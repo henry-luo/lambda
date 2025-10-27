@@ -76,6 +76,13 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     view->type = type;  view->node = node;  view->parent = lycon->parent;
 
     // COMPREHENSIVE VIEW ALLOCATION TRACING
+    fprintf(stderr, "[DOM DEBUG] alloc_view - created view %p, type=%d, node=%p", view, type, (void*)node);
+    if (node) {
+        fprintf(stderr, ", node_type=%d\n", node->type);
+    } else {
+        fprintf(stderr, ", node=NULL\n");
+    }
+
     const char* node_name = node ? node->name() : "NULL";
     const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
     log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
@@ -618,6 +625,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // CRITICAL FIX: Provide better element names for debugging
     const char* tag_name = "unknown";
     if (block->node) {
+        fprintf(stderr, "[DOM DEBUG] view_to_json accessing block %p, block->node=%p\n", (void*)block, (void*)block->node);
         const char* node_name = block->node->name();
         if (node_name) {
             // CRITICAL ISSUE: #null elements should not exist in proper DOM structure
@@ -810,7 +818,198 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         }
     }
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"flexWrap\": \"%s\"\n", flex_wrap_str);
+    strbuf_append_format(buf, "\"flexWrap\": \"%s\",\n", flex_wrap_str);
+
+    // Add boundary properties (margin, padding, border)
+    if (block->bound) {
+        // Margin properties
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"margin\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"top\": %.2f,\n", block->bound->margin.top);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"right\": %.2f,\n", block->bound->margin.right);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->bound->margin.bottom);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"left\": %.2f\n", block->bound->margin.left);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "},\n");
+
+        // Padding properties
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"padding\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"top\": %.2f,\n", block->bound->padding.top);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"right\": %.2f,\n", block->bound->padding.right);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->bound->padding.bottom);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"left\": %.2f\n", block->bound->padding.left);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "},\n");
+
+        // Border properties
+        if (block->bound->border) {
+            // Border width
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"borderWidth\": {\n");
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"top\": %.2f,\n", block->bound->border->width.top);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"right\": %.2f,\n", block->bound->border->width.right);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->bound->border->width.bottom);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"left\": %.2f\n", block->bound->border->width.left);
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "},\n");
+
+            // Border color
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"borderColor\": {\n");
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"top\": \"rgba(%d, %d, %d, %.2f)\",\n",
+                block->bound->border->top_color.r,
+                block->bound->border->top_color.g,
+                block->bound->border->top_color.b,
+                block->bound->border->top_color.a / 255.0f);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"right\": \"rgba(%d, %d, %d, %.2f)\",\n",
+                block->bound->border->right_color.r,
+                block->bound->border->right_color.g,
+                block->bound->border->right_color.b,
+                block->bound->border->right_color.a / 255.0f);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"bottom\": \"rgba(%d, %d, %d, %.2f)\",\n",
+                block->bound->border->bottom_color.r,
+                block->bound->border->bottom_color.g,
+                block->bound->border->bottom_color.b,
+                block->bound->border->bottom_color.a / 255.0f);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"left\": \"rgba(%d, %d, %d, %.2f)\"\n",
+                block->bound->border->left_color.r,
+                block->bound->border->left_color.g,
+                block->bound->border->left_color.b,
+                block->bound->border->left_color.a / 255.0f);
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "},\n");
+
+            // Border radius
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "\"borderRadius\": {\n");
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"topLeft\": %.2f,\n", block->bound->border->radius.top_left);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"topRight\": %.2f,\n", block->bound->border->radius.top_right);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"bottomRight\": %.2f,\n", block->bound->border->radius.bottom_right);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"bottomLeft\": %.2f\n", block->bound->border->radius.bottom_left);
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "},\n");
+        }
+
+        // Background color
+        if (block->bound->background) {
+            fprintf(stderr, "[view_to_json] Background color: r=%d, g=%d, b=%d, a=%d (0x%08X)\n",
+                    block->bound->background->color.r,
+                    block->bound->background->color.g,
+                    block->bound->background->color.b,
+                    block->bound->background->color.a,
+                    block->bound->background->color.c);
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"backgroundColor\": \"rgba(%d, %d, %d, %.2f)\",\n",
+                block->bound->background->color.r,
+                block->bound->background->color.g,
+                block->bound->background->color.b,
+                block->bound->background->color.a / 255.0f);
+        }
+    }
+
+    // Position properties
+    if (block->position) {
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"position\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"type\": \"%s\",\n", lxb_css_value_by_id(block->position->position)->name);
+        if (block->position->has_top) {
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"top\": %.2f,\n", block->position->top);
+        }
+        if (block->position->has_right) {
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"right\": %.2f,\n", block->position->right);
+        }
+        if (block->position->has_bottom) {
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"bottom\": %.2f,\n", block->position->bottom);
+        }
+        if (block->position->has_left) {
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_format(buf, "\"left\": %.2f,\n", block->position->left);
+        }
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"zIndex\": %d,\n", block->position->z_index);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"float\": \"%s\",\n", lxb_css_value_by_id(block->position->float_prop)->name);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"clear\": \"%s\"\n", lxb_css_value_by_id(block->position->clear)->name);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "},\n");
+    }
+
+    // Font properties (output for all elements, use defaults if not set)
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"font\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (block->font && block->font->family) {
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", block->font->family);
+    } else {
+        // CSS default font-family (browser default is typically Times/serif)
+        strbuf_append_str(buf, "\"family\": \"Times\",\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (block->font && block->font->font_size > 0) {
+        strbuf_append_format(buf, "\"size\": %.2f,\n", block->font->font_size);
+    } else {
+        // CSS default font-size is 16px (medium)
+        strbuf_append_str(buf, "\"size\": 16,\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (block->font && block->font->font_style) {
+        strbuf_append_format(buf, "\"style\": \"%s\",\n", lxb_css_value_by_id(block->font->font_style)->name);
+    } else {
+        // CSS default font-style is normal
+        strbuf_append_str(buf, "\"style\": \"normal\",\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 6);
+    if (block->font && block->font->font_weight) {
+        strbuf_append_format(buf, "\"weight\": \"%s\"\n", lxb_css_value_by_id(block->font->font_weight)->name);
+    } else {
+        // CSS default font-weight is 400 (normal)
+        strbuf_append_str(buf, "\"weight\": \"400\"\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "},\n");
+
+    // Inline properties (color, opacity, etc.)
+    if (block->in_line) {
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"color\": \"rgba(%d, %d, %d, %.2f)\",\n",
+            block->in_line->color.r,
+            block->in_line->color.g,
+            block->in_line->color.b,
+            block->in_line->color.a / 255.0f);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"opacity\": %.2f,\n", block->in_line->opacity);
+    }
+
+    // Remove trailing comma from last property
+    // Note: we need to track if this is the last property, for now just ensure consistency
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");

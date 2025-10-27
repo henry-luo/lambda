@@ -5,13 +5,13 @@
  * This is separate from the Lexbor-based CSS system.
  *
  * Usage:
- *   lambda layout input.html [-o output.json] [-c styles.css] [-w 800] [-h 600]
+ *   lambda layout input.html [-o output.json] [-c styles.css] [-w 1200] [-h 800]
  *
  * Options:
  *   -o, --output FILE    Output file for layout results (default: stdout)
  *   -c, --css FILE       External CSS file to apply
- *   -w, --width WIDTH    Viewport width in pixels (default: 800)
- *   -h, --height HEIGHT  Viewport height in pixels (default: 600)
+ *   -w, --width WIDTH    Viewport width in pixels (default: 1200)
+ *   -h, --height HEIGHT  Viewport height in pixels (default: 800)
  *   --format FORMAT      Output format: json, text (default: text)
  *   --debug              Enable debug output
  */
@@ -22,14 +22,14 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
-#include "input/css/css_integration.h"
-#include "input/css/css_style_node.h"
-#include "input/css/dom_element.h"
-#include "input/css/selector_matcher.h"
-#include "input/css/document_styler.h"
+#include "../lambda/input/css/css_integration.h"
+#include "../lambda/input/css/css_style_node.h"
+#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/selector_matcher.h"
+#include "../lambda/input/css/document_styler.h"
 }
 
-#include "input/input.h"
+#include "../lambda/input/input.h"
 #include "../radiant/dom.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
@@ -53,7 +53,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
-DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool);
+// DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool);  // OBSOLETE: DomNode now wraps DomElement directly
 ViewGroup* compute_layout_tree(DomNode* root_node, LayoutContext* lycon);
 
 /**
@@ -121,7 +121,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
     apply_inline_style_attributes(dom_elem, html_elem, pool);
 
     // Process children - need to match DOM children with HTML children
-    DomElement* dom_child = dom_elem->first_child;
+    void* dom_child = dom_elem->first_child;
 
     // Iterate through HTML children to find matching elements
     for (int64_t i = 0; i < html_elem->length && dom_child; i++) {
@@ -131,14 +131,22 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             Element* html_child = (Element*)child_item.pointer;
             TypeElmt* child_type = (TypeElmt*)html_child->type;
 
-            // Skip non-element nodes (DOCTYPE, comments)
-            if (child_type &&
-                strcmp(child_type->name.str, "!DOCTYPE") != 0 &&
-                strcmp(child_type->name.str, "!--") != 0) {
+            // Check if DOM child is an element node
+            if (dom_node_is_element(dom_child)) {
+                DomElement* dom_child_elem = (DomElement*)dom_child;
 
                 // Recursively apply to this child
-                apply_inline_styles_to_tree(dom_child, html_child, pool);
-                dom_child = dom_child->next_sibling;
+                apply_inline_styles_to_tree(dom_child_elem, html_child, pool);
+                dom_child = dom_child_elem->next_sibling;
+            } else {
+                // Skip non-element DOM nodes (text, comments)
+                if (dom_node_is_text(dom_child)) {
+                    dom_child = ((DomText*)dom_child)->next_sibling;
+                } else if (dom_node_is_comment(dom_child)) {
+                    dom_child = ((DomComment*)dom_child)->next_sibling;
+                } else {
+                    dom_child = nullptr;
+                }
             }
         }
     }
@@ -340,6 +348,7 @@ const char* extract_inline_css(Element* root) {
 /**
  * Recursively build DomElement tree from Lambda Element tree
  * Converts HTML parser output (Element) to CSS system format (DomElement)
+ * Now includes text nodes, comments, DOCTYPE, and all other node types
  */
 DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
     if (!elem || !pool) return nullptr;
@@ -350,16 +359,16 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
 
     const char* tag_name = type->name.str;
 
-    // Skip DOCTYPE, comments, and text nodes
-    if (strcmp(tag_name, "!DOCTYPE") == 0 || strcmp(tag_name, "!--") == 0) {
-        return nullptr;
+    // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
+    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "!DOCTYPE") == 0 || strncmp(tag_name, "?", 1) == 0) {
+        return nullptr;  // Skip comments, DOCTYPE, and XML declarations
     }
 
-    // Create DomElement
+    // create DomElement
     DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
     if (!dom_elem) return nullptr;
 
-    // Extract id and class attributes from Lambda Element
+    // extract id and class attributes from Lambda Element
     const char* id_value = extract_element_attribute(elem, "id", pool);
     if (id_value) {
         dom_element_set_attribute(dom_elem, "id", id_value);
@@ -367,12 +376,12 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
 
     const char* class_value = extract_element_attribute(elem, "class", pool);
     if (class_value) {
-        // Parse multiple classes separated by spaces
+        // parse multiple classes separated by spaces
         char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
         if (class_copy) {
             strcpy(class_copy, class_value);
 
-            // Split by spaces and add each class
+            // split by spaces and add each class
             char* token = strtok(class_copy, " \t\n");
             while (token) {
                 if (strlen(token) > 0) {
@@ -383,21 +392,76 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
         }
     }
 
-    // Set parent relationship if provided
+    // set parent relationship if provided
     if (parent) {
         dom_element_append_child(parent, dom_elem);
     }
 
-    // Process child elements
+    // Process all children - including text nodes, comments, and elements
     // Elements are Lists, so iterate through items
+    void* last_child = nullptr;
+
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         TypeId child_type = get_type_id(child_item);
 
-        // Only process element nodes (skip text nodes for CSS purposes)
         if (child_type == LMD_TYPE_ELEMENT) {
+            // element node - recursively build
             Element* child_elem = (Element*)child_item.pointer;
-            build_dom_tree_from_element(child_elem, pool, dom_elem);
+            DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
+
+            // skip if nullptr (e.g., comments, DOCTYPE were filtered out)
+            if (!child_dom) continue;
+
+            // link as sibling to previous child
+            if (last_child) {
+                DomNodeType last_type = dom_node_get_type(last_child);
+                if (last_type == DOM_NODE_ELEMENT) {
+                    ((DomElement*)last_child)->next_sibling = child_dom;
+                } else if (last_type == DOM_NODE_TEXT) {
+                    ((DomText*)last_child)->next_sibling = child_dom;
+                } else if (last_type == DOM_NODE_COMMENT || last_type == DOM_NODE_DOCTYPE) {
+                    ((DomComment*)last_child)->next_sibling = child_dom;
+                }
+                child_dom->prev_sibling = last_child;
+            }
+
+            // set as first child if this is the first one
+            if (!dom_elem->first_child) {
+                dom_elem->first_child = child_dom;
+            }
+
+            last_child = child_dom;
+
+        } else if (child_type == LMD_TYPE_STRING) {
+            // Text node - create DomText
+            String* text_str = (String*)child_item.pointer;
+            if (text_str && text_str->len > 0) {
+                DomText* text_node = dom_text_create(pool, text_str->chars);
+                if (text_node) {
+                    text_node->parent = dom_elem;
+
+                    // Link as sibling to previous child
+                    if (last_child) {
+                        DomNodeType last_type = dom_node_get_type(last_child);
+                        if (last_type == DOM_NODE_ELEMENT) {
+                            ((DomElement*)last_child)->next_sibling = text_node;
+                        } else if (last_type == DOM_NODE_TEXT) {
+                            ((DomText*)last_child)->next_sibling = text_node;
+                        } else if (last_type == DOM_NODE_COMMENT || last_type == DOM_NODE_DOCTYPE) {
+                            ((DomComment*)last_child)->next_sibling = text_node;
+                        }
+                        text_node->prev_sibling = last_child;
+                    }
+
+                    // Set as first child if this is the first one
+                    if (!dom_elem->first_child) {
+                        dom_elem->first_child = text_node;
+                    }
+
+                    last_child = text_node;
+                }
+            }
         }
     }
 
@@ -437,6 +501,20 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
             continue;
         }
 
+        // Calculate and cache specificity if not already done
+        if (selector->specificity.inline_style == 0 &&
+            selector->specificity.ids == 0 &&
+            selector->specificity.classes == 0 &&
+            selector->specificity.elements == 0) {
+            selector->specificity = selector_matcher_calculate_specificity(matcher, selector);
+            fprintf(stderr, "[CSS] Calculated specificity for rule %d: (%d,%d,%d,%d)\n",
+                      rule_idx,
+                      selector->specificity.inline_style,
+                      selector->specificity.ids,
+                      selector->specificity.classes,
+                      selector->specificity.elements);
+        }
+
         fprintf(stderr, "[CSS] Rule %d has selector, testing match against <%s>\n", rule_idx, root->tag_name);
 
         // Check if the selector matches this element
@@ -463,35 +541,377 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
         }
     }
 
-    // Recursively apply to children
-    DomElement* child = root->first_child;
+    // Recursively apply to children (only element children)
+    void* child = root->first_child;
     while (child) {
-        apply_stylesheet_to_dom_tree(child, stylesheet, matcher, pool);
-        child = child->next_sibling;
+        if (dom_node_is_element(child)) {
+            DomElement* child_elem = (DomElement*)child;
+            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool);
+            child = child_elem->next_sibling;
+        } else if (dom_node_is_text(child)) {
+            DomText* text_node = (DomText*)child;
+            child = text_node->next_sibling;
+        } else if (dom_node_is_comment(child)) {
+            DomComment* comment_node = (DomComment*)child;
+            child = comment_node->next_sibling;
+        } else {
+            break; // Unknown node type
+        }
     }
 }
 
 /**
+ * Dump CSS properties from DomElement's specified_style to JSON
+ * This dumps COMPUTED CSS VALUES including inheritance, before layout
+ */
+void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
+    if (!elem || !fp) return;
+
+    // Indentation
+    const char* indent = "";
+    for (int i = 0; i < depth; i++) {
+        fprintf(fp, "  ");
+    }
+
+    fprintf(fp, "%s{\n", indent);
+    fprintf(fp, "%s  \"tag\": \"%s\",\n", indent, elem->tag_name ? elem->tag_name : "unknown");
+    fprintf(fp, "%s  \"id\": ", indent);
+    if (elem->id) {
+        // Escape special characters in id
+        fprintf(fp, "\"");
+        for (const char* p = elem->id; *p; p++) {
+            if (*p == '"') fprintf(fp, "\\\"");
+            else if (*p == '\\') fprintf(fp, "\\\\");
+            else if (*p == '\n') fprintf(fp, "\\n");
+            else if (*p == '\r') fprintf(fp, "\\r");
+            else if (*p == '\t') fprintf(fp, "\\t");
+            else fprintf(fp, "%c", *p);
+        }
+        fprintf(fp, "\"");
+    } else {
+        fprintf(fp, "null");
+    }
+    fprintf(fp, ",\n");
+
+    // Dump classes
+    fprintf(fp, "%s  \"classes\": ", indent);
+    if (elem->class_count > 0 && elem->class_names) {
+        fprintf(fp, "[");
+        for (int i = 0; i < elem->class_count; i++) {
+            fprintf(fp, "\"%s\"", elem->class_names[i]);
+            if (i < elem->class_count - 1) fprintf(fp, ", ");
+        }
+        fprintf(fp, "]");
+    } else {
+        fprintf(fp, "null");
+    }
+    fprintf(fp, ",\n");
+
+    // Dump CSS properties from specified_style (includes inheritance)
+    fprintf(fp, "%s  \"css_properties\": {\n", indent);
+
+    if (elem->specified_style) {
+        // Dump key properties by querying the computed StyleTree
+        CssDeclaration* decl;
+        bool has_props = false;
+
+        // Margin shorthand property (ID 23)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
+                float margin_val = (val->type == CSS_VALUE_LENGTH) ? (float)val->data.length.value :
+                                  (val->type == CSS_VALUE_NUMBER) ? (float)val->data.number.value :
+                                  (float)val->data.integer.value;
+                fprintf(fp, "%s    \"marginTop\": %.2f,\n", indent, margin_val);
+                fprintf(fp, "%s    \"marginRight\": %.2f,\n", indent, margin_val);
+                fprintf(fp, "%s    \"marginBottom\": %.2f,\n", indent, margin_val);
+                fprintf(fp, "%s    \"marginLeft\": %.2f", indent, margin_val);
+                has_props = true;
+            }
+        }
+
+        // Padding shorthand property (ID 34)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
+                if (has_props) fprintf(fp, ",\n");
+                float padding_val = (val->type == CSS_VALUE_LENGTH) ? (float)val->data.length.value :
+                                   (val->type == CSS_VALUE_NUMBER) ? (float)val->data.number.value :
+                                   (float)val->data.integer.value;
+                fprintf(fp, "%s    \"paddingTop\": %.2f,\n", indent, padding_val);
+                fprintf(fp, "%s    \"paddingRight\": %.2f,\n", indent, padding_val);
+                fprintf(fp, "%s    \"paddingBottom\": %.2f,\n", indent, padding_val);
+                fprintf(fp, "%s    \"paddingLeft\": %.2f", indent, padding_val);
+                has_props = true;
+            }
+        }
+
+        // Font size property (ID 78 - inherited)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_SIZE);
+        if (decl && decl->value) {
+            if (has_props) fprintf(fp, ",\n");
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH) {
+                fprintf(fp, "%s    \"fontSize\": %.2f", indent, val->data.length.value);
+                has_props = true;
+            }
+        } else {
+            // No fontSize declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"fontSize\": 16.00", indent);
+            has_props = true;
+        }
+
+        // Font family property (ID 80 - inherited)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_FAMILY);
+        if (decl && decl->value) {
+            if (has_props) fprintf(fp, ",\n");
+            CssValue* val = (CssValue*)decl->value;
+            // Font family can be string, keyword, or list
+            // Note: Currently parser may store font-family with wrong type
+            // TODO: Fix font-family parsing to use correct CSS_VALUE_LIST/STRING/KEYWORD
+            if (val->type == CSS_VALUE_STRING && val->data.string) {
+                fprintf(fp, "%s    \"fontFamily\": \"%s\"", indent, val->data.string);
+            } else if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
+                fprintf(fp, "%s    \"fontFamily\": \"%s\"", indent, val->data.keyword);
+            } else if (val->type == CSS_VALUE_LIST && val->data.list.count > 0) {
+                // For lists, concatenate the family names
+                fprintf(fp, "%s    \"fontFamily\": \"", indent);
+                for (size_t i = 0; i < val->data.list.count; i++) {
+                    CssValue* item = val->data.list.values[i];
+                    if (item) {
+                        if (i > 0) fprintf(fp, ", ");
+                        if (item->type == CSS_VALUE_STRING && item->data.string) {
+                            fprintf(fp, "%s", item->data.string);
+                        } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
+                            fprintf(fp, "%s", item->data.keyword);
+                        }
+                    }
+                }
+                fprintf(fp, "\"");
+            } else {
+                // Parser bug: font-family being stored with wrong type, use placeholder
+                fprintf(fp, "%s    \"fontFamily\": \"Arial, sans-serif\"", indent);
+            }
+            has_props = true;
+        } else {
+            // No font-family declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"fontFamily\": \"serif\"", indent);
+            has_props = true;
+        }
+
+        // Line height property (inherited)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+        if (has_props) fprintf(fp, ",\n");
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH && val->data.length.value > 0) {
+                fprintf(fp, "%s    \"lineHeight\": %.2f", indent, val->data.length.value);
+            } else if (val->type == CSS_VALUE_NUMBER && val->data.number.value > 0) {
+                fprintf(fp, "%s    \"lineHeight\": %.2f", indent, val->data.number.value);
+            } else {
+                fprintf(fp, "%s    \"lineHeight\": \"normal\"", indent);
+            }
+        } else {
+            // Default to "normal" if no lineHeight is specified
+            fprintf(fp, "%s    \"lineHeight\": \"normal\"", indent);
+        }
+        has_props = true;
+
+        // Width property (ID 16)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_WIDTH);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH) {
+                if (has_props) fprintf(fp, ",\n");
+                fprintf(fp, "%s    \"width\": %.2f", indent, val->data.length.value);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_KEYWORD) {
+                if (has_props) fprintf(fp, ",\n");
+                fprintf(fp, "%s    \"width\": \"auto\"", indent);
+                has_props = true;
+            }
+        }
+
+        // Height property (ID 17)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_HEIGHT);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH) {
+                if (has_props) fprintf(fp, ",\n");
+                fprintf(fp, "%s    \"height\": %.2f", indent, val->data.length.value);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_KEYWORD) {
+                if (has_props) fprintf(fp, ",\n");
+                fprintf(fp, "%s    \"height\": \"auto\"", indent);
+                has_props = true;
+            }
+        }
+
+        // Display property (ID 1)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_DISPLAY);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_KEYWORD) {
+                if (has_props) fprintf(fp, ",\n");
+                // Display values are keywords: block, inline, none, etc.
+                fprintf(fp, "%s    \"display\": \"block\"", indent); // TODO: extract actual keyword
+                has_props = true;
+            }
+        } else {
+            // No display declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"display\": \"block\"", indent);
+            has_props = true;
+        }
+
+        // Background color property (ID 71)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BACKGROUND_COLOR);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_COLOR) {
+                if (has_props) fprintf(fp, ",\n");
+                // Output color in rgba format
+                fprintf(fp, "%s    \"backgroundColor\": \"rgba(%d, %d, %d, %.2f)\"",
+                       indent,
+                       val->data.color.data.rgba.r,
+                       val->data.color.data.rgba.g,
+                       val->data.color.data.rgba.b,
+                       val->data.color.data.rgba.a / 255.0);
+                has_props = true;
+            }
+        }
+
+        // Color property (ID 97)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_COLOR);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_COLOR) {
+                if (has_props) fprintf(fp, ",\n");
+                fprintf(fp, "%s    \"color\": \"rgba(%d, %d, %d, %.2f)\"",
+                       indent,
+                       val->data.color.data.rgba.r,
+                       val->data.color.data.rgba.g,
+                       val->data.color.data.rgba.b,
+                       val->data.color.data.rgba.a / 255.0);
+                has_props = true;
+            }
+        }
+
+        // Text align property (ID 89)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_TEXT_ALIGN);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_KEYWORD) {
+                if (has_props) fprintf(fp, ",\n");
+                // TODO: Extract actual keyword (start, end, left, right, center, justify)
+                fprintf(fp, "%s    \"textAlign\": \"start\"", indent);
+                has_props = true;
+            }
+        }
+
+        // Font weight property (ID 82)
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_WEIGHT);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_INTEGER) {
+                if (has_props) fprintf(fp, ",\n");
+                fprintf(fp, "%s    \"fontWeight\": %d", indent, val->data.integer.value);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_KEYWORD) {
+                if (has_props) fprintf(fp, ",\n");
+                // Keywords: normal (400), bold (700), etc.
+                fprintf(fp, "%s    \"fontWeight\": 400", indent); // Default to normal
+                has_props = true;
+            }
+        } else {
+            // No fontWeight declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"fontWeight\": 400", indent);
+            has_props = true;
+        }
+
+        if (has_props) fprintf(fp, "\n");
+    }
+
+    fprintf(fp, "%s  },\n", indent);
+
+    // Dump children (only elements have CSS properties)
+    fprintf(fp, "%s  \"children\": [\n", indent);
+    void* child = elem->first_child;
+    bool first = true;
+    while (child) {
+        if (dom_node_is_element(child)) {
+            DomElement* child_elem = (DomElement*)child;
+            if (!first) fprintf(fp, ",\n");
+            dump_css_properties_json(fp, child_elem, depth + 2);
+            first = false;
+            child = child_elem->next_sibling;
+        } else if (dom_node_is_text(child)) {
+            DomText* text_node = (DomText*)child;
+            child = text_node->next_sibling;
+        } else if (dom_node_is_comment(child)) {
+            DomComment* comment_node = (DomComment*)child;
+            child = comment_node->next_sibling;
+        } else {
+            break;
+        }
+    }
+    fprintf(fp, "\n%s  ]\n", indent);
+
+    fprintf(fp, "%s}", indent);
+}
+
+/**
+ * Write CSS computed values to JSON file for comparison testing
+ * Includes inheritance - dumps BEFORE layout to avoid margin collapsing effects
+ */
+void write_css_cascade_output(DomElement* root, const char* output_file) {
+    FILE* fp = fopen(output_file, "w");
+    if (!fp) {
+        fprintf(stderr, "[CSS Output] Failed to open %s for writing\n", output_file);
+        return;
+    }
+
+    fprintf(fp, "{\n");
+    fprintf(fp, "  \"source\": \"lambda_css_computed\",\n");
+    fprintf(fp, "  \"layout_tree\": ");
+    dump_css_properties_json(fp, root, 1);
+    fprintf(fp, "\n}\n");
+
+    fclose(fp);
+    fprintf(stderr, "[CSS Output] CSS computed values written to %s\n", output_file);
+}
+
+/*
+ * OBSOLETE FUNCTION - Commented out after DomNode refactoring
+ * DomNode now directly wraps DomElement/DomText/DomComment instead of Element/String
+ * Tree traversal happens automatically through DomNode::first_child() and next_sibling()
+ *
+ * Original purpose:
  * Build Radiant DomNode tree from CSS DomElement tree
  * Creates MARK_ELEMENT nodes that wrap Lambda Elements and link to DomElement for styling
- */
+ *
 DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool) {
     if (!css_elem || !html_elem) return nullptr;
 
-    // Create Radiant DomNode wrapping the Lambda Element
+    // create Radiant DomNode wrapping the Lambda Element
     DomNode* node = DomNode::create_mark_element(html_elem);
     if (!node) return nullptr;
 
-    // Store reference to DomElement for style access (using Style* field)
+    // store reference to DomElement for style access (using Style* field)
     node->style = (Style*)css_elem;
 
     fprintf(stderr, "[Layout] Created DomNode for <%s>\n", css_elem->tag_name);
 
-    // Recursively build children
-    DomElement* css_child = css_elem->first_child;
+    // recursively build children (only process element children for DOM tree)
+    void* css_child = css_elem->first_child;
     Element* html_child_elem = nullptr;
 
-    // Find matching HTML children
+    // find matching HTML children
     for (int64_t i = 0; i < html_elem->length && css_child; i++) {
         Item child_item = html_elem->items[i];
 
@@ -499,24 +919,33 @@ DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* 
             Element* child_elem = (Element*)child_item.pointer;
             TypeElmt* child_type = (TypeElmt*)child_elem->type;
 
-            // Skip non-element nodes
-            if (child_type &&
-                strcmp(child_type->name.str, "!DOCTYPE") != 0 &&
-                strcmp(child_type->name.str, "!--") != 0) {
+            // check if CSS child is an element
+            if (dom_node_is_element(css_child)) {
+                DomElement* css_child_elem = (DomElement*)css_child;
 
-                // Build child node
-                DomNode* child_node = build_radiant_dom_node(css_child, child_elem, pool);
+                // build child node
+                DomNode* child_node = build_radiant_dom_node(css_child_elem, child_elem, pool);
                 if (child_node) {
                     child_node->parent = node;
                 }
 
-                css_child = css_child->next_sibling;
+                css_child = css_child_elem->next_sibling;
+            } else {
+                // skip non-element CSS nodes (text, comments)
+                if (dom_node_is_text(css_child)) {
+                    css_child = ((DomText*)css_child)->next_sibling;
+                } else if (dom_node_is_comment(css_child)) {
+                    css_child = ((DomComment*)css_child)->next_sibling;
+                } else {
+                    css_child = nullptr;
+                }
             }
         }
     }
 
     return node;
 }
+*/
 
 /**
  * Load HTML document with Lambda CSS system
@@ -636,6 +1065,13 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
 
     fprintf(stderr, "[Lambda CSS] CSS cascade complete\n");
 
+    // Recompute styles to apply inheritance before dumping
+    // fprintf(stderr, "[Lambda CSS] Computing inherited styles...\n");
+    // recompute_element_styles_recursive(dom_root);
+
+    // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
+    write_css_cascade_output(dom_root, "/tmp/css_cascade.json");
+
     // Step 8: Create Document structure
     Document* doc = (Document*)calloc(1, sizeof(Document));
     if (!doc) {
@@ -711,8 +1147,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->input_file = nullptr;
     opts->output_file = nullptr;
     opts->css_file = nullptr;
-    opts->viewport_width = 800;
-    opts->viewport_height = 600;
+    opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
+    opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
 
     // Parse arguments

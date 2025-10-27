@@ -28,7 +28,66 @@ extern "C" {
 
 // Forward declarations
 typedef struct DomElement DomElement;
+typedef struct DomText DomText;
+typedef struct DomComment DomComment;
 typedef struct DocumentStyler DocumentStyler;
+
+// ============================================================================
+// DOM Node Types
+// ============================================================================
+
+typedef enum DomNodeType {
+    DOM_NODE_ELEMENT = 1,     // Element node
+    DOM_NODE_TEXT = 3,        // Text node
+    DOM_NODE_COMMENT = 8,     // Comment node
+    DOM_NODE_DOCUMENT = 9,    // Document node
+    DOM_NODE_DOCTYPE = 10     // DOCTYPE declaration
+} DomNodeType;
+
+// ============================================================================
+// DOM Text Node
+// ============================================================================
+
+/**
+ * DomText - Text node in DOM tree
+ * Represents text content between elements
+ */
+typedef struct DomText {
+    DomNodeType node_type;       // Always DOM_NODE_TEXT
+    const char* text;            // Text content
+    size_t length;               // Text length
+
+    // DOM tree relationships
+    DomElement* parent;          // Parent element
+    void* next_sibling;          // Next sibling (DomElement, DomText, or DomComment)
+    void* prev_sibling;          // Previous sibling
+
+    // Memory management
+    Pool* pool;                  // Memory pool for allocations
+} DomText;
+
+// ============================================================================
+// DOM Comment/DOCTYPE Node
+// ============================================================================
+
+/**
+ * DomComment - Comment, DOCTYPE, or XML declaration node
+ * Represents comments (<!-- -->), DOCTYPE declarations, and XML declarations
+ */
+typedef struct DomComment {
+    DomNodeType node_type;       // DOM_NODE_COMMENT, DOM_NODE_DOCTYPE, etc.
+    const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
+    const char* content;         // Full content/text
+    size_t length;               // Content length
+
+    // DOM tree relationships
+    DomElement* parent;          // Parent element (NULL for DOCTYPE at document level)
+    void* next_sibling;          // Next sibling (DomElement, DomText, or DomComment)
+    void* prev_sibling;          // Previous sibling
+
+    // Memory management
+    Pool* pool;                  // Memory pool for allocations
+} DomComment;
 
 // ============================================================================
 // Attribute Storage (Hybrid Array/Tree)
@@ -75,6 +134,9 @@ typedef struct AttributeStorage {
  * - Parent/child relationships for inheritance
  */
 typedef struct DomElement {
+    // Node type identifier
+    DomNodeType node_type;       // Always DOM_NODE_ELEMENT for DomElement
+
     // Basic element information
     void* native_element;        // Pointer to native element (lexbor or Lambda Element)
     const char* tag_name;        // Element tag name (cached string)
@@ -89,14 +151,13 @@ typedef struct DomElement {
 
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
-    uint32_t computed_version;   // Version of last computed value calculation
     bool needs_style_recompute;  // Flag indicating computed values are stale
 
     // DOM tree relationships
     DomElement* parent;          // Parent element (for inheritance)
-    DomElement* first_child;     // First child element
-    DomElement* next_sibling;    // Next sibling element
-    DomElement* prev_sibling;    // Previous sibling element
+    void* first_child;           // First child (DomElement*, DomText*, or DomComment*)
+    void* next_sibling;          // Next sibling (DomElement*, DomText*, or DomComment*)
+    void* prev_sibling;          // Previous sibling (DomElement*, DomText*, or DomComment*)
 
     // Attribute access (for selector matching) - hybrid array/tree storage
     AttributeStorage* attributes;  // Hybrid attribute storage (array < 10, tree >= 10)
@@ -353,28 +414,6 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
 CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyId property_id);
 
 /**
- * Get the computed value for a CSS property
- * @param element Target element
- * @param property_id Property to look up
- * @return Computed CSS value or NULL if not available
- */
-CssValue* dom_element_get_computed_value(DomElement* element, CssPropertyId property_id);
-
-/**
- * Invalidate computed styles (mark as needing recomputation)
- * @param element Target element
- * @param propagate_to_children If true, also invalidate all descendants
- */
-void dom_element_invalidate_computed_values(DomElement* element, bool propagate_to_children);
-
-/**
- * Recompute all computed styles for an element
- * @param element Target element
- * @return true on success, false on failure
- */
-bool dom_element_recompute_styles(DomElement* element);
-
-/**
  * Remove a CSS property from an element
  * @param element Target element
  * @param property_id Property to remove
@@ -556,6 +595,109 @@ void dom_element_get_style_stats(DomElement* element,
  * @return Cloned element or NULL on failure
  */
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
+
+// ============================================================================
+// DOM Text Node API
+// ============================================================================
+
+/**
+ * Create a new DomText node
+ * @param pool Memory pool for allocations
+ * @param text Text content (will be copied)
+ * @return New DomText or NULL on failure
+ */
+DomText* dom_text_create(Pool* pool, const char* text);
+
+/**
+ * Destroy a DomText node
+ * @param text_node Text node to destroy
+ */
+void dom_text_destroy(DomText* text_node);
+
+/**
+ * Get text content
+ * @param text_node Text node
+ * @return Text content string
+ */
+const char* dom_text_get_content(DomText* text_node);
+
+/**
+ * Set text content
+ * @param text_node Text node
+ * @param text New text content (will be copied)
+ * @return true on success, false on failure
+ */
+bool dom_text_set_content(DomText* text_node, const char* text);
+
+// ============================================================================
+// DOM Comment/DOCTYPE Node API
+// ============================================================================
+
+/**
+ * Create a new DomComment node
+ * @param pool Memory pool for allocations
+ * @param node_type Type of node (DOM_NODE_COMMENT, DOM_NODE_DOCTYPE, etc.)
+ * @param tag_name Node name (e.g., "!--", "!DOCTYPE")
+ * @param content Content/text (will be copied)
+ * @return New DomComment or NULL on failure
+ */
+DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* tag_name, const char* content);
+
+/**
+ * Destroy a DomComment node
+ * @param comment_node Comment/DOCTYPE node to destroy
+ */
+void dom_comment_destroy(DomComment* comment_node);
+
+/**
+ * Get comment/DOCTYPE content
+ * @param comment_node Comment node
+ * @return Content string
+ */
+const char* dom_comment_get_content(DomComment* comment_node);
+
+// ============================================================================
+// DOM Node Type Utilities
+// ============================================================================
+
+/**
+ * Get node type from a void* pointer (which could be DomElement*, DomText*, or DomComment*)
+ * @param node Node pointer
+ * @return Node type or 0 if NULL
+ */
+static inline DomNodeType dom_node_get_type(void* node) {
+    if (!node) return (DomNodeType)0;
+    // All node types have node_type as first field
+    return *((DomNodeType*)node);
+}
+
+/**
+ * Check if a node is an element
+ * @param node Node pointer
+ * @return true if node is DomElement
+ */
+static inline bool dom_node_is_element(void* node) {
+    return dom_node_get_type(node) == DOM_NODE_ELEMENT;
+}
+
+/**
+ * Check if a node is a text node
+ * @param node Node pointer
+ * @return true if node is DomText
+ */
+static inline bool dom_node_is_text(void* node) {
+    return dom_node_get_type(node) == DOM_NODE_TEXT;
+}
+
+/**
+ * Check if a node is a comment/DOCTYPE node
+ * @param node Node pointer
+ * @return true if node is DomComment or DomComment with DOCTYPE type
+ */
+static inline bool dom_node_is_comment(void* node) {
+    DomNodeType type = dom_node_get_type(node);
+    return type == DOM_NODE_COMMENT || type == DOM_NODE_DOCTYPE;
+}
 
 #ifdef __cplusplus
 }

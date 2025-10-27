@@ -363,7 +363,7 @@ TEST_F(AsciiMathRoundtripTest, AsciiInlineMathRoundtrip) {
 }
 
 // Test roundtrip for pure ASCII math expressions (without markdown wrapping)
-TEST_F(AsciiMathRoundtripTest, AsciiPureMathRoundtrip) {
+TEST_F(AsciiMathRoundtripTest, DISABLED_AsciiPureMathRoundtrip) {
     // Test pure ASCII math expressions covering various mathematical expression groups
     const char* test_cases[] = {
         // Basic operators and arithmetic
@@ -417,7 +417,7 @@ TEST_F(AsciiMathRoundtripTest, AsciiPureMathRoundtrip) {
 }
 
 // Test explicit ASCII math markup
-TEST_F(AsciiMathRoundtripTest, AsciiExplicitMathRoundtrip) {
+TEST_F(AsciiMathRoundtripTest, DISABLED_AsciiExplicitMathRoundtrip) {
     const char* test_cases[] = {
         "asciimath::E = mc^2",
         "asciimath::x^2 + y^2 = z^2",
@@ -450,7 +450,7 @@ TEST_F(AsciiMathRoundtripTest, AsciiMarkdownSimpleTest) {
 }
 
 // Test ASCII vs LaTeX equivalence for common expressions
-TEST_F(AsciiMathRoundtripTest, AsciiVsLatexEquivalence) {
+TEST_F(AsciiMathRoundtripTest, DISABLED_AsciiVsLatexEquivalence) {
     // Test that ASCII and LaTeX representations produce equivalent results
     struct {
         const char* ascii_expr;

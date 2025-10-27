@@ -38,7 +38,7 @@ Item typeditem_to_item(TypedItem *titem) {
 }
 
 Array* array() {
-    Array *arr = (Array*)calloc(1, sizeof(Array));
+    Array *arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     arr->type_id = LMD_TYPE_ARRAY;
     frame_start();
     return arr;
@@ -94,7 +94,7 @@ ArrayInt* array_int() {
     return arr;
 }
 
-// used when there's no interleaving with transpiled code
+// used when there's no interleaving with transpiled code, thus no frame_start
 ArrayInt* array_int_new(int length) {
     ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;

@@ -149,6 +149,9 @@ struct Element : List {
     void* type;  // attr type/shape
     void* data;  // packed data struct of the attrs
     int data_cap;  // capacity of the data struct
+    // member functions
+    bool has_attr(const char* attr_name);
+    // TypedItem get_attr(const char* attr_name);
 };
 
 typedef struct Script Script;

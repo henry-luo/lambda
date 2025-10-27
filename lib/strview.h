@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     const char* str;    // pointer to string data (may or may-not be null-terminated)
     size_t length;      // length excluding null terminator
@@ -22,5 +26,9 @@ int strview_find(const StrView* s, const char* substr);  // Find substring posit
 void strview_trim(StrView* s);                           // Trim whitespace
 int strview_to_int(StrView* s);                          // Convert to integer
 char* strview_to_cstr(const StrView* s);                 // Convert to null-terminated string (allocates)
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

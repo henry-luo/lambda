@@ -12,7 +12,7 @@ extern "C" {
 
 /**
  * CSS Style Node System
- * 
+ *
  * This system extends the basic AVL tree with CSS cascade support.
  * Each style node represents a CSS property with its winning declaration
  * and maintains a list of losing declarations for proper cascade resolution.
@@ -24,11 +24,11 @@ extern "C" {
 
 /**
  * CSS Style Node System
- * 
+ *
  * This system extends the basic AVL tree with CSS cascade support.
  * Each style node represents a CSS property with its winning declaration
  * and maintains a list of losing declarations for proper cascade resolution.
- * 
+ *
  * Types CssSpecificity, CssOrigin, and CssDeclaration are defined in css_style.h
  */
 
@@ -147,7 +147,7 @@ CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyId 
  * @param parent_tree Parent element's style tree (for inheritance)
  * @return Computed value or NULL if not available
  */
-void* style_tree_get_computed_value(StyleTree* style_tree, 
+void* style_tree_get_computed_value(StyleTree* style_tree,
                                    CssPropertyId property_id,
                                    StyleTree* parent_tree);
 
@@ -213,8 +213,8 @@ bool css_should_inherit_property(CssPropertyId property_id, CssDeclaration* decl
  * @param property_id Property to inherit
  * @return true if inheritance was applied, false otherwise
  */
-bool style_tree_inherit_property(StyleTree* child_tree, 
-                                StyleTree* parent_tree, 
+bool style_tree_inherit_property(StyleTree* child_tree,
+                                StyleTree* parent_tree,
                                 CssPropertyId property_id);
 
 /**
@@ -228,6 +228,13 @@ int style_tree_apply_inheritance(StyleTree* child_tree, StyleTree* parent_tree);
 // ============================================================================
 // Computed Value Calculation
 // ============================================================================
+
+/**
+ * Check if a property inherits by default
+ * @param property_id Property ID
+ * @return true if property inherits by default, false otherwise
+ */
+bool css_property_is_inherited(CssPropertyId property_id);
 
 /**
  * Invalidate computed values in a style tree
@@ -288,9 +295,9 @@ void style_node_print_cascade(StyleNode* node);
  * @param total_declarations Output: total number of declarations
  * @param avg_weak_count Output: average number of weak declarations per node
  */
-void style_tree_get_statistics(StyleTree* style_tree, 
-                              int* total_nodes, 
-                              int* total_declarations, 
+void style_tree_get_statistics(StyleTree* style_tree,
+                              int* total_nodes,
+                              int* total_declarations,
                               double* avg_weak_count);
 
 // ============================================================================
@@ -339,10 +346,10 @@ StyleTree* style_tree_create_subset(StyleTree* source,
  * @param important true if !important
  * @return Specificity structure
  */
-CssSpecificity css_specificity_create(uint8_t inline_style, 
-                                     uint8_t ids, 
-                                     uint8_t classes, 
-                                     uint8_t elements, 
+CssSpecificity css_specificity_create(uint8_t inline_style,
+                                     uint8_t ids,
+                                     uint8_t classes,
+                                     uint8_t elements,
                                      bool important);
 
 /**
