@@ -967,25 +967,29 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     if (block->font && block->font->family) {
         strbuf_append_format(buf, "\"family\": \"%s\",\n", block->font->family);
     } else {
-        strbuf_append_str(buf, "\"family\": \"_undef\",\n");
+        // CSS default font-family (browser default is typically Times/serif)
+        strbuf_append_str(buf, "\"family\": \"Times\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font) {
+    if (block->font && block->font->font_size > 0) {
         strbuf_append_format(buf, "\"size\": %.2f,\n", block->font->font_size);
     } else {
-        strbuf_append_str(buf, "\"size\": 0,\n");
+        // CSS default font-size is 16px (medium)
+        strbuf_append_str(buf, "\"size\": 16,\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font) {
+    if (block->font && block->font->font_style) {
         strbuf_append_format(buf, "\"style\": \"%s\",\n", lxb_css_value_by_id(block->font->font_style)->name);
     } else {
-        strbuf_append_str(buf, "\"style\": \"_undef\",\n");
+        // CSS default font-style is normal
+        strbuf_append_str(buf, "\"style\": \"normal\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font) {
+    if (block->font && block->font->font_weight) {
         strbuf_append_format(buf, "\"weight\": \"%s\"\n", lxb_css_value_by_id(block->font->font_weight)->name);
     } else {
-        strbuf_append_str(buf, "\"weight\": \"_undef\"\n");
+        // CSS default font-weight is 400 (normal)
+        strbuf_append_str(buf, "\"weight\": \"400\"\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "},\n");

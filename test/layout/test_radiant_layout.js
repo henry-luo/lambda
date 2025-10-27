@@ -31,10 +31,9 @@ class RadiantLayoutTester {
      */
     async runRadiantLayout(htmlFile) {
         return new Promise((resolve, reject) => {
-            // For Lambda CSS, add viewport arguments to match browser reference (1200x800)
-            const args = this.engine === 'lambda-css'
-                ? ['layout', htmlFile, '--width', '1200', '--height', '800']
-                : ['layout', htmlFile];
+            // Always use standard viewport size (1200x800) to match browser reference
+            // Note: Lambda defaults to 1200x800, but we pass args explicitly for clarity
+            const args = ['layout', htmlFile, '--width', '1200', '--height', '800'];
             const process = spawn(this.radiantExe, args, {
                 cwd: this.projectRoot
             });
