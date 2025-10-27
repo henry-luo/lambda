@@ -429,6 +429,8 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!view) return nullptr;
 
     // Initialize basic properties
+    fprintf(stderr, "[DOM DEBUG] create_flex_item_view - redundant assignment view %p->node = %p (was already set by alloc_view)\n",
+            (void*)view, (void*)node);
     view->node = node;
     view->parent = lycon->parent;
     view->type = RDT_VIEW_BLOCK;

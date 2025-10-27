@@ -359,42 +359,40 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
 
     const char* tag_name = type->name.str;
 
-    // Create DomElement (no longer skip DOCTYPE and comments)
+    // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
+    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "!DOCTYPE") == 0 || strncmp(tag_name, "?", 1) == 0) {
+        return nullptr;  // Skip comments, DOCTYPE, and XML declarations
+    }
+
+    // create DomElement
     DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
     if (!dom_elem) return nullptr;
 
-    // Extract id and class attributes from Lambda Element (only for regular elements)
-    // Skip for special nodes like DOCTYPE, comments
-    bool is_special_node = (strcmp(tag_name, "!DOCTYPE") == 0 ||
-                            strcmp(tag_name, "!--") == 0 ||
-                            strncmp(tag_name, "?", 1) == 0);  // XML declarations start with ?
+    // extract id and class attributes from Lambda Element
+    const char* id_value = extract_element_attribute(elem, "id", pool);
+    if (id_value) {
+        dom_element_set_attribute(dom_elem, "id", id_value);
+    }
 
-    if (!is_special_node) {
-        const char* id_value = extract_element_attribute(elem, "id", pool);
-        if (id_value) {
-            dom_element_set_attribute(dom_elem, "id", id_value);
-        }
+    const char* class_value = extract_element_attribute(elem, "class", pool);
+    if (class_value) {
+        // parse multiple classes separated by spaces
+        char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
+        if (class_copy) {
+            strcpy(class_copy, class_value);
 
-        const char* class_value = extract_element_attribute(elem, "class", pool);
-        if (class_value) {
-            // Parse multiple classes separated by spaces
-            char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
-            if (class_copy) {
-                strcpy(class_copy, class_value);
-
-                // Split by spaces and add each class
-                char* token = strtok(class_copy, " \t\n");
-                while (token) {
-                    if (strlen(token) > 0) {
-                        dom_element_add_class(dom_elem, token);
-                    }
-                    token = strtok(nullptr, " \t\n");
+            // split by spaces and add each class
+            char* token = strtok(class_copy, " \t\n");
+            while (token) {
+                if (strlen(token) > 0) {
+                    dom_element_add_class(dom_elem, token);
                 }
+                token = strtok(nullptr, " \t\n");
             }
         }
     }
 
-    // Set parent relationship if provided
+    // set parent relationship if provided
     if (parent) {
         dom_element_append_child(parent, dom_elem);
     }
@@ -408,12 +406,15 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
         TypeId child_type = get_type_id(child_item);
 
         if (child_type == LMD_TYPE_ELEMENT) {
-            // Element node - recursively build
+            // element node - recursively build
             Element* child_elem = (Element*)child_item.pointer;
             DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
 
-            // Link as sibling to previous child
-            if (last_child && child_dom) {
+            // skip if nullptr (e.g., comments, DOCTYPE were filtered out)
+            if (!child_dom) continue;
+
+            // link as sibling to previous child
+            if (last_child) {
                 DomNodeType last_type = dom_node_get_type(last_child);
                 if (last_type == DOM_NODE_ELEMENT) {
                     ((DomElement*)last_child)->next_sibling = child_dom;
@@ -425,8 +426,8 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
                 child_dom->prev_sibling = last_child;
             }
 
-            // Set as first child if this is the first one
-            if (child_dom && !dom_elem->first_child) {
+            // set as first child if this is the first one
+            if (!dom_elem->first_child) {
                 dom_elem->first_child = child_dom;
             }
 

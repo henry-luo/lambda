@@ -23,6 +23,10 @@ char* DomNode::name() {
     else if (type == MARK_COMMENT && dom_comment) {
         return (char*)"#comment";
     }
+
+    // debug: log what went wrong
+    fprintf(stderr, "[DOM DEBUG] #null node detected - type=%d, dom_element=%p, dom_text=%p, lxb_elmt=%p, lxb_node=%p, this=%p\n",
+            type, (void*)dom_element, (void*)dom_text, (void*)lxb_elmt, (void*)lxb_node, (void*)this);
     return (char*)"#null";
 }
 
@@ -57,6 +61,8 @@ const lxb_char_t* DomNode::get_attribute(const char* attr_name, size_t* value_le
 
 DomNode* DomNode::first_child() {
     if (_child) {
+        fprintf(stderr, "[DOM DEBUG] Returning cached first_child - parent_type=%d, child_type=%d, child_ptr=%p\n",
+                this->type, _child->type, _child->dom_element);
         return _child;
     }
 
@@ -113,6 +119,8 @@ DomNode* DomNode::first_child() {
             if (child_node) {
                 child_node->parent = this;
                 child_node->style = (Style*)first;  // Link to DomElement/DomText for CSS
+                fprintf(stderr, "[DOM DEBUG] Caching first_child - parent_type=%d, child_type=%d, child_ptr=%p\n",
+                        this->type, child_node->type, child_node->dom_element);
                 this->_child = child_node;
                 return child_node;
             }
@@ -123,7 +131,11 @@ DomNode* DomNode::first_child() {
 }
 
 DomNode* DomNode::next_sibling() {
-    if (_next) { return _next; }
+    if (_next) {
+        fprintf(stderr, "[DOM DEBUG] Returning cached next_sibling - parent_type=%d, sibling_type=%d, sibling_ptr=%p\n",
+                this->type, _next->type, _next->dom_element);
+        return _next;
+    }
 
     // handle mark nodes (now using DomElement/DomText)
     if (type == MARK_ELEMENT || type == MARK_TEXT) {
@@ -160,6 +172,8 @@ DomNode* DomNode::next_sibling() {
             if (sibling_node) {
                 sibling_node->parent = parent;
                 sibling_node->style = (Style*)next;  // Link to DomElement/DomText for CSS
+                fprintf(stderr, "[DOM DEBUG] Caching next_sibling - parent_type=%d, sibling_type=%d, sibling_ptr=%p\n",
+                        this->type, sibling_node->type, sibling_node->dom_element);
                 this->_next = sibling_node;
                 return sibling_node;
             }
@@ -254,6 +268,9 @@ DomNode* DomNode::create_mark_element(DomElement* element) {
     node->parent = nullptr;
     node->_next = nullptr;
     node->_child = nullptr;
+
+    fprintf(stderr, "[DOM DEBUG] create_mark_element - created node %p, type=%d, dom_element=%p, tag=%s\n",
+            (void*)node, node->type, (void*)node->dom_element, element->tag_name);
 
     return node;
 }
