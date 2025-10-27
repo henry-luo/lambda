@@ -146,6 +146,8 @@ void layout_text_enhanced(LayoutContext* lycon, DomNode* text_node) {
         return;
     }
 
+    fprintf(stderr, "[DOM DEBUG] layout_text - assigning text_view %p->node = %p\n",
+            (void*)text_view, (void*)text_node);
     text_view->node = text_node;
     text_view->x = lycon->line.advance_x;
     text_view->y = lycon->block.advance_y;

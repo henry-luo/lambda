@@ -1858,7 +1858,10 @@ class PremakeGenerator:
                     continue
 
                 # Avoid subdirectory structure by flattening test names
-                test_name = binary_name.replace('/', '_').replace('test_', '')
+                # Only remove 'test_' prefix, not all occurrences
+                test_name = binary_name.replace('/', '_')
+                if test_name.startswith('test_'):
+                    test_name = test_name[5:]  # Remove 'test_' prefix only
                 test_name = f"test_{test_name}"
                 additional_files = test.get('additional_files', [])
 
@@ -1889,7 +1892,10 @@ class PremakeGenerator:
                     dependencies = library_deps[i] if i < len(library_deps) else []
 
                     # Avoid subdirectory structure by flattening test names
-                    test_name = binary_name.replace('/', '_').replace('test_', '')
+                    # Only remove 'test_' prefix, not all occurrences
+                    test_name = binary_name.replace('/', '_')
+                    if test_name.startswith('test_'):
+                        test_name = test_name[5:]  # Remove 'test_' prefix only
                     test_name = f"test_{test_name}"
 
                     # Determine correct file path - use relative paths from project root

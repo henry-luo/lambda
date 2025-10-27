@@ -525,14 +525,69 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             value->type = CSS_VALUE_PERCENTAGE;
             value->data.percentage.value = tokens[i].data.number_value;
         } else if (tokens[i].type == CSS_TOKEN_HASH) {
-            // Color value
+            // Hex color value (e.g., #ff0000, #f00, #ff0000ff)
             value->type = CSS_VALUE_COLOR;
-            // Simple hex color parsing - default to black for now
             value->data.color.type = CSS_COLOR_RGB;
-            value->data.color.data.rgba.r = 0;
-            value->data.color.data.rgba.g = 0;
-            value->data.color.data.rgba.b = 0;
-            value->data.color.data.rgba.a = 255;
+
+            // Parse hex color from token value
+            const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
+            if (hex_str && hex_str[0] == '#') {
+                size_t len = strlen(hex_str + 1);
+                unsigned int hex_val = 0;
+
+                if (len == 6) {
+                    // #rrggbb format
+                    if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
+                        value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
+                        value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
+                        value->data.color.data.rgba.b = hex_val & 0xFF;
+                        value->data.color.data.rgba.a = 255;
+                    }
+                } else if (len == 3) {
+                    // #rgb format (expand to #rrggbb)
+                    if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
+                        unsigned int r = (hex_val >> 8) & 0xF;
+                        unsigned int g = (hex_val >> 4) & 0xF;
+                        unsigned int b = hex_val & 0xF;
+                        value->data.color.data.rgba.r = (r << 4) | r;
+                        value->data.color.data.rgba.g = (g << 4) | g;
+                        value->data.color.data.rgba.b = (b << 4) | b;
+                        value->data.color.data.rgba.a = 255;
+                    }
+                } else if (len == 8) {
+                    // #rrggbbaa format
+                    if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
+                        value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
+                        value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
+                        value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
+                        value->data.color.data.rgba.a = hex_val & 0xFF;
+                    }
+                } else if (len == 4) {
+                    // #rgba format (expand to #rrggbbaa)
+                    if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
+                        unsigned int r = (hex_val >> 12) & 0xF;
+                        unsigned int g = (hex_val >> 8) & 0xF;
+                        unsigned int b = (hex_val >> 4) & 0xF;
+                        unsigned int a = hex_val & 0xF;
+                        value->data.color.data.rgba.r = (r << 4) | r;
+                        value->data.color.data.rgba.g = (g << 4) | g;
+                        value->data.color.data.rgba.b = (b << 4) | b;
+                        value->data.color.data.rgba.a = (a << 4) | a;
+                    }
+                } else {
+                    // Invalid hex color, default to black
+                    value->data.color.data.rgba.r = 0;
+                    value->data.color.data.rgba.g = 0;
+                    value->data.color.data.rgba.b = 0;
+                    value->data.color.data.rgba.a = 255;
+                }
+            } else {
+                // No value or not a hash, default to black
+                value->data.color.data.rgba.r = 0;
+                value->data.color.data.rgba.g = 0;
+                value->data.color.data.rgba.b = 0;
+                value->data.color.data.rgba.a = 255;
+            }
         } else {
             // Default to keyword
             value->type = CSS_VALUE_KEYWORD;

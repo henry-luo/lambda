@@ -14,6 +14,37 @@ static void format_css_value(StringBuf* sb, Item value);
 static void format_css_declarations(StringBuf* sb, Element* rule, int indent);
 static void format_css_function(StringBuf* sb, Element* function);
 
+// Helper function to check if a font name needs quotes
+// Returns true if the font name contains spaces, special characters, or starts with a digit
+static bool font_name_needs_quotes(const char* name, size_t len) {
+    if (!name || len == 0) return false;
+
+    // Generic font families never need quotes
+    if ((len == 5 && strncmp(name, "serif", 5) == 0) ||
+        (len == 10 && strncmp(name, "sans-serif", 10) == 0) ||
+        (len == 9 && strncmp(name, "monospace", 9) == 0) ||
+        (len == 7 && strncmp(name, "cursive", 7) == 0) ||
+        (len == 7 && strncmp(name, "fantasy", 7) == 0)) {
+        return false;
+    }
+
+    // Check if name starts with a digit
+    if (name[0] >= '0' && name[0] <= '9') return true;
+
+    // Check for spaces or special characters (anything not alphanumeric or hyphen)
+    for (size_t i = 0; i < len; i++) {
+        char c = name[i];
+        if (!(c >= 'a' && c <= 'z') &&
+            !(c >= 'A' && c <= 'Z') &&
+            !(c >= '0' && c <= '9') &&
+            c != '-' && c != '_') {
+            return true; // Contains special character or space
+        }
+    }
+
+    return false;
+}
+
 // Helper function to add indentation
 static void add_css_indent(StringBuf* sb, int indent) {
     for (int i = 0; i < indent; i++) {
@@ -32,13 +63,13 @@ static void format_css_value(StringBuf* sb, Item value) {
                 // Try to extract a clean string, handling potential corruption
                 const char* content = str->chars;
                 size_t len = str->len;
-                
+
                 // Skip any obvious binary prefixes (length bytes, null bytes, etc.)
                 while (len > 0 && (*content < 32 || *content > 126)) {
                     content++;
                     len--;
                 }
-                
+
                 // Find the end of printable content
                 size_t clean_len = 0;
                 for (size_t i = 0; i < len; i++) {
@@ -48,7 +79,7 @@ static void format_css_value(StringBuf* sb, Item value) {
                         break; // Stop at null terminator
                     }
                 }
-                
+
                 if (clean_len > 0) {
                     stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
                 } else {
@@ -94,11 +125,27 @@ static void format_css_value(StringBuf* sb, Item value) {
                         }
                     }
                 }
-                
+
                 const char* separator = likely_font_family ? ", " : " ";
                 for (int i = 0; i < arr->length; i++) {
                     if (i > 0) stringbuf_append_str(sb, separator);
-                    format_css_value(sb, arr->items[i]);
+
+                    // Special handling for font-family symbols
+                    if (likely_font_family && get_type_id(arr->items[i]) == LMD_TYPE_SYMBOL) {
+                        String* symbol = (String*)arr->items[i].pointer;
+                        if (symbol && symbol->chars && symbol->len > 0) {
+                            // Check if this font name needs quotes
+                            if (font_name_needs_quotes(symbol->chars, symbol->len)) {
+                                stringbuf_append_str(sb, "\"");
+                                stringbuf_append_format(sb, "%.*s", (int)symbol->len, symbol->chars);
+                                stringbuf_append_str(sb, "\"");
+                            } else {
+                                stringbuf_append_format(sb, "%.*s", (int)symbol->len, symbol->chars);
+                            }
+                        }
+                    } else {
+                        format_css_value(sb, arr->items[i]);
+                    }
                 }
             }
             break;
@@ -142,6 +189,38 @@ static void format_css_value(StringBuf* sb, Item value) {
     }
 }
 
+// Helper to check if a string is a CSS operator
+static bool is_css_operator(const char* str, size_t len) {
+    if (!str || len == 0) return false;
+    if (len == 1) {
+        return str[0] == '+' || str[0] == '-' || str[0] == '*' || str[0] == '/';
+    }
+    if (len == 3) {
+        return strncmp(str, "mod", 3) == 0 || strncmp(str, "rem", 3) == 0;
+    }
+    return false;
+}
+
+// Helper to check if a string is a gradient direction keyword
+static bool is_gradient_direction_keyword(const char* str, size_t len) {
+    if (!str || len == 0) return false;
+    // Common gradient direction keywords
+    return (len == 2 && strncmp(str, "to", 2) == 0) ||
+           (len == 3 && strncmp(str, "top", 3) == 0) ||
+           (len == 4 && (strncmp(str, "left", 4) == 0 || strncmp(str, "from", 4) == 0)) ||
+           (len == 5 && (strncmp(str, "right", 5) == 0 || strncmp(str, "in", 2) == 0)) ||
+           (len == 6 && strncmp(str, "bottom", 6) == 0) ||
+           (len == 6 && strncmp(str, "center", 6) == 0);
+}
+
+// Helper to check if we're in a calc-like function
+static bool is_calc_function(const char* name, size_t len) {
+    if (!name || len == 0) return false;
+    return (len == 4 && strncmp(name, "calc", 4) == 0) ||
+           (len == 3 && (strncmp(name, "min", 3) == 0 || strncmp(name, "max", 3) == 0)) ||
+           (len == 5 && strncmp(name, "clamp", 5) == 0);
+}
+
 // Format CSS function (rgba, linear-gradient, etc.)
 static void format_css_function(StringBuf* sb, Element* function) {
     if (!function || !function->type) {
@@ -156,13 +235,107 @@ static void format_css_function(StringBuf* sb, Element* function) {
         // Element extends List, so we can access its list items directly
         List* param_list = (List*)function;
 
+        bool is_calc = is_calc_function(elmt_type->name.str, elmt_type->name.length);
+        bool is_url = (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "url", 3) == 0);
+        bool in_gradient_direction = false;
+
         for (long i = 0; i < param_list->length; i++) {
-            if (i > 0) {
-                stringbuf_append_str(sb, ", ");
+            Item param_value = param_list->items[i];
+            TypeId param_type = get_type_id(param_value);
+
+            // Get string representation if available
+            const char* str_value = NULL;
+            size_t str_len = 0;
+
+            if (param_type == LMD_TYPE_STRING) {
+                String* str = (String*)param_value.pointer;
+                if (str && str->chars) {
+                    str_value = str->chars;
+                    str_len = str->len;
+                }
+            } else if (param_type == LMD_TYPE_SYMBOL) {
+                String* sym = (String*)param_value.pointer;
+                if (sym && sym->chars) {
+                    str_value = sym->chars;
+                    str_len = sym->len;
+                }
             }
 
-            Item param_value = param_list->items[i];
-            format_css_value(sb, param_value);
+            // Determine separator
+            bool use_space = false;
+            bool use_comma = false;
+
+            if (i > 0) {
+                // Check previous parameter
+                Item prev_param = param_list->items[i - 1];
+                TypeId prev_type = get_type_id(prev_param);
+                const char* prev_str = NULL;
+                size_t prev_len = 0;
+
+                if (prev_type == LMD_TYPE_STRING) {
+                    String* str = (String*)prev_param.pointer;
+                    if (str && str->chars) {
+                        prev_str = str->chars;
+                        prev_len = str->len;
+                    }
+                } else if (prev_type == LMD_TYPE_SYMBOL) {
+                    String* sym = (String*)prev_param.pointer;
+                    if (sym && sym->chars) {
+                        prev_str = sym->chars;
+                        prev_len = sym->len;
+                    }
+                }
+
+                // Rules for separator selection:
+                // 1. In calc functions, use space around operators
+                if (is_calc && str_value && is_css_operator(str_value, str_len)) {
+                    use_space = true;
+                } else if (is_calc && prev_str && is_css_operator(prev_str, prev_len)) {
+                    use_space = true;
+                }
+                // 2. After "to" keyword in gradients, use space (multi-word keyword)
+                else if (prev_str && prev_len == 2 && strncmp(prev_str, "to", 2) == 0) {
+                    use_space = true;
+                    in_gradient_direction = true;
+                }
+                // 3. After direction keyword following "to", end of direction phrase
+                else if (in_gradient_direction && str_value && is_gradient_direction_keyword(str_value, str_len)) {
+                    use_space = true;
+                    in_gradient_direction = false; // Next will be comma-separated color
+                }
+                // 4. Default: use comma
+                else {
+                    use_comma = true;
+                    in_gradient_direction = false;
+                }
+
+                // Add separator
+                if (use_space) {
+                    stringbuf_append_char(sb, ' ');
+                } else if (use_comma) {
+                    stringbuf_append_str(sb, ", ");
+                }
+            }
+
+            // Special handling for URL function: wrap string values in quotes
+            if (is_url && param_type == LMD_TYPE_STRING) {
+                String* str = (String*)param_value.pointer;
+                if (str && str->chars) {
+                    stringbuf_append_char(sb, '"');
+                    // Escape any quotes in the URL
+                    for (size_t j = 0; j < str->len; j++) {
+                        if (str->chars[j] == '"') {
+                            stringbuf_append_char(sb, '\\');
+                        }
+                        stringbuf_append_char(sb, str->chars[j]);
+                    }
+                    stringbuf_append_char(sb, '"');
+                } else {
+                    format_css_value(sb, param_value);
+                }
+            } else {
+                format_css_value(sb, param_value);
+            }
         }
 
         stringbuf_append_char(sb, ')');
@@ -179,13 +352,13 @@ static void format_css_selectors(StringBuf* sb, Item selectors_item) {
             // Clean selector string - aggressive cleaning for corrupted strings
             const char* selector_str = str->chars;
             size_t len = str->len;
-            
+
             // Find the first printable ASCII character
             while (len > 0 && (*selector_str < 32 || *selector_str > 126)) {
                 selector_str++;
                 len--;
             }
-            
+
             // Find the length of valid content
             size_t clean_len = 0;
             for (size_t i = 0; i < len; i++) {
@@ -195,7 +368,7 @@ static void format_css_selectors(StringBuf* sb, Item selectors_item) {
                     break; // Stop at first non-printable
                 }
             }
-            
+
             if (clean_len > 0) {
                 stringbuf_append_format(sb, "%.*s", (int)clean_len, selector_str);
             } else {
@@ -244,18 +417,26 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
             continue;
         }
 
+        // Skip -important flag fields (these are handled by their main property)
+        if (field->name->length > 10 &&
+            strncmp(field->name->str + field->name->length - 10, "-important", 10) == 0) {
+            field = field->next;
+            field_count++;
+            continue;
+        }
+
         add_css_indent(sb, indent + 1);
-        
+
         // Clean property name - aggressive cleaning for corrupted strings
         const char* prop_name = field->name->str;
         size_t prop_len = field->name->length;
-        
+
         // Find the first printable ASCII character
         while (prop_len > 0 && (*prop_name < 32 || *prop_name > 126)) {
             prop_name++;
             prop_len--;
         }
-        
+
         // Find the length of valid content
         size_t clean_len = 0;
         for (size_t i = 0; i < prop_len; i++) {
@@ -265,7 +446,7 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
                 break; // Stop at first non-printable
             }
         }
-        
+
         if (clean_len > 0) {
             stringbuf_append_format(sb, "%.*s: ", (int)clean_len, prop_name);
         } else {
@@ -277,6 +458,28 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
         Item property_value = create_item_from_field_data(field_data, field->type->type_id);
         format_css_value(sb, property_value);
 
+        // Check if this property has an !important flag
+        // Look for a field named "propertyname-important"
+        bool is_important = false;
+        if (clean_len > 0) {
+            ShapeEntry* check_field = type_map->shape;
+            int check_count = 0;
+            while (check_field && check_count < type_map->length) {
+                if (check_field->name &&
+                    check_field->name->length == clean_len + 10 &&
+                    strncmp(check_field->name->str, prop_name, clean_len) == 0 &&
+                    strncmp(check_field->name->str + clean_len, "-important", 10) == 0) {
+                    is_important = true;
+                    break;
+                }
+                check_field = check_field->next;
+                check_count++;
+            }
+        }
+
+        if (is_important) {
+            stringbuf_append_str(sb, " !important");
+        }
         stringbuf_append_str(sb, ";\n");
 
         field = field->next;
@@ -403,7 +606,7 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
 
                 void* field_data = (char*)at_rule->data + field->byte_offset;
                 Item body_item = create_item_from_field_data(field_data, field->type->type_id);
-                
+
                 if (strncmp(field->name->str, "keyframes", field->name->length) == 0) {
                     // Handle keyframes
                     Array* keyframes = (Array*)body_item.pointer;
@@ -427,7 +630,7 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
     if (!has_body) {
         stringbuf_append_str(sb, ";");
     }
-    
+
     stringbuf_append_char(sb, '\n');
 }
 

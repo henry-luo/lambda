@@ -398,39 +398,40 @@ Color convert_lambda_color(const CssValue* value) {
 // ============================================================================
 
 uint32_t map_lambda_color_keyword(const char* keyword) {
-    if (!keyword) return 0x000000FF; // default black
+    if (!keyword) return 0xFF000000; // default black in ABGR format
 
-    // Map CSS color keywords to RGBA values
-    // Format: 0xRRGGBBAA
-    if (strcasecmp(keyword, "black") == 0) return 0x000000FF;
-    if (strcasecmp(keyword, "white") == 0) return 0xFFFFFFFF;
-    if (strcasecmp(keyword, "red") == 0) return 0xFF0000FF;
-    if (strcasecmp(keyword, "green") == 0) return 0x008000FF;
-    if (strcasecmp(keyword, "blue") == 0) return 0x0000FFFF;
-    if (strcasecmp(keyword, "yellow") == 0) return 0xFFFF00FF;
-    if (strcasecmp(keyword, "cyan") == 0) return 0x00FFFFFF;
-    if (strcasecmp(keyword, "magenta") == 0) return 0xFF00FFFF;
-    if (strcasecmp(keyword, "gray") == 0) return 0x808080FF;
-    if (strcasecmp(keyword, "grey") == 0) return 0x808080FF;
-    if (strcasecmp(keyword, "silver") == 0) return 0xC0C0C0FF;
-    if (strcasecmp(keyword, "lightgray") == 0) return 0xD3D3D3FF;
-    if (strcasecmp(keyword, "lightgrey") == 0) return 0xD3D3D3FF;
-    if (strcasecmp(keyword, "darkgray") == 0) return 0xA9A9A9FF;
-    if (strcasecmp(keyword, "darkgrey") == 0) return 0xA9A9A9FF;
-    if (strcasecmp(keyword, "maroon") == 0) return 0x800000FF;
-    if (strcasecmp(keyword, "purple") == 0) return 0x800080FF;
-    if (strcasecmp(keyword, "fuchsia") == 0) return 0xFF00FFFF;
-    if (strcasecmp(keyword, "lime") == 0) return 0x00FF00FF;
-    if (strcasecmp(keyword, "olive") == 0) return 0x808000FF;
-    if (strcasecmp(keyword, "navy") == 0) return 0x000080FF;
-    if (strcasecmp(keyword, "teal") == 0) return 0x008080FF;
-    if (strcasecmp(keyword, "aqua") == 0) return 0x00FFFFFF;
-    if (strcasecmp(keyword, "orange") == 0) return 0xFFA500FF;
-    if (strcasecmp(keyword, "transparent") == 0) return 0x00000000;
+    // Map CSS color keywords to ABGR values
+    // NOTE: Color union uses ABGR format (0xAABBGGRR), NOT RGBA!
+    // Format: 0xAABBGGRR where AA=alpha, BB=blue, GG=green, RR=red
+    if (strcasecmp(keyword, "black") == 0) return 0xFF000000;       // rgb(0,0,0)
+    if (strcasecmp(keyword, "white") == 0) return 0xFFFFFFFF;       // rgb(255,255,255)
+    if (strcasecmp(keyword, "red") == 0) return 0xFF0000FF;         // rgb(255,0,0)
+    if (strcasecmp(keyword, "green") == 0) return 0xFF008000;       // rgb(0,128,0)
+    if (strcasecmp(keyword, "blue") == 0) return 0xFFFF0000;        // rgb(0,0,255)
+    if (strcasecmp(keyword, "yellow") == 0) return 0xFF00FFFF;      // rgb(255,255,0)
+    if (strcasecmp(keyword, "cyan") == 0) return 0xFFFFFF00;        // rgb(0,255,255)
+    if (strcasecmp(keyword, "magenta") == 0) return 0xFFFF00FF;     // rgb(255,0,255)
+    if (strcasecmp(keyword, "gray") == 0) return 0xFF808080;        // rgb(128,128,128)
+    if (strcasecmp(keyword, "grey") == 0) return 0xFF808080;        // rgb(128,128,128)
+    if (strcasecmp(keyword, "silver") == 0) return 0xFFC0C0C0;      // rgb(192,192,192)
+    if (strcasecmp(keyword, "lightgray") == 0) return 0xFFD3D3D3;   // rgb(211,211,211)
+    if (strcasecmp(keyword, "lightgrey") == 0) return 0xFFD3D3D3;   // rgb(211,211,211)
+    if (strcasecmp(keyword, "darkgray") == 0) return 0xFFA9A9A9;    // rgb(169,169,169)
+    if (strcasecmp(keyword, "darkgrey") == 0) return 0xFFA9A9A9;    // rgb(169,169,169)
+    if (strcasecmp(keyword, "maroon") == 0) return 0xFF000080;      // rgb(128,0,0)
+    if (strcasecmp(keyword, "purple") == 0) return 0xFF800080;      // rgb(128,0,128)
+    if (strcasecmp(keyword, "fuchsia") == 0) return 0xFFFF00FF;     // rgb(255,0,255)
+    if (strcasecmp(keyword, "lime") == 0) return 0xFF00FF00;        // rgb(0,255,0)
+    if (strcasecmp(keyword, "olive") == 0) return 0xFF008080;       // rgb(128,128,0)
+    if (strcasecmp(keyword, "navy") == 0) return 0xFF800000;        // rgb(0,0,128)
+    if (strcasecmp(keyword, "teal") == 0) return 0xFF808000;        // rgb(0,128,128)
+    if (strcasecmp(keyword, "aqua") == 0) return 0xFFFFFF00;        // rgb(0,255,255)
+    if (strcasecmp(keyword, "orange") == 0) return 0xFF00A5FF;      // rgb(255,165,0)
+    if (strcasecmp(keyword, "transparent") == 0) return 0x00000000; // rgba(0,0,0,0)
 
     // TODO: Add more color keywords (148 total CSS3 colors)
 
-    return 0x000000FF; // default to black
+    return 0xFF000000; // default to black
 }
 
 float map_lambda_font_size_keyword(const char* keyword) {
@@ -498,6 +499,8 @@ int32_t get_lambda_specificity(const CssDeclaration* decl) {
 static bool resolve_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
 
+    fprintf(stderr, "[Lambda CSS Callback] resolve_property_callback called\n");
+
     // Get StyleNode from AvlNode->declaration field (not by casting)
     // AvlNode stores a pointer to StyleNode in its declaration field
     StyleNode* style_node = (StyleNode*)node->declaration;
@@ -505,12 +508,16 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
     // get property ID from node
     CssPropertyId prop_id = (CssPropertyId)node->property_id;
 
+    fprintf(stderr, "[Lambda CSS Callback] Property ID: %d\n", prop_id);
+
     // get the CSS declaration for this property
     CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
     if (!decl) {
-        log_debug("  No declaration found for property %d", prop_id);
+        fprintf(stderr, "[Lambda CSS Callback] No declaration found for property %d\n", prop_id);
         return true; // continue iteration
     }
+
+    fprintf(stderr, "[Lambda CSS Callback] Calling resolve_lambda_css_property for property %d\n", prop_id);
 
     // resolve this property
     resolve_lambda_css_property(prop_id, decl, lycon);
@@ -548,23 +555,168 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl,
                                   LayoutContext* lycon) {
-    log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
+    fprintf(stderr, "[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d\n", prop_id);
 
     if (!decl || !lycon || !lycon->view) {
-        log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
-                  decl, lycon, lycon ? lycon->view : NULL);
+        fprintf(stderr, "[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p\n",
+                  (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
         return;
     }
 
     const CssValue* value = decl->value;
     if (!value) {
-        log_debug("[Lambda CSS Property] No value in declaration");
+        fprintf(stderr, "[Lambda CSS Property] No value in declaration\n");
         return;
     }
 
-    log_debug("[Lambda CSS Property] Processing property %d, value type=%d", prop_id, value->type);
+    fprintf(stderr, "[Lambda CSS Property] Processing property %d, value type=%d\n", prop_id, value->type);
 
-    int32_t specificity = get_lambda_specificity(decl);
+    // handle shorthand properties by expanding to longhands
+    bool is_shorthand = css_property_is_shorthand(prop_id);
+    fprintf(stderr, "[Lambda CSS Property] is_shorthand=%d for prop_id=%d\n", is_shorthand, prop_id);
+
+    // DEBUG: manually check the property
+    const CssProperty* dbg_prop = css_property_get_by_id(prop_id);
+    if (dbg_prop) {
+        fprintf(stderr, "[Lambda CSS Property] Property found: name='%s', shorthand=%d\n",
+                dbg_prop->name, dbg_prop->shorthand);
+    } else {
+        fprintf(stderr, "[Lambda CSS Property] Property NOT found in database!\n");
+    }
+
+    if (is_shorthand) {
+        fprintf(stderr, "[Lambda CSS Shorthand] Property %d is a shorthand, expanding...\n", prop_id);
+
+        if (prop_id == CSS_PROPERTY_BACKGROUND) {
+            // background shorthand can set background-color, background-image, etc.
+            // simple case: single color value (e.g., "background: green;")
+            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
+                CssDeclaration color_decl = *decl;
+                color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
+                fprintf(stderr, "[Lambda CSS Shorthand] Expanding background to background-color\n");
+                resolve_lambda_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                return;
+            }
+            fprintf(stderr, "[Lambda CSS Shorthand] Complex background shorthand not yet implemented\n");
+            return;
+        }
+
+        if (prop_id == CSS_PROPERTY_MARGIN) {
+            // margin shorthand: 1-4 values (top, right, bottom, left)
+            fprintf(stderr, "[Lambda CSS Shorthand] Expanding margin shorthand\n");
+
+            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_KEYWORD ||
+                value->type == CSS_VALUE_NUMBER) {
+                // single value - apply to all sides
+                CssDeclaration side_decl = *decl;
+                side_decl.property_id = CSS_PROPERTY_MARGIN_TOP;
+                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_TOP, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_MARGIN_RIGHT;
+                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_RIGHT, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_MARGIN_BOTTOM;
+                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_BOTTOM, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_MARGIN_LEFT;
+                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_LEFT, &side_decl, lycon);
+                return;
+            }
+            fprintf(stderr, "[Lambda CSS Shorthand] Complex margin shorthand not yet implemented\n");
+            return;
+        }
+
+        if (prop_id == CSS_PROPERTY_PADDING) {
+            // padding shorthand: 1-4 values (top, right, bottom, left)
+            fprintf(stderr, "[Lambda CSS Shorthand] Expanding padding shorthand\n");
+
+            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
+                // single value - apply to all sides
+                CssDeclaration side_decl = *decl;
+                side_decl.property_id = CSS_PROPERTY_PADDING_TOP;
+                resolve_lambda_css_property(CSS_PROPERTY_PADDING_TOP, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_PADDING_RIGHT;
+                resolve_lambda_css_property(CSS_PROPERTY_PADDING_RIGHT, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_PADDING_BOTTOM;
+                resolve_lambda_css_property(CSS_PROPERTY_PADDING_BOTTOM, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_PADDING_LEFT;
+                resolve_lambda_css_property(CSS_PROPERTY_PADDING_LEFT, &side_decl, lycon);
+                return;
+            }
+            fprintf(stderr, "[Lambda CSS Shorthand] Complex padding shorthand not yet implemented\n");
+            return;
+        }        if (prop_id == CSS_PROPERTY_BORDER) {
+            // border shorthand: width style color (applies to all sides)
+            fprintf(stderr, "[Lambda CSS Shorthand] Expanding border shorthand\n");
+
+            // for simple case: "border: 1px solid black;"
+            // we need to parse the value and extract width, style, color
+            // for now, just log that it's not implemented
+            fprintf(stderr, "[Lambda CSS Shorthand] Border shorthand expansion not yet implemented\n");
+            return;
+        }
+
+        if (prop_id == CSS_PROPERTY_BORDER_WIDTH) {
+            // border-width shorthand: 1-4 values (top, right, bottom, left)
+            fprintf(stderr, "[Lambda CSS Shorthand] Expanding border-width shorthand\n");
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                CssDeclaration side_decl = *decl;
+                side_decl.property_id = CSS_PROPERTY_BORDER_TOP_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_WIDTH, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_WIDTH, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_LEFT_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_WIDTH, &side_decl, lycon);
+                return;
+            }
+            fprintf(stderr, "[Lambda CSS Shorthand] Complex border-width shorthand not yet implemented\n");
+            return;
+        }
+
+        if (prop_id == CSS_PROPERTY_BORDER_STYLE) {
+            // border-style shorthand: 1-4 values (top, right, bottom, left)
+            fprintf(stderr, "[Lambda CSS Shorthand] Expanding border-style shorthand\n");
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                CssDeclaration side_decl = *decl;
+                side_decl.property_id = CSS_PROPERTY_BORDER_TOP_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_STYLE, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_STYLE, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_STYLE, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_LEFT_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_STYLE, &side_decl, lycon);
+                return;
+            }
+            fprintf(stderr, "[Lambda CSS Shorthand] Complex border-style shorthand not yet implemented\n");
+            return;
+        }
+
+        if (prop_id == CSS_PROPERTY_BORDER_COLOR) {
+            // border-color shorthand: 1-4 values (top, right, bottom, left)
+            fprintf(stderr, "[Lambda CSS Shorthand] Expanding border-color shorthand\n");
+
+            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
+                CssDeclaration side_decl = *decl;
+                side_decl.property_id = CSS_PROPERTY_BORDER_TOP_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_COLOR, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_COLOR, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_COLOR, &side_decl, lycon);
+                side_decl.property_id = CSS_PROPERTY_BORDER_LEFT_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_COLOR, &side_decl, lycon);
+                return;
+            }
+            fprintf(stderr, "[Lambda CSS Shorthand] Complex border-color shorthand not yet implemented\n");
+            return;
+        }
+
+        // other shorthands not yet implemented
+        fprintf(stderr, "[Lambda CSS Shorthand] Shorthand %d expansion not yet implemented\n", prop_id);
+        return;
+    }    int32_t specificity = get_lambda_specificity(decl);
     log_debug("[Lambda CSS Property] Specificity: %d", specificity);
 
     // Dispatch based on property ID
@@ -1209,6 +1361,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->margin.bottom = margin;
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                float margin = (float)value->data.number.value;
+                span->bound->margin.bottom = margin;
+                span->bound->margin.bottom_specificity = specificity;
+                log_debug("[CSS] Margin-bottom: %.2f px", margin);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->margin.bottom_specificity = specificity;
@@ -1348,7 +1505,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         // ===== GROUP 3: Background & Borders =====
 
         case CSS_PROPERTY_BACKGROUND_COLOR: {
-            log_debug("[CSS] Processing background-color property");
+            fprintf(stderr, "[CSS] Processing background-color property (value type=%d)\n", value->type);
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
@@ -1359,8 +1516,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             Color bg_color = {0};
             if (value->type == CSS_VALUE_KEYWORD) {
                 // Map keyword to color (e.g., "red", "lightgray")
+                const char* kw = value->data.keyword ? value->data.keyword : "(null)";
                 bg_color.c = map_lambda_color_keyword(value->data.keyword);
-                log_debug("[CSS] Background color keyword: %s -> 0x%08X", value->data.keyword, bg_color.c);
+                fprintf(stderr, "[CSS] Background color keyword: '%s' -> 0x%08X\n", kw, bg_color.c);
             } else if (value->type == CSS_VALUE_COLOR) {
                 // Direct RGBA color value
                 if (value->data.color.type == CSS_COLOR_RGB) {
@@ -1368,13 +1526,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     bg_color.g = value->data.color.data.rgba.g;
                     bg_color.b = value->data.color.data.rgba.b;
                     bg_color.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Background color RGBA: (%d,%d,%d,%d) -> 0x%08X",
+                    fprintf(stderr, "[CSS] Background color RGBA: (%d,%d,%d,%d) -> 0x%08X\n",
                              bg_color.r, bg_color.g, bg_color.b, bg_color.a, bg_color.c);
                 }
             }
 
             if (bg_color.c != 0) {
                 span->bound->background->color = bg_color;
+                fprintf(stderr, "[CSS] Set background color to 0x%08X\n", bg_color.c);
+            } else {
+                fprintf(stderr, "[CSS] Skipping background color (color is 0)\n");
             }
             break;
         }

@@ -321,6 +321,12 @@ Item fn_sub(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
         return push_d(*(double*)item_a.pointer - (double)item_b.int_val);
     }
+    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
+        return push_l((int64_t)item_a.int_val - *(int64_t*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
+        return push_l(*(int64_t*)item_a.pointer - (int64_t)item_b.int_val);
+    }
     // Add libmpdec decimal support
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
@@ -1336,8 +1342,13 @@ Item fn_sum(Item item) {
             return push_d(sum);
         }
         else {
-            log_error("DEBUG fn_sum: Returning sum as long: %" PRId64, (int64_t)sum);
-            return push_l(sum);
+            if (sum > INT_MAX || sum < INT_MIN) {
+                log_debug("DEBUG fn_sum: Returning sum as long: %" PRId64, (int64_t)sum);
+                return push_l(sum);
+            } else{
+                log_debug("DEBUG fn_sum: Returning sum as int: %d", (int32_t)sum);
+                return {.item = i2it((int32_t)sum)};
+            }
         }
     }
     else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {

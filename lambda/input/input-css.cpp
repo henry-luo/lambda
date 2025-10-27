@@ -510,15 +510,29 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
                 if (values) {
                     // Flatten single property value array
                     Item values_item = flatten_single_array(values);
+
+                    // Check for !important before adding the property
+                    skip_css_comments(css);
+                    bool is_important = false;
+                    if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
+                        *css += 10;
+                        is_important = true;
+                    }
+
+                    // If important, add the flag as a separate property
                     printf("Adding property %s with values %p\n", property_str->chars, (void*)values_item.item);
                     input_add_attribute_item_to_element(input, rule, property_str->chars, values_item);
-                }
 
-                // Check for !important (for now, we'll ignore it in the flattened structure)
-                skip_css_comments(css);
-                if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
-                    *css += 10;
-                    // Could add importance as property_name + "_important" if needed
+                    if (is_important) {
+                        // Add an "important" flag attribute with boolean true value
+                        StringBuf* important_sb = stringbuf_new(input->pool);
+                        stringbuf_append_str(important_sb, property_str->chars);
+                        stringbuf_append_str(important_sb, "-important");
+                        String* important_key = stringbuf_to_string(important_sb);
+
+                        Item true_item = {.item = ITEM_TRUE};
+                        input_add_attribute_item_to_element(input, rule, important_key->chars, true_item);
+                    }
                 }
             }
 
@@ -884,6 +898,7 @@ static Item parse_css_number(Input *input, const char **css) {
 
 static Item parse_css_measure(Input *input, const char **css) {
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset the buffer before parsing measure
     const char* start = *css;
 
     // Parse number part
@@ -1029,9 +1044,50 @@ static Array* parse_css_function_params(Input *input, const char **css) {
             // end of parameters
             break;
         } else if (**css != ')') {
-            // For space-separated values, don't automatically continue parsing as separate parameters
-            // Only continue if this is a space-separated multi-value context (not calc expressions)
+            // Check for calc operators (+, -, *, /) before treating as space-separated
             skip_css_whitespace(css);
+
+            // Check if we have a calc operator
+            if (**css == '+' || **css == '-' || **css == '*') {
+                // Special case: don't treat -- as two operators (it's a CSS custom property prefix)
+                if (**css == '-' && *(*css + 1) == '-') {
+                    // This is --, not an operator - continue as space-separated
+                    continue;
+                }
+
+                // Capture the operator as a separate parameter (symbol)
+                char op_char = **css;
+                (*css)++; // advance past operator
+
+                // Create a string for the operator using stringbuf
+                StringBuf* op_sb = stringbuf_new(input->pool);
+                stringbuf_append_char(op_sb, op_char);
+                String* op_str = stringbuf_to_string(op_sb);
+                if (op_str) {
+                    Item op_item = {.item = y2it(op_str)};  // Store as symbol
+                    array_append(params, op_item, input->pool);
+                }
+
+                skip_css_whitespace(css);
+                continue; // Continue parsing next parameter
+            } else if (**css == '/' && *(*css + 1) != '*') {
+                // Division operator (but not a comment starter)
+                // Only treat as operator if not followed by * (which would start a comment)
+                char op_char = '/';
+                (*css)++; // advance past operator
+
+                // Create a string for the operator using stringbuf
+                StringBuf* op_sb = stringbuf_new(input->pool);
+                stringbuf_append_char(op_sb, op_char);
+                String* op_str = stringbuf_to_string(op_sb);
+                if (op_str) {
+                    Item op_item = {.item = y2it(op_str)};  // Store as symbol
+                    array_append(params, op_item, input->pool);
+                }
+
+                skip_css_whitespace(css);
+                continue; // Continue parsing next parameter
+            }
 
             if (**css && **css != ',' && **css != ')' && **css != '/') {
                 // Only continue parsing for rgba() style space separation, not calc() expressions
@@ -1114,12 +1170,12 @@ static Item parse_css_function(Input *input, const char **css) {
     if (params && params->length > 0) {
         bool prev_disable_string_merging = input_context->disable_string_merging;
         input_context->disable_string_merging = true;
-        
+
         for (long i = 0; i < params->length; i++) {
             Item param = params->items[i];
             list_push((List*)func_element, param);
         }
-        
+
         input_context->disable_string_merging = prev_disable_string_merging;
     }
 
@@ -1197,6 +1253,13 @@ static Item parse_css_value(Input *input, const char **css) {
 
         case '+':
         case '-':
+            // Check if this is a CSS custom property (starts with --)
+            if (**css == '-' && *(*css + 1) == '-') {
+                return parse_css_identifier(input, css);
+            }
+            // Otherwise fall through to parse as number
+            return parse_css_measure(input, css);
+
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
         case '.':

@@ -579,6 +579,7 @@ project "lambda"
         "radiant/render_pdf.cpp",
         "radiant/render_img.cpp",
         "radiant/event.cpp",
+        "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
         "typeset/typeset.c",
         "typeset/view/view_tree.c",
@@ -590,7 +591,6 @@ project "lambda"
         "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
-        "lambda/cmd_layout.cpp",
         "lambda/input/mime-types.c",
         "lambda/input/mime-detect.c",
         "lambda/input/css/css_tokenizer.c",
@@ -2170,6 +2170,109 @@ project "test_html_roundtrip_gtest"
     filter {}
     
 
+project "test_html_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_html_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
 project "test_lambda_domnode_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -3138,6 +3241,78 @@ project "test_css_dom_integration"
     
     files {
         "test/test_css_dom_integration.cpp",
+        "lib/avl_tree.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/mempool.c",
+        "lib/string.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_style_application_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_style_application_gtest.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -4751,7 +4926,7 @@ project "test_latex_html_fixtures_gtest"
     filter {}
     
 
-project "test_validator_gtest"
+project "test_test_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -4852,7 +5027,7 @@ project "test_validator_gtest"
     filter {}
     
 
-project "test_ast_validator_gtest"
+project "test_test_ast_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -4954,7 +5129,7 @@ project "test_ast_validator_gtest"
     filter {}
     
 
-project "test_lambda_gtest"
+project "test_test_lambda_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -5014,7 +5189,7 @@ project "test_lambda_gtest"
     filter {}
     
 
-project "test_lambda_repl_gtest"
+project "test_test_lambda_repl_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -5074,7 +5249,7 @@ project "test_lambda_repl_gtest"
     filter {}
     
 
-project "test_lambda_proc_gtest"
+project "test_test_lambda_proc_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -5134,7 +5309,7 @@ project "test_lambda_proc_gtest"
     filter {}
     
 
-project "test_js_gtest"
+project "test_test_js_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -5194,7 +5369,7 @@ project "test_js_gtest"
     filter {}
     
 
-project "test_lambda_runner"
+project "test_lambda_test_runner"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"

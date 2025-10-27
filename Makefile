@@ -805,6 +805,96 @@ test-lambda: build
 		exit 1; \
 	fi
 
+# CSS Resolution Verification Target
+# Compares Lambda CSS resolved properties against browser reference data
+resolve: build
+	@echo ""
+	@echo "═══════════════════════════════════════════════════════════════════════════════"
+	@echo "CSS Resolution Verification"
+	@echo "═══════════════════════════════════════════════════════════════════════════════"
+	@echo ""
+	@if [ -z "$(TEST)" ]; then \
+		echo "Usage: make resolve TEST=<test_name>"; \
+		echo ""; \
+		echo "Example: make resolve TEST=baseline_803_basic_margin"; \
+		echo ""; \
+		echo "Available tests:"; \
+		ls -1 test/layout/reference/baseline/*.json | xargs -n1 basename | sed 's/\.json//' | head -20; \
+		echo "... and more (see test/layout/reference/baseline/)"; \
+		echo ""; \
+		exit 1; \
+	fi; \
+	TEST_NAME="$(TEST)"; \
+	HTML_FILE="test/layout/data/baseline/$${TEST_NAME}.html"; \
+	if [ ! -f "$${HTML_FILE}" ]; then \
+		echo "❌ Error: Test HTML file not found: $${HTML_FILE}"; \
+		exit 1; \
+	fi; \
+	REF_FILE="test/layout/reference/baseline/$${TEST_NAME}.json"; \
+	if [ ! -f "$${REF_FILE}" ]; then \
+		echo "❌ Error: Browser reference not found: $${REF_FILE}"; \
+		exit 1; \
+	fi; \
+	echo "📄 Test: $${TEST_NAME}"; \
+	echo "📂 HTML: $${HTML_FILE}"; \
+	echo "📊 Reference: $${REF_FILE}"; \
+	echo ""; \
+	echo "─────────────────────────────────────────────────────────────────────────────────"; \
+	echo "Running Lambda CSS resolution..."; \
+	echo "─────────────────────────────────────────────────────────────────────────────────"; \
+	./$(LAMBDA_EXE) layout "$${HTML_FILE}" --width 1200 --height 800 2>&1 | grep -E '^\[|^Error' || true; \
+	echo ""; \
+	if [ ! -f "/tmp/view_tree.json" ]; then \
+		echo "❌ Error: Lambda CSS output not generated at /tmp/view_tree.json"; \
+		exit 1; \
+	fi; \
+	echo "✅ Lambda CSS output generated"; \
+	echo ""; \
+	echo "─────────────────────────────────────────────────────────────────────────────────"; \
+	echo "Comparing CSS properties..."; \
+	echo "─────────────────────────────────────────────────────────────────────────────────"; \
+	cd test/layout && node compare_css.js "$${TEST_NAME}"
+
+# Run CSS resolution verification on all baseline tests
+resolve-all: build
+	@echo ""
+	@echo "═══════════════════════════════════════════════════════════════════════════════"
+	@echo "CSS Resolution Verification - All Baseline Tests"
+	@echo "═══════════════════════════════════════════════════════════════════════════════"
+	@echo ""
+	@PASSED=0; \
+	FAILED=0; \
+	TOTAL=0; \
+	for ref_file in test/layout/reference/baseline/*.json; do \
+		TEST_NAME=$$(basename "$${ref_file}" .json); \
+		HTML_FILE="test/layout/data/baseline/$${TEST_NAME}.html"; \
+		if [ ! -f "$${HTML_FILE}" ]; then \
+			continue; \
+		fi; \
+		TOTAL=$$((TOTAL + 1)); \
+		echo ""; \
+		echo "Testing: $${TEST_NAME}"; \
+		if $(MAKE) resolve TEST="$${TEST_NAME}" > "/tmp/resolve_$${TEST_NAME}.log" 2>&1; then \
+			echo "  ✅ PASSED"; \
+			PASSED=$$((PASSED + 1)); \
+		else \
+			echo "  ❌ FAILED"; \
+			FAILED=$$((FAILED + 1)); \
+		fi; \
+	done; \
+	echo ""; \
+	echo "═══════════════════════════════════════════════════════════════════════════════"; \
+	echo "Summary"; \
+	echo "═══════════════════════════════════════════════════════════════════════════════"; \
+	echo "Total tests: $${TOTAL}"; \
+	echo "Passed: $${PASSED}"; \
+	echo "Failed: $${FAILED}"; \
+	if [ "$${FAILED}" -gt 0 ]; then \
+		echo ""; \
+		echo "See logs in /tmp/resolve_*.log for details"; \
+		exit 1; \
+	fi
+
 test-std: build
 	@echo "Running Lambda Standard Tests (simple runner)..."
 	@if [ -f "test/simple_test_runner.sh" ]; then \

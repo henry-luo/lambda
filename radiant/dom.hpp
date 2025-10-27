@@ -59,12 +59,16 @@ extern "C" {
 
 typedef struct ViewTree ViewTree;
 typedef struct StateStore StateStore;
+typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
+typedef struct DomText DomText;        // Forward declaration for Lambda CSS DOM
+typedef struct DomComment DomComment;  // Forward declaration for Lambda CSS DOM
 
 typedef enum {
     LEXBOR_ELEMENT,   // 0 - Lexbor HTML element
-    MARK_ELEMENT,     // 1 - Lambda markup element
+    MARK_ELEMENT,     // 1 - Lambda DOM element (DomElement)
     LEXBOR_NODE,      // 2 - Lexbor text/other nodes
-    MARK_TEXT,        // 3 - Lambda mark text/string
+    MARK_TEXT,        // 3 - Lambda DOM text (DomText)
+    MARK_COMMENT,     // 4 - Lambda DOM comment (DomComment)
 } NodeType;
 
 typedef struct Style {
@@ -73,12 +77,13 @@ typedef struct Style {
 typedef struct DomNode {
     NodeType type;
     union {
-        lxb_dom_node_t* lxb_node;  // base node
-        lxb_html_element_t *lxb_elmt;
-        Element* mark_element;     // Lambda mark element
-        String* mark_text;         // Lambda mark text/string
+        lxb_dom_node_t* lxb_node;     // base node (for LEXBOR_NODE)
+        lxb_html_element_t *lxb_elmt; // Lexbor HTML element (for LEXBOR_ELEMENT)
+        DomElement* dom_element;      // Lambda CSS DOM element (for MARK_ELEMENT)
+        DomText* dom_text;            // Lambda CSS DOM text (for MARK_TEXT)
+        DomComment* dom_comment;      // Lambda CSS DOM comment (for MARK_COMMENT)
     };
-    struct Style* style;  // associated style
+    struct Style* style;  // associated style (DomElement* for Lambda CSS integration)
     DomNode* parent;
     private:
     DomNode* _child;  // cached first child
@@ -86,23 +91,8 @@ typedef struct DomNode {
 
     public:
     // Basic node information
-    char* name() {
-        if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            const lxb_char_t* element_name = lxb_dom_element_local_name(lxb_dom_interface_element(lxb_elmt), NULL);
-            return element_name ? (char*)element_name : (char*)"#element";
-        }
-        else if (type == LEXBOR_NODE && lxb_node) {
-            return (char*)"#text";
-        }
-        else if (type == MARK_ELEMENT && mark_element) {
-            TypeElmt* elem_type = (TypeElmt*)mark_element->type;
-            return (char*)elem_type->name.str;  // Cast away const
-        }
-        else if (type == MARK_TEXT && mark_text) {
-            return (char*)"#text";
-        }
-        return (char*)"#null";
-    }
+    char* name();  // Moved to .cpp to avoid incomplete type issues
+
     uintptr_t tag() {
         if (type == LEXBOR_ELEMENT && lxb_elmt) {
             return lxb_dom_interface_element(lxb_elmt)->node.local_name;
@@ -127,6 +117,18 @@ typedef struct DomNode {
         return false;
     }
 
+    bool is_comment() {
+        if (type == MARK_COMMENT) return true;
+        if (type != LEXBOR_NODE) return false;
+
+        // Check if Lexbor node is a comment
+        if (lxb_node && lxb_node->type == LXB_DOM_NODE_TYPE_COMMENT) {
+            return true;
+        }
+
+        return false;
+    }
+
     // Text node data access
     unsigned char* text_data();
 
@@ -139,8 +141,9 @@ typedef struct DomNode {
     Item mark_get_content();
 
     // Mark node constructors
-    static DomNode* create_mark_element(Element* element);
-    static DomNode* create_mark_text(String* text);
+    static DomNode* create_mark_element(DomElement* element);
+    static DomNode* create_mark_text(DomText* text);
+    static DomNode* create_mark_comment(DomComment* comment);
 
     // Memory management - free DomNode tree recursively
     static void free_tree(DomNode* node);
@@ -177,6 +180,7 @@ typedef struct {
     Element* lambda_html_root;  // Lambda HTML parser root (for Lambda CSS docs)
     ViewTree* view_tree;
     StateStore* state;
+    DomNode* root_dom_node;  // Root DomNode wrapper (heap-allocated, freed with view tree)
 } Document;
 
 typedef unsigned short PropValue;
