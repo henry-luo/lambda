@@ -493,119 +493,225 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     decl->valid = true;
     decl->ref_count = 1;
 
-    // Create a simple CssValue from the first non-whitespace token
-    for (int i = value_start; i < *pos; i++) {
-        if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+    // Create value(s) from tokens
+    if (value_count == 1) {
+        // Single value - create directly
+        for (int i = value_start; i < *pos; i++) {
+            if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
 
-        CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-        if (!value) return NULL;
+            CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+            if (!value) return NULL;
 
-        // Determine value type from token
-        if (tokens[i].type == CSS_TOKEN_IDENT) {
-            value->type = CSS_VALUE_KEYWORD;
-            // Extract keyword from token start/length if value is NULL
-            if (tokens[i].value) {
-                value->data.keyword = pool_strdup(pool, tokens[i].value);
-            } else if (tokens[i].start && tokens[i].length > 0) {
-                char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
-                if (keyword_buf) {
-                    memcpy(keyword_buf, tokens[i].start, tokens[i].length);
-                    keyword_buf[tokens[i].length] = '\0';
-                    value->data.keyword = keyword_buf;
+            // Determine value type from token
+            if (tokens[i].type == CSS_TOKEN_IDENT) {
+                value->type = CSS_VALUE_KEYWORD;
+                if (tokens[i].value) {
+                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                } else if (tokens[i].start && tokens[i].length > 0) {
+                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
+                    if (keyword_buf) {
+                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
+                        keyword_buf[tokens[i].length] = '\0';
+                        value->data.keyword = keyword_buf;
+                    }
                 }
-            }
-        } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
-            value->type = CSS_VALUE_NUMBER;
-            value->data.number.value = tokens[i].data.number_value;
-        } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
-            value->type = CSS_VALUE_LENGTH;
-            value->data.length.value = tokens[i].data.dimension.value;
-            value->data.length.unit = tokens[i].data.dimension.unit;
-        } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
-            value->type = CSS_VALUE_PERCENTAGE;
-            value->data.percentage.value = tokens[i].data.number_value;
-        } else if (tokens[i].type == CSS_TOKEN_HASH) {
-            // Hex color value (e.g., #ff0000, #f00, #ff0000ff)
-            value->type = CSS_VALUE_COLOR;
-            value->data.color.type = CSS_COLOR_RGB;
+            } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
+                value->type = CSS_VALUE_NUMBER;
+                value->data.number.value = tokens[i].data.number_value;
+            } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+                value->type = CSS_VALUE_LENGTH;
+                value->data.length.value = tokens[i].data.dimension.value;
+                value->data.length.unit = tokens[i].data.dimension.unit;
+            } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
+                value->type = CSS_VALUE_PERCENTAGE;
+                value->data.percentage.value = tokens[i].data.number_value;
+            } else if (tokens[i].type == CSS_TOKEN_HASH) {
+                value->type = CSS_VALUE_COLOR;
+                value->data.color.type = CSS_COLOR_RGB;
 
-            // Parse hex color from token value
-            const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
-            if (hex_str && hex_str[0] == '#') {
-                size_t len = strlen(hex_str + 1);
-                unsigned int hex_val = 0;
+                const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
+                if (hex_str && hex_str[0] == '#') {
+                    size_t len = strlen(hex_str + 1);
+                    unsigned int hex_val = 0;
 
-                if (len == 6) {
-                    // #rrggbb format
-                    if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
-                        value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
-                        value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
-                        value->data.color.data.rgba.b = hex_val & 0xFF;
+                    if (len == 6) {
+                        if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
+                            value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
+                            value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
+                            value->data.color.data.rgba.b = hex_val & 0xFF;
+                            value->data.color.data.rgba.a = 255;
+                        }
+                    } else if (len == 3) {
+                        if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
+                            unsigned int r = (hex_val >> 8) & 0xF;
+                            unsigned int g = (hex_val >> 4) & 0xF;
+                            unsigned int b = hex_val & 0xF;
+                            value->data.color.data.rgba.r = (r << 4) | r;
+                            value->data.color.data.rgba.g = (g << 4) | g;
+                            value->data.color.data.rgba.b = (b << 4) | b;
+                            value->data.color.data.rgba.a = 255;
+                        }
+                    } else if (len == 8) {
+                        if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
+                            value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
+                            value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
+                            value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
+                            value->data.color.data.rgba.a = hex_val & 0xFF;
+                        }
+                    } else if (len == 4) {
+                        if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
+                            unsigned int r = (hex_val >> 12) & 0xF;
+                            unsigned int g = (hex_val >> 8) & 0xF;
+                            unsigned int b = (hex_val >> 4) & 0xF;
+                            unsigned int a = hex_val & 0xF;
+                            value->data.color.data.rgba.r = (r << 4) | r;
+                            value->data.color.data.rgba.g = (g << 4) | g;
+                            value->data.color.data.rgba.b = (b << 4) | b;
+                            value->data.color.data.rgba.a = (a << 4) | a;
+                        }
+                    } else {
+                        value->data.color.data.rgba.r = 0;
+                        value->data.color.data.rgba.g = 0;
+                        value->data.color.data.rgba.b = 0;
                         value->data.color.data.rgba.a = 255;
-                    }
-                } else if (len == 3) {
-                    // #rgb format (expand to #rrggbb)
-                    if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
-                        unsigned int r = (hex_val >> 8) & 0xF;
-                        unsigned int g = (hex_val >> 4) & 0xF;
-                        unsigned int b = hex_val & 0xF;
-                        value->data.color.data.rgba.r = (r << 4) | r;
-                        value->data.color.data.rgba.g = (g << 4) | g;
-                        value->data.color.data.rgba.b = (b << 4) | b;
-                        value->data.color.data.rgba.a = 255;
-                    }
-                } else if (len == 8) {
-                    // #rrggbbaa format
-                    if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
-                        value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
-                        value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
-                        value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
-                        value->data.color.data.rgba.a = hex_val & 0xFF;
-                    }
-                } else if (len == 4) {
-                    // #rgba format (expand to #rrggbbaa)
-                    if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
-                        unsigned int r = (hex_val >> 12) & 0xF;
-                        unsigned int g = (hex_val >> 8) & 0xF;
-                        unsigned int b = (hex_val >> 4) & 0xF;
-                        unsigned int a = hex_val & 0xF;
-                        value->data.color.data.rgba.r = (r << 4) | r;
-                        value->data.color.data.rgba.g = (g << 4) | g;
-                        value->data.color.data.rgba.b = (b << 4) | b;
-                        value->data.color.data.rgba.a = (a << 4) | a;
                     }
                 } else {
-                    // Invalid hex color, default to black
                     value->data.color.data.rgba.r = 0;
                     value->data.color.data.rgba.g = 0;
                     value->data.color.data.rgba.b = 0;
                     value->data.color.data.rgba.a = 255;
                 }
             } else {
-                // No value or not a hash, default to black
-                value->data.color.data.rgba.r = 0;
-                value->data.color.data.rgba.g = 0;
-                value->data.color.data.rgba.b = 0;
-                value->data.color.data.rgba.a = 255;
+                value->type = CSS_VALUE_KEYWORD;
+                if (tokens[i].value) {
+                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                } else if (tokens[i].start && tokens[i].length > 0) {
+                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
+                    if (keyword_buf) {
+                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
+                        keyword_buf[tokens[i].length] = '\0';
+                        value->data.keyword = keyword_buf;
+                    }
+                }
             }
-        } else {
-            // Default to keyword
-            value->type = CSS_VALUE_KEYWORD;
-            // Extract keyword from token start/length if value is NULL
-            if (tokens[i].value) {
-                value->data.keyword = pool_strdup(pool, tokens[i].value);
-            } else if (tokens[i].start && tokens[i].length > 0) {
-                char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
-                if (keyword_buf) {
-                    memcpy(keyword_buf, tokens[i].start, tokens[i].length);
-                    keyword_buf[tokens[i].length] = '\0';
-                    value->data.keyword = keyword_buf;
+
+            decl->value = value;
+            break;
+        }
+    } else {
+        // Multiple values - create list
+        CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+        if (!list_value) return NULL;
+
+        list_value->type = CSS_VALUE_LIST;
+        list_value->data.list.count = value_count;
+
+        // Allocate array of pointers to CssValue
+        list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
+        if (!list_value->data.list.values) return NULL;        int list_idx = 0;
+        for (int i = value_start; i < *pos && list_idx < value_count; i++) {
+            if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+
+            // Allocate individual CssValue
+            CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+            if (!value) return NULL;
+
+            list_value->data.list.values[list_idx++] = value;
+
+            if (tokens[i].type == CSS_TOKEN_IDENT) {
+                value->type = CSS_VALUE_KEYWORD;
+                if (tokens[i].value) {
+                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                } else if (tokens[i].start && tokens[i].length > 0) {
+                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
+                    if (keyword_buf) {
+                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
+                        keyword_buf[tokens[i].length] = '\0';
+                        value->data.keyword = keyword_buf;
+                    }
+                }
+            } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
+                value->type = CSS_VALUE_NUMBER;
+                value->data.number.value = tokens[i].data.number_value;
+            } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+                value->type = CSS_VALUE_LENGTH;
+                value->data.length.value = tokens[i].data.dimension.value;
+                value->data.length.unit = tokens[i].data.dimension.unit;
+            } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
+                value->type = CSS_VALUE_PERCENTAGE;
+                value->data.percentage.value = tokens[i].data.number_value;
+            } else if (tokens[i].type == CSS_TOKEN_HASH) {
+                value->type = CSS_VALUE_COLOR;
+                value->data.color.type = CSS_COLOR_RGB;
+
+                const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
+                if (hex_str && hex_str[0] == '#') {
+                    size_t len = strlen(hex_str + 1);
+                    unsigned int hex_val = 0;
+
+                    if (len == 6) {
+                        if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
+                            value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
+                            value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
+                            value->data.color.data.rgba.b = hex_val & 0xFF;
+                            value->data.color.data.rgba.a = 255;
+                        }
+                    } else if (len == 3) {
+                        if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
+                            unsigned int r = (hex_val >> 8) & 0xF;
+                            unsigned int g = (hex_val >> 4) & 0xF;
+                            unsigned int b = hex_val & 0xF;
+                            value->data.color.data.rgba.r = (r << 4) | r;
+                            value->data.color.data.rgba.g = (g << 4) | g;
+                            value->data.color.data.rgba.b = (b << 4) | b;
+                            value->data.color.data.rgba.a = 255;
+                        }
+                    } else if (len == 8) {
+                        if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
+                            value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
+                            value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
+                            value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
+                            value->data.color.data.rgba.a = hex_val & 0xFF;
+                        }
+                    } else if (len == 4) {
+                        if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
+                            unsigned int r = (hex_val >> 12) & 0xF;
+                            unsigned int g = (hex_val >> 8) & 0xF;
+                            unsigned int b = (hex_val >> 4) & 0xF;
+                            unsigned int a = hex_val & 0xF;
+                            value->data.color.data.rgba.r = (r << 4) | r;
+                            value->data.color.data.rgba.g = (g << 4) | g;
+                            value->data.color.data.rgba.b = (b << 4) | b;
+                            value->data.color.data.rgba.a = (a << 4) | a;
+                        }
+                    } else {
+                        value->data.color.data.rgba.r = 0;
+                        value->data.color.data.rgba.g = 0;
+                        value->data.color.data.rgba.b = 0;
+                        value->data.color.data.rgba.a = 255;
+                    }
+                } else {
+                    value->data.color.data.rgba.r = 0;
+                    value->data.color.data.rgba.g = 0;
+                    value->data.color.data.rgba.b = 0;
+                    value->data.color.data.rgba.a = 255;
+                }
+            } else {
+                value->type = CSS_VALUE_KEYWORD;
+                if (tokens[i].value) {
+                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                } else if (tokens[i].start && tokens[i].length > 0) {
+                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
+                    if (keyword_buf) {
+                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
+                        keyword_buf[tokens[i].length] = '\0';
+                        value->data.keyword = keyword_buf;
+                    }
                 }
             }
         }
 
-        decl->value = value;
-        break; // Use first non-whitespace token for now
+        decl->value = list_value;
     }
 
     return decl;

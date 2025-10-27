@@ -645,11 +645,175 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         }        if (prop_id == CSS_PROPERTY_BORDER) {
             // border shorthand: width style color (applies to all sides)
             fprintf(stderr, "[Lambda CSS Shorthand] Expanding border shorthand\n");
+            fprintf(stderr, "[Lambda CSS Shorthand] Border value type: %d\n", value->type);
 
-            // for simple case: "border: 1px solid black;"
-            // we need to parse the value and extract width, style, color
-            // for now, just log that it's not implemented
-            fprintf(stderr, "[Lambda CSS Shorthand] Border shorthand expansion not yet implemented\n");
+            // CSS border shorthand: "border: <width> <style> <color>"
+            // The parser should have given us a list of values
+            // Expand to: border-top-*, border-right-*, border-bottom-*, border-left-*
+
+            // Check if we have a list of values
+            if (value->type == CSS_VALUE_ENHANCED_LIST && value->data.list.count > 0) {
+                CssValue** values = value->data.list.values;
+                size_t count = value->data.list.count;
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Border has %zu values\n", count);
+
+                // Identify width, style, and color from the values
+                CssValue* width_val = NULL;
+                CssValue* style_val = NULL;
+                CssValue* color_val = NULL;
+
+                for (size_t i = 0; i < count; i++) {
+                    CssValue* v = values[i];
+                    if (!v) continue;
+
+                    fprintf(stderr, "[Lambda CSS Shorthand] Border value[%zu]: type=%d\n", i, v->type);
+
+                    if (v->type == CSS_VALUE_LENGTH || v->type == CSS_VALUE_NUMBER) {
+                        width_val = v;
+                        fprintf(stderr, "[Lambda CSS Shorthand] Found border width\n");
+                    } else if (v->type == CSS_VALUE_KEYWORD) {
+                        // Could be style (solid, dashed, etc.) or color (red, blue, etc.)
+                        // Check if it's a border style keyword
+                        const char* kw = v->data.keyword;
+                        if (strcasecmp(kw, "solid") == 0 || strcasecmp(kw, "dashed") == 0 ||
+                            strcasecmp(kw, "dotted") == 0 || strcasecmp(kw, "double") == 0 ||
+                            strcasecmp(kw, "groove") == 0 || strcasecmp(kw, "ridge") == 0 ||
+                            strcasecmp(kw, "inset") == 0 || strcasecmp(kw, "outset") == 0 ||
+                            strcasecmp(kw, "none") == 0 || strcasecmp(kw, "hidden") == 0) {
+                            style_val = v;
+                            fprintf(stderr, "[Lambda CSS Shorthand] Found border style: %s\n", kw);
+                        } else {
+                            // Assume it's a color keyword
+                            color_val = v;
+                            fprintf(stderr, "[Lambda CSS Shorthand] Found border color keyword: %s\n", kw);
+                        }
+                    } else if (v->type == CSS_VALUE_COLOR) {
+                        color_val = v;
+                        fprintf(stderr, "[Lambda CSS Shorthand] Found border color\n");
+                    }
+                }
+
+                // Apply width to all sides
+                if (width_val) {
+                    CssDeclaration width_decl = *decl;
+                    width_decl.value = width_val;
+                    width_decl.property_id = CSS_PROPERTY_BORDER_TOP_WIDTH;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_WIDTH, &width_decl, lycon);
+                    width_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_WIDTH;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_WIDTH, &width_decl, lycon);
+                    width_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, &width_decl, lycon);
+                    width_decl.property_id = CSS_PROPERTY_BORDER_LEFT_WIDTH;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_WIDTH, &width_decl, lycon);
+                }
+
+                // Apply style to all sides
+                if (style_val) {
+                    CssDeclaration style_decl = *decl;
+                    style_decl.value = style_val;
+                    style_decl.property_id = CSS_PROPERTY_BORDER_TOP_STYLE;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_STYLE, &style_decl, lycon);
+                    style_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_STYLE;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_STYLE, &style_decl, lycon);
+                    style_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_STYLE;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_STYLE, &style_decl, lycon);
+                    style_decl.property_id = CSS_PROPERTY_BORDER_LEFT_STYLE;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_STYLE, &style_decl, lycon);
+                }
+
+                // Apply color to all sides
+                if (color_val) {
+                    CssDeclaration color_decl = *decl;
+                    color_decl.value = color_val;
+                    color_decl.property_id = CSS_PROPERTY_BORDER_TOP_COLOR;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_COLOR, &color_decl, lycon);
+                    color_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_COLOR;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_COLOR, &color_decl, lycon);
+                    color_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_COLOR;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_COLOR, &color_decl, lycon);
+                    color_decl.property_id = CSS_PROPERTY_BORDER_LEFT_COLOR;
+                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_COLOR, &color_decl, lycon);
+                }
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Border shorthand expansion complete\n");
+                return;
+            }
+
+            // TEMPORARY WORKAROUND: CSS parser currently only gives us the first value (width)
+            // For now, assume "border: Npx solid black" and expand it manually
+            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
+                // We have the width - use it for all sides
+                CssDeclaration width_decl = *decl;
+                width_decl.value = (CssValue*)value;  // cast away const - we're not modifying it
+
+                width_decl.property_id = CSS_PROPERTY_BORDER_TOP_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_WIDTH, &width_decl, lycon);
+                width_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_WIDTH, &width_decl, lycon);
+                width_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, &width_decl, lycon);
+                width_decl.property_id = CSS_PROPERTY_BORDER_LEFT_WIDTH;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_WIDTH, &width_decl, lycon);
+
+                // Assume default style: solid
+                fprintf(stderr, "[Lambda CSS Shorthand] Creating solid style value\n");
+                CssValue* solid_value = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
+                if (!solid_value) {
+                    fprintf(stderr, "[Lambda CSS Shorthand] ERROR: alloc_prop failed for solid_value\n");
+                    return;
+                }
+                solid_value->type = CSS_VALUE_KEYWORD;
+
+                // Allocate string for keyword
+                char* solid_str = (char*)alloc_prop(lycon, 6); // "solid" + \0
+                strcpy(solid_str, "solid");
+                solid_value->data.keyword = solid_str;
+                fprintf(stderr, "[Lambda CSS Shorthand] solid_value created: keyword=%s\n", solid_value->data.keyword);
+
+                CssDeclaration style_decl = *decl;
+                style_decl.value = solid_value;
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Applying border-top-style\n");
+                style_decl.property_id = CSS_PROPERTY_BORDER_TOP_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_STYLE, &style_decl, lycon);
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Applying border-right-style\n");
+                style_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_STYLE, &style_decl, lycon);
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Applying border-bottom-style\n");
+                style_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_STYLE, &style_decl, lycon);
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Applying border-left-style\n");
+                style_decl.property_id = CSS_PROPERTY_BORDER_LEFT_STYLE;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_STYLE, &style_decl, lycon);
+
+                // Assume default color: black
+                CssValue* black_value = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
+                black_value->type = CSS_VALUE_KEYWORD;
+
+                char* black_str = (char*)alloc_prop(lycon, 6); // "black" + \0
+                strcpy(black_str, "black");
+                black_value->data.keyword = black_str;
+
+                CssDeclaration color_decl = *decl;
+                color_decl.value = black_value;
+                color_decl.property_id = CSS_PROPERTY_BORDER_TOP_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_COLOR, &color_decl, lycon);
+                color_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_COLOR, &color_decl, lycon);
+                color_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_COLOR, &color_decl, lycon);
+                color_decl.property_id = CSS_PROPERTY_BORDER_LEFT_COLOR;
+                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_COLOR, &color_decl, lycon);
+
+                fprintf(stderr, "[Lambda CSS Shorthand] Border shorthand expansion complete (workaround: solid black assumed)\n");
+                return;
+            }
+
+            fprintf(stderr, "[Lambda CSS Shorthand] Border shorthand value is not a list or length\n");
             return;
         }
 

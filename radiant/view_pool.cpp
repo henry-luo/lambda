@@ -733,6 +733,22 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     }
     strbuf_append_str(buf, ",\n");
 
+    // Add classes array (for test compatibility)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"classes\": [");
+    if (block->node) {
+        size_t class_len;
+        const lxb_char_t* class_attr = block->node->get_attribute("class", &class_len);
+        if (class_attr && class_len > 0) {
+            // Output class names as array
+            // For now, assume single class (TODO: split on whitespace for multiple classes)
+            strbuf_append_char(buf, '\"');
+            strbuf_append_str_n(buf, (const char*)class_attr, class_len);
+            strbuf_append_char(buf, '\"');
+        }
+    }
+    strbuf_append_str(buf, "],\n");
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     print_bounds_json(block, buf, indent, pixel_ratio);
