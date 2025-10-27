@@ -1158,6 +1158,22 @@
                             "lib/mempool.c"
                         ],
                         "binary": "test_avl_tree_perf.exe"
+                    },
+                    {
+                        "source": "test_element_reader_gtest.cpp",
+                        "name": "🔍 Element Reader Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "additional_sources": [
+                            "lambda/element_reader.cpp",
+                            "lambda/element_reader_utils.cpp"
+                        ],
+                        "binary": "test_element_reader_gtest.exe"
                     }
                 ],
                 "type": "library"
