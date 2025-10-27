@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "../../../lambda/input/css/css_parser.h"
-#include "../../../lambda/input/css/css_integration.h"
+#include "../../../lambda/input/css/css_engine.h"
 #include "../../../lib/mempool.h"
 #include <string>
 #include <vector>

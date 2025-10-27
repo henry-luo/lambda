@@ -22,7 +22,7 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
-#include "../lambda/input/css/css_integration.h"
+#include "../lambda/input/css/css_engine.h"
 #include "../lambda/input/css/css_style_node.h"
 #include "../lambda/input/css/dom_element.h"
 #include "../lambda/input/css/selector_matcher.h"

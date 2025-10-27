@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/css/css_integration.h"
+#include "../lambda/input/css/css_engine.h"
 #include "../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
@@ -48,7 +48,7 @@ TEST_F(CssParserTest, ParseSimpleStyleRule) {
 
     ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL";
     EXPECT_GT(stylesheet->rule_count, 0) << "Should have at least 1 rule";
-    
+
     // Basic validation - just check that we get a rule
     if (stylesheet->rule_count > 0) {
         CssRule* rule = stylesheet->rules[0];

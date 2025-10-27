@@ -1,5 +1,5 @@
-#ifndef CSS_INTEGRATION_H
-#define CSS_INTEGRATION_H
+#ifndef CSS_ENGINE_H
+#define CSS_ENGINE_H
 
 #include "css_parser.h"
 #include "css_style.h"
@@ -23,7 +23,7 @@ typedef struct CssStyleEngine {
 
 /**
  * CSS Integration System
- * 
+ *
  * This file integrates all CSS components including tokenizer, parser,
  * style system, and provides a unified CSS processing engine.
  */
@@ -31,17 +31,17 @@ typedef struct CssStyleEngine {
 // CSS Processing Engine
 typedef struct CssEngine {
     Pool* pool;
-    
+
     // Core components
     CssTokenizer* tokenizer;
     struct CSSSelectorParser* selector_parser;
     struct CssPropertyValueParser* value_parser;
     struct CssStyleEngine* style_engine;
-    
+
     // Style storage and cascade
     AvlTree* style_tree;        // AVL tree for style node storage
     CssComputedStyle* root_style; // Root element style
-    
+
     // Feature flags
     struct {
         bool css_nesting;
@@ -55,7 +55,7 @@ typedef struct CssEngine {
         bool css_subgrid;
         bool css_anchor_positioning;
     } features;
-    
+
     // Performance settings
     struct {
         bool cache_parsed_selectors;
@@ -64,7 +64,7 @@ typedef struct CssEngine {
         bool parallel_parsing;
         size_t max_cache_size;
     } performance;
-    
+
     // Context settings
     struct {
         const char* base_url;
@@ -77,7 +77,7 @@ typedef struct CssEngine {
         bool reduced_motion;
         bool high_contrast;
     } context;
-    
+
     // Engine statistics
     struct {
         size_t stylesheets_parsed;
@@ -94,17 +94,17 @@ typedef struct CssEngine {
         size_t cascade_calculations;  // Number of cascade operations
         size_t memory_usage;          // Memory usage in bytes
     } stats;
-    
+
     // Processing options
     bool supports_css3;
     bool supports_unicode;
     bool strict_parsing;
-    
+
     // Performance tracking
     size_t rules_processed;
     size_t selectors_processed;
     size_t properties_processed;
-    
+
     // Error handling
     size_t parse_errors;
     size_t validation_errors;
@@ -121,14 +121,14 @@ typedef struct CssProcessingOptions {
     bool css_logical_properties; // Logical properties
     bool css_subgrid;           // CSS Subgrid
     bool css_anchor_positioning; // CSS Anchor Positioning
-    
+
     // Performance options
     bool cache_parsed_selectors;
     bool cache_computed_values;
     bool optimize_specificity;
     bool parallel_parsing;
     int max_cache_size;
-    
+
     // Document context
     const char* base_url;
     const char* document_charset;
@@ -168,16 +168,16 @@ bool css_rule_to_style_nodes(CssEngine* engine, CssRule* rule, CssComputedStyle*
 bool css_apply_stylesheet(CssEngine* engine, CssStylesheet* stylesheet, CssComputedStyle* target_style);
 
 // Value computation and resolution
-CssValue* css_compute_value(CssEngine* engine, CssValue* declared_value, 
+CssValue* css_compute_value(CssEngine* engine, CssValue* declared_value,
                            CssPropertyId property_id, const CssComputedStyle* parent_style);
-double css_resolve_length(CssEngine* engine, const CssValue* value, 
+double css_resolve_length(CssEngine* engine, const CssValue* value,
                          double container_size, double font_size);
 
 // Custom property management
-bool css_register_custom_property(CssEngine* engine, const char* name, 
+bool css_register_custom_property(CssEngine* engine, const char* name,
                                  const char* syntax, CssValue* initial_value, bool inherits);
 CssValue* css_get_custom_property(CssEngine* engine, const CssComputedStyle* style, const char* name);
-bool css_set_custom_property(CssEngine* engine, CssComputedStyle* style, 
+bool css_set_custom_property(CssEngine* engine, CssComputedStyle* style,
                             const char* name, CssValue* value);
 
 // Statistics and debugging
@@ -285,4 +285,4 @@ bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssSty
 }
 #endif
 
-#endif // CSS_INTEGRATION_H
+#endif // CSS_ENGINE_H
