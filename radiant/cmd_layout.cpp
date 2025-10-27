@@ -53,7 +53,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
-DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool);
+// DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool);  // OBSOLETE: DomNode now wraps DomElement directly
 ViewGroup* compute_layout_tree(DomNode* root_node, LayoutContext* lycon);
 
 /**
@@ -885,27 +885,32 @@ void write_css_cascade_output(DomElement* root, const char* output_file) {
     fprintf(stderr, "[CSS Output] CSS computed values written to %s\n", output_file);
 }
 
-/**
+/*
+ * OBSOLETE FUNCTION - Commented out after DomNode refactoring
+ * DomNode now directly wraps DomElement/DomText/DomComment instead of Element/String
+ * Tree traversal happens automatically through DomNode::first_child() and next_sibling()
+ *
+ * Original purpose:
  * Build Radiant DomNode tree from CSS DomElement tree
  * Creates MARK_ELEMENT nodes that wrap Lambda Elements and link to DomElement for styling
- */
+ *
 DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool) {
     if (!css_elem || !html_elem) return nullptr;
 
-    // Create Radiant DomNode wrapping the Lambda Element
+    // create Radiant DomNode wrapping the Lambda Element
     DomNode* node = DomNode::create_mark_element(html_elem);
     if (!node) return nullptr;
 
-    // Store reference to DomElement for style access (using Style* field)
+    // store reference to DomElement for style access (using Style* field)
     node->style = (Style*)css_elem;
 
     fprintf(stderr, "[Layout] Created DomNode for <%s>\n", css_elem->tag_name);
 
-    // Recursively build children (only process element children for DOM tree)
+    // recursively build children (only process element children for DOM tree)
     void* css_child = css_elem->first_child;
     Element* html_child_elem = nullptr;
 
-    // Find matching HTML children
+    // find matching HTML children
     for (int64_t i = 0; i < html_elem->length && css_child; i++) {
         Item child_item = html_elem->items[i];
 
@@ -913,11 +918,11 @@ DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* 
             Element* child_elem = (Element*)child_item.pointer;
             TypeElmt* child_type = (TypeElmt*)child_elem->type;
 
-            // Check if CSS child is an element
+            // check if CSS child is an element
             if (dom_node_is_element(css_child)) {
                 DomElement* css_child_elem = (DomElement*)css_child;
 
-                // Build child node
+                // build child node
                 DomNode* child_node = build_radiant_dom_node(css_child_elem, child_elem, pool);
                 if (child_node) {
                     child_node->parent = node;
@@ -925,7 +930,7 @@ DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* 
 
                 css_child = css_child_elem->next_sibling;
             } else {
-                // Skip non-element CSS nodes (text, comments)
+                // skip non-element CSS nodes (text, comments)
                 if (dom_node_is_text(css_child)) {
                     css_child = ((DomText*)css_child)->next_sibling;
                 } else if (dom_node_is_comment(css_child)) {
@@ -939,6 +944,7 @@ DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* 
 
     return node;
 }
+*/
 
 /**
  * Load HTML document with Lambda CSS system
