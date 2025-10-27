@@ -5,13 +5,13 @@
  * This is separate from the Lexbor-based CSS system.
  *
  * Usage:
- *   lambda layout input.html [-o output.json] [-c styles.css] [-w 800] [-h 600]
+ *   lambda layout input.html [-o output.json] [-c styles.css] [-w 1200] [-h 800]
  *
  * Options:
  *   -o, --output FILE    Output file for layout results (default: stdout)
  *   -c, --css FILE       External CSS file to apply
- *   -w, --width WIDTH    Viewport width in pixels (default: 800)
- *   -h, --height HEIGHT  Viewport height in pixels (default: 600)
+ *   -w, --width WIDTH    Viewport width in pixels (default: 1200)
+ *   -h, --height HEIGHT  Viewport height in pixels (default: 800)
  *   --format FORMAT      Output format: json, text (default: text)
  *   --debug              Enable debug output
  */
@@ -1147,8 +1147,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->input_file = nullptr;
     opts->output_file = nullptr;
     opts->css_file = nullptr;
-    opts->viewport_width = 800;
-    opts->viewport_height = 600;
+    opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
+    opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
 
     // Parse arguments
