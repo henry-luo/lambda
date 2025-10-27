@@ -913,6 +913,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
         // Background color
         if (block->bound->background) {
+            fprintf(stderr, "[view_to_json] Background color: r=%d, g=%d, b=%d, a=%d (0x%08X)\n",
+                    block->bound->background->color.r,
+                    block->bound->background->color.g,
+                    block->bound->background->color.b,
+                    block->bound->background->color.a,
+                    block->bound->background->color.c);
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"backgroundColor\": \"rgba(%d, %d, %d, %.2f)\",\n",
                 block->bound->background->color.r,
