@@ -22,14 +22,14 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
-#include "input/css/css_integration.h"
-#include "input/css/css_style_node.h"
-#include "input/css/dom_element.h"
-#include "input/css/selector_matcher.h"
-#include "input/css/document_styler.h"
+#include "../lambda/input/css/css_integration.h"
+#include "../lambda/input/css/css_style_node.h"
+#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/selector_matcher.h"
+#include "../lambda/input/css/document_styler.h"
 }
 
-#include "input/input.h"
+#include "../lambda/input/input.h"
 #include "../radiant/dom.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
@@ -121,7 +121,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
     apply_inline_style_attributes(dom_elem, html_elem, pool);
 
     // Process children - need to match DOM children with HTML children
-    DomElement* dom_child = dom_elem->first_child;
+    void* dom_child = dom_elem->first_child;
 
     // Iterate through HTML children to find matching elements
     for (int64_t i = 0; i < html_elem->length && dom_child; i++) {
@@ -131,14 +131,22 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             Element* html_child = (Element*)child_item.pointer;
             TypeElmt* child_type = (TypeElmt*)html_child->type;
 
-            // Skip non-element nodes (DOCTYPE, comments)
-            if (child_type &&
-                strcmp(child_type->name.str, "!DOCTYPE") != 0 &&
-                strcmp(child_type->name.str, "!--") != 0) {
+            // Check if DOM child is an element node
+            if (dom_node_is_element(dom_child)) {
+                DomElement* dom_child_elem = (DomElement*)dom_child;
 
                 // Recursively apply to this child
-                apply_inline_styles_to_tree(dom_child, html_child, pool);
-                dom_child = dom_child->next_sibling;
+                apply_inline_styles_to_tree(dom_child_elem, html_child, pool);
+                dom_child = dom_child_elem->next_sibling;
+            } else {
+                // Skip non-element DOM nodes (text, comments)
+                if (dom_node_is_text(dom_child)) {
+                    dom_child = ((DomText*)dom_child)->next_sibling;
+                } else if (dom_node_is_comment(dom_child)) {
+                    dom_child = ((DomComment*)dom_child)->next_sibling;
+                } else {
+                    dom_child = nullptr;
+                }
             }
         }
     }
@@ -340,6 +348,7 @@ const char* extract_inline_css(Element* root) {
 /**
  * Recursively build DomElement tree from Lambda Element tree
  * Converts HTML parser output (Element) to CSS system format (DomElement)
+ * Now includes text nodes, comments, DOCTYPE, and all other node types
  */
 DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
     if (!elem || !pool) return nullptr;
@@ -350,35 +359,37 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
 
     const char* tag_name = type->name.str;
 
-    // Skip DOCTYPE, comments, and text nodes
-    if (strcmp(tag_name, "!DOCTYPE") == 0 || strcmp(tag_name, "!--") == 0) {
-        return nullptr;
-    }
-
-    // Create DomElement
+    // Create DomElement (no longer skip DOCTYPE and comments)
     DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
     if (!dom_elem) return nullptr;
 
-    // Extract id and class attributes from Lambda Element
-    const char* id_value = extract_element_attribute(elem, "id", pool);
-    if (id_value) {
-        dom_element_set_attribute(dom_elem, "id", id_value);
-    }
+    // Extract id and class attributes from Lambda Element (only for regular elements)
+    // Skip for special nodes like DOCTYPE, comments
+    bool is_special_node = (strcmp(tag_name, "!DOCTYPE") == 0 ||
+                            strcmp(tag_name, "!--") == 0 ||
+                            strncmp(tag_name, "?", 1) == 0);  // XML declarations start with ?
 
-    const char* class_value = extract_element_attribute(elem, "class", pool);
-    if (class_value) {
-        // Parse multiple classes separated by spaces
-        char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
-        if (class_copy) {
-            strcpy(class_copy, class_value);
+    if (!is_special_node) {
+        const char* id_value = extract_element_attribute(elem, "id", pool);
+        if (id_value) {
+            dom_element_set_attribute(dom_elem, "id", id_value);
+        }
 
-            // Split by spaces and add each class
-            char* token = strtok(class_copy, " \t\n");
-            while (token) {
-                if (strlen(token) > 0) {
-                    dom_element_add_class(dom_elem, token);
+        const char* class_value = extract_element_attribute(elem, "class", pool);
+        if (class_value) {
+            // Parse multiple classes separated by spaces
+            char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
+            if (class_copy) {
+                strcpy(class_copy, class_value);
+
+                // Split by spaces and add each class
+                char* token = strtok(class_copy, " \t\n");
+                while (token) {
+                    if (strlen(token) > 0) {
+                        dom_element_add_class(dom_elem, token);
+                    }
+                    token = strtok(nullptr, " \t\n");
                 }
-                token = strtok(nullptr, " \t\n");
             }
         }
     }
@@ -388,16 +399,68 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
         dom_element_append_child(parent, dom_elem);
     }
 
-    // Process child elements
+    // Process all children - including text nodes, comments, and elements
     // Elements are Lists, so iterate through items
+    void* last_child = nullptr;
+
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         TypeId child_type = get_type_id(child_item);
 
-        // Only process element nodes (skip text nodes for CSS purposes)
         if (child_type == LMD_TYPE_ELEMENT) {
+            // Element node - recursively build
             Element* child_elem = (Element*)child_item.pointer;
-            build_dom_tree_from_element(child_elem, pool, dom_elem);
+            DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
+
+            // Link as sibling to previous child
+            if (last_child && child_dom) {
+                DomNodeType last_type = dom_node_get_type(last_child);
+                if (last_type == DOM_NODE_ELEMENT) {
+                    ((DomElement*)last_child)->next_sibling = child_dom;
+                } else if (last_type == DOM_NODE_TEXT) {
+                    ((DomText*)last_child)->next_sibling = child_dom;
+                } else if (last_type == DOM_NODE_COMMENT || last_type == DOM_NODE_DOCTYPE) {
+                    ((DomComment*)last_child)->next_sibling = child_dom;
+                }
+                child_dom->prev_sibling = last_child;
+            }
+
+            // Set as first child if this is the first one
+            if (child_dom && !dom_elem->first_child) {
+                dom_elem->first_child = child_dom;
+            }
+
+            last_child = child_dom;
+
+        } else if (child_type == LMD_TYPE_STRING) {
+            // Text node - create DomText
+            String* text_str = (String*)child_item.pointer;
+            if (text_str && text_str->len > 0) {
+                DomText* text_node = dom_text_create(pool, text_str->chars);
+                if (text_node) {
+                    text_node->parent = dom_elem;
+
+                    // Link as sibling to previous child
+                    if (last_child) {
+                        DomNodeType last_type = dom_node_get_type(last_child);
+                        if (last_type == DOM_NODE_ELEMENT) {
+                            ((DomElement*)last_child)->next_sibling = text_node;
+                        } else if (last_type == DOM_NODE_TEXT) {
+                            ((DomText*)last_child)->next_sibling = text_node;
+                        } else if (last_type == DOM_NODE_COMMENT || last_type == DOM_NODE_DOCTYPE) {
+                            ((DomComment*)last_child)->next_sibling = text_node;
+                        }
+                        text_node->prev_sibling = last_child;
+                    }
+
+                    // Set as first child if this is the first one
+                    if (!dom_elem->first_child) {
+                        dom_elem->first_child = text_node;
+                    }
+
+                    last_child = text_node;
+                }
+            }
         }
     }
 
@@ -477,11 +540,22 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
         }
     }
 
-    // Recursively apply to children
-    DomElement* child = root->first_child;
+    // Recursively apply to children (only element children)
+    void* child = root->first_child;
     while (child) {
-        apply_stylesheet_to_dom_tree(child, stylesheet, matcher, pool);
-        child = child->next_sibling;
+        if (dom_node_is_element(child)) {
+            DomElement* child_elem = (DomElement*)child;
+            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool);
+            child = child_elem->next_sibling;
+        } else if (dom_node_is_text(child)) {
+            DomText* text_node = (DomText*)child;
+            child = text_node->next_sibling;
+        } else if (dom_node_is_comment(child)) {
+            DomComment* comment_node = (DomComment*)child;
+            child = comment_node->next_sibling;
+        } else {
+            break; // Unknown node type
+        }
     }
 }
 
@@ -764,15 +838,26 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
 
     fprintf(fp, "%s  },\n", indent);
 
-    // Dump children
+    // Dump children (only elements have CSS properties)
     fprintf(fp, "%s  \"children\": [\n", indent);
-    DomElement* child = elem->first_child;
+    void* child = elem->first_child;
     bool first = true;
     while (child) {
-        if (!first) fprintf(fp, ",\n");
-        dump_css_properties_json(fp, child, depth + 2);
-        child = child->next_sibling;
-        first = false;
+        if (dom_node_is_element(child)) {
+            DomElement* child_elem = (DomElement*)child;
+            if (!first) fprintf(fp, ",\n");
+            dump_css_properties_json(fp, child_elem, depth + 2);
+            first = false;
+            child = child_elem->next_sibling;
+        } else if (dom_node_is_text(child)) {
+            DomText* text_node = (DomText*)child;
+            child = text_node->next_sibling;
+        } else if (dom_node_is_comment(child)) {
+            DomComment* comment_node = (DomComment*)child;
+            child = comment_node->next_sibling;
+        } else {
+            break;
+        }
     }
     fprintf(fp, "\n%s  ]\n", indent);
 
@@ -816,8 +901,8 @@ DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* 
 
     fprintf(stderr, "[Layout] Created DomNode for <%s>\n", css_elem->tag_name);
 
-    // Recursively build children
-    DomElement* css_child = css_elem->first_child;
+    // Recursively build children (only process element children for DOM tree)
+    void* css_child = css_elem->first_child;
     Element* html_child_elem = nullptr;
 
     // Find matching HTML children
@@ -828,18 +913,26 @@ DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* 
             Element* child_elem = (Element*)child_item.pointer;
             TypeElmt* child_type = (TypeElmt*)child_elem->type;
 
-            // Skip non-element nodes
-            if (child_type &&
-                strcmp(child_type->name.str, "!DOCTYPE") != 0 &&
-                strcmp(child_type->name.str, "!--") != 0) {
+            // Check if CSS child is an element
+            if (dom_node_is_element(css_child)) {
+                DomElement* css_child_elem = (DomElement*)css_child;
 
                 // Build child node
-                DomNode* child_node = build_radiant_dom_node(css_child, child_elem, pool);
+                DomNode* child_node = build_radiant_dom_node(css_child_elem, child_elem, pool);
                 if (child_node) {
                     child_node->parent = node;
                 }
 
-                css_child = css_child->next_sibling;
+                css_child = css_child_elem->next_sibling;
+            } else {
+                // Skip non-element CSS nodes (text, comments)
+                if (dom_node_is_text(css_child)) {
+                    css_child = ((DomText*)css_child)->next_sibling;
+                } else if (dom_node_is_comment(css_child)) {
+                    css_child = ((DomComment*)css_child)->next_sibling;
+                } else {
+                    css_child = nullptr;
+                }
             }
         }
     }
