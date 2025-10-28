@@ -7,8 +7,8 @@ extern "C" {
 #include "../../../lib/log.h"
 }
 
-// Simple test for DOM element printing functionality
-class DomElementSimpleTest : public ::testing::Test {
+// Test for DOM element printing functionality
+class DomElementPrintTest : public ::testing::Test {
 protected:
     Pool* pool;
     StrBuf* buffer;
@@ -30,7 +30,7 @@ protected:
     }
 };
 
-TEST_F(DomElementSimpleTest, PrintEmptyDiv) {
+TEST_F(DomElementPrintTest, PrintEmptyDiv) {
     // Create a simple div element using proper API
     DomElement* div = dom_element_create(pool, "div", nullptr);
     ASSERT_NE(div, nullptr);
@@ -44,7 +44,7 @@ TEST_F(DomElementSimpleTest, PrintEmptyDiv) {
     EXPECT_STREQ(result, "<div></div>\n");
 }
 
-TEST_F(DomElementSimpleTest, PrintDivWithId) {
+TEST_F(DomElementPrintTest, PrintDivWithId) {
     // Create div element with ID
     DomElement* div = dom_element_create(pool, "div", nullptr);
     ASSERT_NE(div, nullptr);
@@ -61,7 +61,7 @@ TEST_F(DomElementSimpleTest, PrintDivWithId) {
     EXPECT_TRUE(strstr(result, "id=\"test-id\"") != nullptr);
 }
 
-TEST_F(DomElementSimpleTest, PrintDivWithClass) {
+TEST_F(DomElementPrintTest, PrintDivWithClass) {
     // Create div element with class
     DomElement* div = dom_element_create(pool, "div", nullptr);
     ASSERT_NE(div, nullptr);
@@ -78,7 +78,7 @@ TEST_F(DomElementSimpleTest, PrintDivWithClass) {
     EXPECT_TRUE(strstr(result, "class=\"test-class\"") != nullptr);
 }
 
-TEST_F(DomElementSimpleTest, PrintNestedElements) {
+TEST_F(DomElementPrintTest, PrintNestedElements) {
     // Create parent div
     DomElement* div = dom_element_create(pool, "div", nullptr);
     ASSERT_NE(div, nullptr);
@@ -102,7 +102,7 @@ TEST_F(DomElementSimpleTest, PrintNestedElements) {
     EXPECT_TRUE(strstr(result, "</div>") != nullptr);
 }
 
-TEST_F(DomElementSimpleTest, PrintWithIndentation) {
+TEST_F(DomElementPrintTest, PrintWithIndentation) {
     // Create simple element
     DomElement* p = dom_element_create(pool, "p", nullptr);
     ASSERT_NE(p, nullptr);

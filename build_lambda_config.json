@@ -1535,8 +1535,8 @@
                         "binary": "test_css_engine_unit.exe"
                     },
                     {
-                        "source": "test/css/unit/test_dom_element_simple.cpp",
-                        "name": "🎨 DOM Element Simple Tests",
+                        "source": "test/css/unit/test_dom_element_print.cpp",
+                        "name": "🎨 DOM Element Print Tests",
                         "dependencies": [],
                         "additional_sources": [
                             "lib/strbuf.c",
@@ -1559,7 +1559,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_dom_element_simple.exe"
+                        "binary": "test_dom_element_print.exe"
                     },
                     {
                         "source": "test/css/unit/test_css_formatter_unit.cpp",

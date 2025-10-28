@@ -3933,16 +3933,16 @@ project "test_css_engine_unit"
     filter {}
     
 
-project "test_dom_element_simple"
+project "test_dom_element_print"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
-    targetname "test_dom_element_simple"
+    targetname "test_dom_element_print"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_dom_element_simple.cpp",
+        "test/css/unit/test_dom_element_print.cpp",
         "lib/strbuf.c",
         "lib/stringbuf.c",
         "lib/strview.c",
