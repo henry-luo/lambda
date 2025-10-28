@@ -363,7 +363,8 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     if (!type) return nullptr;
 
     const char* tag_name = type->name.str;
-    log_debug("build element: <%s>", tag_name);
+    log_debug("build element: <%s> (parent: %s)", tag_name, 
+              parent ? parent->tag_name : "none");
 
     // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
     if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "!DOCTYPE") == 0 || strncmp(tag_name, "?", 1) == 0) {
@@ -414,67 +415,78 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
 
     // Process all children - including text nodes, comments, and elements
     // Elements are Lists, so iterate through items
-    void* last_child = nullptr;
 
+    log_debug("Processing %lld children for <%s> (dom_elem=%p)", elem->length, tag_name, (void*)dom_elem);
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         TypeId child_type = get_type_id(child_item);
-
+        log_debug("  Child %lld: type=%d", i, child_type);
         if (child_type == LMD_TYPE_ELEMENT) {
             // element node - recursively build
             Element* child_elem = (Element*)child_item.pointer;
+            TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
+            const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
+            
+            log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
             DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
 
             // skip if nullptr (e.g., comments, DOCTYPE were filtered out)
-            if (!child_dom) continue;
-
-            // link as sibling to previous child
-            if (last_child) {
-                DomNodeType last_type = dom_node_get_type(last_child);
-                if (last_type == DOM_NODE_ELEMENT) {
-                    ((DomElement*)last_child)->next_sibling = child_dom;
-                } else if (last_type == DOM_NODE_TEXT) {
-                    ((DomText*)last_child)->next_sibling = child_dom;
-                } else if (last_type == DOM_NODE_COMMENT || last_type == DOM_NODE_DOCTYPE) {
-                    ((DomComment*)last_child)->next_sibling = child_dom;
-                }
-                child_dom->prev_sibling = last_child;
+            if (!child_dom) {
+                log_debug("  Skipped child element: <%s>", child_tag_name);
+                continue;
             }
 
-            // set as first child if this is the first one
-            if (!dom_elem->first_child) {
-                dom_elem->first_child = child_dom;
-            }
-
-            last_child = child_dom;
+            log_debug("  Successfully built child <%s> with parent <%s>. child_dom=%p, child_dom->parent=%p", 
+                     child_tag_name, tag_name, (void*)child_dom, (void*)child_dom->parent);
+            
+            // The dom_element_append_child was already called in the recursive call,
+            // so the parent-child and sibling relationships are already established correctly.
+            // No manual linking needed!
 
         } else if (child_type == LMD_TYPE_STRING) {
-            // Text node - create DomText
+            // Text node - create DomText and append manually (no dom_text_append_child function)
             String* text_str = (String*)child_item.pointer;
             if (text_str && text_str->len > 0) {
                 DomText* text_node = dom_text_create(pool, text_str->chars);
                 if (text_node) {
                     text_node->parent = dom_elem;
 
-                    // Link as sibling to previous child
-                    if (last_child) {
-                        DomNodeType last_type = dom_node_get_type(last_child);
-                        if (last_type == DOM_NODE_ELEMENT) {
-                            ((DomElement*)last_child)->next_sibling = text_node;
-                        } else if (last_type == DOM_NODE_TEXT) {
-                            ((DomText*)last_child)->next_sibling = text_node;
-                        } else if (last_type == DOM_NODE_COMMENT || last_type == DOM_NODE_DOCTYPE) {
-                            ((DomComment*)last_child)->next_sibling = text_node;
-                        }
-                        text_node->prev_sibling = last_child;
-                    }
-
-                    // Set as first child if this is the first one
+                    // Add text node using the same append logic as dom_element_append_child
                     if (!dom_elem->first_child) {
+                        // First child
                         dom_elem->first_child = text_node;
+                        text_node->prev_sibling = nullptr;
+                        text_node->next_sibling = nullptr;
+                    } else {
+                        // Find last child and append
+                        void* last_child_node = dom_elem->first_child;
+                        while (last_child_node) {
+                            void* next = nullptr;
+                            DomNodeType type = dom_node_get_type(last_child_node);
+                            if (type == DOM_NODE_ELEMENT) {
+                                next = ((DomElement*)last_child_node)->next_sibling;
+                            } else if (type == DOM_NODE_TEXT) {
+                                next = ((DomText*)last_child_node)->next_sibling;
+                            } else if (type == DOM_NODE_COMMENT || type == DOM_NODE_DOCTYPE) {
+                                next = ((DomComment*)last_child_node)->next_sibling;
+                            }
+                            
+                            if (!next) {
+                                // This is the last child, append text node here
+                                if (type == DOM_NODE_ELEMENT) {
+                                    ((DomElement*)last_child_node)->next_sibling = text_node;
+                                } else if (type == DOM_NODE_TEXT) {
+                                    ((DomText*)last_child_node)->next_sibling = text_node;
+                                } else if (type == DOM_NODE_COMMENT || type == DOM_NODE_DOCTYPE) {
+                                    ((DomComment*)last_child_node)->next_sibling = text_node;
+                                }
+                                text_node->prev_sibling = last_child_node;
+                                text_node->next_sibling = nullptr;
+                                break;
+                            }
+                            last_child_node = next;
+                        }
                     }
-
-                    last_child = text_node;
                 }
             }
         }
@@ -958,22 +970,9 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
         log_error("Failed to build DomElement tree");
         return nullptr;
     }
-    log_debug("Built DomElement root: %p", (void*)dom_root);
     strbuf_reset(str_buf);
     dom_element_print(dom_root, str_buf, 0);
-    log_debug("Built DomElement tree: %p, %d", (void*)dom_root, str_buf->length);
-    
-    // Debug StrBuf state more carefully
-    log_debug("StrBuf debug: str=%p, length=%zu, capacity=%zu", 
-              (void*)str_buf->str, str_buf->length, str_buf->capacity);
-    if (str_buf->str && str_buf->length > 0) {
-        log_debug("First 100 chars: %.100s", str_buf->str);
-        log_debug("Last 100 chars from end: %.100s", 
-                  str_buf->str + (str_buf->length > 100 ? str_buf->length - 100 : 0));
-        log_debug("Full DomElement tree:\n%s", str_buf->str);
-    } else {
-        log_debug("StrBuf is empty or null!");
-    }
+    log_debug("Built DomElement tree: %s", str_buf->str);
 
     // Step 3: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
