@@ -8,7 +8,7 @@
 #include <cctype>
 #include "../lambda/input/css/css_tokenizer.h"
 #include "../lambda/input/css/css_property_value_parser.h"
-#include "../lambda/input/css/css_selector_parser.h"
+#include "../lambda/input/css/css_parser.h"
 #include "../lambda/input/css/css_style.h"
 #include "../lambda/input/input.h"
 #include "../lambda/format/format.h"
@@ -363,12 +363,12 @@ protected:
             css_property_value_parser_destroy(prop_parser);
         }
 
-        // Test 3: Selector Parser Creation
-        CSSSelectorParser* sel_parser = css_selector_parser_create(pool);
-        EXPECT_NE(sel_parser, nullptr) << "Selector parser should be created for: " << file_name;
-        if (sel_parser) {
-            css_selector_parser_destroy(sel_parser);
-        }
+        // Legacy selector parser removed - modern array-based parser is integrated into css_parser.c
+        // CSSSelectorParser* sel_parser = css_selector_parser_create(pool);
+        // EXPECT_NE(sel_parser, nullptr) << "Selector parser should be created for: " << file_name;
+        // if (sel_parser) {
+        //     css_selector_parser_destroy(sel_parser);
+        // }
 
         // Test 4: Token validation for CSS features
         validateCssTokensForFeatures(tokens, token_count, file_name);

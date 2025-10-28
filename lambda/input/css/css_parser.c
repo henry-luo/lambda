@@ -819,9 +819,6 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     rule->data.style_rule.selector_group = selector_group;
     // For backward compatibility, store the first selector in the single selector field
     rule->data.style_rule.selector = (selector_group->selector_count > 0) ? selector_group->selectors[0] : NULL;
-    // Note: selector_list is legacy and uses CSSComplexSelector* (linked list format)
-    // Our new CssSelector* uses arrays, so we leave selector_list NULL for now
-    rule->selector_list = NULL;
     rule->data.style_rule.declarations = declarations;
     rule->data.style_rule.declaration_count = decl_count;
 

@@ -207,7 +207,7 @@ DomElement* find_element_by_id(DomElement* root, const char* id) {
     }
 
     // Search children
-    for (DomElement* child = root->first_child; child != nullptr; child = child->next_sibling) {
+    for (DomElement* child = (DomElement*)root->first_child; child != nullptr; child = (DomElement*)child->next_sibling) {
         DomElement* found = find_element_by_id(child, id);
         if (found) return found;
     }
@@ -224,7 +224,7 @@ DomElement* find_element_by_class(DomElement* root, const char* class_name) {
     }
 
     // Search children
-    for (DomElement* child = root->first_child; child != nullptr; child = child->next_sibling) {
+    for (DomElement* child = (DomElement*)root->first_child; child != nullptr; child = (DomElement*)child->next_sibling) {
         DomElement* found = find_element_by_class(child, class_name);
         if (found) return found;
     }
@@ -241,7 +241,7 @@ DomElement* find_element_by_tag(DomElement* root, const char* tag_name) {
     }
 
     // Search children
-    for (DomElement* child = root->first_child; child != nullptr; child = child->next_sibling) {
+    for (DomElement* child = (DomElement*)root->first_child; child != nullptr; child = (DomElement*)child->next_sibling) {
         DomElement* found = find_element_by_tag(child, tag_name);
         if (found) return found;
     }
@@ -703,7 +703,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_NestedElements) {
     EXPECT_NE(dom_root->first_child, nullptr) << "Should have child element";
 
     if (dom_root->first_child) {
-        DomElement* child = dom_root->first_child;
+        DomElement* child = (DomElement*)dom_root->first_child;
         printf("Child element: tag=%s\n", child->tag_name);
         EXPECT_STREQ(child->tag_name, "p") << "Child should be <p> element";
         EXPECT_EQ(child->parent, dom_root) << "Child should have parent pointer";

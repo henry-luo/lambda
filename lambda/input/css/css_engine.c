@@ -1,6 +1,7 @@
 #include "css_engine.h"
 #include "css_property_value_parser.h"
 #include "css_parser.h"
+#include "css_style_node.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -235,7 +236,7 @@ CssEngine* css_enhanced_engine_create(Pool* pool) {
 
     // Initialize core components
     engine->tokenizer = css_tokenizer_enhanced_create(pool);
-    engine->selector_parser = css_selector_parser_create(pool);
+    // Removed: engine->selector_parser (legacy linked-list parser removed)
     engine->value_parser = css_property_value_parser_create(pool);
 
     // Initialize style storage
@@ -283,7 +284,7 @@ void css_enhanced_engine_destroy(CssEngine* engine) {
 
     // Cleanup components
     css_tokenizer_enhanced_destroy(engine->tokenizer);
-    css_selector_parser_destroy(engine->selector_parser);
+    // Removed: css_selector_parser_destroy (legacy parser removed)
     css_property_value_parser_destroy(engine->value_parser);
 
     if (engine->style_tree) {
@@ -521,21 +522,8 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule) {
     if (!stylesheet || !rule) return;
 
-    // Check for CSS Nesting (& selector)
-    if (rule->selector_list) {
-        CSSComplexSelector* current = rule->selector_list;
-        while (current) {
-            CSSSelectorComponent* component = current->components;
-            while (component) {
-                if (component->type == CSS_SELECTOR_NESTING_PARENT ||
-                    component->type == CSS_SELECTOR_NESTING_DESCENDANT) {
-                    stylesheet->uses_nesting = true;
-                }
-                component = component->next;
-            }
-            current = current->next;
-        }
-    }
+    // Legacy selector_list field removed - nesting detection moved to modern selector_group
+    // TODO: Implement nesting detection using CssSelectorGroup* format
 
     // Check for custom properties and other features
     for (int i = 0; i < rule->property_count; i++) {
@@ -558,6 +546,7 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
     }
 }
 
+#if 0  // DISABLED: Legacy functions using removed CSSComplexSelector type
 // Style node integration
 bool css_enhanced_rule_to_style_node(CssEngine* engine,
                                      CssRule* rule,
@@ -664,6 +653,7 @@ CssStyleNode* css_enhanced_selector_to_style_node(CssEngine* engine,
 
     return node;
 }
+#endif  // DISABLED
 
 // Value conversion from enhanced to string representation
 static const char* css_enhanced_value_to_string_repr(CssEngine* engine,
@@ -721,6 +711,7 @@ bool css_enhanced_apply_cascade(CssEngine* engine,
     return true;
 }
 
+#if 0  // DISABLED: Legacy function using removed CSSComplexSelector type
 // Selector matching with enhanced features
 bool css_enhanced_selector_matches_element(CssEngine* engine,
                                           CSSComplexSelector* selector,
@@ -785,6 +776,7 @@ bool css_enhanced_selector_matches_element(CssEngine* engine,
 
     return matches;
 }
+#endif  // DISABLED
 
 // Statistics and monitoring
 void css_enhanced_engine_update_stats(CssEngine* engine) {

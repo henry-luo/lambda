@@ -102,7 +102,6 @@ project "lambda-input-full-c"
         "lambda/parse.c",
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_parser.c",
         "lambda/input/css/css_engine.c",
@@ -204,7 +203,6 @@ project "lambda-input-full-cpp"
         "lambda/parse.c",
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_parser.c",
         "lambda/input/css/css_engine.c",
@@ -376,7 +374,6 @@ project "radiant"
         "lambda/lambda-data.cpp",
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_parser.c",
         "lambda/input/css/css_engine.c",
@@ -544,7 +541,6 @@ project "lambda"
         "lambda/js/js_print.cpp",
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_parser.c",
         "lambda/input/css/css_engine.c",
@@ -599,7 +595,6 @@ project "lambda"
         "lambda/input/mime-detect.c",
         "lambda/input/css/css_formatter.c",
         "lambda/input/css/css_tokenizer.c",
-        "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_engine.c",
         "lambda/input/css/dom_element.c",
         "lambda/input/css/css_style_node.c",
@@ -645,7 +640,6 @@ project "lambda"
         "lambda/input/input-graph-dot.cpp",
         "lambda/input/css/css_formatter.c",
         "lambda/input/css/css_tokenizer.c",
-        "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_engine.c",
         "lambda/input/css/dom_element.c",
         "lambda/input/css/css_style_node.c",
@@ -2289,6 +2283,9 @@ project "test_lambda_domnode_gtest"
     files {
         "test/test_lambda_domnode_gtest.cpp",
         "radiant/dom.cpp",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/url_parser.c",
     }
     
     includedirs {

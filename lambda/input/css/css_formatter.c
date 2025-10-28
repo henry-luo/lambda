@@ -1,6 +1,5 @@
 #include "css_formatter.h"
 #include "css_parser.h"
-#include "css_selector_parser.h"
 #include "css_style.h"
 #include "../../../lib/stringbuf.h"
 #include <stdio.h>
