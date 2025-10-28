@@ -112,8 +112,10 @@ get_test_suite_category() {
     local exe_name="$1"
 
     # Get suite category from build configuration using new tests array structure
+    # Only consider enabled test suites (exclude disabled ones)
     local suite_category=$(jq -r --arg exe "$exe_name" '
         .test.test_suites[] |
+        select(.disabled != true) |
         select(.tests[]? | (.source // "") | test("\\b" + $exe + "\\.(c|cpp)$")) |
         .suite
     ' build_lambda_config.json 2>/dev/null | head -1)
@@ -138,8 +140,10 @@ get_suite_category_display_name() {
     local category="$1"
 
     # Get display name from build configuration
+    # Only consider enabled test suites (exclude disabled ones)
     local display_name=$(jq -r --arg suite "$category" '
         .test.test_suites[] |
+        select(.disabled != true) |
         select(.suite == $suite) |
         .name
     ' build_lambda_config.json 2>/dev/null | head -1)
@@ -169,8 +173,10 @@ get_c_test_display_name() {
     local exe_name="$1"
 
     # Try to get custom display name from build configuration using new tests array structure
+    # Only consider enabled test suites (exclude disabled ones)
     local display_name=$(jq -r --arg exe "$exe_name" '
         .test.test_suites[] |
+        select(.disabled != true) |
         .tests[]? |
         select((.source // "") | test("\\b" + $exe + "\\.(c|cpp)$")) |
         .name
@@ -604,7 +610,8 @@ echo "🔍 Finding test executables and sources..."
 # Get list of valid test source files from build configuration
 get_valid_test_sources() {
     # Extract test sources from the JSON configuration using new tests array structure
-    jq -r '.test.test_suites[].tests[]?.source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
+    # Only include sources from enabled test suites (exclude disabled ones)
+    jq -r '.test.test_suites[] | select(.disabled != true) | .tests[]?.source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
         # Handle different source path formats
         if [[ "$source" == test/* ]]; then
             echo "$source"
@@ -679,13 +686,6 @@ for source_file in "${valid_test_sources[@]}"; do
     fi
 done
 
-# Add custom test runner if it exists in config
-if jq -e '.test.test_suites[] | select(.suite == "lambda-std")' build_lambda_config.json >/dev/null 2>&1; then
-    if [ -f "test/lambda_test_runner.exe" ] || [ -f "test/lambda_test_runner.cpp" ]; then
-        test_executables+=("test/lambda_test_runner.exe")
-    fi
-fi
-
 # Remove duplicates and sort
 test_executables=($(printf "%s\n" "${test_executables[@]}" | sort -u))
 
@@ -729,9 +729,10 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
     for test_exe in "${test_executables[@]}"; do
         base_name=$(basename "$test_exe" .exe)
 
-        # Check if we have a source file for this test
-        source_file="test/${base_name}.c"
-        if [ -f "$source_file" ] || [ -x "$test_exe" ]; then
+        # Check if we have a source file for this test (try both .c and .cpp)
+        source_file_c="test/${base_name}.c"
+        source_file_cpp="test/${base_name}.cpp"
+        if [ -f "$source_file_c" ] || [ -f "$source_file_cpp" ] || [ -x "$test_exe" ]; then
             # Calculate result file path - this must match what run_single_test creates
             result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
             result_files+=("$result_file")

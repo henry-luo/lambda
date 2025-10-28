@@ -1662,6 +1662,11 @@ class PremakeGenerator:
         for suite in test_suites:
             suite_name = suite.get('suite', '')
             suite_type = suite.get('type', '')
+            
+            # Skip disabled test suites
+            if suite.get('disabled', False):
+                print(f"Skipping disabled test suite: {suite_name}")
+                continue
 
             # Determine test framework type for this suite
             is_criterion_suite = False
@@ -1858,8 +1863,10 @@ class PremakeGenerator:
                     continue
 
                 # Avoid subdirectory structure by flattening test names
-                # Only remove 'test_' prefix, not all occurrences
-                test_name = binary_name.replace('/', '_')
+                # Extract just the filename from binary path to prevent double prefixes
+                import os
+                binary_basename = os.path.basename(binary_name)
+                test_name = binary_basename.replace('/', '_')
                 if test_name.startswith('test_'):
                     test_name = test_name[5:]  # Remove 'test_' prefix only
                 test_name = f"test_{test_name}"
@@ -1878,7 +1885,7 @@ class PremakeGenerator:
                     print(f"Warning: Test file not found: {actual_path}")
                     continue
 
-                self._generate_single_test(test_name, test_file_path, dependencies, test_special_flags, cpp_flags, libraries, defines, additional_files, additional_sources)
+                self._generate_single_test(test_name, test_file_path, dependencies, test_special_flags, cpp_flags, libraries, defines, additional_files, additional_sources, binary_name)
         else:
             # Old format: parallel arrays (for backward compatibility)
             sources = suite.get('sources', [])
@@ -1892,8 +1899,10 @@ class PremakeGenerator:
                     dependencies = library_deps[i] if i < len(library_deps) else []
 
                     # Avoid subdirectory structure by flattening test names
-                    # Only remove 'test_' prefix, not all occurrences
-                    test_name = binary_name.replace('/', '_')
+                    # Extract just the filename from binary path to prevent double prefixes
+                    import os
+                    binary_basename = os.path.basename(binary_name)
+                    test_name = binary_basename.replace('/', '_')
                     if test_name.startswith('test_'):
                         test_name = test_name[5:]  # Remove 'test_' prefix only
                     test_name = f"test_{test_name}"
@@ -1911,7 +1920,7 @@ class PremakeGenerator:
                         print(f"Warning: Test file not found: {actual_path}")
 
     def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str],
-                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None, additional_sources: List[str] = None) -> None:
+                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None, additional_sources: List[str] = None, target_name: str = None) -> None:
         """Generate a single test project"""
         if libraries is None:
             libraries = []
@@ -1931,6 +1940,16 @@ class PremakeGenerator:
             f'    language "{language}"',
             '    targetdir "test"',
             '    objdir "build/obj/%{prj.name}"',
+        ])
+        
+        # Use custom target name if provided, otherwise use the project name
+        if target_name:
+            # Remove .exe extension and extract just the filename for targetname
+            import os
+            clean_target_name = os.path.basename(target_name).replace('.exe', '')
+            self.premake_content.append(f'    targetname "{clean_target_name}"')
+        
+        self.premake_content.extend([
             '    targetextension ".exe"',
             '    ',
             '    files {',

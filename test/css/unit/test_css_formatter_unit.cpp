@@ -276,8 +276,8 @@ TEST_F(CssFormatterUnitTest, FormatStylesheet_Empty) {
     const char* result = css_format_stylesheet(formatter, stylesheet);
 
     ASSERT_NE(result, nullptr);
-    // Should contain comment about 0 rules
-    EXPECT_NE(strstr(result, "0 rules"), nullptr);
+    // Empty stylesheet should produce empty or minimal output
+    EXPECT_EQ(strlen(result), 0);
 }
 
 TEST_F(CssFormatterUnitTest, FormatStylesheet_SingleRule) {
@@ -287,8 +287,10 @@ TEST_F(CssFormatterUnitTest, FormatStylesheet_SingleRule) {
     const char* result = css_format_stylesheet(formatter, stylesheet);
 
     ASSERT_NE(result, nullptr);
-    // Should contain comment about 1 rule
-    EXPECT_NE(strstr(result, "1 rule"), nullptr);
+    // Should contain the CSS rule content
+    EXPECT_GT(strlen(result), 0);
+    EXPECT_TRUE(strstr(result, "div") != nullptr);
+    EXPECT_TRUE(strstr(result, "color") != nullptr);
 }
 
 TEST_F(CssFormatterUnitTest, FormatStylesheet_MultipleRules) {
@@ -298,8 +300,11 @@ TEST_F(CssFormatterUnitTest, FormatStylesheet_MultipleRules) {
     const char* result = css_format_stylesheet(formatter, stylesheet);
 
     ASSERT_NE(result, nullptr);
-    // Should mention rules in output
-    EXPECT_NE(strstr(result, "rules"), nullptr);
+    // Should contain multiple CSS rules
+    EXPECT_GT(strlen(result), 0);
+    EXPECT_TRUE(strstr(result, "div") != nullptr);
+    EXPECT_TRUE(strstr(result, "color") != nullptr);
+    EXPECT_TRUE(strstr(result, "p") != nullptr || strstr(result, "margin") != nullptr);
 }
 
 TEST_F(CssFormatterUnitTest, FormatStylesheet_NullFormatter) {
@@ -547,9 +552,15 @@ TEST_F(CssFormatterUnitTest, Integration_ComplexStylesheet) {
     const char* formatted = css_format_stylesheet(formatter, stylesheet);
 
     ASSERT_NE(formatted, nullptr);
-    // Stub implementation may produce minimal output
-    // Just verify it contains information about rules
-    EXPECT_TRUE(strstr(formatted, "rule") != nullptr || strstr(formatted, "Rule") != nullptr);
+    // Should contain actual CSS content from the parsed rules
+    EXPECT_GT(strlen(formatted), 0);
+    // Look for CSS selectors or properties that should be present
+    EXPECT_TRUE(strstr(formatted, "body") != nullptr || 
+                strstr(formatted, "h1") != nullptr || 
+                strstr(formatted, "container") != nullptr ||
+                strstr(formatted, "margin") != nullptr ||
+                strstr(formatted, "padding") != nullptr ||
+                strstr(formatted, "color") != nullptr);
 }TEST_F(CssFormatterUnitTest, Integration_RoundTrip) {
     const char* original = "div { color: red; }";
 
