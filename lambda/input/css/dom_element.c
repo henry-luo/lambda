@@ -1313,30 +1313,12 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     log_debug("dom_element_print: element <%s>", element->tag_name ? element->tag_name : "#null");
 
     // Add indentation
+    strbuf_append_char(buf, '\n');
     strbuf_append_char_n(buf, ' ', indent);
 
     // Print opening tag
     strbuf_append_char(buf, '<');
     strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
-
-    // Print ID attribute if present
-    // if (element->id && element->id[0] != '\0') {
-    //     strbuf_append_str(buf, "id=\"");
-    //     strbuf_append_str(buf, element->id);
-    //     strbuf_append_char(buf, '"');
-    // }
-
-    // // Print class attributes if present
-    // if (element->class_count > 0 && element->class_names) {
-    //     strbuf_append_str(buf, " class=\"");
-    //     for (int i = 0; i < element->class_count; i++) {
-    //         if (i > 0) {
-    //             strbuf_append_char(buf, ' ');
-    //         }
-    //         strbuf_append_str(buf, element->class_names[i]);
-    //     }
-    //     strbuf_append_char(buf, '"');
-    // }
 
     // Print other attributes
     if (element->attributes) {
@@ -1361,7 +1343,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
 
     // Print pseudo-state information if any
     if (element->pseudo_state != 0) {
-        strbuf_append_str(buf, " [pseudo:");
+        strbuf_append_str(buf, "[pseudo:");
         if (element->pseudo_state & PSEUDO_STATE_HOVER) strbuf_append_str(buf, " hover");
         if (element->pseudo_state & PSEUDO_STATE_ACTIVE) strbuf_append_str(buf, " active");
         if (element->pseudo_state & PSEUDO_STATE_FOCUS) strbuf_append_str(buf, " focus");
@@ -1375,22 +1357,27 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
 
     // Print specified CSS styles if present
     if (element->id || element->class_count > 0 || element->specified_style) {
-        strbuf_append_str(buf, " [");
+        int has_text = false;
+        strbuf_append_str(buf, "[");
         // print id
-        if (element->id && element->id[0] != '\0') strbuf_append_format(buf, "id:'%s'", element->id);
+        if (element->id && element->id[0] != '\0') {
+            strbuf_append_format(buf, "id:'%s'", element->id);
+            has_text = true;
+        }
 
         // print classes
         if (element->class_count > 0 && element->class_names) {
-            strbuf_append_str(buf, " classes:");
+            strbuf_append_str(buf, has_text ? ", classes:" : "classes:");
             strbuf_append_char(buf, '[');
             for (int i = 0; i < element->class_count; i++) {
                 strbuf_append_format(buf, "\"%s\"", element->class_names[i]);
                 if (i < element->class_count - 1) strbuf_append_char(buf, ',');
             }
             strbuf_append_char(buf, ']');
+            has_text = true;
         }
 
-        strbuf_append_str(buf, " styles:{");
+        strbuf_append_str(buf, has_text ? ", styles:{" : "styles:{");
         CssDeclaration* decl;  bool has_props = false;
 
         // Display property
@@ -1652,6 +1639,6 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
     }
     strbuf_append_str(buf, "</");
-    // strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+    strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
     strbuf_append_str(buf, ">");
 }
