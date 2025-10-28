@@ -176,6 +176,7 @@ typedef struct {
         DomElement* lambda_dom_root;        // Lambda CSS DOM root element
     };
     Element* lambda_html_root;  // Lambda HTML parser root (for Lambda CSS docs)
+    int html_version;           // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
     ViewTree* view_tree;
     StateStore* state;
     DomNode* root_dom_node;  // Root DomNode wrapper (heap-allocated, freed with view tree)

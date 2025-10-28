@@ -959,6 +959,13 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
         log_error("Failed to get HTML root element");
         return nullptr;
     }
+
+    // Detect HTML version from the original input tree (contains DOCTYPE)
+    int detected_version = HTML5;  // Default fallback
+    if (input && input->root.pointer) {
+        detected_version = detect_html_version_from_lambda_element(nullptr, input);
+        log_debug("[Lambda CSS] Detected HTML version: %d", detected_version);
+    }
     StrBuf* str_buf = strbuf_new();
     print_item(str_buf, (Item){.element = html_root});
     log_debug("Parsed HTML root element:\n%s", str_buf->str);
@@ -1050,6 +1057,7 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     doc->doc_type = DOC_TYPE_LAMBDA_CSS;
     doc->lambda_dom_root = dom_root;
     doc->lambda_html_root = html_root;
+    doc->html_version = detected_version;
 
     // Create a minimal URL structure for print_view_tree
     doc->url = (lxb_url_t*)calloc(1, sizeof(lxb_url_t));
