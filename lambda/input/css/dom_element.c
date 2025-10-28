@@ -1407,4 +1407,5 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     strbuf_append_str(buf, ">\n");
     log_debug("Finished printing element <%s>, %d",
         element->tag_name ? element->tag_name : "#null", buf->length);
+    log_debug("dom_element_print: %s", buf->str);
 }
