@@ -1584,10 +1584,10 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
 
     // Count and print children
     while (child) {
-        if (!has_children) {
-            strbuf_append_char(buf, '\n');
-            has_children = true;
-        }
+        // if (!has_children) {
+        //     strbuf_append_char(buf, '\n');
+        //     has_children = true;
+        // }
 
         DomNodeType child_type = dom_node_get_type(child);
 
@@ -1611,6 +1611,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                 }
 
                 if (!is_whitespace_only) {
+                    strbuf_append_str(buf, "\n");
                     strbuf_append_char_n(buf, ' ', indent + 2);
                     strbuf_append_str(buf, "\"");
                     strbuf_append_str_n(buf, text_node->text, text_node->length);
@@ -1635,9 +1636,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     }
 
     // Print closing tag
-    if (has_children) {
-        strbuf_append_char_n(buf, ' ', indent);
-    }
+    strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "</");
     strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
     strbuf_append_str(buf, ">");
