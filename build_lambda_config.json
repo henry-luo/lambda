@@ -59,6 +59,7 @@
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_parser.c",
         "lambda/input/css/css_engine.c",
+        "lambda/input/css/css_formatter.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/dom_element.c",
         "lambda/input/css/selector_matcher.c",
@@ -341,6 +342,7 @@
                 "lambda/input/css/css_property_value_parser.c",
                 "lambda/input/css/css_parser.c",
                 "lambda/input/css/css_engine.c",
+                "lambda/input/css/css_formatter.c",
                 "lambda/input/css/css_style_node.c",
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
@@ -417,6 +419,7 @@
                 "lambda/input/css/css_property_value_parser.c",
                 "lambda/input/css/css_parser.c",
                 "lambda/input/css/css_engine.c",
+                "lambda/input/css/css_formatter.c",
                 "lambda/input/css/css_style_node.c",
                 "lambda/input/css/dom_element.c",
                 "lambda/input/css/selector_matcher.c",
@@ -1530,6 +1533,19 @@
                             "rpmalloc"
                         ],
                         "binary": "test_css_integration_unit.exe"
+                    },
+                    {
+                        "source": "test/css/unit/test_css_formatter_unit.cpp",
+                        "name": "🎨 CSS Formatter Unit Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_formatter_unit.exe"
                     },
                     {
                         "source": "test/css/test_compound_descendant_selectors.cpp",
