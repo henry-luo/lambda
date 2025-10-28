@@ -962,7 +962,18 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     strbuf_reset(str_buf);
     dom_element_print(dom_root, str_buf, 0);
     log_debug("Built DomElement tree: %p, %d", (void*)dom_root, str_buf->length);
-    log_debug("DomElement tree string: %.*s", str_buf->length, str_buf->str);
+    
+    // Debug StrBuf state more carefully
+    log_debug("StrBuf debug: str=%p, length=%zu, capacity=%zu", 
+              (void*)str_buf->str, str_buf->length, str_buf->capacity);
+    if (str_buf->str && str_buf->length > 0) {
+        log_debug("First 100 chars: %.100s", str_buf->str);
+        log_debug("Last 100 chars from end: %.100s", 
+                  str_buf->str + (str_buf->length > 100 ? str_buf->length - 100 : 0));
+        log_debug("Full DomElement tree:\n%s", str_buf->str);
+    } else {
+        log_debug("StrBuf is empty or null!");
+    }
 
     // Step 3: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
