@@ -1,7 +1,7 @@
 /**
- * CSS Integration Unit Tests - Comprehensive Coverage
+ * CSS Engine Unit Tests - Comprehensive Coverage
  *
- * Tests for CSS integration functionality including:
+ * Tests for CSS engine functionality including:
  * - Stylesheet parsing (single/multiple rules, complex stylesheets)
  * - Error recovery (brace depth tracking, unclosed braces)
  * - Cascade (inline vs external, specificity, importance)
@@ -26,7 +26,7 @@ using namespace CssTestHelpers;
 // Test Fixture
 // ============================================================================
 
-class CssIntegrationTest : public ::testing::Test {
+class CssEngineTest : public ::testing::Test {
 protected:
     PoolGuard pool;
 
@@ -46,7 +46,7 @@ protected:
 // ============================================================================
 
 // Test 1.1: Parse single rule stylesheet
-TEST_F(CssIntegrationTest, Stylesheet_SingleRule) {
+TEST_F(CssEngineTest, Stylesheet_SingleRule) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -63,7 +63,7 @@ TEST_F(CssIntegrationTest, Stylesheet_SingleRule) {
 }
 
 // Test 1.2: Parse multiple rules stylesheet
-TEST_F(CssIntegrationTest, Stylesheet_MultipleRules) {
+TEST_F(CssEngineTest, Stylesheet_MultipleRules) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -79,7 +79,7 @@ TEST_F(CssIntegrationTest, Stylesheet_MultipleRules) {
 }
 
 // Test 1.3: Parse empty stylesheet
-TEST_F(CssIntegrationTest, Stylesheet_Empty) {
+TEST_F(CssEngineTest, Stylesheet_Empty) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -93,7 +93,7 @@ TEST_F(CssIntegrationTest, Stylesheet_Empty) {
 }
 
 // Test 1.4: Parse stylesheet with comments
-TEST_F(CssIntegrationTest, Stylesheet_WithComments) {
+TEST_F(CssEngineTest, Stylesheet_WithComments) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -110,7 +110,7 @@ TEST_F(CssIntegrationTest, Stylesheet_WithComments) {
 }
 
 // Test 1.5: Parse stylesheet with whitespace
-TEST_F(CssIntegrationTest, Stylesheet_WithWhitespace) {
+TEST_F(CssEngineTest, Stylesheet_WithWhitespace) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -128,7 +128,7 @@ TEST_F(CssIntegrationTest, Stylesheet_WithWhitespace) {
 }
 
 // Test 1.6: Parse complex stylesheet with multiple declarations
-TEST_F(CssIntegrationTest, Stylesheet_ComplexRules) {
+TEST_F(CssEngineTest, Stylesheet_ComplexRules) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -153,7 +153,7 @@ TEST_F(CssIntegrationTest, Stylesheet_ComplexRules) {
 }
 
 // Test 1.7: Parse stylesheet with mixed selector types
-TEST_F(CssIntegrationTest, Stylesheet_MixedSelectors) {
+TEST_F(CssEngineTest, Stylesheet_MixedSelectors) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -170,7 +170,7 @@ TEST_F(CssIntegrationTest, Stylesheet_MixedSelectors) {
 }
 
 // Test 1.8: Parse stylesheet with !important declarations
-TEST_F(CssIntegrationTest, Stylesheet_WithImportant) {
+TEST_F(CssEngineTest, Stylesheet_WithImportant) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -185,7 +185,7 @@ TEST_F(CssIntegrationTest, Stylesheet_WithImportant) {
 }
 
 // Test 1.9: Parse very large stylesheet
-TEST_F(CssIntegrationTest, Stylesheet_LargeScale) {
+TEST_F(CssEngineTest, Stylesheet_LargeScale) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -202,7 +202,7 @@ TEST_F(CssIntegrationTest, Stylesheet_LargeScale) {
 }
 
 // Test 1.10: Parse stylesheet with various units
-TEST_F(CssIntegrationTest, Stylesheet_VariousUnits) {
+TEST_F(CssEngineTest, Stylesheet_VariousUnits) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -223,7 +223,7 @@ TEST_F(CssIntegrationTest, Stylesheet_VariousUnits) {
 }
 
 // Test 1.11: Parse stylesheet with color formats
-TEST_F(CssIntegrationTest, Stylesheet_ColorFormats) {
+TEST_F(CssEngineTest, Stylesheet_ColorFormats) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -242,7 +242,7 @@ TEST_F(CssIntegrationTest, Stylesheet_ColorFormats) {
 }
 
 // Test 1.12: Parse stylesheet with functions
-TEST_F(CssIntegrationTest, Stylesheet_WithFunctions) {
+TEST_F(CssEngineTest, Stylesheet_WithFunctions) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -260,7 +260,7 @@ TEST_F(CssIntegrationTest, Stylesheet_WithFunctions) {
 }
 
 // Test 1.13: Parse stylesheet with shorthand properties
-TEST_F(CssIntegrationTest, Stylesheet_ShorthandProperties) {
+TEST_F(CssEngineTest, Stylesheet_ShorthandProperties) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -279,7 +279,7 @@ TEST_F(CssIntegrationTest, Stylesheet_ShorthandProperties) {
 }
 
 // Test 1.14: Parse minified stylesheet
-TEST_F(CssIntegrationTest, Stylesheet_Minified) {
+TEST_F(CssEngineTest, Stylesheet_Minified) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -292,7 +292,7 @@ TEST_F(CssIntegrationTest, Stylesheet_Minified) {
 }
 
 // Test 1.15: Parse stylesheet with rule ordering
-TEST_F(CssIntegrationTest, Stylesheet_RuleOrdering) {
+TEST_F(CssEngineTest, Stylesheet_RuleOrdering) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -319,7 +319,7 @@ TEST_F(CssIntegrationTest, Stylesheet_RuleOrdering) {
 // ============================================================================
 
 // Test 2.1: Recover from unclosed brace
-TEST_F(CssIntegrationTest, ErrorRecovery_UnclosedBrace) {
+TEST_F(CssEngineTest, ErrorRecovery_UnclosedBrace) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -334,7 +334,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_UnclosedBrace) {
 }
 
 // Test 2.2: Recover from missing opening brace
-TEST_F(CssIntegrationTest, ErrorRecovery_MissingOpenBrace) {
+TEST_F(CssEngineTest, ErrorRecovery_MissingOpenBrace) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -349,7 +349,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_MissingOpenBrace) {
 }
 
 // Test 2.3: Recover from extra closing braces
-TEST_F(CssIntegrationTest, ErrorRecovery_ExtraClosingBraces) {
+TEST_F(CssEngineTest, ErrorRecovery_ExtraClosingBraces) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -363,7 +363,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_ExtraClosingBraces) {
 }
 
 // Test 2.4: Recover from nested braces (invalid)
-TEST_F(CssIntegrationTest, ErrorRecovery_NestedBraces) {
+TEST_F(CssEngineTest, ErrorRecovery_NestedBraces) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -377,7 +377,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_NestedBraces) {
 }
 
 // Test 2.5: Recover from missing semicolon
-TEST_F(CssIntegrationTest, ErrorRecovery_MissingSemicolon) {
+TEST_F(CssEngineTest, ErrorRecovery_MissingSemicolon) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -394,7 +394,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_MissingSemicolon) {
 }
 
 // Test 2.6: Recover from invalid property name
-TEST_F(CssIntegrationTest, ErrorRecovery_InvalidProperty) {
+TEST_F(CssEngineTest, ErrorRecovery_InvalidProperty) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -410,7 +410,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_InvalidProperty) {
 }
 
 // Test 2.7: Recover from invalid property value
-TEST_F(CssIntegrationTest, ErrorRecovery_InvalidValue) {
+TEST_F(CssEngineTest, ErrorRecovery_InvalidValue) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -426,7 +426,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_InvalidValue) {
 }
 
 // Test 2.8: Recover from unclosed string
-TEST_F(CssIntegrationTest, ErrorRecovery_UnclosedString) {
+TEST_F(CssEngineTest, ErrorRecovery_UnclosedString) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -442,7 +442,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_UnclosedString) {
 }
 
 // Test 2.9: Recover from unclosed comment
-TEST_F(CssIntegrationTest, ErrorRecovery_UnclosedComment) {
+TEST_F(CssEngineTest, ErrorRecovery_UnclosedComment) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -456,7 +456,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_UnclosedComment) {
 }
 
 // Test 2.10: Recover from multiple errors in sequence
-TEST_F(CssIntegrationTest, ErrorRecovery_MultipleErrors) {
+TEST_F(CssEngineTest, ErrorRecovery_MultipleErrors) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -471,7 +471,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_MultipleErrors) {
 }
 
 // Test 2.11: Recover and continue parsing after error
-TEST_F(CssIntegrationTest, ErrorRecovery_ContinueParsing) {
+TEST_F(CssEngineTest, ErrorRecovery_ContinueParsing) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -490,7 +490,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_ContinueParsing) {
 }
 
 // Test 2.12: Track brace depth correctly
-TEST_F(CssIntegrationTest, ErrorRecovery_BraceDepthTracking) {
+TEST_F(CssEngineTest, ErrorRecovery_BraceDepthTracking) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -509,7 +509,7 @@ TEST_F(CssIntegrationTest, ErrorRecovery_BraceDepthTracking) {
 // ============================================================================
 
 // Test 3.1: Engine statistics - rules parsed
-TEST_F(CssIntegrationTest, Cascade_EngineStats_RulesParsed) {
+TEST_F(CssEngineTest, Cascade_EngineStats_RulesParsed) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -526,7 +526,7 @@ TEST_F(CssIntegrationTest, Cascade_EngineStats_RulesParsed) {
 }
 
 // Test 3.2: Engine statistics - stylesheets parsed
-TEST_F(CssIntegrationTest, Cascade_EngineStats_StylesheetsParsed) {
+TEST_F(CssEngineTest, Cascade_EngineStats_StylesheetsParsed) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -538,7 +538,7 @@ TEST_F(CssIntegrationTest, Cascade_EngineStats_StylesheetsParsed) {
 }
 
 // Test 3.3: Stylesheet origin - user agent
-TEST_F(CssIntegrationTest, Cascade_Origin_UserAgent) {
+TEST_F(CssEngineTest, Cascade_Origin_UserAgent) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -553,7 +553,7 @@ TEST_F(CssIntegrationTest, Cascade_Origin_UserAgent) {
 }
 
 // Test 3.4: Rule source order (simplified)
-TEST_F(CssIntegrationTest, Cascade_SourceOrder) {
+TEST_F(CssEngineTest, Cascade_SourceOrder) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -574,7 +574,7 @@ TEST_F(CssIntegrationTest, Cascade_SourceOrder) {
 }
 
 // Test 3.5: Important flag affects cascade (simplified)
-TEST_F(CssIntegrationTest, Cascade_ImportantFlag) {
+TEST_F(CssEngineTest, Cascade_ImportantFlag) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -596,7 +596,7 @@ TEST_F(CssIntegrationTest, Cascade_ImportantFlag) {
 }
 
 // Test 3.6: Stylesheet metadata - title
-TEST_F(CssIntegrationTest, Cascade_StylesheetMetadata_Title) {
+TEST_F(CssEngineTest, Cascade_StylesheetMetadata_Title) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -609,7 +609,7 @@ TEST_F(CssIntegrationTest, Cascade_StylesheetMetadata_Title) {
 }
 
 // Test 3.7: Stylesheet metadata - href
-TEST_F(CssIntegrationTest, Cascade_StylesheetMetadata_Href) {
+TEST_F(CssEngineTest, Cascade_StylesheetMetadata_Href) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -625,7 +625,7 @@ TEST_F(CssIntegrationTest, Cascade_StylesheetMetadata_Href) {
 }
 
 // Test 3.8: Stylesheet disabled flag
-TEST_F(CssIntegrationTest, Cascade_StylesheetDisabled) {
+TEST_F(CssEngineTest, Cascade_StylesheetDisabled) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -638,7 +638,7 @@ TEST_F(CssIntegrationTest, Cascade_StylesheetDisabled) {
 }
 
 // Test 3.9: Engine context - viewport size
-TEST_F(CssIntegrationTest, Cascade_EngineContext_Viewport) {
+TEST_F(CssEngineTest, Cascade_EngineContext_Viewport) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -649,7 +649,7 @@ TEST_F(CssIntegrationTest, Cascade_EngineContext_Viewport) {
 }
 
 // Test 3.10: Engine context - root font size (not yet implemented)
-TEST_F(CssIntegrationTest, Cascade_EngineContext_RootFontSize) {
+TEST_F(CssEngineTest, Cascade_EngineContext_RootFontSize) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -658,7 +658,7 @@ TEST_F(CssIntegrationTest, Cascade_EngineContext_RootFontSize) {
 }
 
 // Test 3.11: Engine context - color scheme (not yet implemented)
-TEST_F(CssIntegrationTest, Cascade_EngineContext_ColorScheme) {
+TEST_F(CssEngineTest, Cascade_EngineContext_ColorScheme) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -667,7 +667,7 @@ TEST_F(CssIntegrationTest, Cascade_EngineContext_ColorScheme) {
 }
 
 // Test 3.12: Engine context - device pixel ratio
-TEST_F(CssIntegrationTest, Cascade_EngineContext_DevicePixelRatio) {
+TEST_F(CssEngineTest, Cascade_EngineContext_DevicePixelRatio) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -676,7 +676,7 @@ TEST_F(CssIntegrationTest, Cascade_EngineContext_DevicePixelRatio) {
 }
 
 // Test 3.13: Parse time tracking
-TEST_F(CssIntegrationTest, Cascade_ParseTimeTracking) {
+TEST_F(CssEngineTest, Cascade_ParseTimeTracking) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -689,7 +689,7 @@ TEST_F(CssIntegrationTest, Cascade_ParseTimeTracking) {
 }
 
 // Test 3.14: Stylesheet source preservation
-TEST_F(CssIntegrationTest, Cascade_SourcePreservation) {
+TEST_F(CssEngineTest, Cascade_SourcePreservation) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -704,7 +704,7 @@ TEST_F(CssIntegrationTest, Cascade_SourcePreservation) {
 }
 
 // Test 3.15: Multiple stylesheets in engine (simplified to avoid hang)
-TEST_F(CssIntegrationTest, Cascade_MultipleStylesheets) {
+TEST_F(CssEngineTest, Cascade_MultipleStylesheets) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -720,7 +720,7 @@ TEST_F(CssIntegrationTest, Cascade_MultipleStylesheets) {
 // ============================================================================
 
 // Test 4.1: Parse with base URL
-TEST_F(CssIntegrationTest, External_BaseURL) {
+TEST_F(CssEngineTest, External_BaseURL) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -736,7 +736,7 @@ TEST_F(CssIntegrationTest, External_BaseURL) {
 }
 
 // Test 4.2: Parse with file URL
-TEST_F(CssIntegrationTest, External_FileURL) {
+TEST_F(CssEngineTest, External_FileURL) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -749,7 +749,7 @@ TEST_F(CssIntegrationTest, External_FileURL) {
 }
 
 // Test 4.3: Parse with relative URL in context
-TEST_F(CssIntegrationTest, External_RelativeURL) {
+TEST_F(CssEngineTest, External_RelativeURL) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -763,7 +763,7 @@ TEST_F(CssIntegrationTest, External_RelativeURL) {
 }
 
 // Test 4.4: Parse with data URL
-TEST_F(CssIntegrationTest, External_DataURL) {
+TEST_F(CssEngineTest, External_DataURL) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -775,7 +775,7 @@ TEST_F(CssIntegrationTest, External_DataURL) {
 }
 
 // Test 4.5: Parse with @import (if supported)
-TEST_F(CssIntegrationTest, External_ImportRule) {
+TEST_F(CssEngineTest, External_ImportRule) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -789,7 +789,7 @@ TEST_F(CssIntegrationTest, External_ImportRule) {
 }
 
 // Test 4.6: Engine base URL context
-TEST_F(CssIntegrationTest, External_EngineBaseURL) {
+TEST_F(CssEngineTest, External_EngineBaseURL) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -798,7 +798,7 @@ TEST_F(CssIntegrationTest, External_EngineBaseURL) {
 }
 
 // Test 4.7: Stylesheet href metadata
-TEST_F(CssIntegrationTest, External_StylesheetHref) {
+TEST_F(CssEngineTest, External_StylesheetHref) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -812,7 +812,7 @@ TEST_F(CssIntegrationTest, External_StylesheetHref) {
 }
 
 // Test 4.8: Parse with charset information
-TEST_F(CssIntegrationTest, External_Charset) {
+TEST_F(CssEngineTest, External_Charset) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -826,7 +826,7 @@ TEST_F(CssIntegrationTest, External_Charset) {
 }
 
 // Test 4.9: Document charset context
-TEST_F(CssIntegrationTest, External_DocumentCharset) {
+TEST_F(CssEngineTest, External_DocumentCharset) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -835,7 +835,7 @@ TEST_F(CssIntegrationTest, External_DocumentCharset) {
 }
 
 // Test 4.10: Multiple imported stylesheets
-TEST_F(CssIntegrationTest, External_MultipleImports) {
+TEST_F(CssEngineTest, External_MultipleImports) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -855,7 +855,7 @@ TEST_F(CssIntegrationTest, External_MultipleImports) {
 // ============================================================================
 
 // Test 5.1: CSS3 support flag
-TEST_F(CssIntegrationTest, Feature_CSS3Support) {
+TEST_F(CssEngineTest, Feature_CSS3Support) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -864,7 +864,7 @@ TEST_F(CssIntegrationTest, Feature_CSS3Support) {
 }
 
 // Test 5.2: Feature flags - CSS nesting
-TEST_F(CssIntegrationTest, Feature_CSSNesting) {
+TEST_F(CssEngineTest, Feature_CSSNesting) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -873,7 +873,7 @@ TEST_F(CssIntegrationTest, Feature_CSSNesting) {
 }
 
 // Test 5.3: Feature flags - CSS cascade layers
-TEST_F(CssIntegrationTest, Feature_CascadeLayers) {
+TEST_F(CssEngineTest, Feature_CascadeLayers) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -881,7 +881,7 @@ TEST_F(CssIntegrationTest, Feature_CascadeLayers) {
 }
 
 // Test 5.4: Feature flags - CSS container queries
-TEST_F(CssIntegrationTest, Feature_ContainerQueries) {
+TEST_F(CssEngineTest, Feature_ContainerQueries) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -889,7 +889,7 @@ TEST_F(CssIntegrationTest, Feature_ContainerQueries) {
 }
 
 // Test 5.5: Feature flags - CSS scope
-TEST_F(CssIntegrationTest, Feature_CSSScope) {
+TEST_F(CssEngineTest, Feature_CSSScope) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -897,7 +897,7 @@ TEST_F(CssIntegrationTest, Feature_CSSScope) {
 }
 
 // Test 5.6: Stylesheet feature detection - nesting
-TEST_F(CssIntegrationTest, Feature_StylesheetUsesNesting) {
+TEST_F(CssEngineTest, Feature_StylesheetUsesNesting) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -910,7 +910,7 @@ TEST_F(CssIntegrationTest, Feature_StylesheetUsesNesting) {
 }
 
 // Test 5.7: Stylesheet feature detection - custom properties
-TEST_F(CssIntegrationTest, Feature_StylesheetUsesCustomProperties) {
+TEST_F(CssEngineTest, Feature_StylesheetUsesCustomProperties) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -922,7 +922,7 @@ TEST_F(CssIntegrationTest, Feature_StylesheetUsesCustomProperties) {
 }
 
 // Test 5.8: Parse modern CSS3 features
-TEST_F(CssIntegrationTest, Feature_CSS3Features) {
+TEST_F(CssEngineTest, Feature_CSS3Features) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -940,7 +940,7 @@ TEST_F(CssIntegrationTest, Feature_CSS3Features) {
 }
 
 // Test 5.9: Handle unknown/future properties gracefully
-TEST_F(CssIntegrationTest, Feature_UnknownProperties) {
+TEST_F(CssEngineTest, Feature_UnknownProperties) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
@@ -957,7 +957,7 @@ TEST_F(CssIntegrationTest, Feature_UnknownProperties) {
 }
 
 // Test 5.10: Handle vendor prefixes
-TEST_F(CssIntegrationTest, Feature_VendorPrefixes) {
+TEST_F(CssEngineTest, Feature_VendorPrefixes) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 

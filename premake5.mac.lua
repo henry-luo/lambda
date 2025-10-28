@@ -3794,7 +3794,7 @@ project "test_css_parser_unit"
     filter {}
     
 
-project "test_css_integration_unit"
+project "test_css_engine_unit"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -3802,7 +3802,7 @@ project "test_css_integration_unit"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_integration_unit.cpp",
+        "test/css/unit/test_css_engine_unit.cpp",
     }
     
     includedirs {
