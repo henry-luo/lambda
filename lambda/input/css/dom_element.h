@@ -3,6 +3,7 @@
 
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/mempool.h"
+#include "../../../lib/strbuf.h"
 #include "css_style.h"
 #include "css_style_node.h"
 #include <stdint.h>
@@ -595,6 +596,14 @@ void dom_element_get_style_stats(DomElement* element,
  * @return Cloned element or NULL on failure
  */
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
+
+/**
+ * Print a DOM element and its children to a string buffer
+ * @param element Element to print
+ * @param buf String buffer to append to
+ * @param indent Current indentation level (number of spaces)
+ */
+void dom_element_print(DomElement* element, StrBuf* buf, int indent);
 
 // ============================================================================
 // DOM Text Node API

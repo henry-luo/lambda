@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "dom_element.h"
 #include "../../../lib/hashmap.h"
+#include "../../../lib/strbuf.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -1275,4 +1276,135 @@ void dom_comment_destroy(DomComment* comment_node) {
 
 const char* dom_comment_get_content(DomComment* comment_node) {
     return comment_node ? comment_node->content : NULL;
+}
+
+// ============================================================================
+// DOM Element Print Implementation
+// ============================================================================
+
+/**
+ * Print a DOM element and its children to a string buffer
+ * Outputs the element in a tree-like format with proper indentation
+ */
+void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
+    if (!element || !buf) {
+        log_debug("dom_element_print: Invalid arguments");
+        return;
+    }
+    log_debug("dom_element_print: Printing element <%s>",
+        element->tag_name ? element->tag_name : "#null");
+
+    // Add indentation
+    strbuf_append_char_n(buf, ' ', indent);
+
+    // Print opening tag
+    strbuf_append_char(buf, '<');
+    strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+
+    // Print ID attribute if present
+    if (element->id && element->id[0] != '\0') {
+        strbuf_append_str(buf, " id=\"");
+        strbuf_append_str(buf, element->id);
+        strbuf_append_char(buf, '"');
+    }
+
+    // Print class attributes if present
+    if (element->class_count > 0 && element->class_names) {
+        strbuf_append_str(buf, " class=\"");
+        for (int i = 0; i < element->class_count; i++) {
+            if (i > 0) {
+                strbuf_append_char(buf, ' ');
+            }
+            strbuf_append_str(buf, element->class_names[i]);
+        }
+        strbuf_append_char(buf, '"');
+    }
+
+    // Print other attributes
+    if (element->attributes) {
+        int attr_count = 0;
+        const char** attr_names = attribute_storage_get_names(element->attributes, &attr_count);
+        if (attr_names) {
+            for (int i = 0; i < attr_count; i++) {
+                const char* name = attr_names[i];
+                const char* value = attribute_storage_get(element->attributes, name);
+                
+                // Skip id and class as they're already printed
+                if (strcmp(name, "id") != 0 && strcmp(name, "class") != 0 && value) {
+                    strbuf_append_char(buf, ' ');
+                    strbuf_append_str(buf, name);
+                    strbuf_append_str(buf, "=\"");
+                    strbuf_append_str(buf, value);
+                    strbuf_append_char(buf, '"');
+                }
+            }
+        }
+    }
+
+    // Print pseudo-state information if any
+    if (element->pseudo_state != 0) {
+        strbuf_append_str(buf, " [pseudo:");
+        if (element->pseudo_state & PSEUDO_STATE_HOVER) strbuf_append_str(buf, " hover");
+        if (element->pseudo_state & PSEUDO_STATE_ACTIVE) strbuf_append_str(buf, " active");
+        if (element->pseudo_state & PSEUDO_STATE_FOCUS) strbuf_append_str(buf, " focus");
+        if (element->pseudo_state & PSEUDO_STATE_VISITED) strbuf_append_str(buf, " visited");
+        if (element->pseudo_state & PSEUDO_STATE_CHECKED) strbuf_append_str(buf, " checked");
+        if (element->pseudo_state & PSEUDO_STATE_DISABLED) strbuf_append_str(buf, " disabled");
+        strbuf_append_char(buf, ']');
+    }
+
+    strbuf_append_char(buf, '>');
+
+    // Check if element has children
+    bool has_children = false;
+    void* child = element->first_child;
+    
+    // Count and print children
+    while (child) {
+        if (!has_children) {
+            strbuf_append_char(buf, '\n');
+            has_children = true;
+        }
+
+        DomNodeType child_type = dom_node_get_type(child);
+        
+        if (child_type == DOM_NODE_ELEMENT) {
+            // Recursively print child elements
+            dom_element_print((DomElement*)child, buf, indent + 2);
+            child = ((DomElement*)child)->next_sibling;
+        } else if (child_type == DOM_NODE_TEXT) {
+            // Print text nodes
+            DomText* text_node = (DomText*)child;
+            if (text_node->text && text_node->length > 0) {
+                strbuf_append_char_n(buf, ' ', indent + 2);
+                strbuf_append_str(buf, "\"");
+                strbuf_append_str_n(buf, text_node->text, text_node->length);
+                strbuf_append_str(buf, "\"\n");
+            }
+            child = text_node->next_sibling;
+        } else if (child_type == DOM_NODE_COMMENT || child_type == DOM_NODE_DOCTYPE) {
+            // Print comment/DOCTYPE nodes
+            DomComment* comment_node = (DomComment*)child;
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "<!-- ");
+            if (comment_node->content) {
+                strbuf_append_str(buf, comment_node->content);
+            }
+            strbuf_append_str(buf, " -->\n");
+            child = comment_node->next_sibling;
+        } else {
+            // Unknown node type, skip
+            break;
+        }
+    }
+
+    // Print closing tag
+    if (has_children) {
+        strbuf_append_char_n(buf, ' ', indent);
+    }
+    strbuf_append_str(buf, "</");
+    strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+    strbuf_append_str(buf, ">\n");
+    log_debug("Finished printing element <%s>, %d",
+        element->tag_name ? element->tag_name : "#null", buf->length);
 }
