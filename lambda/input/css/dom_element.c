@@ -1373,13 +1373,25 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             dom_element_print((DomElement*)child, buf, indent + 2);
             child = ((DomElement*)child)->next_sibling;
         } else if (child_type == DOM_NODE_TEXT) {
-            // Print text nodes
+            // Print text nodes (skip whitespace-only text nodes)
             DomText* text_node = (DomText*)child;
             if (text_node->text && text_node->length > 0) {
-                strbuf_append_char_n(buf, ' ', indent + 2);
-                strbuf_append_str(buf, "\"");
-                strbuf_append_str_n(buf, text_node->text, text_node->length);
-                strbuf_append_str(buf, "\"\n");
+                // Check if text node contains only whitespace
+                bool is_whitespace_only = true;
+                for (size_t i = 0; i < text_node->length; i++) {
+                    char c = text_node->text[i];
+                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                        is_whitespace_only = false;
+                        break;
+                    }
+                }
+                
+                if (!is_whitespace_only) {
+                    strbuf_append_char_n(buf, ' ', indent + 2);
+                    strbuf_append_str(buf, "\"");
+                    strbuf_append_str_n(buf, text_node->text, text_node->length);
+                    strbuf_append_str(buf, "\"\n");
+                }
             }
             child = text_node->next_sibling;
         } else if (child_type == DOM_NODE_COMMENT || child_type == DOM_NODE_DOCTYPE) {
