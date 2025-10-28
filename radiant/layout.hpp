@@ -144,4 +144,8 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
 void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_ratio);
 
+// HTML version detection functions
+int detect_html_version_lambda_css(Document* doc);
+HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, Input* input);
+
 #endif // LAYOUT_HPP
