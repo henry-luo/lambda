@@ -1310,8 +1310,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
         log_debug("dom_element_print: Invalid arguments");
         return;
     }
-    log_debug("dom_element_print: Printing element <%s>",
-        element->tag_name ? element->tag_name : "#null");
+    log_debug("dom_element_print: element <%s>", element->tag_name ? element->tag_name : "#null");
 
     // Add indentation
     strbuf_append_char_n(buf, ' ', indent);
@@ -1321,23 +1320,23 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
 
     // Print ID attribute if present
-    if (element->id && element->id[0] != '\0') {
-        strbuf_append_str(buf, " id=\"");
-        strbuf_append_str(buf, element->id);
-        strbuf_append_char(buf, '"');
-    }
+    // if (element->id && element->id[0] != '\0') {
+    //     strbuf_append_str(buf, "id=\"");
+    //     strbuf_append_str(buf, element->id);
+    //     strbuf_append_char(buf, '"');
+    // }
 
-    // Print class attributes if present
-    if (element->class_count > 0 && element->class_names) {
-        strbuf_append_str(buf, " class=\"");
-        for (int i = 0; i < element->class_count; i++) {
-            if (i > 0) {
-                strbuf_append_char(buf, ' ');
-            }
-            strbuf_append_str(buf, element->class_names[i]);
-        }
-        strbuf_append_char(buf, '"');
-    }
+    // // Print class attributes if present
+    // if (element->class_count > 0 && element->class_names) {
+    //     strbuf_append_str(buf, " class=\"");
+    //     for (int i = 0; i < element->class_count; i++) {
+    //         if (i > 0) {
+    //             strbuf_append_char(buf, ' ');
+    //         }
+    //         strbuf_append_str(buf, element->class_names[i]);
+    //     }
+    //     strbuf_append_char(buf, '"');
+    // }
 
     // Print other attributes
     if (element->attributes) {
@@ -1376,23 +1375,22 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
 
     // Print specified CSS styles if present
     if (element->id || element->class_count > 0 || element->specified_style) {
+        strbuf_append_str(buf, " [");
         // print id
-        strbuf_append_format(buf, " [id:'%s'", element->id ? element->id : "null");
+        if (element->id && element->id[0] != '\0') strbuf_append_format(buf, "id:'%s'", element->id);
 
         // print classes
-        strbuf_append_str(buf, ", classes:");
         if (element->class_count > 0 && element->class_names) {
+            strbuf_append_str(buf, " classes:");
             strbuf_append_char(buf, '[');
             for (int i = 0; i < element->class_count; i++) {
                 strbuf_append_format(buf, "\"%s\"", element->class_names[i]);
                 if (i < element->class_count - 1) strbuf_append_char(buf, ',');
             }
             strbuf_append_char(buf, ']');
-        } else {
-            strbuf_append_str(buf, "null");
         }
 
-        strbuf_append_str(buf, ", styles:");
+        strbuf_append_str(buf, " styles:{");
         CssDeclaration* decl;  bool has_props = false;
 
         // Display property
@@ -1427,7 +1425,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " height:");
+                strbuf_append_str(buf, "height:");
                 char height_str[32];
                 snprintf(height_str, sizeof(height_str), "%.2fpx", val->data.length.value);
                 strbuf_append_str(buf, height_str);
@@ -1441,7 +1439,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " margin:");
+                strbuf_append_str(buf, "margin:");
                 char margin_str[32];
                 snprintf(margin_str, sizeof(margin_str), "%.2fpx",
                     val->type == CSS_VALUE_LENGTH ? val->data.length.value : val->type == CSS_VALUE_NUMBER ? val->data.number.value : val->data.integer.value);
@@ -1456,7 +1454,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " padding:");
+                strbuf_append_str(buf, "padding:");
                 char padding_str[32];
                 snprintf(padding_str, sizeof(padding_str), "%.2fpx",
                     val->type == CSS_VALUE_LENGTH ? val->data.length.value : val->type == CSS_VALUE_NUMBER ? val->data.number.value : val->data.integer.value);
@@ -1471,7 +1469,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " font-size:");
+                strbuf_append_str(buf, "font-size:");
                 char size_str[32];
                 snprintf(size_str, sizeof(size_str), "%.2fpx", val->data.length.value);
                 strbuf_append_str(buf, size_str);
@@ -1486,13 +1484,14 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             if ((val->type == CSS_VALUE_STRING || val->type == CSS_VALUE_KEYWORD) &&
                 (val->data.string || val->data.keyword)) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " font-family:");
+                strbuf_append_str(buf, "font-family:");
                 strbuf_append_str(buf, val->data.string ? val->data.string : val->data.keyword);
                 has_props = true;
             }
             else if (val->type == CSS_VALUE_LIST && val->data.list.count > 0) {
                 // For lists, concatenate the family names
-                strbuf_append_str(buf, " font-family:[");
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, "font-family:[");
                 for (size_t i = 0; i < val->data.list.count; i++) {
                     CssValue* item = val->data.list.values[i];
                     if (item) {
@@ -1514,15 +1513,16 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_INTEGER) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " font-weight:");
+                strbuf_append_str(buf, "font-weight:");
                 char weight_str[16];
                 snprintf(weight_str, sizeof(weight_str), "%d", val->data.integer.value);
                 strbuf_append_str(buf, weight_str);
                 has_props = true;
-            } else if (val->type == CSS_VALUE_KEYWORD) {
+            }
+            else if (val->type == CSS_VALUE_KEYWORD) {
                 if (has_props) strbuf_append_str(buf, ", ");
                 // Keywords: normal (400), bold (700), etc.
-                strbuf_append_format(buf, " font-weight: %s", val->data.keyword);
+                strbuf_append_format(buf, "font-weight: %s", val->data.keyword);
                 has_props = true;
             }
         }
@@ -1533,7 +1533,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_COLOR) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " color:");
+                strbuf_append_str(buf, "color:");
                 char color_str[64];
                 snprintf(color_str, sizeof(color_str), "rgba(%d,%d,%d,%.2f)",
                     val->data.color.data.rgba.r,
@@ -1551,7 +1551,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_COLOR) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " background-color:");
+                strbuf_append_str(buf, "background-color:");
                 char color_str[64];
                 snprintf(color_str, sizeof(color_str), "rgba(%d,%d,%d,%.2f)",
                     val->data.color.data.rgba.r,
@@ -1583,12 +1583,12 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             if (val->type == CSS_VALUE_KEYWORD) {
                 if (has_props) strbuf_append_str(buf, ", ");
                 // TODO: Extract actual keyword (start, end, left, right, center, justify)
-                strbuf_append_format(buf, " text-align: %s", val->data.keyword);
+                strbuf_append_format(buf, "text-align: %s", val->data.keyword);
                 has_props = true;
             }
         }
 
-        strbuf_append_char(buf, ']');
+        strbuf_append_str(buf, "}]");
     }
 
     // Check if element has children
@@ -1652,6 +1652,6 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
     }
     strbuf_append_str(buf, "</");
-    strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
-    strbuf_append_str(buf, ">\n");
+    // strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+    strbuf_append_str(buf, ">");
 }

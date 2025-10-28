@@ -363,7 +363,7 @@ void list_push(List *list, Item item) {
         break;
     }
     }
-    log_item({.list = list}, "list_after_push");
+    // log_item({.list = list}, "list_after_push");
 }
 
 TypedItem to_typed(Item item) {

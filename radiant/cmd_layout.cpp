@@ -768,7 +768,6 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
         return nullptr;
     }
 
-
     // Step 3: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
