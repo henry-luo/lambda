@@ -93,12 +93,10 @@ typedef struct DomNode {
     // Basic node information
     char* name();  // Moved to .cpp to avoid incomplete type issues
 
-    uintptr_t tag() {
-        if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            return lxb_dom_interface_element(lxb_elmt)->node.local_name;
-        }
-        return 0;
-    }
+    uintptr_t tag();  // Moved to .cpp to avoid incomplete type issues
+
+    // Helper function to convert tag name string to Lexbor tag ID
+    static uintptr_t tag_name_to_lexbor_id(const char* tag_name);
 
     bool is_element() {
         return (type == LEXBOR_ELEMENT || type == MARK_ELEMENT);

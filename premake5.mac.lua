@@ -3933,6 +3933,83 @@ project "test_css_engine_unit"
     filter {}
     
 
+project "test_dom_element_simple"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_dom_element_simple"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_dom_element_simple.cpp",
+        "lib/strbuf.c",
+        "lib/stringbuf.c",
+        "lib/strview.c",
+        "lib/string.c",
+        "lib/log.c",
+        "lib/mempool.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
+        "lib/avl_tree.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/css_property_value_parser.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
 project "test_css_formatter_unit"
     kind "ConsoleApp"
     language "C++"

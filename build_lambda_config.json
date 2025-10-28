@@ -1535,6 +1535,33 @@
                         "binary": "test_css_engine_unit.exe"
                     },
                     {
+                        "source": "test/css/unit/test_dom_element_simple.cpp",
+                        "name": "🎨 DOM Element Simple Tests",
+                        "dependencies": [],
+                        "additional_sources": [
+                            "lib/strbuf.c",
+                            "lib/stringbuf.c",
+                            "lib/strview.c",
+                            "lib/string.c",
+                            "lib/log.c",
+                            "lib/mempool.c",
+                            "lib/hashmap.c",
+                            "lib/arraylist.c",
+                            "lib/avl_tree.c",
+                            "lambda/input/css/dom_element.c",
+                            "lambda/input/css/css_style_node.c",
+                            "lambda/input/css/css_properties.c",
+                            "lambda/input/css/css_parser.c",
+                            "lambda/input/css/css_property_value_parser.c"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_dom_element_simple.exe"
+                    },
+                    {
                         "source": "test/css/unit/test_css_formatter_unit.cpp",
                         "name": "🎨 CSS Formatter Unit Tests",
                         "dependencies": [
