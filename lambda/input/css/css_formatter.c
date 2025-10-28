@@ -4,6 +4,7 @@
 #include "../../../lib/stringbuf.h"
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 // Create a CSS formatter with default style
 CssFormatter* css_formatter_create(Pool* pool, CssFormatStyle style) {
@@ -51,56 +52,255 @@ void css_formatter_destroy(CssFormatter* formatter) {
     (void)formatter;
 }
 
-// Format stylesheet (stub implementation)
-const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* stylesheet) {
-    if (!formatter || !stylesheet) return NULL;
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
-    stringbuf_reset(formatter->output);
+static void append_indent(CssFormatter* formatter) {
+    if (formatter->options.style == CSS_FORMAT_COMPRESSED) {
+        return; // No indentation in compressed mode
+    }
 
-    // Simple stub: just output rule count
-    stringbuf_append_format(formatter->output, "/* Stylesheet with %zu rules */\n", stylesheet->rule_count);
-
-    // Format each rule
-    for (size_t i = 0; i < stylesheet->rule_count; i++) {
-        if (stylesheet->rules[i]->property_count > 0) {
-            stringbuf_append_str(formatter->output, "/* Rule ");
-            stringbuf_append_ulong(formatter->output, i);
-            stringbuf_append_str(formatter->output, " */ {\n");
-
-            // Format properties
-            for (size_t j = 0; j < stylesheet->rules[i]->property_count; j++) {
-                stringbuf_append_str(formatter->output, "    ");
-                stringbuf_append_str(formatter->output, stylesheet->rules[i]->property_names[j]);
-                stringbuf_append_str(formatter->output, ": <value>;\n");
+    for (int i = 0; i < formatter->current_indent; i++) {
+        if (formatter->options.use_tabs) {
+            stringbuf_append_str(formatter->output, "\t");
+        } else {
+            for (int j = 0; j < formatter->options.indent_size; j++) {
+                stringbuf_append_str(formatter->output, " ");
             }
-
-            stringbuf_append_str(formatter->output, "}\n\n");
         }
+    }
+}
+
+static void append_newline(CssFormatter* formatter) {
+    if (formatter->options.style != CSS_FORMAT_COMPRESSED) {
+        stringbuf_append_str(formatter->output, "\n");
+    }
+}
+
+static void append_space(CssFormatter* formatter) {
+    if (formatter->options.style != CSS_FORMAT_COMPRESSED) {
+        stringbuf_append_str(formatter->output, " ");
+    }
+}
+
+static const char* unit_to_string(CssUnit unit) {
+    switch (unit) {
+        case CSS_UNIT_PX: return "px";
+        case CSS_UNIT_EM: return "em";
+        case CSS_UNIT_REM: return "rem";
+        case CSS_UNIT_PERCENT: return "%";
+        case CSS_UNIT_VW: return "vw";
+        case CSS_UNIT_VH: return "vh";
+        case CSS_UNIT_CM: return "cm";
+        case CSS_UNIT_MM: return "mm";
+        case CSS_UNIT_IN: return "in";
+        case CSS_UNIT_PT: return "pt";
+        case CSS_UNIT_PC: return "pc";
+        case CSS_UNIT_EX: return "ex";
+        case CSS_UNIT_CH: return "ch";
+        case CSS_UNIT_VMIN: return "vmin";
+        case CSS_UNIT_VMAX: return "vmax";
+        case CSS_UNIT_DEG: return "deg";
+        case CSS_UNIT_RAD: return "rad";
+        case CSS_UNIT_GRAD: return "grad";
+        case CSS_UNIT_TURN: return "turn";
+        case CSS_UNIT_S: return "s";
+        case CSS_UNIT_MS: return "ms";
+        case CSS_UNIT_FR: return "fr";
+        default: return "";
+    }
+}
+
+// ============================================================================
+// Value Formatting
+// ============================================================================
+
+// Format value (complete implementation)
+const char* css_format_value(CssFormatter* formatter, CssValue* value) {
+    if (!formatter || !value) return NULL;
+
+    // Don't reset buffer - append to existing content
+
+    switch (value->type) {
+        case CSS_VALUE_KEYWORD:
+            if (value->data.keyword) {
+                stringbuf_append_str(formatter->output, value->data.keyword);
+            }
+            break;
+
+        case CSS_VALUE_LENGTH:
+            // Format number with unit
+            stringbuf_append_format(formatter->output, "%.2f", value->data.length.value);
+            stringbuf_append_str(formatter->output, unit_to_string(value->data.length.unit));
+            break;
+
+        case CSS_VALUE_NUMBER:
+            stringbuf_append_format(formatter->output, "%.2f", value->data.number.value);
+            break;
+
+        case CSS_VALUE_PERCENTAGE:
+            stringbuf_append_format(formatter->output, "%.2f%%", value->data.percentage.value);
+            break;
+
+        case CSS_VALUE_COLOR:
+            // Format color based on type
+            if (value->data.color.type == CSS_COLOR_KEYWORD && value->data.color.data.keyword) {
+                stringbuf_append_str(formatter->output, value->data.color.data.keyword);
+            } else if (value->data.color.type == CSS_COLOR_HEX || value->data.color.type == CSS_COLOR_RGB) {
+                // Format as hex or rgb
+                uint8_t r = value->data.color.data.rgba.r;
+                uint8_t g = value->data.color.data.rgba.g;
+                uint8_t b = value->data.color.data.rgba.b;
+                uint8_t a = value->data.color.data.rgba.a;
+
+                if (a == 255) {
+                    if (formatter->options.lowercase_hex) {
+                        stringbuf_append_format(formatter->output, "#%02x%02x%02x", r, g, b);
+                    } else {
+                        stringbuf_append_format(formatter->output, "#%02X%02X%02X", r, g, b);
+                    }
+                } else {
+                    stringbuf_append_format(formatter->output, "rgba(%d, %d, %d, %.2f)",
+                        r, g, b, a / 255.0);
+                }
+            } else if (value->data.color.type == CSS_COLOR_HSL) {
+                double h = value->data.color.data.hsla.h;
+                double s = value->data.color.data.hsla.s;
+                double l = value->data.color.data.hsla.l;
+                double a = value->data.color.data.hsla.a;
+
+                if (a >= 1.0) {
+                    stringbuf_append_format(formatter->output, "hsl(%.1f, %.1f%%, %.1f%%)", h, s * 100, l * 100);
+                } else {
+                    stringbuf_append_format(formatter->output, "hsla(%.1f, %.1f%%, %.1f%%, %.2f)", h, s * 100, l * 100, a);
+                }
+            } else {
+                // Fallback to black
+                stringbuf_append_str(formatter->output, "#000000");
+            }
+            break;
+
+        case CSS_VALUE_STRING:
+            if (value->data.string) {
+                stringbuf_append_str(formatter->output, "\"");
+                stringbuf_append_str(formatter->output, value->data.string);
+                stringbuf_append_str(formatter->output, "\"");
+            }
+            break;
+
+        case CSS_VALUE_URL:
+            stringbuf_append_str(formatter->output, "url(");
+            if (formatter->options.quote_urls) {
+                stringbuf_append_str(formatter->output, "\"");
+            }
+            if (value->data.url) {
+                stringbuf_append_str(formatter->output, value->data.url);
+            }
+            if (formatter->options.quote_urls) {
+                stringbuf_append_str(formatter->output, "\"");
+            }
+            stringbuf_append_str(formatter->output, ")");
+            break;
+
+        case CSS_VALUE_FUNCTION:
+            if (value->data.function.name) {
+                stringbuf_append_str(formatter->output, value->data.function.name);
+                stringbuf_append_str(formatter->output, "(");
+                // Format function arguments
+                for (size_t i = 0; i < value->data.function.arg_count; i++) {
+                    if (i > 0) {
+                        stringbuf_append_str(formatter->output, ", ");
+                    }
+                    if (value->data.function.args && value->data.function.args[i]) {
+                        const char* arg_str = css_format_value(formatter, value->data.function.args[i]);
+                        if (arg_str) {
+                            // Save current output, format arg value, restore
+                            StringBuf* temp = formatter->output;
+                            formatter->output = stringbuf_new(formatter->pool);
+                            css_format_value(formatter, value->data.function.args[i]);
+                            const char* formatted_arg = stringbuf_to_string(formatter->output)->chars;
+                            formatter->output = temp;
+                            stringbuf_append_str(formatter->output, formatted_arg);
+                        }
+                    }
+                }
+                stringbuf_append_str(formatter->output, ")");
+            }
+            break;
+
+        case CSS_VALUE_LIST:
+            // Format value list (space-separated)
+            for (size_t i = 0; i < value->data.list.count; i++) {
+                if (i > 0) {
+                    stringbuf_append_str(formatter->output, " ");
+                }
+                if (value->data.list.values && value->data.list.values[i]) {
+                    // Recursively format list values
+                    StringBuf* temp = formatter->output;
+                    formatter->output = stringbuf_new(formatter->pool);
+                    css_format_value(formatter, value->data.list.values[i]);
+                    const char* formatted_val = stringbuf_to_string(formatter->output)->chars;
+                    formatter->output = temp;
+                    stringbuf_append_str(formatter->output, formatted_val);
+                }
+            }
+            break;
+
+        default:
+            stringbuf_append_str(formatter->output, "<unknown-value>");
+            break;
     }
 
     return stringbuf_to_string(formatter->output)->chars;
 }
 
-// Format rule (stub)
-const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
-    if (!formatter || !rule) return NULL;
+// ============================================================================
+// Declaration Formatting
+// ============================================================================
 
-    stringbuf_reset(formatter->output);
-    stringbuf_append_str(formatter->output, "/* CSS Rule */\n");
+const char* css_format_declaration(CssFormatter* formatter, CssPropertyId property_id, CssValue* value) {
+    if (!formatter || !value) return NULL;
+
+    // Don't reset buffer - append to existing content
+
+    // Get property name
+    const char* property_name = css_property_get_name(property_id);
+    if (!property_name) {
+        property_name = "<unknown-property>";
+    }
+
+    stringbuf_append_str(formatter->output, property_name);
+    stringbuf_append_str(formatter->output, ":");
+    append_space(formatter);
+
+    // Format value
+    StringBuf* temp = formatter->output;
+    formatter->output = stringbuf_new(formatter->pool);
+    const char* value_str = css_format_value(formatter, value);
+    formatter->output = temp;
+
+    if (value_str) {
+        stringbuf_append_str(formatter->output, value_str);
+    }
 
     return stringbuf_to_string(formatter->output)->chars;
 }
 
-// Format selector group (stub)
+// ============================================================================
+// Selector Formatting
+// ============================================================================
+
 const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup* selector_group) {
     if (!formatter || !selector_group) return NULL;
 
-    stringbuf_reset(formatter->output);
+    // Don't reset buffer - append to existing content
 
     // Format each selector in the group separated by commas
     for (size_t i = 0; i < selector_group->selector_count; i++) {
         if (i > 0) {
-            stringbuf_append_str(formatter->output, ", ");
+            stringbuf_append_str(formatter->output, ",");
+            append_space(formatter);
         }
 
         CssSelector* selector = selector_group->selectors[i];
@@ -113,19 +313,27 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                 CssCombinator combinator = selector->combinators[j - 1];
                 switch (combinator) {
                     case CSS_COMBINATOR_DESCENDANT:
-                        stringbuf_append_str(formatter->output, " ");
+                        append_space(formatter);
                         break;
                     case CSS_COMBINATOR_CHILD:
-                        stringbuf_append_str(formatter->output, " > ");
+                        append_space(formatter);
+                        stringbuf_append_str(formatter->output, ">");
+                        append_space(formatter);
                         break;
                     case CSS_COMBINATOR_NEXT_SIBLING:
-                        stringbuf_append_str(formatter->output, " + ");
+                        append_space(formatter);
+                        stringbuf_append_str(formatter->output, "+");
+                        append_space(formatter);
                         break;
                     case CSS_COMBINATOR_SUBSEQUENT_SIBLING:
-                        stringbuf_append_str(formatter->output, " ~ ");
+                        append_space(formatter);
+                        stringbuf_append_str(formatter->output, "~");
+                        append_space(formatter);
                         break;
                     case CSS_COMBINATOR_COLUMN:
-                        stringbuf_append_str(formatter->output, " || ");
+                        append_space(formatter);
+                        stringbuf_append_str(formatter->output, "||");
+                        append_space(formatter);
                         break;
                     default:
                         break;
@@ -201,6 +409,14 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                     case CSS_SELECTOR_PSEUDO_LAST_CHILD:
                         stringbuf_append_str(formatter->output, ":last-child");
                         break;
+                    case CSS_SELECTOR_PSEUDO_NTH_CHILD:
+                        stringbuf_append_str(formatter->output, ":nth-child");
+                        if (simple->value) {
+                            stringbuf_append_str(formatter->output, "(");
+                            stringbuf_append_str(formatter->output, simple->value);
+                            stringbuf_append_str(formatter->output, ")");
+                        }
+                        break;
                     default:
                         // For other pseudo-classes/elements with values
                         if (simple->value) {
@@ -214,40 +430,208 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
     }
 
     return stringbuf_to_string(formatter->output)->chars;
-}// Format value (stub)
-const char* css_format_value(CssFormatter* formatter, CssValue* value) {
-    if (!formatter || !value) return NULL;
+}
+
+// ============================================================================
+// Rule Formatting
+// ============================================================================
+
+const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
+    if (!formatter || !rule) return NULL;
 
     stringbuf_reset(formatter->output);
 
-    switch (value->type) {
-        case CSS_VALUE_KEYWORD:
-            stringbuf_append_str(formatter->output, value->data.keyword);
-            break;
-        case CSS_VALUE_LENGTH:
-            stringbuf_append_format(formatter->output, "%.2fpx", value->data.length.value);
-            break;
-        case CSS_VALUE_NUMBER:
-            stringbuf_append_format(formatter->output, "%.2f", value->data.number.value);
-            break;
-        default:
-            stringbuf_append_str(formatter->output, "<value>");
-            break;
+    // Handle different rule types
+    if (rule->type == CSS_RULE_STYLE) {
+        // Format selector group
+        if (rule->data.style_rule.selector_group) {
+            const char* selector_str = css_format_selector_group(formatter, rule->data.style_rule.selector_group);
+            if (selector_str) {
+                stringbuf_append_str(formatter->output, selector_str);
+            }
+        }
+
+        // Opening brace
+        if (formatter->options.space_before_brace) {
+            append_space(formatter);
+        }
+        stringbuf_append_str(formatter->output, "{");
+
+        if (formatter->options.newline_after_brace) {
+            append_newline(formatter);
+        }
+
+        // Format declarations
+        formatter->current_indent++;
+
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* decl = rule->data.style_rule.declarations[i];
+            if (!decl) continue;
+
+            if (formatter->options.newline_after_brace) {
+                append_indent(formatter);
+            } else if (i > 0) {
+                append_space(formatter);
+            }
+
+            // Format declaration
+            const char* decl_str = css_format_declaration(formatter, decl->property_id, decl->value);
+            if (decl_str) {
+                stringbuf_append_str(formatter->output, decl_str);
+            }
+
+            // Add !important flag
+            if (decl->important) {
+                append_space(formatter);
+                stringbuf_append_str(formatter->output, "!important");
+            }
+
+            // Semicolon
+            if (i < rule->data.style_rule.declaration_count - 1 || formatter->options.trailing_semicolon) {
+                stringbuf_append_str(formatter->output, ";");
+            }
+
+            if (formatter->options.newline_after_brace) {
+                append_newline(formatter);
+            }
+        }
+
+        formatter->current_indent--;
+
+        // Closing brace
+        if (formatter->options.newline_after_brace && rule->data.style_rule.declaration_count > 0) {
+            append_indent(formatter);
+        }
+        stringbuf_append_str(formatter->output, "}");
+
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS) {
+        // Format conditional at-rules (@media, @supports, etc.)
+        const char* rule_name = (rule->type == CSS_RULE_MEDIA) ? "media" : "supports";
+
+        stringbuf_append_str(formatter->output, "@");
+        stringbuf_append_str(formatter->output, rule_name);
+
+        if (rule->data.conditional_rule.condition) {
+            append_space(formatter);
+            stringbuf_append_str(formatter->output, rule->data.conditional_rule.condition);
+        }
+
+        if (formatter->options.space_before_brace) {
+            append_space(formatter);
+        }
+        stringbuf_append_str(formatter->output, "{");
+
+        if (formatter->options.newline_after_brace) {
+            append_newline(formatter);
+        }
+
+        // Format nested rules
+        formatter->current_indent++;
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            if (formatter->options.newline_after_brace) {
+                append_indent(formatter);
+            }
+            const char* nested_rule = css_format_rule(formatter, rule->data.conditional_rule.rules[i]);
+            if (nested_rule) {
+                stringbuf_append_str(formatter->output, nested_rule);
+            }
+            if (formatter->options.newline_after_brace) {
+                append_newline(formatter);
+            }
+        }
+        formatter->current_indent--;
+
+        if (formatter->options.newline_after_brace) {
+            append_indent(formatter);
+        }
+        stringbuf_append_str(formatter->output, "}");
+
+    } else if (rule->type == CSS_RULE_IMPORT) {
+        // Format @import rule
+        stringbuf_append_str(formatter->output, "@import url(");
+        if (rule->data.import_rule.url) {
+            stringbuf_append_str(formatter->output, rule->data.import_rule.url);
+        }
+        stringbuf_append_str(formatter->output, ")");
+
+        if (rule->data.import_rule.media) {
+            append_space(formatter);
+            stringbuf_append_str(formatter->output, rule->data.import_rule.media);
+        }
+        stringbuf_append_str(formatter->output, ";");
+
+    } else if (rule->type == CSS_RULE_CHARSET) {
+        // Format @charset rule
+        stringbuf_append_str(formatter->output, "@charset ");
+        if (rule->data.charset_rule.charset) {
+            stringbuf_append_str(formatter->output, "\"");
+            stringbuf_append_str(formatter->output, rule->data.charset_rule.charset);
+            stringbuf_append_str(formatter->output, "\"");
+        }
+        stringbuf_append_str(formatter->output, ";");
+
+    } else if (rule->type == CSS_RULE_NAMESPACE) {
+        // Format @namespace rule
+        stringbuf_append_str(formatter->output, "@namespace ");
+        if (rule->data.namespace_rule.prefix) {
+            stringbuf_append_str(formatter->output, rule->data.namespace_rule.prefix);
+            append_space(formatter);
+        }
+        if (rule->data.namespace_rule.namespace_url) {
+            stringbuf_append_str(formatter->output, "url(");
+            stringbuf_append_str(formatter->output, rule->data.namespace_rule.namespace_url);
+            stringbuf_append_str(formatter->output, ")");
+        }
+        stringbuf_append_str(formatter->output, ";");
     }
 
     return stringbuf_to_string(formatter->output)->chars;
 }
 
-// Format declaration (stub)
-const char* css_format_declaration(CssFormatter* formatter, CssPropertyId property_id, CssValue* value) {
-    if (!formatter || !value) return NULL;
+// ============================================================================
+// Stylesheet Formatting
+// ============================================================================
+
+const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* stylesheet) {
+    if (!formatter || !stylesheet) return NULL;
 
     stringbuf_reset(formatter->output);
-    stringbuf_append_format(formatter->output, "property_%d: ", property_id);
-    stringbuf_append_str(formatter->output, css_format_value(formatter, value));
+    formatter->current_indent = 0;
+
+    // Format each rule
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        if (i > 0) {
+            append_newline(formatter);
+            if (formatter->options.style == CSS_FORMAT_PRETTY ||
+                formatter->options.style == CSS_FORMAT_EXPANDED) {
+                append_newline(formatter); // Extra blank line between rules
+            }
+        }
+
+        // Format this rule into a temporary buffer
+        // We need to save the current output and restore it after formatting the rule
+        StringBuf* saved_output = formatter->output;
+        formatter->output = stringbuf_new(formatter->pool);
+
+        const char* rule_str = css_format_rule(formatter, stylesheet->rules[i]);
+
+        // Restore the main output buffer and append the rule
+        formatter->output = saved_output;
+        if (rule_str) {
+            stringbuf_append_str(formatter->output, rule_str);
+        }
+    }
+
+    // Final newline
+    if (stylesheet->rule_count > 0 && formatter->options.style != CSS_FORMAT_COMPRESSED) {
+        append_newline(formatter);
+    }
 
     return stringbuf_to_string(formatter->output)->chars;
 }
+// ============================================================================
+// Convenience functions
+// ============================================================================
 
 // Convenience function: format stylesheet with default compact style
 const char* css_stylesheet_to_string(CssStylesheet* stylesheet, Pool* pool) {
@@ -269,13 +653,57 @@ const char* css_stylesheet_to_string_styled(CssStylesheet* stylesheet, Pool* poo
 CssFormatOptions css_get_default_format_options(CssFormatStyle style) {
     CssFormatOptions options;
     options.style = style;
-    options.indent_size = (style == CSS_FORMAT_COMPACT) ? 2 : 4;
-    options.use_tabs = false;
-    options.trailing_semicolon = true;
-    options.space_before_brace = true;
-    options.newline_after_brace = (style != CSS_FORMAT_COMPRESSED);
-    options.lowercase_hex = true;
-    options.quote_urls = false;
-    options.sort_properties = false;
+
+    switch (style) {
+        case CSS_FORMAT_COMPACT:
+            options.indent_size = 2;
+            options.use_tabs = false;
+            options.trailing_semicolon = true;
+            options.space_before_brace = true;
+            options.newline_after_brace = false;
+            options.lowercase_hex = true;
+            options.quote_urls = false;
+            options.sort_properties = false;
+            break;
+
+        case CSS_FORMAT_EXPANDED:
+            options.indent_size = 4;
+            options.use_tabs = false;
+            options.trailing_semicolon = true;
+            options.space_before_brace = true;
+            options.newline_after_brace = true;
+            options.lowercase_hex = true;
+            options.quote_urls = false;
+            options.sort_properties = false;
+            break;
+
+        case CSS_FORMAT_COMPRESSED:
+            options.indent_size = 0;
+            options.use_tabs = false;
+            options.trailing_semicolon = false;
+            options.space_before_brace = false;
+            options.newline_after_brace = false;
+            options.lowercase_hex = true;
+            options.quote_urls = false;
+            options.sort_properties = false;
+            break;
+
+        case CSS_FORMAT_PRETTY:
+            options.indent_size = 2;
+            options.use_tabs = false;
+            options.trailing_semicolon = true;
+            options.space_before_brace = true;
+            options.newline_after_brace = true;
+            options.lowercase_hex = true;
+            options.quote_urls = true;
+            options.sort_properties = false;
+            break;
+
+        default:
+            // Default to compact
+            options = css_get_default_format_options(CSS_FORMAT_COMPACT);
+            break;
+    }
+
     return options;
 }

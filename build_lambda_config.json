@@ -1548,6 +1548,19 @@
                         "binary": "test_css_formatter_unit.exe"
                     },
                     {
+                        "source": "test/css/unit/test_css_roundtrip_unit.cpp",
+                        "name": "🎨 CSS Roundtrip Unit Tests (Parse→Format→Parse)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_roundtrip_unit.exe"
+                    },
+                    {
                         "source": "test/css/test_compound_descendant_selectors.cpp",
                         "name": "🎨 CSS Compound & Descendant Selector Tests",
                         "dependencies": [
