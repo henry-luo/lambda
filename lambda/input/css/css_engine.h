@@ -3,7 +3,6 @@
 
 #include "css_parser.h"
 #include "css_style.h"
-#include "css_selector_parser.h"
 #include "../../../lib/mempool.h"
 
 #ifdef __cplusplus
@@ -11,7 +10,6 @@ extern "C" {
 #endif
 
 // Forward declarations
-struct CSSSelectorParser;
 struct CssPropertyValueParser;
 
 // CSS Style Engine structure
@@ -34,7 +32,7 @@ typedef struct CssEngine {
 
     // Core components
     CssTokenizer* tokenizer;
-    struct CSSSelectorParser* selector_parser;
+    // Removed: selector_parser (legacy linked-list parser removed)
     struct CssPropertyValueParser* value_parser;
     struct CssStyleEngine* style_engine;
 
@@ -276,7 +274,7 @@ void css_engine_clear_errors(CssEngine* engine);
 // Enhanced CSS functions (for backward compatibility)
 CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
 void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule);
-CssStyleNode* css_enhanced_selector_to_style_node(CssEngine* engine, CSSComplexSelector* selector);
+// Removed: CssStyleNode* css_enhanced_selector_to_style_node(CssEngine* engine, CSSComplexSelector* selector);
 const char* css_value_enhanced_to_string(CssValue* value, Pool* pool);
 bool css_enhanced_nesting_parent_matches(const CssSelector* selector, const CssStyleNode* node);
 bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssStyleNode* node);

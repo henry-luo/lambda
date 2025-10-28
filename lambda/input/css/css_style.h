@@ -814,9 +814,6 @@ typedef struct CssRule {
     CssRuleType type;
     Pool* pool;
 
-    // Common rule members (for compatibility with parsing code)
-    struct CSSComplexSelector* selector_list;  // List of selectors for this rule
-
     // Rule content varies by type
     union {
         struct {

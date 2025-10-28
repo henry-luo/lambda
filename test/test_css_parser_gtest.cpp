@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include "../lambda/input/css/css_tokenizer.h"
 #include "../lambda/input/css/css_property_value_parser.h"
-#include "../lambda/input/css/css_selector_parser.h"
+#include "../lambda/input/css/css_parser.h"
 #include "../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
@@ -31,7 +31,7 @@ protected:
 // Test basic CSS parsing components
 TEST_F(CssParserTest, ParseEmptyStylesheet) {
     const char* css = "";
-    
+
     // Empty CSS should still work with tokenizer
     size_t token_count;
     CSSToken* tokens = css_tokenize(css, 0, pool, &token_count);
@@ -47,19 +47,20 @@ TEST_F(CssParserTest, ParseWhitespaceOnlyStylesheet) {
 TEST_F(CssParserTest, ParseSimpleStyleRule) {
     const char* css = "body { color: red; }";
     validateTokenization(css, 5); // body, {, color, :, red, ;, }
-    
+
     // Test that parsers can be created
     CssPropertyValueParser* prop_parser = css_property_value_parser_create(pool);
     EXPECT_NE(prop_parser, nullptr) << "Property parser should be created";
     if (prop_parser) {
         css_property_value_parser_destroy(prop_parser);
     }
-    
-    CSSSelectorParser* sel_parser = css_selector_parser_create(pool);
-    EXPECT_NE(sel_parser, nullptr) << "Selector parser should be created";
-    if (sel_parser) {
-        css_selector_parser_destroy(sel_parser);
-    }
+
+    // Legacy selector parser removed - modern array-based parser is integrated into css_parser.c
+    // CSSSelectorParser* sel_parser = css_selector_parser_create(pool);
+    // EXPECT_NE(sel_parser, nullptr) << "Selector parser should be created";
+    // if (sel_parser) {
+    //     css_selector_parser_destroy(sel_parser);
+    // }
 }
 
 TEST_F(CssParserTest, ParseMultipleRules) {
