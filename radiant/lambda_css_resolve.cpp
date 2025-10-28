@@ -1468,6 +1468,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->margin.top = margin;
                 span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                float margin = (float)value->data.number.value;
+                span->bound->margin.top = margin;
+                span->bound->margin.top_specificity = specificity;
+                log_debug("[CSS] Margin-top: %.2f px", margin);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->margin.top_specificity = specificity;
@@ -1494,6 +1499,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float margin = value->data.length.value;
+                span->bound->margin.right = margin;
+                span->bound->margin.right_specificity = specificity;
+                log_debug("[CSS] Margin-right: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                float margin = (float)value->data.number.value;
                 span->bound->margin.right = margin;
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: %.2f px", margin);
@@ -1555,6 +1565,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float margin = value->data.length.value;
+                span->bound->margin.left = margin;
+                span->bound->margin.left_specificity = specificity;
+                log_debug("[CSS] Margin-left: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                float margin = (float)value->data.number.value;
                 span->bound->margin.left = margin;
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: %.2f px", margin);
