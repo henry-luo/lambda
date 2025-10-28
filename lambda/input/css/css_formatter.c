@@ -213,15 +213,14 @@ const char* css_format_value(CssFormatter* formatter, CssValue* value) {
                         stringbuf_append_str(formatter->output, ", ");
                     }
                     if (value->data.function.args && value->data.function.args[i]) {
-                        const char* arg_str = css_format_value(formatter, value->data.function.args[i]);
-                        if (arg_str) {
-                            // Save current output, format arg value, restore
-                            StringBuf* temp = formatter->output;
-                            formatter->output = stringbuf_new(formatter->pool);
-                            css_format_value(formatter, value->data.function.args[i]);
-                            const char* formatted_arg = stringbuf_to_string(formatter->output)->chars;
-                            formatter->output = temp;
-                            stringbuf_append_str(formatter->output, formatted_arg);
+                        // Save current output, format arg value, restore
+                        StringBuf* temp = formatter->output;
+                        formatter->output = stringbuf_new(formatter->pool);
+                        css_format_value(formatter, value->data.function.args[i]);
+                        String* formatted_str = stringbuf_to_string(formatter->output);
+                        formatter->output = temp;
+                        if (formatted_str && formatted_str->chars) {
+                            stringbuf_append_str(formatter->output, formatted_str->chars);
                         }
                     }
                 }
@@ -230,19 +229,27 @@ const char* css_format_value(CssFormatter* formatter, CssValue* value) {
             break;
 
         case CSS_VALUE_LIST:
-            // Format value list (space-separated)
-            for (size_t i = 0; i < value->data.list.count; i++) {
-                if (i > 0) {
-                    stringbuf_append_str(formatter->output, " ");
-                }
-                if (value->data.list.values && value->data.list.values[i]) {
-                    // Recursively format list values
-                    StringBuf* temp = formatter->output;
-                    formatter->output = stringbuf_new(formatter->pool);
-                    css_format_value(formatter, value->data.list.values[i]);
-                    const char* formatted_val = stringbuf_to_string(formatter->output)->chars;
-                    formatter->output = temp;
-                    stringbuf_append_str(formatter->output, formatted_val);
+            // Format value list (space-separated or comma-separated)
+            if (value->data.list.values) {
+                for (size_t i = 0; i < value->data.list.count; i++) {
+                    if (i > 0) {
+                        if (value->data.list.comma_separated) {
+                            stringbuf_append_str(formatter->output, ", ");
+                        } else {
+                            stringbuf_append_str(formatter->output, " ");
+                        }
+                    }
+                    if (value->data.list.values[i]) {
+                        // Recursively format list values
+                        StringBuf* temp = formatter->output;
+                        formatter->output = stringbuf_new(formatter->pool);
+                        css_format_value(formatter, value->data.list.values[i]);
+                        String* formatted_str = stringbuf_to_string(formatter->output);
+                        formatter->output = temp;
+                        if (formatted_str && formatted_str->chars) {
+                            stringbuf_append_str(formatter->output, formatted_str->chars);
+                        }
+                    }
                 }
             }
             break;
@@ -252,7 +259,8 @@ const char* css_format_value(CssFormatter* formatter, CssValue* value) {
             break;
     }
 
-    return stringbuf_to_string(formatter->output)->chars;
+    String* result = stringbuf_to_string(formatter->output);
+    return (result && result->chars) ? result->chars : "";
 }
 
 // ============================================================================
@@ -274,17 +282,19 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyId proper
     stringbuf_append_str(formatter->output, ":");
     append_space(formatter);
 
-    // Format value
+    // Format value - use temporary buffer
     StringBuf* temp = formatter->output;
     formatter->output = stringbuf_new(formatter->pool);
-    const char* value_str = css_format_value(formatter, value);
+    css_format_value(formatter, value);
+    String* value_str = stringbuf_to_string(formatter->output);
     formatter->output = temp;
 
-    if (value_str) {
-        stringbuf_append_str(formatter->output, value_str);
+    if (value_str && value_str->chars) {
+        stringbuf_append_str(formatter->output, value_str->chars);
     }
 
-    return stringbuf_to_string(formatter->output)->chars;
+    String* result = stringbuf_to_string(formatter->output);
+    return (result && result->chars) ? result->chars : "";
 }
 
 // ============================================================================
@@ -429,7 +439,8 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
         }
     }
 
-    return stringbuf_to_string(formatter->output)->chars;
+    String* result = stringbuf_to_string(formatter->output);
+    return (result && result->chars) ? result->chars : "";
 }
 
 // ============================================================================
@@ -585,7 +596,8 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         stringbuf_append_str(formatter->output, ";");
     }
 
-    return stringbuf_to_string(formatter->output)->chars;
+    String* result = stringbuf_to_string(formatter->output);
+    return (result && result->chars) ? result->chars : "";
 }
 
 // ============================================================================
@@ -627,7 +639,8 @@ const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* styles
         append_newline(formatter);
     }
 
-    return stringbuf_to_string(formatter->output)->chars;
+    String* result = stringbuf_to_string(formatter->output);
+    return (result && result->chars) ? result->chars : "";
 }
 // ============================================================================
 // Convenience functions

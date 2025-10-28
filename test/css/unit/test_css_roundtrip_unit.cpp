@@ -316,8 +316,13 @@ protected:
             CssNormalization::StrictNormalizeCSS(formatted) :
             CssNormalization::NormalizeCSS(formatted);
 
-        // With current stub implementation, we may not get exact matches
-        // Just verify formatting produces reasonable output
+        // If normalized input is empty (e.g., only comments), output should also be empty
+        if (normalized_input.empty()) {
+            EXPECT_TRUE(normalized_output.empty()) << "Output should be empty when input has no CSS rules";
+            return normalized_output.empty();
+        }
+
+        // Otherwise, verify formatting produces non-empty output
         EXPECT_FALSE(normalized_output.empty()) << "Formatted output is empty";
 
         return !normalized_output.empty();
