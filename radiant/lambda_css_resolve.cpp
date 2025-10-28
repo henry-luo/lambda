@@ -990,6 +990,26 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->font->family = strdup(family);
                     log_debug("[CSS] Font family keyword: %s -> %s", value->data.keyword, family);
                 }
+            } else if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
+                // List of font families (e.g., "Arial, sans-serif")
+                // Use the first available font family
+                for (size_t i = 0; i < value->data.list.count; i++) {
+                    CssValue* item = value->data.list.values[i];
+                    if (!item) continue;
+
+                    const char* family = NULL;
+                    if (item->type == CSS_VALUE_STRING && item->data.string) {
+                        family = item->data.string;
+                    } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
+                        family = map_lambda_font_family_keyword(item->data.keyword);
+                    }
+
+                    if (family && strlen(family) > 0) {
+                        span->font->family = strdup(family);
+                        log_debug("[CSS] Font family from list[%zu]: %s", i, family);
+                        break; // Use first font in the list
+                    }
+                }
             }
             break;
         }

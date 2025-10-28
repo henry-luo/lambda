@@ -68,53 +68,53 @@ HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, I
     }
 
     log_debug("Detecting HTML version from Lambda Element tree");
-    
+
     // The input->root contains the full parsed tree including DOCTYPE
     // It's typically a List containing multiple items (DOCTYPE, html element, etc.)
     TypeId root_type = get_type_id(input->root);
-    
+
     if (root_type == LMD_TYPE_LIST) {
         List* root_list = (List*)input->root.pointer;
         log_debug("Examining root list with %lld items", root_list->length);
-        
+
         // Search through the list for DOCTYPE element
         for (int64_t i = 0; i < root_list->length; i++) {
             Item item = root_list->items[i];
             TypeId item_type = get_type_id(item);
-            
+
             if (item_type == LMD_TYPE_ELEMENT) {
                 Element* elem = (Element*)item.pointer;
                 TypeElmt* type = (TypeElmt*)elem->type;
-                
+
                 if (type && (strcmp(type->name.str, "!DOCTYPE") == 0 || strcmp(type->name.str, "!doctype") == 0)) {
                     log_debug("Found DOCTYPE element");
-                    
+
                     // Extract DOCTYPE content from the element's children
                     if (elem->length > 0) {
                         Item first_child = elem->items[0];
                         if (get_type_id(first_child) == LMD_TYPE_STRING) {
                             String* doctype_content = (String*)first_child.pointer;
                             const char* content = doctype_content->chars;
-                            
+
                             log_debug("DOCTYPE content: '%s'", content);
-                            
+
                             // Parse DOCTYPE content to determine version
                             // Check for HTML 4.01 patterns first (more specific)
                             if (strstr(content, "-//W3C//DTD HTML 4.01//EN")) {
                                 log_debug("Detected HTML 4.01 Strict DOCTYPE");
                                 return HTML4_01_STRICT;
                             }
-                            
+
                             if (strstr(content, "-//W3C//DTD HTML 4.01 Transitional//EN")) {
                                 log_debug("Detected HTML 4.01 Transitional DOCTYPE");
                                 return HTML4_01_TRANSITIONAL;
                             }
-                            
+
                             if (strstr(content, "-//W3C//DTD HTML 4.01 Frameset//EN")) {
                                 log_debug("Detected HTML 4.01 Frameset DOCTYPE");
                                 return HTML4_01_FRAMESET;
                             }
-                            
+
                             // Check for XHTML patterns
                             if (strstr(content, "-//W3C//DTD XHTML 1.0")) {
                                 if (strstr(content, "Strict")) {
@@ -132,12 +132,12 @@ HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, I
                                 log_debug("Detected XHTML 1.0 DOCTYPE (default to Transitional)");
                                 return HTML4_01_TRANSITIONAL; // Default XHTML 1.0
                             }
-                            
+
                             if (strstr(content, "-//W3C//DTD XHTML 1.1//EN")) {
                                 log_debug("Detected XHTML 1.1 DOCTYPE");
                                 return HTML4_01_TRANSITIONAL;
                             }
-                            
+
                             // HTML5 DOCTYPE: "html" with no public/system identifiers
                             // Must check this AFTER other patterns to avoid false matches
                             if (strncasecmp(content, "html", 4) == 0) {
@@ -152,13 +152,13 @@ HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, I
                                     return HTML5;
                                 }
                             }
-                            
+
                             // If we found a DOCTYPE but don't recognize it, assume HTML5
                             log_debug("Found unrecognized DOCTYPE '%s', defaulting to HTML5", content);
                             return HTML5;
                         }
                     }
-                    
+
                     // Empty DOCTYPE content - assume HTML5
                     log_debug("Found empty DOCTYPE, assuming HTML5");
                     return HTML5;
@@ -166,7 +166,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, I
             }
         }
     }
-    
+
     // No DOCTYPE found - assume HTML5 (modern default)
     log_debug("No DOCTYPE found in Lambda Element tree, defaulting to HTML5");
     return HTML5;
@@ -477,7 +477,7 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     if (!type) return nullptr;
 
     const char* tag_name = type->name.str;
-    log_debug("build element: <%s> (parent: %s)", tag_name, 
+    log_debug("build element: <%s> (parent: %s)", tag_name,
               parent ? parent->tag_name : "none");
 
     // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
@@ -540,7 +540,7 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
             Element* child_elem = (Element*)child_item.pointer;
             TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
-            
+
             log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
             DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
 
@@ -550,9 +550,9 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
                 continue;
             }
 
-            log_debug("  Successfully built child <%s> with parent <%s>. child_dom=%p, child_dom->parent=%p", 
+            log_debug("  Successfully built child <%s> with parent <%s>. child_dom=%p, child_dom->parent=%p",
                      child_tag_name, tag_name, (void*)child_dom, (void*)child_dom->parent);
-            
+
             // The dom_element_append_child was already called in the recursive call,
             // so the parent-child and sibling relationships are already established correctly.
             // No manual linking needed!
@@ -584,7 +584,7 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
                             } else if (type == DOM_NODE_COMMENT || type == DOM_NODE_DOCTYPE) {
                                 next = ((DomComment*)last_child_node)->next_sibling;
                             }
-                            
+
                             if (!next) {
                                 // This is the last child, append text node here
                                 if (type == DOM_NODE_ELEMENT) {
@@ -807,9 +807,11 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
 
         // Font family property (ID 80 - inherited)
         decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_FAMILY);
+        fprintf(stderr, "[DEBUG] Element <%s>: font-family decl=%p\n", elem->tag_name, (void*)decl);
         if (decl && decl->value) {
-            if (has_props) fprintf(fp, ",\n");
             CssValue* val = (CssValue*)decl->value;
+            fprintf(stderr, "[DEBUG] font-family value type=%d\n", val->type);
+            if (has_props) fprintf(fp, ",\n");
             // Font family can be string, keyword, or list
             // Note: Currently parser may store font-family with wrong type
             // TODO: Fix font-family parsing to use correct CSS_VALUE_LIST/STRING/KEYWORD
@@ -819,10 +821,13 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
                 fprintf(fp, "%s    \"fontFamily\": \"%s\"", indent, val->data.keyword);
             } else if (val->type == CSS_VALUE_LIST && val->data.list.count > 0) {
                 // For lists, concatenate the family names
+                fprintf(stderr, "[DEBUG] font-family is LIST with %zu items\n", val->data.list.count);
                 fprintf(fp, "%s    \"fontFamily\": \"", indent);
                 for (size_t i = 0; i < val->data.list.count; i++) {
                     CssValue* item = val->data.list.values[i];
+                    fprintf(stderr, "[DEBUG]   item[%zu]: %p\n", i, (void*)item);
                     if (item) {
+                        fprintf(stderr, "[DEBUG]   item[%zu] type=%d\n", i, item->type);
                         if (i > 0) fprintf(fp, ", ");
                         if (item->type == CSS_VALUE_STRING && item->data.string) {
                             fprintf(fp, "%s", item->data.string);
@@ -834,11 +839,13 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
                 fprintf(fp, "\"");
             } else {
                 // Parser bug: font-family being stored with wrong type, use placeholder
+                fprintf(stderr, "[DEBUG] font-family has unexpected type or null data\n");
                 fprintf(fp, "%s    \"fontFamily\": \"Arial, sans-serif\"", indent);
             }
             has_props = true;
         } else {
             // No font-family declaration, use default
+            fprintf(stderr, "[DEBUG] No font-family declaration found\n");
             if (has_props) fprintf(fp, ",\n");
             fprintf(fp, "%s    \"fontFamily\": \"serif\"", indent);
             has_props = true;
