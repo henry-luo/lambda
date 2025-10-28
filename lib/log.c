@@ -332,24 +332,78 @@ static void write_log_message_to_stream(FILE *stream, log_category_t *category,
                                        const char *timestamp, const char *level_str,
                                        const char *color, const char *reset_color,
                                        const char *message, bool use_colors) {
-    char formatted_message[1024];
+    // Buffer size for formatted output (header + message)
+    #define LOG_BUFFER_SIZE 1024
+    // Maximum message size that fits in buffer (leaving room for header)
+    #define MAX_MESSAGE_CHUNK 800  // Conservative estimate for header overhead
+
+    char formatted_message[LOG_BUFFER_SIZE];
 
     // Use colors if requested for this specific stream
     const char *actual_color = use_colors ? color : "";
     const char *actual_reset = use_colors ? reset_color : "";
 
-    format_log_message(formatted_message, sizeof(formatted_message),
-                      category->format, timestamp, level_str,
-                      category->name, actual_color, actual_reset, message);
+    size_t message_len = strlen(message);
 
-    // Remove trailing newline if it exists (we'll add our own)
-    size_t len = strlen(formatted_message);
-    if (len > 0 && formatted_message[len - 1] == '\n') {
-        formatted_message[len - 1] = '\0';
+    // If message fits in buffer, format and output normally
+    if (message_len <= MAX_MESSAGE_CHUNK) {
+        format_log_message(formatted_message, sizeof(formatted_message),
+                          category->format, timestamp, level_str,
+                          category->name, actual_color, actual_reset, message);
+
+        // Remove trailing newline if it exists (we'll add our own)
+        size_t len = strlen(formatted_message);
+        if (len > 0 && formatted_message[len - 1] == '\n') {
+            formatted_message[len - 1] = '\0';
+        }
+
+        fprintf(stream, "%s\n", formatted_message);
+        fflush(stream);
+    } else {
+        // Message is too long - output header once, then print message continuously
+        const char *msg_ptr = message;
+        size_t remaining = message_len;
+
+        // Format the first chunk with full header
+        size_t first_chunk_size = (remaining > MAX_MESSAGE_CHUNK) ? MAX_MESSAGE_CHUNK : remaining;
+        char chunk_message[MAX_MESSAGE_CHUNK + 1];
+        memcpy(chunk_message, msg_ptr, first_chunk_size);
+        chunk_message[first_chunk_size] = '\0';
+
+        format_log_message(formatted_message, sizeof(formatted_message),
+                          category->format, timestamp, level_str,
+                          category->name, actual_color, actual_reset, chunk_message);
+
+        // Remove trailing newline if it exists (we'll continue the message)
+        size_t len = strlen(formatted_message);
+        if (len > 0 && formatted_message[len - 1] == '\n') {
+            formatted_message[len - 1] = '\0';
+        }
+
+        // Print first chunk WITHOUT newline (message continues)
+        fprintf(stream, "%s", formatted_message);
+
+        msg_ptr += first_chunk_size;
+        remaining -= first_chunk_size;
+
+        // Print remaining chunks directly (no headers)
+        while (remaining > 0) {
+            size_t chunk_size = (remaining > MAX_MESSAGE_CHUNK) ? MAX_MESSAGE_CHUNK : remaining;
+
+            // Write chunk directly to stream (no formatting overhead)
+            fwrite(msg_ptr, 1, chunk_size, stream);
+
+            msg_ptr += chunk_size;
+            remaining -= chunk_size;
+        }
+
+        // End with newline
+        fprintf(stream, "\n");
+        fflush(stream);
     }
 
-    fprintf(stream, "%s\n", formatted_message);
-    fflush(stream);
+    #undef LOG_BUFFER_SIZE
+    #undef MAX_MESSAGE_CHUNK
 }
 
 /* Helper function to check if format contains %t (with any modifiers) */

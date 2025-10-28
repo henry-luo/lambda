@@ -878,7 +878,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
                     // Create text string if we have content (preserve all whitespace)
                     if (text_chars > 0) {
                         String *text_string = stringbuf_to_string(text_sb);
-                        log_debug("got text content: '%s'", text_string->chars);
+                        log_debug("got text content: '%t'", text_string->chars);
                         Item text_item = {.item = s2it(text_string)};
                         log_debug("pushing text to element %p", element);
                         list_push((List*)element, text_item);
