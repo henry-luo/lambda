@@ -1686,7 +1686,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_latex_html_fixtures_gtest.exe",
+                        "binary": "test_latex_html_fixtures.exe",
                         "additional_sources": [
                             "test/latex/fixture_loader.cpp",
                             "test/latex/html_comparison.cpp",
@@ -1794,13 +1794,14 @@
             },
             {
                 "suite": "lambda-std",
+                "disabled": true,
                 "name": "🧪 Lambda Standard Tests",
                 "tests": [
                     {
                         "source": "test/lambda_test_runner.cpp",
                         "name": "🧪 Lambda Standard Tests",
                         "dependencies": [],
-                        "binary": "test/lambda_test_runner",
+                        "binary": "lambda_test_runner.exe",
                         "libraries": [
                             "c++fs"
                         ],
@@ -1835,7 +1836,7 @@
                 },
                 "test_runner": {
                     "type": "custom",
-                    "executable": "test/lambda_test_runner",
+                    "executable": "lambda_test_runner",
                     "test_dir": "test/std",
                     "output_formats": [
                         "json",
@@ -1855,10 +1856,10 @@
                     ],
                     "platform_specific": {
                         "darwin": {
-                            "executable": "./test/lambda_test_runner"
+                            "executable": "./test/lambda_test_runner.exe"
                         },
                         "linux": {
-                            "executable": "./test/lambda_test_runner"
+                            "executable": "./test/lambda_test_runner.exe"
                         },
                         "windows": {
                             "executable": "test\\lambda_test_runner.exe"

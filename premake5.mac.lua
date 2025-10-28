@@ -773,6 +773,7 @@ project "test_strbuf_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_strbuf_gtest"
     targetextension ".exe"
     
     files {
@@ -834,6 +835,7 @@ project "test_stringbuf_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_stringbuf_gtest"
     targetextension ".exe"
     
     files {
@@ -896,6 +898,7 @@ project "test_strview_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_strview_gtest"
     targetextension ".exe"
     
     files {
@@ -957,6 +960,7 @@ project "test_num_stack_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_num_stack_gtest"
     targetextension ".exe"
     
     files {
@@ -1018,6 +1022,7 @@ project "test_datetime_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_datetime_gtest"
     targetextension ".exe"
     
     files {
@@ -1080,6 +1085,7 @@ project "test_url_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_url_gtest"
     targetextension ".exe"
     
     files {
@@ -1141,6 +1147,7 @@ project "test_url_extra_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_url_extra_gtest"
     targetextension ".exe"
     
     files {
@@ -1202,6 +1209,7 @@ project "test_cmdedit_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_cmdedit_gtest"
     targetextension ".exe"
     
     files {
@@ -1267,6 +1275,7 @@ project "test_mempool_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mempool_gtest"
     targetextension ".exe"
     
     files {
@@ -1329,6 +1338,7 @@ project "test_avl_tree"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_avl_tree"
     targetextension ".exe"
     
     files {
@@ -1392,6 +1402,7 @@ project "test_avl_tree_perf"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_avl_tree_perf"
     targetextension ".exe"
     
     files {
@@ -1455,6 +1466,7 @@ project "test_element_reader_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_element_reader_gtest"
     targetextension ".exe"
     
     files {
@@ -1558,6 +1570,7 @@ project "test_mime_detect_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mime_detect_gtest"
     targetextension ".exe"
     
     files {
@@ -1660,6 +1673,7 @@ project "test_math_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_math_gtest"
     targetextension ".exe"
     
     files {
@@ -1763,6 +1777,7 @@ project "test_math_ascii_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_math_ascii_gtest"
     targetextension ".exe"
     
     files {
@@ -1866,6 +1881,7 @@ project "test_markup_roundtrip_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_markup_roundtrip_gtest"
     targetextension ".exe"
     
     files {
@@ -1969,6 +1985,7 @@ project "test_input_roundtrip_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_input_roundtrip_gtest"
     targetextension ".exe"
     
     files {
@@ -2072,6 +2089,7 @@ project "test_html_roundtrip_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_html_roundtrip_gtest"
     targetextension ".exe"
     
     files {
@@ -2175,6 +2193,7 @@ project "test_html_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_html_gtest"
     targetextension ".exe"
     
     files {
@@ -2278,6 +2297,7 @@ project "test_lambda_domnode_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_domnode_gtest"
     targetextension ".exe"
     
     files {
@@ -2386,6 +2406,7 @@ project "test_dir_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_dir_gtest"
     targetextension ".exe"
     
     files {
@@ -2488,6 +2509,7 @@ project "test_graph_parser_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_graph_parser_gtest"
     targetextension ".exe"
     
     files {
@@ -2591,6 +2613,7 @@ project "test_graph_formatter_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_graph_formatter_gtest"
     targetextension ".exe"
     
     files {
@@ -2694,6 +2717,7 @@ project "test_http_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_http_gtest"
     targetextension ".exe"
     
     files {
@@ -2796,6 +2820,7 @@ project "test_sysinfo_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_sysinfo_gtest"
     targetextension ".exe"
     
     files {
@@ -2899,6 +2924,7 @@ project "test_jsx_roundtrip_new_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_jsx_roundtrip_new_gtest"
     targetextension ".exe"
     
     files {
@@ -3002,6 +3028,7 @@ project "test_mdx_roundtrip_new_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mdx_roundtrip_new_gtest"
     targetextension ".exe"
     
     files {
@@ -3104,6 +3131,7 @@ project "test_css_style_node"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_style_node"
     targetextension ".exe"
     
     files {
@@ -3171,6 +3199,7 @@ project "test_css_system"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_system"
     targetextension ".exe"
     
     files {
@@ -3240,6 +3269,7 @@ project "test_css_dom_integration"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_dom_integration"
     targetextension ".exe"
     
     files {
@@ -3312,6 +3342,7 @@ project "test_css_style_application_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_style_application_gtest"
     targetextension ".exe"
     
     files {
@@ -3384,6 +3415,7 @@ project "test_html_css_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_html_css_gtest"
     targetextension ".exe"
     
     files {
@@ -3490,6 +3522,7 @@ project "test_css_tokenizer_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_tokenizer_gtest"
     targetextension ".exe"
     
     files {
@@ -3593,6 +3626,7 @@ project "test_css_tokenizer_unit"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_tokenizer_unit"
     targetextension ".exe"
     
     files {
@@ -3696,6 +3730,7 @@ project "test_css_parser_unit"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_parser_unit"
     targetextension ".exe"
     
     files {
@@ -3799,6 +3834,7 @@ project "test_css_engine_unit"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_engine_unit"
     targetextension ".exe"
     
     files {
@@ -3902,6 +3938,7 @@ project "test_css_formatter_unit"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_formatter_unit"
     targetextension ".exe"
     
     files {
@@ -4005,6 +4042,7 @@ project "test_css_roundtrip_unit"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_roundtrip_unit"
     targetextension ".exe"
     
     files {
@@ -4108,6 +4146,7 @@ project "test_compound_descendant_selectors"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_compound_descendant_selectors"
     targetextension ".exe"
     
     files {
@@ -4211,6 +4250,7 @@ project "test_selector_groups"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_selector_groups"
     targetextension ".exe"
     
     files {
@@ -4314,6 +4354,7 @@ project "test_css_parser_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_parser_gtest"
     targetextension ".exe"
     
     files {
@@ -4417,6 +4458,7 @@ project "test_css_integration_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_integration_gtest"
     targetextension ".exe"
     
     files {
@@ -4520,6 +4562,7 @@ project "test_css_files_safe_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_files_safe_gtest"
     targetextension ".exe"
     
     files {
@@ -4623,6 +4666,7 @@ project "test_css_frameworks_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_frameworks_gtest"
     targetextension ".exe"
     
     files {
@@ -4726,6 +4770,7 @@ project "test_css_all_files_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_all_files_gtest"
     targetextension ".exe"
     
     files {
@@ -4829,6 +4874,7 @@ project "test_mdx_roundtrip_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mdx_roundtrip_gtest"
     targetextension ".exe"
     
     files {
@@ -4931,6 +4977,7 @@ project "test_jsx_roundtrip_gtest"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_jsx_roundtrip_gtest"
     targetextension ".exe"
     
     files {
@@ -5028,11 +5075,12 @@ project "test_jsx_roundtrip_gtest"
     filter {}
     
 
-project "test_latex_html_fixtures_gtest"
+project "test_latex_html_fixtures"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_latex_html_fixtures"
     targetextension ".exe"
     
     files {
@@ -5135,11 +5183,12 @@ project "test_latex_html_fixtures_gtest"
     filter {}
     
 
-project "test_test_validator_gtest"
+project "test_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_validator_gtest"
     targetextension ".exe"
     
     files {
@@ -5236,11 +5285,12 @@ project "test_test_validator_gtest"
     filter {}
     
 
-project "test_test_ast_validator_gtest"
+project "test_ast_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_ast_validator_gtest"
     targetextension ".exe"
     
     files {
@@ -5338,11 +5388,12 @@ project "test_test_ast_validator_gtest"
     filter {}
     
 
-project "test_test_lambda_gtest"
+project "test_lambda_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_gtest"
     targetextension ".exe"
     
     files {
@@ -5398,11 +5449,12 @@ project "test_test_lambda_gtest"
     filter {}
     
 
-project "test_test_lambda_repl_gtest"
+project "test_lambda_repl_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_repl_gtest"
     targetextension ".exe"
     
     files {
@@ -5458,11 +5510,12 @@ project "test_test_lambda_repl_gtest"
     filter {}
     
 
-project "test_test_lambda_proc_gtest"
+project "test_lambda_proc_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_proc_gtest"
     targetextension ".exe"
     
     files {
@@ -5518,11 +5571,12 @@ project "test_test_lambda_proc_gtest"
     filter {}
     
 
-project "test_test_js_gtest"
+project "test_js_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_js_gtest"
     targetextension ".exe"
     
     files {
@@ -5568,64 +5622,6 @@ project "test_test_js_gtest"
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
-    }
-    
-    -- AddressSanitizer for test projects only
-    filter { "configurations:Debug", "not platforms:Linux_x64" }
-        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
-        linkoptions { "-fsanitize=address" }
-    
-    filter {}
-    
-
-project "test_lambda_test_runner"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/lambda_test_runner.cpp",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-javascript/bindings/c",
-        "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
-        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-        "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "/usr/local/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-fno-omit-frame-pointer",
-        "-g",
-        "-O2",
-        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
-        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
     }
     
     -- AddressSanitizer for test projects only
