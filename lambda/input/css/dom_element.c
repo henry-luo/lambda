@@ -841,20 +841,39 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
         child->prev_sibling = NULL;
         child->next_sibling = NULL;
     } else {
-        // Find last child
-        DomElement* last_child = parent->first_child;
-        while (last_child->next_sibling) {
-            last_child = last_child->next_sibling;
+        // Find last child - need to handle mixed node types (DomElement, DomText, etc.)
+        void* last_child_node = parent->first_child;
+        
+        while (last_child_node) {
+            void* next_sibling = NULL;
+            
+            // Get next_sibling based on the actual node type
+            DomNodeType node_type = dom_node_get_type(last_child_node);
+            if (node_type == DOM_NODE_ELEMENT) {
+                next_sibling = ((DomElement*)last_child_node)->next_sibling;
+            } else if (node_type == DOM_NODE_TEXT) {
+                next_sibling = ((DomText*)last_child_node)->next_sibling;
+            } else if (node_type == DOM_NODE_COMMENT || node_type == DOM_NODE_DOCTYPE) {
+                next_sibling = ((DomComment*)last_child_node)->next_sibling;
+            }
+            
+            if (!next_sibling) {
+                // This is the last child, append the new element after it
+                if (node_type == DOM_NODE_ELEMENT) {
+                    ((DomElement*)last_child_node)->next_sibling = child;
+                } else if (node_type == DOM_NODE_TEXT) {
+                    ((DomText*)last_child_node)->next_sibling = child;
+                } else if (node_type == DOM_NODE_COMMENT || node_type == DOM_NODE_DOCTYPE) {
+                    ((DomComment*)last_child_node)->next_sibling = child;
+                }
+                child->prev_sibling = last_child_node;
+                child->next_sibling = NULL;
+                break;
+            }
+            
+            last_child_node = next_sibling;
         }
-
-        // Append as last child
-        last_child->next_sibling = child;
-        child->prev_sibling = last_child;
-        child->next_sibling = NULL;
     }
-
-    // Invalidate child's computed values (parent relationship changed)
-    // dom_element_invalidate_computed_values(child, true);
 
     return true;
 }
@@ -1375,6 +1394,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
         } else if (child_type == DOM_NODE_TEXT) {
             // Print text nodes (skip whitespace-only text nodes)
             DomText* text_node = (DomText*)child;
+            
             if (text_node->text && text_node->length > 0) {
                 // Check if text node contains only whitespace
                 bool is_whitespace_only = true;
@@ -1417,7 +1437,4 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     strbuf_append_str(buf, "</");
     strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
     strbuf_append_str(buf, ">\n");
-    log_debug("Finished printing element <%s>, %d",
-        element->tag_name ? element->tag_name : "#null", buf->length);
-    log_debug("dom_element_print: %s", buf->str);
 }
