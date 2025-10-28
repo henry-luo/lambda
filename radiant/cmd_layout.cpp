@@ -58,6 +58,120 @@ ViewGroup* compute_layout_tree(DomNode* root_node, LayoutContext* lycon);
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
 void dom_element_print(DomElement* element, StrBuf* buf, int indent);
 
+// Function to determine HTML version from Lambda CSS document DOCTYPE
+// This function examines the original Element tree to find DOCTYPE information
+// before it gets filtered out during DomElement tree construction
+HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, Input* input) {
+    if (!input || !input->root.item) {
+        log_debug("No input or root available for DOCTYPE detection");
+        return HTML5;
+    }
+
+    log_debug("Detecting HTML version from Lambda Element tree");
+    
+    // The input->root contains the full parsed tree including DOCTYPE
+    // It's typically a List containing multiple items (DOCTYPE, html element, etc.)
+    TypeId root_type = get_type_id(input->root);
+    
+    if (root_type == LMD_TYPE_LIST) {
+        List* root_list = (List*)input->root.pointer;
+        log_debug("Examining root list with %lld items", root_list->length);
+        
+        // Search through the list for DOCTYPE element
+        for (int64_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            TypeId item_type = get_type_id(item);
+            
+            if (item_type == LMD_TYPE_ELEMENT) {
+                Element* elem = (Element*)item.pointer;
+                TypeElmt* type = (TypeElmt*)elem->type;
+                
+                if (type && (strcmp(type->name.str, "!DOCTYPE") == 0 || strcmp(type->name.str, "!doctype") == 0)) {
+                    log_debug("Found DOCTYPE element");
+                    
+                    // Extract DOCTYPE content from the element's children
+                    if (elem->length > 0) {
+                        Item first_child = elem->items[0];
+                        if (get_type_id(first_child) == LMD_TYPE_STRING) {
+                            String* doctype_content = (String*)first_child.pointer;
+                            const char* content = doctype_content->chars;
+                            
+                            log_debug("DOCTYPE content: '%s'", content);
+                            
+                            // Parse DOCTYPE content to determine version
+                            // Check for HTML 4.01 patterns first (more specific)
+                            if (strstr(content, "-//W3C//DTD HTML 4.01//EN")) {
+                                log_debug("Detected HTML 4.01 Strict DOCTYPE");
+                                return HTML4_01_STRICT;
+                            }
+                            
+                            if (strstr(content, "-//W3C//DTD HTML 4.01 Transitional//EN")) {
+                                log_debug("Detected HTML 4.01 Transitional DOCTYPE");
+                                return HTML4_01_TRANSITIONAL;
+                            }
+                            
+                            if (strstr(content, "-//W3C//DTD HTML 4.01 Frameset//EN")) {
+                                log_debug("Detected HTML 4.01 Frameset DOCTYPE");
+                                return HTML4_01_FRAMESET;
+                            }
+                            
+                            // Check for XHTML patterns
+                            if (strstr(content, "-//W3C//DTD XHTML 1.0")) {
+                                if (strstr(content, "Strict")) {
+                                    log_debug("Detected XHTML 1.0 Strict DOCTYPE");
+                                    return HTML4_01_STRICT;
+                                }
+                                if (strstr(content, "Transitional")) {
+                                    log_debug("Detected XHTML 1.0 Transitional DOCTYPE");
+                                    return HTML4_01_TRANSITIONAL;
+                                }
+                                if (strstr(content, "Frameset")) {
+                                    log_debug("Detected XHTML 1.0 Frameset DOCTYPE");
+                                    return HTML4_01_FRAMESET;
+                                }
+                                log_debug("Detected XHTML 1.0 DOCTYPE (default to Transitional)");
+                                return HTML4_01_TRANSITIONAL; // Default XHTML 1.0
+                            }
+                            
+                            if (strstr(content, "-//W3C//DTD XHTML 1.1//EN")) {
+                                log_debug("Detected XHTML 1.1 DOCTYPE");
+                                return HTML4_01_TRANSITIONAL;
+                            }
+                            
+                            // HTML5 DOCTYPE: "html" with no public/system identifiers
+                            // Must check this AFTER other patterns to avoid false matches
+                            if (strncasecmp(content, "html", 4) == 0) {
+                                // Skip whitespace after "html"
+                                const char* after_html = content + 4;
+                                while (*after_html && isspace(*after_html)) {
+                                    after_html++;
+                                }
+                                // HTML5 should have nothing after "html" (or only whitespace)
+                                if (*after_html == '\0') {
+                                    log_debug("Detected HTML5 DOCTYPE");
+                                    return HTML5;
+                                }
+                            }
+                            
+                            // If we found a DOCTYPE but don't recognize it, assume HTML5
+                            log_debug("Found unrecognized DOCTYPE '%s', defaulting to HTML5", content);
+                            return HTML5;
+                        }
+                    }
+                    
+                    // Empty DOCTYPE content - assume HTML5
+                    log_debug("Found empty DOCTYPE, assuming HTML5");
+                    return HTML5;
+                }
+            }
+        }
+    }
+    
+    // No DOCTYPE found - assume HTML5 (modern default)
+    log_debug("No DOCTYPE found in Lambda Element tree, defaulting to HTML5");
+    return HTML5;
+}
+
 /**
  * Extract string attribute from Lambda Element
  * Returns attribute value or nullptr if not found
