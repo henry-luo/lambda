@@ -467,7 +467,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             break;
         }
 
-        if (t != CSS_TOKEN_WHITESPACE) {
+        // Count non-whitespace, non-comma tokens as values
+        if (t != CSS_TOKEN_WHITESPACE && t != CSS_TOKEN_COMMA) {
             value_count++;
         }
         (*pos)++;
@@ -610,7 +611,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
         if (!list_value->data.list.values) return NULL;        int list_idx = 0;
         for (int i = value_start; i < *pos && list_idx < value_count; i++) {
-            if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+            if (tokens[i].type == CSS_TOKEN_WHITESPACE || tokens[i].type == CSS_TOKEN_COMMA) continue;
 
             // Allocate individual CssValue
             CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
