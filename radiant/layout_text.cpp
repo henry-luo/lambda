@@ -262,8 +262,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     else { // baseline
         rect->y = lycon->block.advance_y + lycon->block.lead_y;
     }
-    log_debug("layout text: '%t', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f",
-        str, rect->start_index, rect->x, rect->y, lycon->block.advance_y, lycon->block.lead_y);
+    log_debug("layout text: '%t', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f, font_face: '%s', font_size: %f",
+        str, rect->start_index, rect->x, rect->y, lycon->block.advance_y, lycon->block.lead_y, lycon->font.style->family, lycon->font.style->font_size);
 
     // layout the text glyphs
     do {
