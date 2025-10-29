@@ -287,11 +287,16 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
     if (node->is_element()) {
         log_debug("Element: %s", node->name());
+        log_debug("Processing element: %s", node->name());
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
 
         // Debug: print display values for all elements to diagnose grid issue
         log_debug("DEBUG: Element %s - outer=%d, inner=%d", node->name(), display.outer, display.inner);
+        if (strcmp(node->name(), "table") == 0) {
+            log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
+                   display.outer, display.inner, LXB_CSS_VALUE_TABLE);
+        }
         if (strcmp(node->name(), "tbody") == 0) {
             printf("DEBUG: TBODY in layout_flow_node - outer=%d, inner=%d\n", display.outer, display.inner);
             printf("DEBUG: TBODY current position before layout_block: x=%.1f, y=%.1f\n",

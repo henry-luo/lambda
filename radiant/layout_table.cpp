@@ -332,13 +332,8 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
     // Process table children
     for (DomNode* child = first_element_child(tableNode); child; child = next_element_sibling(child)) {
-        // Get display property (styles should already be resolved by layout system)
-        lxb_html_element_t* child_elmt = child->as_element();
-        if (!child_elmt) {
-            log_debug("layout_table: as_element() returned NULL for child, skipping");
-            continue;
-        }
-        DisplayValue child_display = resolve_display(child_elmt);
+        // Get display property using resolve_display_value which handles both Lexbor and Lambda CSS nodes
+        DisplayValue child_display = resolve_display_value(child);
 
         uintptr_t tag = child->tag();
 
@@ -415,12 +410,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
                 for (DomNode* rowNode = first_element_child(child); rowNode; rowNode = next_element_sibling(rowNode)) {
                     // Check for table row by CSS display property or HTML tag
-                    lxb_html_element_t* row_elmt = rowNode->as_element();
-                    if (!row_elmt) {
-                        log_debug("layout_table: as_element() returned NULL for row, skipping");
-                        continue;
-                    }
-                    DisplayValue row_display = resolve_display(row_elmt);
+                    DisplayValue row_display = resolve_display_value(rowNode);
 
                     log_debug("Processing row candidate - tag=%s, display.outer=%d, display.inner=%d",
                            rowNode->name(), row_display.outer, row_display.inner);
@@ -437,12 +427,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
                             for (DomNode* cellNode = first_element_child(rowNode); cellNode; cellNode = next_element_sibling(cellNode)) {
                                 // Check for table cell by CSS display property or HTML tag
-                                lxb_html_element_t* cell_elmt = cellNode->as_element();
-                                if (!cell_elmt) {
-                                    log_debug("layout_table: as_element() returned NULL for cell, skipping");
-                                    continue;
-                                }
-                                DisplayValue cell_display = resolve_display(cell_elmt);
+                                DisplayValue cell_display = resolve_display_value(cellNode);
 
                                 log_debug("Processing cell candidate - tag=%s, display.outer=%d, display.inner=%d",
                                        cellNode->name(), cell_display.outer, cell_display.inner);
@@ -517,12 +502,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
                 for (DomNode* cellNode = first_element_child(child); cellNode; cellNode = next_element_sibling(cellNode)) {
                     // Check for table cell by CSS display property or HTML tag
-                    lxb_html_element_t* cell_elmt = cellNode->as_element();
-                    if (!cell_elmt) {
-                        log_debug("layout_table: as_element() returned NULL for cell, skipping");
-                        continue;
-                    }
-                    DisplayValue cell_display = resolve_display(cell_elmt);
+                    DisplayValue cell_display = resolve_display_value(cellNode);
 
                     log_debug("Processing direct cell candidate - tag=%s, display.outer=%d, display.inner=%d",
                            cellNode->name(), cell_display.outer, cell_display.inner);

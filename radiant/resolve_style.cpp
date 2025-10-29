@@ -459,6 +459,7 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
             break;
         // HTML table elements default display mapping (Phase 1)
         case LXB_TAG_TABLE:
+            log_debug("LXB_TAG_TABLE detected in resolve_display!");
             outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE;  break;
         case LXB_TAG_CAPTION:
             outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;  break;
@@ -1330,18 +1331,15 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_JUSTIFY_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
+        printf("DEBUG: JUSTIFY_CONTENT case - type=%d\n", justify_content->type);
         log_debug("DEBUG: JUSTIFY_CONTENT parsed - type=%d", justify_content->type);
         alloc_flex_prop(lycon, block);
 
-        // Handle space-evenly specially since lexbor might not support it
-        if (justify_content->type == LXB_CSS_VALUE_SPACE_EVENLY) {
-            log_debug("Setting justify-content to SPACE_EVENLY");
-            block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
-        } else {
-            // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-            block->embed->flex->justify = (JustifyContent)justify_content->type;
-            log_debug("Set justify-content to %d", justify_content->type);
-        }
+        // Lexbor only supports standard values (flex-start, flex-end, center, space-between, space-around)
+        // space-evenly is handled as a custom property since lexbor doesn't recognize it
+        block->embed->flex->justify = (JustifyContent)justify_content->type;
+        printf("DEBUG: JUSTIFY_CONTENT - Set flex->justify to %d\n", justify_content->type);
+        log_debug("Set justify-content to %d", justify_content->type);
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_ITEMS: {
@@ -1450,22 +1448,33 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // Handle CSS Grid properties as custom properties until lexbor supports them
+        fprintf(stderr, "DEBUG: CUSTOM_PROPERTY - name='%.*s' value='%.*s'\n",
+               (int)custom->name.length, (const char*)custom->name.data,
+               (int)custom->value.length, (const char*)custom->value.data);
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
 
         // Check if this is x-justify-content with space-evenly value (Lexbor compatibility fallback)
         if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "x-justify-content", 17) == 0) {
-            if (custom->value.length == 12 && strncmp((const char*)custom->value.data, "space-evenly", 12) == 0) {
-                printf("DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Applied space-evenly via x-justify-content custom property\n");
+            fprintf(stderr, "DEBUG: X_JUSTIFY_CONTENT matched! value_length=%d, value='%.*s'\n",
+                   (int)custom->value.length, (int)custom->value.length, (const char*)custom->value.data);
+            // Trim whitespace from value
+            const char* value_start = (const char*)custom->value.data;
+            const char* value_end = value_start + custom->value.length;
+            while (value_start < value_end && (*value_start == ' ' || *value_start == '\t')) value_start++;
+            while (value_end > value_start && (*(value_end-1) == ' ' || *(value_end-1) == '\t')) value_end--;
+            int trimmed_length = value_end - value_start;
+
+            if (trimmed_length == 12 && strncmp(value_start, "space-evenly", 12) == 0) {
+                fprintf(stderr, "DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Applied space-evenly, block=%p\n", block);
                 if (block) {
                     alloc_flex_prop(lycon, block);
                     block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                    fprintf(stderr, "DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Set flex->justify to %d\n", LXB_CSS_VALUE_SPACE_EVENLY);
                 }
             }
-        }
-
-        // Handle aspect-ratio as custom property until lexbor supports it
+        }        // Handle aspect-ratio as custom property until lexbor supports it
         if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "aspect-ratio", 12) == 0) {
             // Parse aspect-ratio value (simplified parsing)
             // Format: "width / height" or just "ratio"
@@ -1495,14 +1504,19 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // Handle justify-content space-evenly as custom property since lexbor doesn't support it
         else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
             const char* value_str = (const char*)custom->value.data;
+            printf("DEBUG: CUSTOM_JUSTIFY_CONTENT - Found custom property justify-content with value '%.*s'\n",
+                   (int)custom->value.length, value_str);
             log_debug("Custom justify-content property found: '%.*s'", (int)custom->value.length, value_str);
 
             // Check if the value is "space-evenly"
             if (custom->value.length == 12 && strncmp(value_str, "space-evenly", 12) == 0) {
+                printf("DEBUG: CUSTOM_JUSTIFY_CONTENT - Matched space-evenly! block=%p\n", block);
                 // Set justify-content to space-evenly using our custom constant
                 if (block) {
                     alloc_flex_prop(lycon, block);
                     block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                    printf("DEBUG: CUSTOM_JUSTIFY_CONTENT - Set flex->justify to %d (SPACE_EVENLY)\n",
+                           LXB_CSS_VALUE_SPACE_EVENLY);
                     log_debug("Set justify-content to SPACE_EVENLY (%d)", LXB_CSS_VALUE_SPACE_EVENLY);
                 }
             }

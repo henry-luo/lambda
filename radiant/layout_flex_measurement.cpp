@@ -260,6 +260,46 @@ DisplayValue resolve_display_value(DomNode* child) {
                                     display.outer = LXB_CSS_VALUE_NONE;
                                     display.inner = LXB_CSS_VALUE_NONE;
                                     return display;
+                                } else if (strcmp(keyword, "table") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE;
+                                    return display;
+                                } else if (strcmp(keyword, "inline-table") == 0) {
+                                    display.outer = LXB_CSS_VALUE_INLINE;
+                                    display.inner = LXB_CSS_VALUE_TABLE;
+                                    return display;
+                                } else if (strcmp(keyword, "table-row") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_ROW;
+                                    return display;
+                                } else if (strcmp(keyword, "table-cell") == 0) {
+                                    display.outer = LXB_CSS_VALUE_TABLE_CELL;
+                                    display.inner = LXB_CSS_VALUE_TABLE_CELL;
+                                    return display;
+                                } else if (strcmp(keyword, "table-row-group") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_ROW_GROUP;
+                                    return display;
+                                } else if (strcmp(keyword, "table-header-group") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_HEADER_GROUP;
+                                    return display;
+                                } else if (strcmp(keyword, "table-footer-group") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_FOOTER_GROUP;
+                                    return display;
+                                } else if (strcmp(keyword, "table-column") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_COLUMN;
+                                    return display;
+                                } else if (strcmp(keyword, "table-column-group") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;
+                                    return display;
+                                } else if (strcmp(keyword, "table-caption") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_TABLE_CAPTION;
+                                    return display;
                                 }
                             }
                         }
