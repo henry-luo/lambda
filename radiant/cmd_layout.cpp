@@ -239,25 +239,24 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
     apply_inline_style_attributes(dom_elem, html_elem, pool);
 
     // Process children - need to match DOM children with HTML children
+    // NOTE: Both HTML and DOM trees contain text nodes, so we need to skip them in parallel
     void* dom_child = dom_elem->first_child;
 
     // Iterate through HTML children to find matching elements
-    for (int64_t i = 0; i < html_elem->length && dom_child; i++) {
+    for (int64_t i = 0; i < html_elem->length; i++) {
         Item child_item = html_elem->items[i];
+        TypeId child_type_id = get_type_id(child_item);
 
-        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+        if (child_type_id == LMD_TYPE_ELEMENT) {
             Element* html_child = (Element*)child_item.pointer;
-            TypeElmt* child_type = (TypeElmt*)html_child->type;
 
-            // Check if DOM child is an element node
-            if (dom_node_is_element(dom_child)) {
-                DomElement* dom_child_elem = (DomElement*)dom_child;
+            if (!dom_child) {
+                // HTML has more element children than DOM - shouldn't happen
+                break;
+            }
 
-                // Recursively apply to this child
-                apply_inline_styles_to_tree(dom_child_elem, html_child, pool);
-                dom_child = dom_child_elem->next_sibling;
-            } else {
-                // Skip non-element DOM nodes (text, comments)
+            // Skip non-element DOM nodes (text, comments) until we find an element
+            while (dom_child && !dom_node_is_element(dom_child)) {
                 if (dom_node_is_text(dom_child)) {
                     dom_child = ((DomText*)dom_child)->next_sibling;
                 } else if (dom_node_is_comment(dom_child)) {
@@ -266,7 +265,26 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
                     dom_child = nullptr;
                 }
             }
+
+            if (!dom_child) {
+                // Ran out of DOM children
+                break;
+            }
+
+            DomElement* dom_child_elem = (DomElement*)dom_child;
+
+            // Recursively apply to this child
+            apply_inline_styles_to_tree(dom_child_elem, html_child, pool);
+
+            // Move to next DOM sibling
+            dom_child = dom_child_elem->next_sibling;
+        } else if (child_type_id == LMD_TYPE_STRING) {
+            // HTML text node - skip corresponding DOM text node
+            if (dom_child && dom_node_is_text(dom_child)) {
+                dom_child = ((DomText*)dom_child)->next_sibling;
+            }
         }
+        // Skip other non-element HTML children (comments, etc.)
     }
 }
 
