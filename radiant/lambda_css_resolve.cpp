@@ -2219,7 +2219,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float width = value->data.length.value;
+                float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.top = width;
                 span->bound->border->width.top_specificity = specificity;
                 log_debug("[CSS] Border-top-width: %.2f px", width);
@@ -2262,7 +2262,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float width = value->data.length.value;
+                float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.right = width;
                 span->bound->border->width.right_specificity = specificity;
                 log_debug("[CSS] Border-right-width: %.2f px", width);
@@ -2304,7 +2304,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float width = value->data.length.value;
+                float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.bottom = width;
                 span->bound->border->width.bottom_specificity = specificity;
                 log_debug("[CSS] Border-bottom-width: %.2f px", width);
@@ -2346,7 +2346,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float width = value->data.length.value;
+                float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.left = width;
                 span->bound->border->width.left_specificity = specificity;
                 log_debug("[CSS] Border-left-width: %.2f px", width);
@@ -2604,8 +2604,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 for (size_t i = 0; i < count; i++) {
                     CssValue* val = values[i];
                     if (val->type == CSS_VALUE_LENGTH) {
-                        // Width
-                        border_width = val->data.length.value;
+                        // Width - convert to pixels
+                        border_width = convert_lambda_length_to_px(val, lycon, prop_id);
                     } else if (val->type == CSS_VALUE_KEYWORD) {
                         // Could be width keyword, style, or color
                         const char* keyword = val->data.keyword;
@@ -2639,7 +2639,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             } else {
                 // Single value
                 if (value->type == CSS_VALUE_LENGTH) {
-                    border_width = value->data.length.value;
+                    border_width = convert_lambda_length_to_px(value, lycon, prop_id);
                 } else if (value->type == CSS_VALUE_KEYWORD) {
                     const char* keyword = value->data.keyword;
                     if (strcasecmp(keyword, "thin") == 0) {
