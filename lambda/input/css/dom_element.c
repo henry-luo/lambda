@@ -1507,6 +1507,10 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
         decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_FONT_WEIGHT);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
+            log_debug("[DOM ELEMENT] font-weight for <%s>: type=%d", element->tag_name, val->type);
+            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
+                log_debug("[DOM ELEMENT]   keyword value: '%s'", val->data.keyword);
+            }
             if (val->type == CSS_VALUE_INTEGER) {
                 if (has_props) strbuf_append_str(buf, ", ");
                 strbuf_append_str(buf, "font-weight:");
@@ -1521,6 +1525,9 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                 strbuf_append_format(buf, "font-weight: %s", val->data.keyword);
                 has_props = true;
             }
+        } else {
+            log_debug("[DOM ELEMENT] font-weight for <%s>: NO DECLARATION FOUND (decl=%p)",
+                     element->tag_name, (void*)decl);
         }
 
         // Color property

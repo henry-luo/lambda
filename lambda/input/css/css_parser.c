@@ -14,6 +14,7 @@
 
 #include "css_parser.h"
 #include "css_style.h"
+#include "../../../lib/log.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -487,7 +488,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     decl->property_id = css_property_id_from_name(property_name);
 
     // Debug: Print property name and ID for troubleshooting
-    fprintf(stderr, "[CSS Parser] Property: '%s' -> ID: %d, important=%d, value_count=%d\n",
+    log_debug("[CSS Parser] Property: '%s' -> ID: %d, important=%d, value_count=%d",
             property_name, decl->property_id, is_important, value_count);
 
     decl->important = is_important;
