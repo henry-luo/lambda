@@ -55,6 +55,27 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
             break;
         case RDT_VIEW_TABLE_CELL:
             view = (ViewTableCell*)pool_calloc(tree->pool, sizeof(ViewTableCell));
+            // Initialize rowspan/colspan from DOM attributes (for Lambda CSS support)
+            if (view && node) {
+                ViewTableCell* cell = (ViewTableCell*)view;
+
+                // Read colspan attribute
+                const lxb_char_t* colspan_str = node->get_attribute("colspan");
+                if (colspan_str && *colspan_str) {
+                    int colspan = atoi((const char*)colspan_str);
+                    cell->col_span = (colspan > 0) ? colspan : 1;
+                } else {
+                    cell->col_span = 1;
+                }
+                // Read rowspan attribute
+                const lxb_char_t* rowspan_str = node->get_attribute("rowspan");
+                if (rowspan_str && *rowspan_str) {
+                    int rowspan = atoi((const char*)rowspan_str);
+                    cell->row_span = (rowspan > 0) ? rowspan : 1;
+                } else {
+                    cell->row_span = 1;
+                }
+            }
             break;
         case RDT_VIEW_INLINE:
             view = (ViewSpan*)pool_calloc(tree->pool, sizeof(ViewSpan));

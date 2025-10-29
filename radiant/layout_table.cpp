@@ -206,8 +206,12 @@ static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
 
     if (!cellNode->is_element()) return;
 
+    log_debug("parse_cell_attributes: cellNode->type=%d (LEXBOR=%d, MARK=%d)",
+           cellNode->type, LEXBOR_ELEMENT, MARK_ELEMENT);
+
     // Handle both Lexbor and Lambda CSS elements
     if (cellNode->type == LEXBOR_ELEMENT && cellNode->lxb_elmt) {
+        log_debug("Using Lexbor path for cell attributes");
         // Lexbor path (original code)
         lxb_html_element_t* element = cellNode->lxb_elmt;
 
@@ -277,22 +281,27 @@ static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
     } else if (cellNode->type == MARK_ELEMENT && cellNode->dom_element) {
         // Lambda CSS path
         DomElement* dom_elem = cellNode->dom_element;
+        log_debug("Lambda CSS: parse_cell_attributes for element type=%d", cellNode->type);
 
         // Parse colspan attribute
         const char* colspan_str = dom_element_get_attribute(dom_elem, "colspan");
+        log_debug("Lambda CSS: colspan_str = %s", colspan_str ? colspan_str : "NULL");
         if (colspan_str && colspan_str[0] != '\0') {
             int span = atoi(colspan_str);
             if (span > 0 && span <= 1000) {
                 cell->col_span = span;
+                log_debug("Lambda CSS: Parsed colspan=%d", span);
             }
         }
 
         // Parse rowspan attribute
         const char* rowspan_str = dom_element_get_attribute(dom_elem, "rowspan");
+        log_debug("Lambda CSS: rowspan_str = %s", rowspan_str ? rowspan_str : "NULL");
         if (rowspan_str && rowspan_str[0] != '\0') {
             int span = atoi(rowspan_str);
             if (span > 0 && span <= 65534) {
                 cell->row_span = span;
+                log_debug("Lambda CSS: Parsed rowspan=%d from attribute value '%s'", span, rowspan_str);
             }
         }
 
@@ -502,8 +511,11 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                        cellNode->name(), cell_display.outer, cell_display.inner);
 
                                 uintptr_t ctag = cellNode->tag();
+                                log_debug("Cell check: ctag=%lu, LXB_TAG_TD=%lu, inner_display=%d, TABLE_CELL=%d",
+                                       ctag, LXB_TAG_TD, cell_display.inner, LXB_CSS_VALUE_TABLE_CELL);
                                 if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH ||
                                     cell_display.inner == LXB_CSS_VALUE_TABLE_CELL) {
+                                    log_debug("Creating table cell via create_table_cell");
                                     ViewTableCell* cell = create_table_cell(lycon, cellNode);
                                     if (cell) {
                                         // Layout cell content

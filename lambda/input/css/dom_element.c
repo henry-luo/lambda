@@ -446,9 +446,7 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
     }
 
     return attribute_storage_get(element->attributes, name);
-}
-
-bool dom_element_remove_attribute(DomElement* element, const char* name) {
+}bool dom_element_remove_attribute(DomElement* element, const char* name) {
     if (!element || !name || !element->attributes) {
         return false;
     }
@@ -1727,6 +1725,46 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                 if (has_props) strbuf_append_str(buf, ", ");
                 // TODO: Extract actual keyword (start, end, left, right, center, justify)
                 strbuf_append_format(buf, "text-align: %s", val->data.keyword);
+                has_props = true;
+            }
+        }
+
+        // Border collapse property (ID 203) - for table elements
+        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_COLLAPSE);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_format(buf, " border-collapse:%s", val->data.keyword);
+                has_props = true;
+            }
+        }
+
+        // Border spacing property (ID 204) - for table elements
+        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_SPACING);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LENGTH) {
+                // Single value applies to both horizontal and vertical
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_format(buf, " border-spacing:%.2fpx", val->data.length.value);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_LIST && val->data.list.count >= 2) {
+                // Two values: horizontal and vertical
+                CssValue* h_val = val->data.list.values[0];
+                CssValue* v_val = val->data.list.values[1];
+                if (h_val && v_val && h_val->type == CSS_VALUE_LENGTH && v_val->type == CSS_VALUE_LENGTH) {
+                    if (has_props) strbuf_append_str(buf, ", ");
+                    strbuf_append_format(buf, " border-spacing:%.2fpx %.2fpx",
+                        h_val->data.length.value, v_val->data.length.value);
+                    has_props = true;
+                }
+            } else if (val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
+                // Handle numeric values
+                float spacing = (val->type == CSS_VALUE_NUMBER) ?
+                    val->data.number.value : (float)val->data.integer.value;
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_format(buf, " border-spacing:%.2fpx", spacing);
                 has_props = true;
             }
         }

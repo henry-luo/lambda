@@ -516,8 +516,6 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     }
 
     const char* class_value = extract_element_attribute(elem, "class", pool);
-    fprintf(stderr, "[HTML] Element <%s>: class attribute = %s\n",
-            tag_name, class_value ? class_value : "(null)");
     if (class_value) {
         // parse multiple classes separated by spaces
         char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
@@ -528,7 +526,6 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
             char* token = strtok(class_copy, " \t\n");
             while (token) {
                 if (strlen(token) > 0) {
-                    fprintf(stderr, "[HTML] Adding class '%s' to <%s>\n", token, tag_name);
                     dom_element_add_class(dom_elem, token);
                 }
                 token = strtok(nullptr, " \t\n");
@@ -536,7 +533,18 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
         }
     }
 
-    // set parent relationship if provided
+    // extract rowspan and colspan attributes for table cells (td, th)
+    if (strcasecmp(tag_name, "td") == 0 || strcasecmp(tag_name, "th") == 0) {
+        const char* rowspan_value = extract_element_attribute(elem, "rowspan", pool);
+        if (rowspan_value) {
+            dom_element_set_attribute(dom_elem, "rowspan", rowspan_value);
+        }
+
+        const char* colspan_value = extract_element_attribute(elem, "colspan", pool);
+        if (colspan_value) {
+            dom_element_set_attribute(dom_elem, "colspan", colspan_value);
+        }
+    }    // set parent relationship if provided
     if (parent) {
         dom_element_append_child(parent, dom_elem);
     }
