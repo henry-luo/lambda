@@ -36,14 +36,14 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OVERFLOW_X, "overflow-x", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW_Y, "overflow-y", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_VISIBILITY, "visibility", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "visible", true, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Additional Layout Properties
     {CSS_PROPERTY_CLIP, "clip", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_CLIP_PATH, "clip-path", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_DIRECTION, "direction", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "ltr", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_UNICODE_BIDI, "unicode-bidi", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WRITING_MODE, "writing-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "horizontal-tb", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Box Model Properties
     {CSS_PROPERTY_WIDTH, "width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_HEIGHT, "height", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
@@ -51,13 +51,13 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_MIN_HEIGHT, "min-height", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MAX_WIDTH, "max-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MAX_HEIGHT, "max-height", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Margin Properties
     {CSS_PROPERTY_MARGIN_TOP, "margin-top", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_RIGHT, "margin-right", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_BOTTOM, "margin-bottom", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_LEFT, "margin-left", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Margin Logical Properties
     {CSS_PROPERTY_MARGIN_BLOCK, "margin-block", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_BLOCK_START, "margin-block-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
@@ -65,13 +65,13 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_MARGIN_INLINE, "margin-inline", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_INLINE_START, "margin-inline-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_MARGIN_INLINE_END, "margin-inline-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Padding Properties
     {CSS_PROPERTY_PADDING_TOP, "padding-top", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING_RIGHT, "padding-right", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING_BOTTOM, "padding-bottom", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING_LEFT, "padding-left", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Padding Logical Properties
     {CSS_PROPERTY_PADDING_BLOCK, "padding-block", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING_BLOCK_START, "padding-block-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
@@ -79,7 +79,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_PADDING_INLINE, "padding-inline", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING_INLINE_START, "padding-inline-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING_INLINE_END, "padding-inline-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Border Properties
     {CSS_PROPERTY_BORDER_TOP_WIDTH, "border-top-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_RIGHT_WIDTH, "border-right-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
@@ -93,7 +93,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_RIGHT_COLOR, "border-right-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_BOTTOM_COLOR, "border-bottom-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_LEFT_COLOR, "border-left-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
-    
+
     // Border shorthand properties
     {CSS_PROPERTY_BORDER_WIDTH, "border-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_STYLE, "border-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
@@ -102,9 +102,9 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_RIGHT, "border-right", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    
+
     {CSS_PROPERTY_BOX_SIZING, "box-sizing", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "content-box", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Typography Properties
     {CSS_PROPERTY_COLOR, "color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "black", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_FONT_FAMILY, "font-family", PROP_TYPE_STRING, PROP_INHERIT_YES, "serif", false, false, NULL, 0, validate_string, NULL},
@@ -112,7 +112,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FONT_WEIGHT, "font-weight", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FONT_STYLE, "font-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FONT_VARIANT, "font-variant", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Additional Font Properties
     {CSS_PROPERTY_FONT_SIZE_ADJUST, "font-size-adjust", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "none", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_FONT_KERNING, "font-kerning", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
@@ -126,7 +126,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FONT_OPTICAL_SIZING, "font-optical-sizing", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FONT_VARIATION_SETTINGS, "font-variation-settings", PROP_TYPE_STRING, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_FONT_DISPLAY, "font-display", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     {CSS_PROPERTY_LETTER_SPACING, "letter-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_WORD_SPACING, "word-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_TEXT_SHADOW, "text-shadow", PROP_TYPE_STRING, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_string, NULL},
@@ -136,14 +136,14 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TEXT_TRANSFORM, "text-transform", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WHITE_SPACE, "white-space", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_VERTICAL_ALIGN, "vertical-align", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "baseline", true, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Background Properties
     {CSS_PROPERTY_BACKGROUND_COLOR, "background-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "transparent", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BACKGROUND_IMAGE, "background-image", PROP_TYPE_URL, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_url, NULL},
     {CSS_PROPERTY_BACKGROUND_REPEAT, "background-repeat", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "repeat", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BACKGROUND_POSITION, "background-position", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0% 0%", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BACKGROUND_SIZE, "background-size", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Flexbox Properties
     {CSS_PROPERTY_FLEX_DIRECTION, "flex-direction", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "row", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX_WRAP, "flex-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "nowrap", false, false, NULL, 0, validate_keyword, NULL},
@@ -156,7 +156,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FLEX_SHRINK, "flex-shrink", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_FLEX_BASIS, "flex-basis", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_ORDER, "order", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "0", false, false, NULL, 0, validate_integer, NULL},
-    
+
     // Grid Properties
     {CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, "grid-template-columns", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_TEMPLATE_ROWS, "grid-template-rows", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
@@ -166,7 +166,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_GRID_ROW_END, "grid-row-end", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_GRID_COLUMN_GAP, "grid-column-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_GRID_ROW_GAP, "grid-row-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Additional Grid Properties
     {CSS_PROPERTY_GRID_TEMPLATE, "grid-template", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_TEMPLATE_AREAS, "grid-template-areas", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
@@ -177,18 +177,18 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_GRID_COLUMN, "grid-column", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_AREA, "grid-area", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_GRID_GAP, "grid-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
-    
+
     // Other Properties
     {CSS_PROPERTY_OPACITY, "opacity", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_CURSOR, "cursor", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_RADIUS, "border-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Additional Border Properties (Group 15)
     {CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, "border-top-left-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, "border-top-right-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, "border-bottom-right-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, "border-bottom-left-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Advanced Background Properties (Group 16)
     {CSS_PROPERTY_BACKGROUND_ATTACHMENT, "background-attachment", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "scroll", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BACKGROUND_ORIGIN, "background-origin", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "padding-box", false, false, NULL, 0, validate_keyword, NULL},
@@ -196,14 +196,14 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BACKGROUND_POSITION_X, "background-position-x", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0%", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BACKGROUND_POSITION_Y, "background-position-y", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0%", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BACKGROUND_BLEND_MODE, "background-blend-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Background shorthand and additional properties
     {CSS_PROPERTY_BACKGROUND, "background", PROP_TYPE_STRING, PROP_INHERIT_NO, "transparent", false, true, NULL, 0, validate_string, NULL},
-    
+
     // Filter Properties
     {CSS_PROPERTY_FILTER, "filter", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BACKDROP_FILTER, "backdrop-filter", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
-    
+
     // Transform Properties
     {CSS_PROPERTY_TRANSFORM, "transform", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TRANSFORM_ORIGIN, "transform-origin", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50% 0", false, false, NULL, 0, validate_string, NULL},
@@ -211,7 +211,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BACKFACE_VISIBILITY, "backface-visibility", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_PERSPECTIVE, "perspective", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "none", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PERSPECTIVE_ORIGIN, "perspective-origin", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50%", false, false, NULL, 0, validate_string, NULL},
-    
+
     // Animation Properties
     {CSS_PROPERTY_ANIMATION, "animation", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ANIMATION_NAME, "animation-name", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
@@ -222,17 +222,17 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_ANIMATION_DIRECTION, "animation-direction", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ANIMATION_FILL_MODE, "animation-fill-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ANIMATION_PLAY_STATE, "animation-play-state", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "running", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Transition Properties
     {CSS_PROPERTY_TRANSITION, "transition", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
-    
+
     // Shorthand Properties
     {CSS_PROPERTY_MARGIN, "margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
-    
+
     // Multi-column Layout Properties
     {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
@@ -243,12 +243,12 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_COLUMN_RULE_COLOR, "column-rule-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_COLUMN_SPAN, "column-span", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_FILL, "column-fill", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Gap Properties
     {CSS_PROPERTY_GAP, "gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_ROW_GAP, "row-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_COLUMN_GAP, "column-gap", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Logical Properties
     {CSS_PROPERTY_BLOCK_SIZE, "block-size", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_INLINE_SIZE, "inline-size", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
@@ -263,7 +263,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_INSET_INLINE, "inset-inline", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_INSET_INLINE_START, "inset-inline-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_INSET_INLINE_END, "inset-inline-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Text Effects Properties
     {CSS_PROPERTY_TEXT_DECORATION_LINE, "text-decoration-line", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_DECORATION_STYLE, "text-decoration-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "solid", false, false, NULL, 0, validate_keyword, NULL},
@@ -284,35 +284,35 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TEXT_JUSTIFY, "text-justify", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_ALIGN_ALL, "text-align-all", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "start", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_ALIGN_LAST, "text-align-last", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // List Properties
     {CSS_PROPERTY_LIST_STYLE, "list-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc outside none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_TYPE, "list-style-type", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_POSITION, "list-style-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "outside", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LIST_STYLE_IMAGE, "list-style-image", PROP_TYPE_URL, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_url, NULL},
-    
+
     // Counter Properties
     {CSS_PROPERTY_COUNTER_RESET, "counter-reset", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COUNTER_INCREMENT, "counter-increment", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Content Properties
     {CSS_PROPERTY_CONTENT, "content", PROP_TYPE_STRING, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_QUOTES, "quotes", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_string, NULL},
-    
+
     // Additional Typography Properties
     {CSS_PROPERTY_FONT, "font", PROP_TYPE_STRING, PROP_INHERIT_YES, "medium serif", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_FONT_STRETCH, "font-stretch", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_ORIENTATION, "text-orientation", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "mixed", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_COMBINE_UPRIGHT, "text-combine-upright", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_INDENT, "text-indent", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Table Properties
     {CSS_PROPERTY_BORDER_COLLAPSE, "border-collapse", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "separate", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_SPACING, "border-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_CAPTION_SIDE, "caption-side", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "top", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_EMPTY_CELLS, "empty-cells", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "show", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TABLE_LAYOUT, "table-layout", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // User Interface Properties
     {CSS_PROPERTY_RESIZE, "resize", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CARET_COLOR, "caret-color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "auto", true, false, NULL, 0, validate_color, NULL},
@@ -323,10 +323,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_NAV_LEFT, "nav-left", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_APPEARANCE, "appearance", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_USER_SELECT, "user-select", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Box Shadow
     {CSS_PROPERTY_BOX_SHADOW, "box-shadow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Border Properties (additional)
     {CSS_PROPERTY_BORDER_IMAGE, "border-image", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_IMAGE_SOURCE, "border-image-source", PROP_TYPE_URL, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_url, NULL},
@@ -339,7 +339,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OUTLINE_WIDTH, "outline-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_OUTLINE_COLOR, "outline-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "invert", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_OUTLINE_OFFSET, "outline-offset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
-    
+
     // Page Break Properties
     {CSS_PROPERTY_BREAK_BEFORE, "break-before", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BREAK_AFTER, "break-after", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
@@ -349,18 +349,18 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_PAGE_BREAK_INSIDE, "page-break-inside", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ORPHANS, "orphans", PROP_TYPE_INTEGER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_WIDOWS, "widows", PROP_TYPE_INTEGER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
-    
+
     // Container Properties
     {CSS_PROPERTY_CONTAINER, "container", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_CONTAINER_TYPE, "container-type", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CONTAINER_NAME, "container-name", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Baseline Properties
     {CSS_PROPERTY_ALIGNMENT_BASELINE, "alignment-baseline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "baseline", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BASELINE_SHIFT, "baseline-shift", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "baseline", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BASELINE_SOURCE, "baseline-source", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_DOMINANT_BASELINE, "dominant-baseline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Additional Properties
     {CSS_PROPERTY_ISOLATION, "isolation", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_MIX_BLEND_MODE, "mix-blend-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
@@ -368,7 +368,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OBJECT_POSITION, "object-position", PROP_TYPE_STRING, PROP_INHERIT_NO, "50% 50%", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_POINTER_EVENTS, "pointer-events", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_USER_SELECT, "user-select", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    
+
     // Remaining Additional Properties
     {CSS_PROPERTY_FLOAT_DEFER, "float-defer", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FLOAT_OFFSET, "float-offset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
@@ -402,7 +402,7 @@ static CssProperty property_definitions[] = {
 
 CSSPropertyID css_property_id_from_name(const char* name) {
     if (!name) return CSS_PROP_UNKNOWN;
-    
+
     for (int i = 0; i < PROPERTY_DEFINITION_COUNT; i++) {
         if (strcmp(name, property_definitions[i].name) == 0) {
             return property_definitions[i].id;
@@ -425,7 +425,7 @@ CSSPropertyType css_property_get_expected_type(CSSPropertyID id) {
         case CSS_PROP_COLOR:
         case CSS_PROP_BACKGROUND_COLOR:
             return CSS_PROP_TYPE_COLOR;
-            
+
         case CSS_PROP_FONT_SIZE:
         case CSS_PROP_WIDTH:
         case CSS_PROP_HEIGHT:
@@ -435,15 +435,15 @@ CSSPropertyType css_property_get_expected_type(CSSPropertyID id) {
         case CSS_PROP_LEFT:
         case CSS_PROP_LINE_HEIGHT:
             return CSS_PROP_TYPE_LENGTH;
-            
+
         case CSS_PROP_Z_INDEX:
         case CSS_PROP_OPACITY:
         case CSS_PROP_FONT_WEIGHT:
             return CSS_PROP_TYPE_NUMBER;
-            
+
         case CSS_PROP_FONT_FAMILY:
             return CSS_PROP_TYPE_STRING;
-            
+
         default:
             return CSS_PROP_TYPE_KEYWORD;
     }
@@ -451,14 +451,14 @@ CSSPropertyType css_property_get_expected_type(CSSPropertyID id) {
 
 bool css_property_enhanced_validate_value(CSSPropertyID id, CSSPropertyValue* value) {
     if (!value) return false;
-    
+
     CSSPropertyType expected = css_property_get_expected_type(id);
     return value->type == expected || value->type == CSS_PROP_TYPE_KEYWORD;
 }
 
 bool css_property_validate_value(CssPropertyId id, CssValue* value) {
     if (!value) return false;
-    
+
     // Basic validation - accept all values for now
     // In a full implementation, this would validate the value against the property's allowed types
     (void)id; // Suppress unused parameter warning
@@ -467,10 +467,10 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
 
 CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool) {
     if (!name || !value || !pool) return NULL;
-    
+
     CSSProperty* prop = (CSSProperty*)pool_calloc(pool, sizeof(CSSProperty));
     if (!prop) return NULL;
-    
+
     // Initialize the declaration structure
     prop->property_id = css_property_id_from_name(name);
     prop->origin = CSS_ORIGIN_AUTHOR;
@@ -478,31 +478,31 @@ CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool)
     prop->important = false;
     prop->source_file = NULL;
     prop->source_line = 0;
-    
+
     // Initialize specificity to zero
     prop->specificity.inline_style = 0;
     prop->specificity.ids = 0;
     prop->specificity.classes = 0;
     prop->specificity.elements = 0;
     prop->specificity.important = false;
-    
+
     // Check for !important
     const char* important_pos = strstr(value, "!important");
     if (important_pos) {
         prop->important = true;
         prop->specificity.important = true;
     }
-    
+
     // Create a simple value (just store as keyword for now)
     prop->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!prop->value) {
         return NULL;
     }
-    
+
     // Simple value parsing - just store as keyword for now
     prop->value->type = CSS_VALUE_KEYWORD;
     prop->value->data.keyword = pool_strdup(pool, value);
-    
+
     return prop;
 }
 
@@ -554,11 +554,11 @@ static bool validate_string(const char* value_str, void** parsed_value, Pool* po
 static unsigned int hash_string(const char* str) {
     unsigned int hash = 5381;
     int c;
-    
+
     while ((c = *str++)) {
         hash = ((hash << 5) + hash) + c; // hash * 33 + c
     }
-    
+
     return hash % PROPERTY_HASH_SIZE;
 }
 
@@ -570,34 +570,34 @@ bool css_property_system_init(Pool* pool) {
     if (g_system_initialized) {
         return true; // Already initialized
     }
-    
+
     g_property_pool = pool;
     g_property_count = PROPERTY_DEFINITION_COUNT;
-    
+
     // Allocate property database
     g_property_database = (CssProperty*)pool_calloc(pool, sizeof(CssProperty) * g_property_count);
     if (!g_property_database) {
         return false;
     }
-    
+
     // Copy property definitions
     memcpy(g_property_database, property_definitions, sizeof(property_definitions));
-    
+
     // Initialize hash table
     memset(g_property_hash, 0, sizeof(g_property_hash));
-    
+
     // Build hash table for name lookups
     for (int i = 0; i < g_property_count; i++) {
         unsigned int hash = hash_string(g_property_database[i].name);
-        
+
         // Handle collisions with chaining (simplified)
         while (g_property_hash[hash] != NULL) {
             hash = (hash + 1) % PROPERTY_HASH_SIZE;
         }
-        
+
         g_property_hash[hash] = &g_property_database[i];
     }
-    
+
     g_system_initialized = true;
     return true;
 }
@@ -614,7 +614,7 @@ void css_property_system_cleanup(void) {
 
 const CssProperty* css_property_get_by_id(CssPropertyId property_id) {
     if (!g_system_initialized) return NULL;
-    
+
     // Handle custom properties
     if (property_id >= CSS_PROPERTY_CUSTOM && property_id < CSS_PROPERTY_COUNT) {
         for (int i = 0; i < g_custom_property_count; i++) {
@@ -624,20 +624,20 @@ const CssProperty* css_property_get_by_id(CssPropertyId property_id) {
         }
         return NULL;
     }
-    
+
     // Handle standard properties
     for (int i = 0; i < g_property_count; i++) {
         if (g_property_database[i].id == property_id) {
             return &g_property_database[i];
         }
     }
-    
+
     return NULL;
 }
 
 const CssProperty* css_property_get_by_name(const char* name) {
     if (!g_system_initialized || !name) return NULL;
-    
+
     // Check for custom property (starts with --)
     if (strncmp(name, "--", 2) == 0) {
         for (int i = 0; i < g_custom_property_count; i++) {
@@ -647,23 +647,23 @@ const CssProperty* css_property_get_by_name(const char* name) {
         }
         return NULL;
     }
-    
+
     // Search hash table
     unsigned int hash = hash_string(name);
-    
+
     for (int i = 0; i < PROPERTY_HASH_SIZE; i++) {
         unsigned int index = (hash + i) % PROPERTY_HASH_SIZE;
         CssProperty* prop = g_property_hash[index];
-        
+
         if (!prop) {
             break; // Not found
         }
-        
+
         if (strcmp(prop->name, name) == 0) {
             return prop;
         }
     }
-    
+
     return NULL;
 }
 
@@ -691,19 +691,19 @@ bool css_property_is_shorthand(CssPropertyId property_id) {
     return prop && prop->shorthand;
 }
 
-int css_property_get_longhand_properties(CssPropertyId shorthand_id, 
-                                        CssPropertyId* longhand_ids, 
+int css_property_get_longhand_properties(CssPropertyId shorthand_id,
+                                        CssPropertyId* longhand_ids,
                                         int max_count) {
     const CssProperty* prop = css_property_get_by_id(shorthand_id);
     if (!prop || !prop->shorthand || !longhand_ids || max_count <= 0) {
         return 0;
     }
-    
+
     int count = prop->longhand_count < max_count ? prop->longhand_count : max_count;
     for (int i = 0; i < count; i++) {
         longhand_ids[i] = prop->longhand_props[i];
     }
-    
+
     return count;
 }
 
@@ -712,7 +712,7 @@ void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool) {
     if (!prop || !prop->initial_value) {
         return NULL;
     }
-    
+
     // For now, just return the string. In a full implementation,
     // this would parse the initial value into the appropriate type.
     size_t len = strlen(prop->initial_value);
@@ -721,15 +721,15 @@ void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool) {
     return value;
 }
 
-bool css_property_validate_value_from_string(CssPropertyId property_id, 
-                                const char* value_str, 
-                                void** parsed_value, 
+bool css_property_validate_value_from_string(CssPropertyId property_id,
+                                const char* value_str,
+                                void** parsed_value,
                                 Pool* pool) {
     const CssProperty* prop = css_property_get_by_id(property_id);
     if (!prop || !value_str || !parsed_value) {
         return false;
     }
-    
+
     // Handle global keywords
     if (strcmp(value_str, "inherit") == 0 ||
         strcmp(value_str, "initial") == 0 ||
@@ -741,12 +741,65 @@ bool css_property_validate_value_from_string(CssPropertyId property_id,
         *parsed_value = keyword;
         return true;
     }
-    
+
     // Use property-specific validator
     if (prop->validate_value) {
-        return prop->validate_value(value_str, parsed_value, pool);
+        bool valid = prop->validate_value(value_str, parsed_value, pool);
+        if (!valid) {
+            return false;
+        }
+
+        // Additional validation for length values that don't allow negatives
+        if (prop->type == PROP_TYPE_LENGTH && *parsed_value) {
+            CssLength* length = (CssLength*)(*parsed_value);
+
+            // Properties that cannot have negative values
+            bool disallow_negative = false;
+            switch (property_id) {
+                // width, height, and their min/max variants cannot be negative
+                case CSS_PROPERTY_WIDTH:
+                case CSS_PROPERTY_HEIGHT:
+                case CSS_PROPERTY_MIN_WIDTH:
+                case CSS_PROPERTY_MIN_HEIGHT:
+                case CSS_PROPERTY_MAX_WIDTH:
+                case CSS_PROPERTY_MAX_HEIGHT:
+                // padding properties cannot be negative
+                case CSS_PROPERTY_PADDING_TOP:
+                case CSS_PROPERTY_PADDING_RIGHT:
+                case CSS_PROPERTY_PADDING_BOTTOM:
+                case CSS_PROPERTY_PADDING_LEFT:
+                case CSS_PROPERTY_PADDING_BLOCK:
+                case CSS_PROPERTY_PADDING_BLOCK_START:
+                case CSS_PROPERTY_PADDING_BLOCK_END:
+                case CSS_PROPERTY_PADDING_INLINE:
+                case CSS_PROPERTY_PADDING_INLINE_START:
+                case CSS_PROPERTY_PADDING_INLINE_END:
+                // border widths cannot be negative
+                case CSS_PROPERTY_BORDER_TOP_WIDTH:
+                case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
+                case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
+                case CSS_PROPERTY_BORDER_LEFT_WIDTH:
+                case CSS_PROPERTY_BORDER_WIDTH:
+                    disallow_negative = true;
+                    break;
+
+                // margins, positioning (top/right/bottom/left) CAN be negative
+                default:
+                    disallow_negative = false;
+                    break;
+            }
+
+            if (disallow_negative && length->value < 0) {
+                // reject negative value for properties that don't allow it
+                printf("[CSS Parse] Rejecting negative value %.2f for property %s\n",
+                       length->value, prop->name);
+                return false;
+            }
+        }
+
+        return true;
     }
-    
+
     return false;
 }
 
@@ -758,12 +811,12 @@ void* css_property_compute_value(CssPropertyId property_id,
     if (!prop || !specified_value) {
         return css_property_get_initial_value(property_id, pool);
     }
-    
+
     // Use property-specific computation function
     if (prop->compute_value) {
         return prop->compute_value(specified_value, parent_value, pool);
     }
-    
+
     // Default: return specified value as-is
     return specified_value;
 }
@@ -776,22 +829,22 @@ CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
     if (!name || strncmp(name, "--", 2) != 0) {
         return 0; // Invalid custom property name
     }
-    
+
     // Check if already registered
     CssPropertyId existing = css_property_get_custom_id(name);
     if (existing) {
         return existing;
     }
-    
+
     // Expand custom property array if needed
     if (!g_custom_properties) {
         g_custom_properties = (CssProperty*)pool_calloc(pool, sizeof(CssProperty) * 100);
     }
-    
+
     if (g_custom_property_count >= 100) {
         return 0; // Too many custom properties
     }
-    
+
     // Create new custom property
     CssProperty* custom_prop = &g_custom_properties[g_custom_property_count];
     custom_prop->id = g_next_custom_id++;
@@ -805,7 +858,7 @@ CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
     custom_prop->longhand_count = 0;
     custom_prop->validate_value = NULL; // Custom properties accept any value
     custom_prop->compute_value = NULL;
-    
+
     g_custom_property_count++;
     return custom_prop->id;
 }
@@ -814,13 +867,13 @@ CssPropertyId css_property_get_custom_id(const char* name) {
     if (!name || strncmp(name, "--", 2) != 0) {
         return 0;
     }
-    
+
     for (int i = 0; i < g_custom_property_count; i++) {
         if (strcmp(g_custom_properties[i].name, name) == 0) {
             return g_custom_properties[i].id;
         }
     }
-    
+
     return 0;
 }
 
@@ -834,39 +887,39 @@ bool css_property_is_custom(CssPropertyId property_id) {
 
 static bool validate_length(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     CssLength* length = (CssLength*)pool_calloc(pool, sizeof(CssLength));
     if (!length) return false;
-    
+
     // Simple length parsing (full implementation would be more robust)
     if (css_parse_length(value_str, length)) {
         *parsed_value = length;
         return true;
     }
-    
+
     return false;
 }
 
 static bool validate_color(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     CssColor* color = (CssColor*)pool_calloc(pool, sizeof(CssColor));
     if (!color) return false;
-    
+
     if (css_parse_color(value_str, color)) {
         *parsed_value = color;
         return true;
     }
-    
+
     return false;
 }
 
 static bool validate_keyword(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     CssKeyword* keyword = (CssKeyword*)pool_calloc(pool, sizeof(CssKeyword));
     if (!keyword) return false;
-    
+
     keyword->value = value_str;
     keyword->enum_value = 0; // Would map to enum in full implementation
     *parsed_value = keyword;
@@ -875,15 +928,15 @@ static bool validate_keyword(const char* value_str, void** parsed_value, Pool* p
 
 static bool validate_number(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     char* endptr;
     double value = strtod(value_str, &endptr);
-    
+
     if (endptr == value_str) return false; // No conversion
-    
+
     double* number = (double*)pool_calloc(pool, sizeof(double));
     if (!number) return false;
-    
+
     *number = value;
     *parsed_value = number;
     return true;
@@ -891,15 +944,15 @@ static bool validate_number(const char* value_str, void** parsed_value, Pool* po
 
 static bool validate_integer(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     char* endptr;
     long value = strtol(value_str, &endptr, 10);
-    
+
     if (endptr == value_str) return false; // No conversion
-    
+
     int* integer = (int*)pool_calloc(pool, sizeof(int));
     if (!integer) return false;
-    
+
     *integer = (int)value;
     *parsed_value = integer;
     return true;
@@ -907,22 +960,22 @@ static bool validate_integer(const char* value_str, void** parsed_value, Pool* p
 
 static bool validate_percentage(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     size_t len = strlen(value_str);
     if (len == 0 || value_str[len - 1] != '%') return false;
-    
+
     char* temp = (char*)pool_calloc(pool, len);
     strncpy(temp, value_str, len - 1);
     temp[len - 1] = '\0';
-    
+
     char* endptr;
     double value = strtod(temp, &endptr);
-    
+
     if (endptr == temp) return false;
-    
+
     double* percentage = (double*)pool_calloc(pool, sizeof(double));
     if (!percentage) return false;
-    
+
     *percentage = value;
     *parsed_value = percentage;
     return true;
@@ -930,10 +983,10 @@ static bool validate_percentage(const char* value_str, void** parsed_value, Pool
 
 static bool validate_url(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     // Simple URL validation (starts with url())
     if (strncmp(value_str, "url(", 4) != 0) return false;
-    
+
     size_t len = strlen(value_str);
     char* url = (char*)pool_calloc(pool, len + 1);
     strcpy(url, value_str);
@@ -943,7 +996,7 @@ static bool validate_url(const char* value_str, void** parsed_value, Pool* pool)
 
 static bool validate_string(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     size_t len = strlen(value_str);
     char* string = (char*)pool_calloc(pool, len + 1);
     strcpy(string, value_str);
@@ -953,13 +1006,13 @@ static bool validate_string(const char* value_str, void** parsed_value, Pool* po
 
 static bool validate_time(const char* value_str, void** parsed_value, Pool* pool) {
     if (!value_str || !parsed_value) return false;
-    
+
     // Parse time values like "0.5s", "300ms", "2s"
     char* endptr;
     double value = strtod(value_str, &endptr);
-    
+
     if (endptr == value_str) return false;
-    
+
     // Check for valid time units
     bool valid_unit = false;
     if (strncmp(endptr, "s", 1) == 0 && strlen(endptr) == 1) {
@@ -970,12 +1023,12 @@ static bool validate_time(const char* value_str, void** parsed_value, Pool* pool
         value = value / 1000.0;
         valid_unit = true;
     }
-    
+
     if (!valid_unit || value < 0) return false;
-    
+
     double* time = (double*)pool_calloc(pool, sizeof(double));
     if (!time) return false;
-    
+
     *time = value;
     *parsed_value = time;
     return true;
@@ -987,22 +1040,22 @@ static bool validate_time(const char* value_str, void** parsed_value, Pool* pool
 
 bool css_parse_length(const char* value_str, CssLength* length) {
     if (!value_str || !length) return false;
-    
+
     // Handle special keywords
     if (strcmp(value_str, "auto") == 0) {
         length->value = 0;
         length->unit = CSS_UNIT_PX; // Special handling needed
         return true;
     }
-    
+
     char* endptr;
     double value = strtod(value_str, &endptr);
-    
+
     if (endptr == value_str) return false;
-    
+
     length->value = value;
-    
-    // Parse unit
+
+    // Parse unit - check longer units first to avoid partial matches
     if (strcmp(endptr, "px") == 0) {
         length->unit = CSS_UNIT_PX;
     } else if (strcmp(endptr, "em") == 0) {
@@ -1015,19 +1068,51 @@ bool css_parse_length(const char* value_str, CssLength* length) {
         length->unit = CSS_UNIT_VW;
     } else if (strcmp(endptr, "vh") == 0) {
         length->unit = CSS_UNIT_VH;
+    } else if (strcmp(endptr, "vi") == 0) {
+        length->unit = CSS_UNIT_VI;
+    } else if (strcmp(endptr, "vb") == 0) {
+        length->unit = CSS_UNIT_VB;
+    } else if (strcmp(endptr, "vmin") == 0) {
+        length->unit = CSS_UNIT_VMIN;
+    } else if (strcmp(endptr, "vmax") == 0) {
+        length->unit = CSS_UNIT_VMAX;
+    } else if (strcmp(endptr, "cm") == 0) {
+        length->unit = CSS_UNIT_CM;
+    } else if (strcmp(endptr, "mm") == 0) {
+        length->unit = CSS_UNIT_MM;
+    } else if (strcmp(endptr, "in") == 0) {
+        length->unit = CSS_UNIT_IN;
+    } else if (strcmp(endptr, "pt") == 0) {
+        length->unit = CSS_UNIT_PT;
+    } else if (strcmp(endptr, "pc") == 0) {
+        length->unit = CSS_UNIT_PC;
+    } else if (strcmp(endptr, "q") == 0) {
+        length->unit = CSS_UNIT_Q;
+    } else if (strcmp(endptr, "ex") == 0) {
+        length->unit = CSS_UNIT_EX;
+    } else if (strcmp(endptr, "ch") == 0) {
+        length->unit = CSS_UNIT_CH;
+    } else if (strcmp(endptr, "cap") == 0) {
+        length->unit = CSS_UNIT_CAP;
+    } else if (strcmp(endptr, "ic") == 0) {
+        length->unit = CSS_UNIT_IC;
+    } else if (strcmp(endptr, "lh") == 0) {
+        length->unit = CSS_UNIT_LH;
+    } else if (strcmp(endptr, "rlh") == 0) {
+        length->unit = CSS_UNIT_RLH;
     } else if (*endptr == '\0' && value == 0) {
         // Unitless zero is valid for lengths
         length->unit = CSS_UNIT_PX;
     } else {
         return false; // Unknown unit
     }
-    
+
     return true;
 }
 
 bool css_parse_color(const char* value_str, CssColor* color) {
     if (!value_str || !color) return false;
-    
+
     // Handle hex colors
     if (value_str[0] == '#') {
         // Simple hex parsing (full implementation would handle 3/4/6/8 digit hex)
@@ -1044,7 +1129,7 @@ bool css_parse_color(const char* value_str, CssColor* color) {
         }
         return false;
     }
-    
+
     // Handle named colors (simple examples)
     if (strcmp(value_str, "red") == 0) {
         color->r = 255; color->g = 0; color->b = 0; color->a = 255;
@@ -1069,13 +1154,13 @@ bool css_parse_color(const char* value_str, CssColor* color) {
         color->type = CSS_COLOR_CURRENT;
         return true;
     }
-    
+
     return false;
 }
 
 bool css_parse_keyword(const char* value_str, CssPropertyId property_id, CssKeyword* keyword) {
     if (!value_str || !keyword) return false;
-    
+
     keyword->value = value_str;
     keyword->enum_value = 0; // Would map to property-specific enum
     return true;
@@ -1083,20 +1168,20 @@ bool css_parse_keyword(const char* value_str, CssPropertyId property_id, CssKeyw
 
 bool css_parse_function(const char* value_str, CssFunction* function, Pool* pool) {
     if (!value_str || !function || !pool) return false;
-    
+
     // Simple function parsing (calc, var, rgb, etc.)
     const char* paren = strchr(value_str, '(');
     if (!paren) return false;
-    
+
     size_t name_len = paren - value_str;
     char* name = (char*)pool_calloc(pool, name_len + 1);
     strncpy(name, value_str, name_len);
     name[name_len] = '\0';
-    
+
     function->name = name;
     function->arguments = NULL; // Would parse arguments in full implementation
     function->argument_count = 0;
-    
+
     return true;
 }
 
@@ -1115,7 +1200,7 @@ void css_property_print_info(CssPropertyId property_id) {
         printf("Property ID %u: NOT FOUND\n", (unsigned int)property_id);
         return;
     }
-    
+
     printf("Property: %s (ID: %u)\n", prop->name, (unsigned int)prop->id);
     printf("  Type: %d\n", prop->type);
     printf("  Inherits: %s\n", prop->inheritance == PROP_INHERIT_YES ? "yes" : "no");
@@ -1128,25 +1213,25 @@ int css_property_get_count(void) {
     return g_property_count + g_custom_property_count;
 }
 
-int css_property_foreach(bool (*callback)(const CssProperty* prop, void* context), 
+int css_property_foreach(bool (*callback)(const CssProperty* prop, void* context),
                         void* context) {
     if (!callback) return 0;
-    
+
     int count = 0;
-    
+
     // Iterate standard properties
     for (int i = 0; i < g_property_count; i++) {
         if (callback(&g_property_database[i], context)) {
             count++;
         }
     }
-    
+
     // Iterate custom properties
     for (int i = 0; i < g_custom_property_count; i++) {
         if (callback(&g_custom_properties[i], context)) {
             count++;
         }
     }
-    
+
     return count;
 }

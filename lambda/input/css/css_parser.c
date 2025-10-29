@@ -716,6 +716,74 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         decl->value = list_value;
     }
 
+    // Debug: print the value type
+    if (decl->value) {
+        log_debug("[CSS Parse] Declaration for property ID %d: value type = %d",
+               decl->property_id, decl->value->type);
+        if (decl->value->type == CSS_VALUE_LENGTH) {
+            log_debug("[CSS Parse]   Length value = %.2f", decl->value->data.length.value);
+        }
+    }
+
+    // Validate the parsed value before returning
+    if (decl->value) {
+        bool disallow_negative = false;
+        float value_to_check = 0;
+
+        // Check if this is a length or number value
+        if (decl->value->type == CSS_VALUE_LENGTH) {
+            value_to_check = decl->value->data.length.value;
+        } else if (decl->value->type == CSS_VALUE_NUMBER) {
+            value_to_check = decl->value->data.number.value;
+        } else {
+            // Not a numeric value, skip validation
+            return decl;
+        }
+
+        // Properties that cannot have negative values
+        switch (decl->property_id) {
+            // width, height, and their min/max variants cannot be negative
+            case CSS_PROPERTY_WIDTH:
+            case CSS_PROPERTY_HEIGHT:
+            case CSS_PROPERTY_MIN_WIDTH:
+            case CSS_PROPERTY_MIN_HEIGHT:
+            case CSS_PROPERTY_MAX_WIDTH:
+            case CSS_PROPERTY_MAX_HEIGHT:
+            // padding properties cannot be negative
+            case CSS_PROPERTY_PADDING_TOP:
+            case CSS_PROPERTY_PADDING_RIGHT:
+            case CSS_PROPERTY_PADDING_BOTTOM:
+            case CSS_PROPERTY_PADDING_LEFT:
+            case CSS_PROPERTY_PADDING_BLOCK:
+            case CSS_PROPERTY_PADDING_BLOCK_START:
+            case CSS_PROPERTY_PADDING_BLOCK_END:
+            case CSS_PROPERTY_PADDING_INLINE:
+            case CSS_PROPERTY_PADDING_INLINE_START:
+            case CSS_PROPERTY_PADDING_INLINE_END:
+            // border widths cannot be negative
+            case CSS_PROPERTY_BORDER_TOP_WIDTH:
+            case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
+            case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
+            case CSS_PROPERTY_BORDER_LEFT_WIDTH:
+            case CSS_PROPERTY_BORDER_WIDTH:
+                disallow_negative = true;
+                break;
+
+            // margins, positioning (top/right/bottom/left) CAN be negative
+            default:
+                disallow_negative = false;
+                break;
+        }
+
+        if (disallow_negative && value_to_check < 0) {
+            // reject negative value for properties that don't allow it
+            // per CSS spec, return NULL to prevent invalid declaration from entering cascade
+            log_debug("[CSS Parse] Rejecting negative value %.2f for property ID %d",
+                   value_to_check, decl->property_id);
+            return NULL;
+        }
+    }
+
     return decl;
 }
 
@@ -789,6 +857,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
         // Parse declaration
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
+        fprintf(stderr, "[CSS Parser] After parsing: decl=%p\n", (void*)decl);
         if (decl) {
             fprintf(stderr, "[CSS Parser] Parsed declaration: property_id=%d for position %d\n",
                     decl->property_id, decl_count);

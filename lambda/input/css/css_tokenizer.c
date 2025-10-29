@@ -4,6 +4,46 @@
 #include <ctype.h>
 #include <assert.h>
 
+// Helper function to parse CSS unit from string
+static CssUnit parse_css_unit(const char* unit_str, size_t length) {
+    if (!unit_str || length == 0) return CSS_UNIT_NONE;
+
+    // Create null-terminated string for comparison
+    char unit[16];
+    if (length >= sizeof(unit)) return CSS_UNIT_NONE;
+    strncpy(unit, unit_str, length);
+    unit[length] = '\0';
+
+    // Absolute units
+    if (strcmp(unit, "px") == 0) return CSS_UNIT_PX;
+    if (strcmp(unit, "cm") == 0) return CSS_UNIT_CM;
+    if (strcmp(unit, "mm") == 0) return CSS_UNIT_MM;
+    if (strcmp(unit, "in") == 0) return CSS_UNIT_IN;
+    if (strcmp(unit, "pt") == 0) return CSS_UNIT_PT;
+    if (strcmp(unit, "pc") == 0) return CSS_UNIT_PC;
+    if (strcmp(unit, "q") == 0) return CSS_UNIT_Q;
+
+    // Font-relative units
+    if (strcmp(unit, "em") == 0) return CSS_UNIT_EM;
+    if (strcmp(unit, "ex") == 0) return CSS_UNIT_EX;
+    if (strcmp(unit, "cap") == 0) return CSS_UNIT_CAP;
+    if (strcmp(unit, "ch") == 0) return CSS_UNIT_CH;
+    if (strcmp(unit, "ic") == 0) return CSS_UNIT_IC;
+    if (strcmp(unit, "rem") == 0) return CSS_UNIT_REM;
+    if (strcmp(unit, "lh") == 0) return CSS_UNIT_LH;
+    if (strcmp(unit, "rlh") == 0) return CSS_UNIT_RLH;
+
+    // Viewport units
+    if (strcmp(unit, "vw") == 0) return CSS_UNIT_VW;
+    if (strcmp(unit, "vh") == 0) return CSS_UNIT_VH;
+    if (strcmp(unit, "vi") == 0) return CSS_UNIT_VI;
+    if (strcmp(unit, "vb") == 0) return CSS_UNIT_VB;
+    if (strcmp(unit, "vmin") == 0) return CSS_UNIT_VMIN;
+    if (strcmp(unit, "vmax") == 0) return CSS_UNIT_VMAX;
+
+    return CSS_UNIT_NONE;
+}
+
 // Enhanced Unicode character classification
 bool css_is_name_start_char_unicode(uint32_t codepoint) {
     // CSS3 name-start character definition
@@ -813,10 +853,14 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                         token->type = CSS_TOKEN_PERCENTAGE;
                     } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
                         // Parse unit
+                        size_t unit_start = pos;
                         while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
                             pos++;
                         }
                         token->type = CSS_TOKEN_DIMENSION;
+                        // Parse the unit string and convert to CssUnit enum
+                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
+                        token->data.dimension.unit = parsed_unit;
                     } else {
                         token->type = CSS_TOKEN_NUMBER;
                     }
@@ -828,7 +872,11 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     if (num_str) {
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
-                        token->data.number_value = atof(num_str);
+                        if (token->type == CSS_TOKEN_DIMENSION) {
+                            token->data.dimension.value = atof(num_str);
+                        } else {
+                            token->data.number_value = atof(num_str);
+                        }
                     }
                 } else {
                     token->type = CSS_TOKEN_DELIM;
@@ -861,10 +909,14 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                         token->type = CSS_TOKEN_PERCENTAGE;
                     } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
                         // Parse unit
+                        size_t unit_start = pos;
                         while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
                             pos++;
                         }
                         token->type = CSS_TOKEN_DIMENSION;
+                        // Parse the unit string and convert to CssUnit enum
+                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
+                        token->data.dimension.unit = parsed_unit;
                     } else {
                         token->type = CSS_TOKEN_NUMBER;
                     }
@@ -876,7 +928,11 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     if (num_str) {
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
-                        token->data.number_value = atof(num_str);
+                        if (token->type == CSS_TOKEN_DIMENSION) {
+                            token->data.dimension.value = atof(num_str);
+                        } else {
+                            token->data.number_value = atof(num_str);
+                        }
                     }
                 } else if (ch == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
                     // Decimal number starting with . (e.g., .5)
@@ -895,10 +951,14 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                         token->type = CSS_TOKEN_PERCENTAGE;
                     } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
                         // Parse unit
+                        size_t unit_start = pos;
                         while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
                             pos++;
                         }
                         token->type = CSS_TOKEN_DIMENSION;
+                        // Parse the unit string and convert to CssUnit enum
+                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
+                        token->data.dimension.unit = parsed_unit;
                     } else {
                         token->type = CSS_TOKEN_NUMBER;
                     }
@@ -910,7 +970,11 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     if (num_str) {
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
-                        token->data.number_value = atof(num_str);
+                        if (token->type == CSS_TOKEN_DIMENSION) {
+                            token->data.dimension.value = atof(num_str);
+                        } else {
+                            token->data.number_value = atof(num_str);
+                        }
                     }
                 } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))) {
                     // Identifier or function - check for ASCII start
