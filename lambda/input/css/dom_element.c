@@ -1014,15 +1014,27 @@ int dom_element_get_child_index(DomElement* element) {
         return -1;
     }
 
+    // Count only element children (not text nodes or comments)
+    // According to CSS spec, :nth-child() counts only element nodes
     int index = 0;
-    DomElement* sibling = element->parent->first_child;
+    void* sibling = element->parent->first_child;
 
     while (sibling && sibling != element) {
-        index++;
-        sibling = sibling->next_sibling;
+        // Only count element nodes for nth-child
+        if (dom_node_get_type(sibling) == DOM_NODE_ELEMENT) {
+            index++;
+        }
+        // Get next sibling based on node type
+        if (dom_node_get_type(sibling) == DOM_NODE_ELEMENT) {
+            sibling = ((DomElement*)sibling)->next_sibling;
+        } else if (dom_node_get_type(sibling) == DOM_NODE_TEXT) {
+            sibling = ((DomText*)sibling)->next_sibling;
+        } else {
+            sibling = ((DomComment*)sibling)->next_sibling;
+        }
     }
 
-    return sibling == element ? index : -1;
+    return (sibling == element) ? index : -1;
 }
 
 int dom_element_count_children(DomElement* element) {
