@@ -51,8 +51,8 @@ static const KeywordMapping keyword_map[] = {
     {"circle", 0x0220},    // Custom value for list-style-type circle
     {"clip", 0x003c},      // LXB_CSS_VALUE_CLIP (text-overflow)
     {"collapse", 0x0210},  // Custom value for border-collapse collapse
-    {"column", 0x0054},    // LXB_CSS_VALUE_COLUMN (flex-direction)
-    {"column-reverse", 0x0055}, // LXB_CSS_VALUE_COLUMN_REVERSE
+    {"column", 0x010e},    // LXB_CSS_VALUE_COLUMN (flex-direction)
+    {"column-reverse", 0x010f}, // LXB_CSS_VALUE_COLUMN_REVERSE
     {"content-box", 0x0029}, // LXB_CSS_VALUE_CONTENT_BOX
     {"currentcolor", 0x0031}, // LXB_CSS_VALUE_CURRENTCOLOR
 
@@ -78,8 +78,8 @@ static const KeywordMapping keyword_map[] = {
 
     // Display types
     {"flex", 0x00f5},      // LXB_CSS_VALUE_FLEX
-    {"flex-end", 0x0057},  // LXB_CSS_VALUE_FLEX_END
-    {"flex-start", 0x0058}, // LXB_CSS_VALUE_FLEX_START
+    {"flex-end", 0x0006},  // LXB_CSS_VALUE_FLEX_END
+    {"flex-start", 0x0005}, // LXB_CSS_VALUE_FLEX_START
     {"fixed", 0x0151},     // LXB_CSS_VALUE_FIXED
 
     // Animation fill modes
@@ -174,8 +174,8 @@ static const KeywordMapping keyword_map[] = {
     // Background repeat
     {"round", 0x0206},     // Custom value for background-repeat round
 
-    {"row", 0x0059},       // LXB_CSS_VALUE_ROW (flex-direction)
-    {"row-reverse", 0x005a}, // LXB_CSS_VALUE_ROW_REVERSE
+    {"row", 0x010c},       // LXB_CSS_VALUE_ROW (flex-direction)
+    {"row-reverse", 0x010d}, // LXB_CSS_VALUE_ROW_REVERSE
 
     // Animation play state
     {"running", 0x009c},   // LXB_CSS_VALUE_RUNNING (animation-play-state)
@@ -191,13 +191,13 @@ static const KeywordMapping keyword_map[] = {
     // Background repeat
     {"space", 0x0207},     // Custom value for background-repeat space
 
-    {"space-around", 0x005b}, // LXB_CSS_VALUE_SPACE_AROUND
-    {"space-between", 0x005c}, // LXB_CSS_VALUE_SPACE_BETWEEN
+    {"space-around", 0x0009}, // LXB_CSS_VALUE_SPACE_AROUND
+    {"space-between", 0x0008}, // LXB_CSS_VALUE_SPACE_BETWEEN
     {"space-evenly", 0x005d}, // LXB_CSS_VALUE_SPACE_EVENLY
     {"square", 0x0225},    // Custom value for list-style-type square
     {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
     {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
-    {"stretch", 0x005e},   // LXB_CSS_VALUE_STRETCH
+    {"stretch", 0x000a},   // LXB_CSS_VALUE_STRETCH
     {"sub", 0x0016},       // LXB_CSS_VALUE_SUB
     {"super", 0x0017},     // LXB_CSS_VALUE_SUPER
 
@@ -216,8 +216,8 @@ static const KeywordMapping keyword_map[] = {
     {"visible", 0x0149},     // LXB_CSS_VALUE_VISIBLE
 
     // Flexbox wrap
-    {"wrap", 0x005f},        // LXB_CSS_VALUE_WRAP
-    {"wrap-reverse", 0x0060}, // LXB_CSS_VALUE_WRAP_REVERSE
+    {"wrap", 0x0112},        // LXB_CSS_VALUE_WRAP
+    {"wrap-reverse", 0x0113}, // LXB_CSS_VALUE_WRAP_REVERSE
 
     // Colors
     {"white", 0x00c4},       // LXB_CSS_VALUE_WHITE
