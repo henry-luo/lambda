@@ -1320,6 +1320,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk->given_height = height;
                 lycon->block.given_height = height;  // CRITICAL: Also set in LayoutContext for layout calculation
                 log_debug("[CSS] Height: %.2f px", height);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for height per CSS spec
+                float height = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (height != 0.0f) {
+                    log_debug("[CSS] Height: unitless %.2f (invalid, only 0 allowed)", height);
+                    break;
+                }
+                block->blk->given_height = 0.0f;
+                lycon->block.given_height = 0.0f;
+                log_debug("[CSS] Height: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 // per CSS spec, negative percentages for height are invalid
@@ -1353,6 +1364,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_min_width = min_width;
                 log_debug("[CSS] Min-width: %.2f px", min_width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for min-width per CSS spec
+                float min_width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (min_width != 0.0f) {
+                    log_debug("[CSS] Min-width: unitless %.2f (invalid, only 0 allowed)", min_width);
+                    break;
+                }
+                block->blk->given_min_width = 0.0f;
+                log_debug("[CSS] Min-width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
@@ -1380,6 +1401,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_max_width = max_width;
                 log_debug("[CSS] Max-width: %.2f px", max_width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for max-width per CSS spec
+                float max_width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (max_width != 0.0f) {
+                    log_debug("[CSS] Max-width: unitless %.2f (invalid, only 0 allowed)", max_width);
+                    break;
+                }
+                block->blk->given_max_width = 0.0f;
+                log_debug("[CSS] Max-width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
@@ -1410,6 +1441,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_min_height = min_height;
                 log_debug("[CSS] Min-height: %.2f px", min_height);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for min-height per CSS spec
+                float min_height = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (min_height != 0.0f) {
+                    log_debug("[CSS] Min-height: unitless %.2f (invalid, only 0 allowed)", min_height);
+                    break;
+                }
+                block->blk->given_min_height = 0.0f;
+                log_debug("[CSS] Min-height: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
@@ -1437,6 +1478,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_max_height = max_height;
                 log_debug("[CSS] Max-height: %.2f px", max_height);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for max-height per CSS spec
+                float max_height = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (max_height != 0.0f) {
+                    log_debug("[CSS] Max-height: unitless %.2f (invalid, only 0 allowed)", max_height);
+                    break;
+                }
+                block->blk->given_max_height = 0.0f;
+                log_debug("[CSS] Max-height: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
@@ -1822,6 +1873,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.top = padding;
                 span->bound->padding.top_specificity = specificity;
                 log_debug("[CSS] Padding-top: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for padding per CSS spec
+                float padding = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (padding != 0.0f) {
+                    log_debug("[CSS] Padding-top: unitless %.2f (invalid, only 0 allowed)", padding);
+                    break;
+                }
+                span->bound->padding.top = 0.0f;
+                span->bound->padding.top_specificity = specificity;
+                log_debug("[CSS] Padding-top: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.top_specificity = specificity;
@@ -1846,6 +1908,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.right = padding;
                 span->bound->padding.right_specificity = specificity;
                 log_debug("[CSS] Padding-right: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for padding per CSS spec
+                float padding = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (padding != 0.0f) {
+                    log_debug("[CSS] Padding-right: unitless %.2f (invalid, only 0 allowed)", padding);
+                    break;
+                }
+                span->bound->padding.right = 0.0f;
+                span->bound->padding.right_specificity = specificity;
+                log_debug("[CSS] Padding-right: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.right_specificity = specificity;
@@ -1870,6 +1943,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.bottom = padding;
                 span->bound->padding.bottom_specificity = specificity;
                 log_debug("[CSS] Padding-bottom: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for padding per CSS spec
+                float padding = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (padding != 0.0f) {
+                    log_debug("[CSS] Padding-bottom: unitless %.2f (invalid, only 0 allowed)", padding);
+                    break;
+                }
+                span->bound->padding.bottom = 0.0f;
+                span->bound->padding.bottom_specificity = specificity;
+                log_debug("[CSS] Padding-bottom: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.bottom_specificity = specificity;
@@ -1894,6 +1978,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.left = padding;
                 span->bound->padding.left_specificity = specificity;
                 log_debug("[CSS] Padding-left: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for padding per CSS spec
+                float padding = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (padding != 0.0f) {
+                    log_debug("[CSS] Padding-left: unitless %.2f (invalid, only 0 allowed)", padding);
+                    break;
+                }
+                span->bound->padding.left = 0.0f;
+                span->bound->padding.left_specificity = specificity;
+                log_debug("[CSS] Padding-left: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.left_specificity = specificity;
@@ -2079,6 +2174,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.top = width;
                 span->bound->border->width.top_specificity = specificity;
                 log_debug("[CSS] Border-top-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for border-width per CSS spec
+                float width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (width != 0.0f) {
+                    log_debug("[CSS] Border-top-width: unitless %.2f (invalid, only 0 allowed)", width);
+                    break;
+                }
+                span->bound->border->width.top = 0.0f;
+                span->bound->border->width.top_specificity = specificity;
+                log_debug("[CSS] Border-top-width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // Keywords: thin (1px), medium (3px), thick (5px)
                 const char* keyword = value->data.keyword;
@@ -2111,6 +2217,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.right = width;
                 span->bound->border->width.right_specificity = specificity;
                 log_debug("[CSS] Border-right-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for border-width per CSS spec
+                float width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (width != 0.0f) {
+                    log_debug("[CSS] Border-right-width: unitless %.2f (invalid, only 0 allowed)", width);
+                    break;
+                }
+                span->bound->border->width.right = 0.0f;
+                span->bound->border->width.right_specificity = specificity;
+                log_debug("[CSS] Border-right-width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 float width = 3.0f;
@@ -2142,6 +2259,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.bottom = width;
                 span->bound->border->width.bottom_specificity = specificity;
                 log_debug("[CSS] Border-bottom-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for border-width per CSS spec
+                float width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (width != 0.0f) {
+                    log_debug("[CSS] Border-bottom-width: unitless %.2f (invalid, only 0 allowed)", width);
+                    break;
+                }
+                span->bound->border->width.bottom = 0.0f;
+                span->bound->border->width.bottom_specificity = specificity;
+                log_debug("[CSS] Border-bottom-width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 float width = 3.0f;
@@ -2173,6 +2301,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.left = width;
                 span->bound->border->width.left_specificity = specificity;
                 log_debug("[CSS] Border-left-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for border-width per CSS spec
+                float width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (width != 0.0f) {
+                    log_debug("[CSS] Border-left-width: unitless %.2f (invalid, only 0 allowed)", width);
+                    break;
+                }
+                span->bound->border->width.left = 0.0f;
+                span->bound->border->width.left_specificity = specificity;
+                log_debug("[CSS] Border-left-width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 float width = 3.0f;
