@@ -490,7 +490,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
             }
         }
         else if (tag == LXB_TAG_TR || child_display.inner == LXB_CSS_VALUE_TABLE_ROW) {
-            // Direct table row (create implicit tbody)
+            // Direct table row - process without implicit tbody for now
             ViewTableRow* row = create_table_row(lycon, child);
             if (row) {
                 // Process cells in row

@@ -111,6 +111,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx);
 DisplayValue resolve_display(lxb_html_element_t* elmt);
+DisplayValue resolve_display_value(DomNode* child); // Unified function for both Lexbor and Lambda CSS
 int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
 Color color_name_to_rgb(PropValue color_name);
 
