@@ -459,9 +459,75 @@ bool css_property_enhanced_validate_value(CSSPropertyID id, CSSPropertyValue* va
 bool css_property_validate_value(CssPropertyId id, CssValue* value) {
     if (!value) return false;
 
-    // Basic validation - accept all values for now
-    // In a full implementation, this would validate the value against the property's allowed types
-    (void)id; // Suppress unused parameter warning
+    // Property-specific validation
+    switch (id) {
+        case CSS_PROPERTY_FONT_SIZE: {
+            // Font-size must be non-negative
+            // Per CSS spec: Negative values are not allowed
+            if (value->type == CSS_VALUE_LENGTH) {
+                if (value->data.length.value < 0) {
+                    return false; // Negative font-size is invalid
+                }
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                if (value->data.percentage.value < 0) {
+                    return false; // Negative percentage is invalid
+                }
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // Unitless values are generally invalid for font-size (except 0 in some contexts)
+                // For safety, reject negative numbers
+                if (value->data.number.value < 0) {
+                    return false;
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WIDTH:
+        case CSS_PROPERTY_HEIGHT:
+        case CSS_PROPERTY_MIN_WIDTH:
+        case CSS_PROPERTY_MIN_HEIGHT:
+        case CSS_PROPERTY_MAX_WIDTH:
+        case CSS_PROPERTY_MAX_HEIGHT: {
+            // Width and height must be non-negative (per CSS spec)
+            if (value->type == CSS_VALUE_LENGTH) {
+                if (value->data.length.value < 0) {
+                    return false;
+                }
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                if (value->data.percentage.value < 0) {
+                    return false;
+                }
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                if (value->data.number.value < 0) {
+                    return false;
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_WIDTH:
+        case CSS_PROPERTY_BORDER_TOP_WIDTH:
+        case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
+        case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
+        case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
+            // Border widths must be non-negative
+            if (value->type == CSS_VALUE_LENGTH) {
+                if (value->data.length.value < 0) {
+                    return false;
+                }
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                if (value->data.number.value < 0) {
+                    return false;
+                }
+            }
+            break;
+        }
+
+        default:
+            // For other properties, accept all values for now
+            break;
+    }
+
     return true;
 }
 

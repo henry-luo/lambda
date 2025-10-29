@@ -696,6 +696,14 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         return false;
     }
 
+    // Validate the property value before applying
+    if (!css_property_validate_value(declaration->property_id, declaration->value)) {
+        log_debug("[APPLY_DECL] Invalid value for property %d on <%s>, skipping",
+                  declaration->property_id,
+                  element->tag_name ? element->tag_name : "null");
+        return false;
+    }
+
     // DEBUG: Log which element is receiving the declaration
     log_debug("[APPLY_DECL] Element <%s> receiving property %d (spec:%u, order:%d)",
             element->tag_name ? element->tag_name : "null",
