@@ -882,7 +882,7 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
     strbuf_reset(str_buf);
     dom_element_print(dom_root, str_buf, 0);
-    log_debug("Built DomElement tree with styles: %s", str_buf->str);
+    log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
 
     // Step 8: Create Document structure
     Document* doc = (Document*)calloc(1, sizeof(Document));

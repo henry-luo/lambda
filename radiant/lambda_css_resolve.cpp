@@ -1261,14 +1261,36 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float width = value->data.length.value;
+                float width = convert_lambda_length_to_px(value, lycon, prop_id);
+                // per CSS spec, negative values for width are invalid and should be ignored
+                if (width < 0.0f) {
+                    log_debug("[CSS] Width: %.2f px (negative, ignored per CSS spec)", width);
+                    break;
+                }
                 block->blk->given_width = width;
                 lycon->block.given_width = width;  // CRITICAL: Also set in LayoutContext for layout calculation
                 block->blk->given_width_type = LXB_CSS_VALUE_INITIAL; // Mark as explicitly set
                 log_debug("[CSS] Width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // unitless zero is valid for width per CSS spec
+                float width = value->data.number.value;
+                // per CSS spec, only unitless zero is valid (treated as 0px)
+                if (width != 0.0f) {
+                    log_debug("[CSS] Width: unitless %.2f (invalid, only 0 allowed)", width);
+                    break;
+                }
+                block->blk->given_width = 0.0f;
+                lycon->block.given_width = 0.0f;
+                block->blk->given_width_type = LXB_CSS_VALUE_INITIAL;
+                log_debug("[CSS] Width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 // For now, store percentage as-is (need parent width for proper calculation)
                 float percentage = value->data.percentage.value;
+                // per CSS spec, negative percentages for width are invalid
+                if (percentage < 0.0f) {
+                    log_debug("[CSS] Width: %.2f%% (negative, ignored per CSS spec)", percentage);
+                    break;
+                }
                 log_debug("[CSS] Width: %.2f%% (percentage not yet fully supported)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword
@@ -1287,12 +1309,24 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float height = value->data.length.value;
+                log_debug("[CSS] Height before conversion: %.2f, unit: %d", value->data.length.value, value->data.length.unit);
+                float height = convert_lambda_length_to_px(value, lycon, prop_id);
+                log_debug("[CSS] Height after conversion: %.2f px", height);
+                // per CSS spec, negative values for height are invalid and should be ignored
+                if (height < 0.0f) {
+                    log_debug("[CSS] Height: %.2f px (negative, ignored per CSS spec)", height);
+                    break;
+                }
                 block->blk->given_height = height;
                 lycon->block.given_height = height;  // CRITICAL: Also set in LayoutContext for layout calculation
                 log_debug("[CSS] Height: %.2f px", height);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                // per CSS spec, negative percentages for height are invalid
+                if (percentage < 0.0f) {
+                    log_debug("[CSS] Height: %.2f%% (negative, ignored per CSS spec)", percentage);
+                    break;
+                }
                 log_debug("[CSS] Height: %.2f%% (percentage not yet fully supported)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword
@@ -1312,10 +1346,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float min_width = convert_lambda_length_to_px(value, lycon, prop_id);
+                // per CSS spec, negative values for min-width are invalid and should be ignored
+                if (min_width < 0.0f) {
+                    log_debug("[CSS] Min-width: %.2f px (negative, ignored per CSS spec)", min_width);
+                    break;
+                }
                 block->blk->given_min_width = min_width;
                 log_debug("[CSS] Min-width: %.2f px", min_width);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                if (percentage < 0.0f) {
+                    log_debug("[CSS] Min-width: %.2f%% (negative, ignored per CSS spec)", percentage);
+                    break;
+                }
                 log_debug("[CSS] Min-width: %.2f%% (percentage not yet fully supported)", percentage);
             }
             break;
@@ -1330,10 +1373,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float max_width = convert_lambda_length_to_px(value, lycon, prop_id);
+                // per CSS spec, negative values for max-width are invalid and should be ignored
+                if (max_width < 0.0f) {
+                    log_debug("[CSS] Max-width: %.2f px (negative, ignored per CSS spec)", max_width);
+                    break;
+                }
                 block->blk->given_max_width = max_width;
                 log_debug("[CSS] Max-width: %.2f px", max_width);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                if (percentage < 0.0f) {
+                    log_debug("[CSS] Max-width: %.2f%% (negative, ignored per CSS spec)", percentage);
+                    break;
+                }
                 log_debug("[CSS] Max-width: %.2f%% (percentage not yet fully supported)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
                 block->blk->given_max_width = -1.0f; // -1 means none/unlimited
@@ -1351,10 +1403,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float min_height = convert_lambda_length_to_px(value, lycon, prop_id);
+                // per CSS spec, negative values for min-height are invalid and should be ignored
+                if (min_height < 0.0f) {
+                    log_debug("[CSS] Min-height: %.2f px (negative, ignored per CSS spec)", min_height);
+                    break;
+                }
                 block->blk->given_min_height = min_height;
                 log_debug("[CSS] Min-height: %.2f px", min_height);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                if (percentage < 0.0f) {
+                    log_debug("[CSS] Min-height: %.2f%% (negative, ignored per CSS spec)", percentage);
+                    break;
+                }
                 log_debug("[CSS] Min-height: %.2f%% (percentage not yet fully supported)", percentage);
             }
             break;
@@ -1369,10 +1430,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float max_height = convert_lambda_length_to_px(value, lycon, prop_id);
+                // per CSS spec, negative values for max-height are invalid and should be ignored
+                if (max_height < 0.0f) {
+                    log_debug("[CSS] Max-height: %.2f px (negative, ignored per CSS spec)", max_height);
+                    break;
+                }
                 block->blk->given_max_height = max_height;
                 log_debug("[CSS] Max-height: %.2f px", max_height);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                if (percentage < 0.0f) {
+                    log_debug("[CSS] Max-height: %.2f%% (negative, ignored per CSS spec)", percentage);
+                    break;
+                }
                 log_debug("[CSS] Max-height: %.2f%% (percentage not yet fully supported)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
                 block->blk->given_max_height = -1.0f; // -1 means none/unlimited
