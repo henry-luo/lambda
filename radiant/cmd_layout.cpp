@@ -87,7 +87,8 @@ HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, I
                 Element* elem = (Element*)item.pointer;
                 TypeElmt* type = (TypeElmt*)elem->type;
 
-                if (type && (strcmp(type->name.str, "!DOCTYPE") == 0 || strcmp(type->name.str, "!doctype") == 0)) {
+                // Check for DOCTYPE element (case-insensitive)
+                if (type && strcasecmp(type->name.str, "!DOCTYPE") == 0) {
                     log_debug("Found DOCTYPE element");
 
                     // Extract DOCTYPE content from the element's children
@@ -291,8 +292,8 @@ Element* get_html_root_element(Input* input) {
                 Element* elem = (Element*)item.pointer;
                 TypeElmt* type = (TypeElmt*)elem->type;
 
-                // Skip DOCTYPE and comments
-                if (strcmp(type->name.str, "!DOCTYPE") != 0 &&
+                // Skip DOCTYPE and comments (case-insensitive for DOCTYPE)
+                if (strcasecmp(type->name.str, "!DOCTYPE") != 0 &&
                     strcmp(type->name.str, "!--") != 0) {
                     return elem;
                 }
@@ -491,7 +492,10 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
               parent ? parent->tag_name : "none");
 
     // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
-    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "!DOCTYPE") == 0 || strncmp(tag_name, "?", 1) == 0) {
+    // use case-insensitive comparison for DOCTYPE to handle both !DOCTYPE and !doctype
+    if (strcmp(tag_name, "!--") == 0 ||
+        strcasecmp(tag_name, "!DOCTYPE") == 0 ||
+        strncmp(tag_name, "?", 1) == 0) {
         return nullptr;  // Skip comments, DOCTYPE, and XML declarations
     }
 
