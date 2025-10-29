@@ -1481,6 +1481,63 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             }
         }
 
+        // Border property (shorthand) - try this first
+        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_LIST && val->data.list.count >= 2) {
+                // border: width style color
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, " border:");
+
+                // Width
+                CssValue* width = val->data.list.values[0];
+                if (width && width->type == CSS_VALUE_LENGTH) {
+                    char width_str[32];
+                    snprintf(width_str, sizeof(width_str), "%.2fpx", width->data.length.value);
+                    strbuf_append_str(buf, width_str);
+                }
+
+                // Style
+                strbuf_append_str(buf, " ");
+                CssValue* style = val->data.list.values[1];
+                if (style && style->type == CSS_VALUE_KEYWORD && style->data.keyword) {
+                    strbuf_append_str(buf, style->data.keyword);
+                }
+
+                // Color (optional)
+                if (val->data.list.count >= 3) {
+                    strbuf_append_str(buf, " ");
+                    CssValue* color = val->data.list.values[2];
+                    if (color && color->type == CSS_VALUE_COLOR) {
+                        char color_str[64];
+                        snprintf(color_str, sizeof(color_str), "#%02x%02x%02x",
+                            color->data.color.data.rgba.r,
+                            color->data.color.data.rgba.g,
+                            color->data.color.data.rgba.b);
+                        strbuf_append_str(buf, color_str);
+                    }
+                }
+                has_props = true;
+            }
+        }
+
+        // If no border shorthand, try individual border-width
+        if (!decl || !decl->value) {
+            decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+            if (decl && decl->value) {
+                CssValue* val = (CssValue*)decl->value;
+                if (val->type == CSS_VALUE_LENGTH) {
+                    if (has_props) strbuf_append_str(buf, ", ");
+                    strbuf_append_str(buf, " border-width:");
+                    char width_str[32];
+                    snprintf(width_str, sizeof(width_str), "%.2fpx", val->data.length.value);
+                    strbuf_append_str(buf, width_str);
+                    has_props = true;
+                }
+            }
+        }
+
         // Font size property
         decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_FONT_SIZE);
         if (decl && decl->value) {
