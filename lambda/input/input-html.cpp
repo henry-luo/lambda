@@ -909,6 +909,144 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     return {.element = element};
 }
 
+// HTML5 spec requires implicit tbody creation for direct tr children of table
+static void create_implicit_tbody(Input* input, Element* table_element) {
+    if (!table_element) return;
+
+    List* table_list = (List*)table_element;
+    if (table_list->length == 0) return;
+
+    log_debug("Checking table for implicit tbody - has %zu children", table_list->length);
+
+    // Track if we need to create an implicit tbody
+    bool has_direct_tr = false;
+    bool has_tbody = false;
+
+    // First pass: check if we have direct <tr> children or existing tbody/thead/tfoot
+    for (size_t i = 0; i < table_list->length; i++) {
+        Item child = table_list->items[i];
+        TypeId child_type = get_type_id(child);
+        if (child_type == LMD_TYPE_ELEMENT) {
+            Element* child_element = child.element;
+            TypeElmt* child_type_elmt = (TypeElmt*)child_element->type;
+            if (!child_type_elmt) continue;
+            const char* tag = child_type_elmt->name.str;
+
+            log_debug("  Table child[%zu]: <%s>", i, tag);
+
+            if (strcasecmp(tag, "tr") == 0) {
+                has_direct_tr = true;
+                log_debug("    Found direct <tr> child");
+            } else if (strcasecmp(tag, "tbody") == 0 ||
+                       strcasecmp(tag, "thead") == 0 ||
+                       strcasecmp(tag, "tfoot") == 0) {
+                has_tbody = true;
+                log_debug("    Found existing <%s>", tag);
+            }
+        }
+    }
+
+    log_debug("Table analysis: has_direct_tr=%d, has_tbody=%d", has_direct_tr, has_tbody);
+
+    // If we have direct <tr> children without a tbody, create implicit tbody
+    if (has_direct_tr && !has_tbody) {
+        log_info("Creating implicit <tbody> element for table with direct <tr> children");
+
+        // Create implicit tbody element
+        Element* tbody = input_create_element(input, "tbody");
+        if (!tbody) {
+            log_error("Failed to create implicit tbody element");
+            return;
+        }
+
+        // Create a new list for the table's children
+        List* new_table_children = (List*)pool_calloc(input->pool, sizeof(List));
+        if (!new_table_children) {
+            log_error("Failed to allocate list for table children");
+            return;
+        }
+        new_table_children->type_id = LMD_TYPE_LIST;
+        new_table_children->length = 0;
+        new_table_children->capacity = 0;
+        new_table_children->items = NULL;
+
+        // Move all <tr>, <td>, <th> children into tbody, keep others in table
+        for (size_t i = 0; i < table_list->length; i++) {
+            Item child = table_list->items[i];
+            TypeId child_type = get_type_id(child);
+            if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_element = child.element;
+                TypeElmt* child_type_elmt = (TypeElmt*)child_element->type;
+                if (!child_type_elmt) continue;
+                const char* tag = child_type_elmt->name.str;
+
+                // HTML5 spec: tr, td, th directly under table should be wrapped in tbody
+                if (strcasecmp(tag, "tr") == 0 ||
+                    strcasecmp(tag, "td") == 0 ||
+                    strcasecmp(tag, "th") == 0) {
+                    // Add to tbody
+                    log_debug("  Moving <%s> into implicit tbody", tag);
+                    list_push((List*)tbody, child);
+                } else {
+                    // Keep in table (caption, colgroup, col, etc.)
+                    log_debug("  Keeping <%s> in table", tag);
+                    list_push(new_table_children, child);
+                }
+            } else {
+                // Keep text nodes, comments, etc. in table
+                list_push(new_table_children, child);
+            }
+        }
+
+        // Set tbody content length
+        ((TypeElmt*)tbody->type)->content_length = ((List*)tbody)->length;
+
+        // Add tbody to the new table children list
+        Item tbody_item = {.element = tbody};
+        list_push(new_table_children, tbody_item);
+
+        // Replace table's children with the new list
+        table_list->items = new_table_children->items;
+        table_list->length = new_table_children->length;
+        table_list->capacity = new_table_children->capacity;
+
+        // Update content length
+        ((TypeElmt*)table_element->type)->content_length = table_list->length;
+
+        log_info("Created implicit <tbody> element in <table> with %zu row(s)",
+                  ((List*)tbody)->length);
+    }
+}
+
+// Recursively process all elements to add implicit tbody where needed
+static void process_implicit_tbody(Input* input, Item item) {
+    TypeId item_type = get_type_id(item);
+
+    if (item_type == LMD_TYPE_ELEMENT) {
+        Element* element = item.element;
+        TypeElmt* type = (TypeElmt*)element->type;
+        if (!type) return;
+        const char* tag = type->name.str;
+
+        // Check if this is a table element
+        if (strcasecmp(tag, "table") == 0) {
+            create_implicit_tbody(input, element);
+        }
+
+        // Recursively process children
+        List* list = (List*)element;
+        for (size_t i = 0; i < list->length; i++) {
+            process_implicit_tbody(input, list->items[i]);
+        }
+    } else if (item_type == LMD_TYPE_LIST) {
+        // Process list items
+        List* list = item.list;
+        for (size_t i = 0; i < list->length; i++) {
+            process_implicit_tbody(input, list->items[i]);
+        }
+    }
+}
+
 // Internal function - use input_from_source() instead for external API
 __attribute__((visibility("hidden")))
 void parse_html_impl(Input* input, const char* html_string) {
@@ -990,6 +1128,12 @@ void parse_html_impl(Input* input, const char* html_string) {
         if (*html) {
             html++;
         }
+    }
+
+    // HTML5 spec compliance: Create implicit tbody elements for tables with direct tr children
+    // This must be done before setting input->root to ensure the DOM tree is compliant
+    for (size_t i = 0; i < root_list->length; i++) {
+        process_implicit_tbody(input, root_list->items[i]);
     }
 
     // If list contains only one item, return that item and free the list
