@@ -984,11 +984,26 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] Font family: %s", family);
                 }
             } else if (value->type == CSS_VALUE_KEYWORD) {
-                // Generic family: serif, sans-serif, monospace, etc.
-                const char* family = map_lambda_font_family_keyword(value->data.keyword);
+                // Keyword font family - check if generic or specific
+                const char* keyword = value->data.keyword;
+                const char* family = NULL;
+
+                if (strcasecmp(keyword, "serif") == 0 ||
+                    strcasecmp(keyword, "sans-serif") == 0 ||
+                    strcasecmp(keyword, "monospace") == 0 ||
+                    strcasecmp(keyword, "cursive") == 0 ||
+                    strcasecmp(keyword, "fantasy") == 0) {
+                    // Generic keyword - map it
+                    family = map_lambda_font_family_keyword(keyword);
+                    log_debug("[CSS] Font family generic keyword: %s -> %s", keyword, family);
+                } else {
+                    // Specific font name (e.g., Arial, Times) - use directly
+                    family = keyword;
+                    log_debug("[CSS] Font family specific name: %s", family);
+                }
+
                 if (family) {
                     span->font->family = strdup(family);
-                    log_debug("[CSS] Font family keyword: %s -> %s", value->data.keyword, family);
                 }
             } else if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Arial, sans-serif")
@@ -1001,7 +1016,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     if (item->type == CSS_VALUE_STRING && item->data.string) {
                         family = item->data.string;
                     } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
-                        family = map_lambda_font_family_keyword(item->data.keyword);
+                        // Check if it's a generic font family keyword
+                        const char* keyword = item->data.keyword;
+                        if (strcasecmp(keyword, "serif") == 0 ||
+                            strcasecmp(keyword, "sans-serif") == 0 ||
+                            strcasecmp(keyword, "monospace") == 0 ||
+                            strcasecmp(keyword, "cursive") == 0 ||
+                            strcasecmp(keyword, "fantasy") == 0) {
+                            // Generic keyword - map it
+                            family = map_lambda_font_family_keyword(keyword);
+                        } else {
+                            // Specific font name (e.g., Arial, Times) - use directly
+                            family = keyword;
+                        }
                     }
 
                     if (family && strlen(family) > 0) {
