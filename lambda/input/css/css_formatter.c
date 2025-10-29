@@ -117,8 +117,8 @@ static const char* unit_to_string(CssUnit unit) {
 // ============================================================================
 
 // Format value (complete implementation)
-const char* css_format_value(CssFormatter* formatter, CssValue* value) {
-    if (!formatter || !value) return NULL;
+void css_format_value(CssFormatter* formatter, CssValue* value) {
+    if (!formatter || !value) return;
 
     // Don't reset buffer - append to existing content
 
@@ -259,8 +259,8 @@ const char* css_format_value(CssFormatter* formatter, CssValue* value) {
             break;
     }
 
-    String* result = stringbuf_to_string(formatter->output);
-    return (result && result->chars) ? result->chars : "";
+    // Don't call stringbuf_to_string here - let the caller handle it
+    // This function just appends to the formatter's output buffer
 }
 
 // ============================================================================
@@ -291,9 +291,7 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyId proper
 
     if (value_str && value_str->chars) {
         stringbuf_append_str(formatter->output, value_str->chars);
-    }
-
-    String* result = stringbuf_to_string(formatter->output);
+    }    String* result = stringbuf_to_string(formatter->output);
     return (result && result->chars) ? result->chars : "";
 }
 

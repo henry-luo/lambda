@@ -90,7 +90,7 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
         }
         size_t old_capacity = new_capacity;
         new_capacity *= 2;
-        log_debug("doubling stringbuf new_capacity: %zu -> %zu", old_capacity, new_capacity);
+        // log_debug("doubling stringbuf new_capacity: %zu -> %zu", old_capacity, new_capacity);
     }
 
     String *new_str;

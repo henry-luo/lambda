@@ -789,6 +789,9 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         // Parse declaration
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
         if (decl) {
+            fprintf(stderr, "[CSS Parser] Parsed declaration: property_id=%d for position %d\n",
+                    decl->property_id, decl_count);
+
             // Expand array if needed
             if (decl_count >= decl_capacity) {
                 decl_capacity *= 2;
@@ -797,6 +800,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 declarations = new_decls;
             }
             declarations[decl_count++] = decl;
+            fprintf(stderr, "[CSS Parser] Stored declaration at index %d, now have %d declarations\n",
+                    decl_count - 1, decl_count);
         }
 
         // Skip optional semicolon
@@ -822,6 +827,13 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     rule->data.style_rule.selector = (selector_group->selector_count > 0) ? selector_group->selectors[0] : NULL;
     rule->data.style_rule.declarations = declarations;
     rule->data.style_rule.declaration_count = decl_count;
+
+    fprintf(stderr, "[CSS Parser] Created rule with %d declarations:\n", decl_count);
+    for (int i = 0; i < decl_count && i < 5; i++) {
+        if (declarations[i]) {
+            fprintf(stderr, "[CSS Parser]   Declaration[%d]: property_id=%d\n", i, declarations[i]->property_id);
+        }
+    }
 
     *out_rule = rule;
     return pos - start_pos; // Return number of tokens consumed
