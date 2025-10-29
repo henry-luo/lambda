@@ -27,6 +27,7 @@ extern "C" {
 #include "../lambda/input/css/dom_element.h"
 #include "../lambda/input/css/selector_matcher.h"
 #include "../lambda/input/css/document_styler.h"
+#include "../lambda/input/css/css_formatter.h"
 }
 
 #include "../lambda/input/input.h"
@@ -351,10 +352,19 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
         // Extract text content from style element
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
-            if (get_type_id(child_item) == LMD_TYPE_STRING) {
+            int type_id = get_type_id(child_item);
+            log_debug("[CSS] <style> child[%lld] type_id=%d", i, type_id);
+
+            if (type_id == LMD_TYPE_STRING) {
                 String* css_text = (String*)child_item.pointer;
+                log_debug("[CSS] Found STRING child: ptr=%p, len=%d", (void*)css_text, css_text ? css_text->len : -1);
                 if (css_text && css_text->len > 0) {
-                    fprintf(stderr, "[CSS] Found <style> element with %d bytes of CSS\n", css_text->len);
+                    // Log first non-whitespace content
+                    const char* content = css_text->chars;
+                    while (*content && (*content == ' ' || *content == '\n' || *content == '\t' || *content == '\r')) {
+                        content++;
+                    }
+                    // log_debug("[CSS CONTENT] After whitespace: %.200s", content);
 
                     // Parse the inline CSS
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
@@ -616,29 +626,29 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool) {
     if (!root || !stylesheet || !matcher || !pool) return;
 
-    fprintf(stderr, "[CSS] Applying stylesheet with %d rules to element <%s>\n",
+    log_debug("[CSS] Applying stylesheet with %zu rules to element <%s>",
               stylesheet->rule_count, root->tag_name);
 
     // Iterate through all rules in the stylesheet
-    for (int rule_idx = 0; rule_idx < stylesheet->rule_count; rule_idx++) {
+    for (int rule_idx = 0; rule_idx < (int)stylesheet->rule_count; rule_idx++) {
         CssRule* rule = stylesheet->rules[rule_idx];
         if (!rule) {
-            fprintf(stderr, "[CSS] Rule %d is NULL\n", rule_idx);
+            log_debug("[CSS] Rule %d is NULL", rule_idx);
             continue;
         }
 
-        fprintf(stderr, "[CSS] Processing rule %d, type=%d\n", rule_idx, rule->type);
+        log_debug("[CSS] Processing rule %d, type=%d", rule_idx, rule->type);
 
         // Only process style rules (skip @media, @import, etc.)
         if (rule->type != CSS_RULE_STYLE) {
-            fprintf(stderr, "[CSS] Rule %d is not a style rule, skipping\n", rule_idx);
+            log_debug("[CSS] Rule %d is not a style rule, skipping", rule_idx);
             continue;
         }
 
         // Get selector from style_rule union
         CssSelector* selector = rule->data.style_rule.selector;
         if (!selector) {
-            fprintf(stderr, "[CSS] Rule %d has no selector\n", rule_idx);
+            log_debug("[CSS] Rule %d has no selector", rule_idx);
             continue;
         }
 
@@ -648,7 +658,7 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
             selector->specificity.classes == 0 &&
             selector->specificity.elements == 0) {
             selector->specificity = selector_matcher_calculate_specificity(matcher, selector);
-            fprintf(stderr, "[CSS] Calculated specificity for rule %d: (%d,%d,%d,%d)\n",
+            log_debug("[CSS] Calculated specificity for rule %d: (%d,%d,%d,%d)",
                       rule_idx,
                       selector->specificity.inline_style,
                       selector->specificity.ids,
@@ -656,12 +666,25 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
                       selector->specificity.elements);
         }
 
-        fprintf(stderr, "[CSS] Rule %d has selector, testing match against <%s>\n", rule_idx, root->tag_name);
+        log_debug("[CSS] Rule %d has selector, testing match against <%s>", rule_idx, root->tag_name);
+
+        // Log rule details
+        if (rule->data.style_rule.declaration_count > 0) {
+            log_debug("[CSS] Rule %d has %zu declarations (array @%p):",
+                      rule_idx, rule->data.style_rule.declaration_count,
+                      (void*)rule->data.style_rule.declarations);
+            for (size_t d = 0; d < rule->data.style_rule.declaration_count && d < 5; d++) {
+                CssDeclaration* decl = rule->data.style_rule.declarations[d];
+                if (decl) {
+                    log_debug("[CSS]   - [%zu] property_id=%d (@%p)", d, decl->property_id, (void*)decl);
+                }
+            }
+        }
 
         // Check if the selector matches this element
         MatchResult match_result;
         if (selector_matcher_matches(matcher, selector, root, &match_result)) {
-            fprintf(stderr, "[CSS] Rule %d MATCHES <%s>: specificity (%d,%d,%d,%d)\n",
+            log_debug("[CSS] Rule %d MATCHES <%s>: specificity (%d,%d,%d,%d)",
                       rule_idx, root->tag_name,
                       match_result.specificity.inline_style,
                       match_result.specificity.ids,
@@ -670,15 +693,15 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 
             // Apply all declarations from this rule
             size_t decl_count = rule->data.style_rule.declaration_count;
-            fprintf(stderr, "[CSS] Applying %zu declarations from rule %d\n", decl_count, rule_idx);
+            log_debug("[CSS] Applying %zu declarations from rule %d", decl_count, rule_idx);
 
             if (decl_count > 0) {
                 dom_element_apply_rule(root, rule, match_result.specificity);
-                fprintf(stderr, "[CSS] Applied %zu declarations to <%s>\n",
+                log_debug("[CSS] Applied %zu declarations to <%s>",
                           decl_count, root->tag_name);
             }
         } else {
-            fprintf(stderr, "[CSS] Rule %d does NOT match <%s>\n", rule_idx, root->tag_name);
+            log_debug("[CSS] Rule %d does NOT match <%s>", rule_idx, root->tag_name);
         }
     }
 
@@ -789,6 +812,12 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
                 free(css_content);
                 external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
                 if (external_stylesheet) {
+                    // Print parsed stylesheet for debugging
+                    const char* formatted_css = css_stylesheet_to_string_styled(
+                        external_stylesheet, pool, CSS_FORMAT_EXPANDED);
+                    if (formatted_css) {
+                        log_debug("[Lambda CSS] Parsed external stylesheet:\n%s", formatted_css);
+                    }
                     log_debug("[Lambda CSS] Loaded external stylesheet with %zu rules",
                             external_stylesheet->rule_count);
                 } else {
@@ -807,20 +836,41 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, css_engine, html_filename, pool, &inline_stylesheet_count);
-
-    // Step 6: Apply CSS cascade (external + <style> elements)
+    // print internal stylesheets for debugging
+    for (int i = 0; i < inline_stylesheet_count; i++) {
+        const char* formatted_css = css_stylesheet_to_string_styled(
+            inline_stylesheets[i], pool, CSS_FORMAT_EXPANDED);
+        if (formatted_css) {
+            log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
+        }
+    }    // Step 6: Apply CSS cascade (external + <style> elements)
     log_debug("[Lambda CSS] Applying CSS cascade...");
+    log_debug("[Lambda CSS] inline_stylesheet_count = %d", inline_stylesheet_count);
+    log_debug("[Lambda CSS] external_stylesheet = %p, rule_count = %d",
+              external_stylesheet, external_stylesheet ? external_stylesheet->rule_count : -1);
     SelectorMatcher* matcher = selector_matcher_create(pool);
 
     // Apply external stylesheet first (lower priority)
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
+        log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
         apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool);
     }
 
     // Apply inline stylesheets (higher priority)
     for (int i = 0; i < inline_stylesheet_count; i++) {
-        if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-            apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool);
+        log_debug("[Lambda CSS] Inline stylesheet %d: ptr=%p, rule_count=%zu",
+            i, inline_stylesheets[i], inline_stylesheets[i] ? inline_stylesheets[i]->rule_count : 0);
+        if (inline_stylesheets[i]) {
+            log_debug("[Lambda CSS] Stylesheet %d is not null, rule_count=%zu", i, inline_stylesheets[i]->rule_count);
+            if (inline_stylesheets[i]->rule_count > 0) {
+                log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules", i, inline_stylesheets[i]->rule_count);
+                apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool);
+                log_debug("[Lambda CSS] Finished applying inline stylesheet %d", i);
+            } else {
+                log_debug("[Lambda CSS] Skipping stylesheet %d: rule_count=%zu is not > 0", i, inline_stylesheets[i]->rule_count);
+            }
+        } else {
+            log_debug("[Lambda CSS] Stylesheet %d is NULL", i);
         }
     }
 

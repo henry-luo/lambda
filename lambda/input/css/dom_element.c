@@ -2,6 +2,7 @@
 #include "dom_element.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/log.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -696,7 +697,7 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     }
 
     // DEBUG: Log which element is receiving the declaration
-    fprintf(stderr, "[APPLY_DECL] Element <%s> receiving property %d (spec:%u, order:%d)\n",
+    log_debug("[APPLY_DECL] Element <%s> receiving property %d (spec:%u, order:%d)",
             element->tag_name ? element->tag_name : "null",
             declaration->property_id,
             css_specificity_to_value(declaration->specificity),
@@ -705,8 +706,16 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     // Apply to specified style tree
     StyleNode* node = style_tree_apply_declaration(element->specified_style, declaration);
     if (!node) {
+        log_debug("[APPLY_DECL] FAILED to apply property %d to <%s>",
+                  declaration->property_id,
+                  element->tag_name ? element->tag_name : "null");
         return false;
     }
+
+    log_debug("[APPLY_DECL] Successfully applied property %d to <%s>, style tree now has %d nodes",
+              declaration->property_id,
+              element->tag_name ? element->tag_name : "null",
+              element->specified_style && element->specified_style->tree ? element->specified_style->tree->node_count : 0);
 
     // Increment style version to invalidate caches
     element->style_version++;

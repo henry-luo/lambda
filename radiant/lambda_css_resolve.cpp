@@ -527,30 +527,92 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
 
 void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     if (!dom_elem || !lycon) {
-        fprintf(stderr, "[Lambda CSS] resolve_lambda_css_styles: null input (dom_elem=%p, lycon=%p)\n", (void*)dom_elem, (void*)lycon);
+        log_debug("[Lambda CSS] resolve_lambda_css_styles: null input (dom_elem=%p, lycon=%p)", (void*)dom_elem, (void*)lycon);
         return;
     }
 
-    fprintf(stderr, "[Lambda CSS] Resolving styles for element\n");
+    log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
 
     // iterate through specified_style AVL tree
     StyleTree* style_tree = dom_elem->specified_style;
     if (!style_tree) {
-        fprintf(stderr, "[Lambda CSS] No style tree found for element\n");
+        log_debug("[Lambda CSS] No style tree found for element");
         return;
     }
 
     if (!style_tree->tree) {
-        fprintf(stderr, "[Lambda CSS] Style tree has no AVL tree\n");
+        log_debug("[Lambda CSS] Style tree has no AVL tree");
         return;
     }
 
-    fprintf(stderr, "[Lambda CSS] Style tree has %d nodes\n", style_tree->tree->node_count);
+    log_debug("[Lambda CSS] Style tree has %d nodes", style_tree->tree->node_count);
 
     // Traverse the AVL tree and resolve each property
     int processed = avl_tree_foreach_inorder(style_tree->tree, resolve_property_callback, lycon);
 
-    fprintf(stderr, "[Lambda CSS] Processed %d style properties\n", processed);
+    log_debug("[Lambda CSS] Processed %d style properties", processed);
+
+    // Handle CSS inheritance for inheritable properties not explicitly set
+    // Important inherited properties: font-family, font-size, font-weight, color, etc.
+    static const CssPropertyId inheritable_props[] = {
+        CSS_PROPERTY_FONT_FAMILY,
+        CSS_PROPERTY_FONT_SIZE,
+        CSS_PROPERTY_FONT_WEIGHT,
+        CSS_PROPERTY_FONT_STYLE,
+        CSS_PROPERTY_COLOR,
+        CSS_PROPERTY_LINE_HEIGHT,
+        CSS_PROPERTY_TEXT_ALIGN,
+        CSS_PROPERTY_TEXT_DECORATION,
+        CSS_PROPERTY_TEXT_TRANSFORM,
+        CSS_PROPERTY_LETTER_SPACING,
+        CSS_PROPERTY_WORD_SPACING,
+        CSS_PROPERTY_WHITE_SPACE,
+        CSS_PROPERTY_VISIBILITY,
+    };
+    static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
+
+    // Get parent's style tree for inheritance
+    StyleTree* parent_tree = (dom_elem->parent && dom_elem->parent->specified_style)
+                             ? dom_elem->parent->specified_style : NULL;
+
+    if (parent_tree) {
+        log_debug("[Lambda CSS] Checking inheritance from parent <%s>",
+                dom_elem->parent->tag_name);
+
+        for (size_t i = 0; i < num_inheritable; i++) {
+            CssPropertyId prop_id = inheritable_props[i];
+
+            // Check if this property is already set on the element
+            CssDeclaration* existing = style_tree_get_declaration(style_tree, prop_id);
+            if (existing) {
+                // Property is explicitly set, don't inherit
+                continue;
+            }
+
+            // Property not set, check parent chain for inherited declaration
+            // Walk up the parent chain until we find a declaration
+            DomElement* ancestor = dom_elem->parent;
+            CssDeclaration* inherited_decl = NULL;
+
+            while (ancestor && !inherited_decl) {
+                if (ancestor->specified_style) {
+                    inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
+                    if (inherited_decl && inherited_decl->value) {
+                        break; // Found it!
+                    }
+                }
+                ancestor = ancestor->parent;
+            }
+
+            if (inherited_decl && inherited_decl->value) {
+                log_debug("[Lambda CSS] Inheriting property %d from ancestor <%s>",
+                         prop_id, ancestor ? ancestor->tag_name : "unknown");
+
+                // Apply the inherited property using the ancestor's declaration
+                resolve_lambda_css_property(prop_id, inherited_decl, lycon);
+            }
+        }
+    }
 }
 
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl,
@@ -1004,6 +1066,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
                 if (family) {
                     span->font->family = strdup(family);
+                    log_debug("[CSS] Set span->font->family = '%s' (ptr=%p)", span->font->family, span->font->family);
                 }
             } else if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Arial, sans-serif")

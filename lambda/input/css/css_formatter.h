@@ -82,9 +82,9 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule);
 const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup* selector_group);
 
 /**
- * Format a value to string
+ * Format a value to string (appends to formatter's output buffer)
  */
-const char* css_format_value(CssFormatter* formatter, CssValue* value);
+void css_format_value(CssFormatter* formatter, CssValue* value);
 
 /**
  * Format a declaration (property: value) to string
