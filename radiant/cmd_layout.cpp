@@ -675,10 +675,50 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
             continue;
         }
 
-        // Get selector from style_rule union
+        // Get selector or selector group from style_rule union
         CssSelector* selector = rule->data.style_rule.selector;
+        CssSelectorGroup* selector_group = rule->data.style_rule.selector_group;
+
+        // Handle selector groups (comma-separated selectors like "th, td")
+        if (selector_group && selector_group->selector_count > 0) {
+            log_debug("[CSS] Rule %d has selector group with %zu selectors",
+                      rule_idx, selector_group->selector_count);
+
+            // Try matching each selector in the group
+            bool any_match = false;
+            CssSpecificity best_specificity = {0, 0, 0, 0, false};
+
+            for (size_t sel_idx = 0; sel_idx < selector_group->selector_count; sel_idx++) {
+                CssSelector* group_sel = selector_group->selectors[sel_idx];
+                if (!group_sel) continue;
+
+                MatchResult match_result;
+                if (selector_matcher_matches(matcher, group_sel, root, &match_result)) {
+                    log_debug("[CSS] Rule %d selector [%zu] MATCHES <%s>",
+                              rule_idx, sel_idx, root->tag_name);
+                    any_match = true;
+                    best_specificity = match_result.specificity;
+                    break; // Found a match, no need to test other selectors in group
+                }
+            }
+
+            if (any_match) {
+                log_debug("[CSS] Rule %d group MATCHES <%s>: applying %zu declarations",
+                          rule_idx, root->tag_name, rule->data.style_rule.declaration_count);
+                if (rule->data.style_rule.declaration_count > 0) {
+                    dom_element_apply_rule(root, rule, best_specificity);
+                }
+            } else {
+                log_debug("[CSS] Rule %d group does NOT match <%s>", rule_idx, root->tag_name);
+            }
+
+            // Continue to next rule
+            continue;
+        }
+
+        // Handle single selector (backward compatibility)
         if (!selector) {
-            log_debug("[CSS] Rule %d has no selector", rule_idx);
+            log_debug("[CSS] Rule %d has no selector or selector group", rule_idx);
             continue;
         }
 
