@@ -47,6 +47,75 @@ static inline DomNode* next_element_sibling(DomNode* n) {
 
 // Parse table-specific CSS properties from DOM element
 static void resolve_table_properties(DomNode* element, ViewTable* table) {
+    // Read CSS border-collapse and border-spacing properties first
+    // These apply regardless of table-layout mode
+
+    // Handle both Lexbor and Lambda CSS elements for border properties
+    if (element->type == LEXBOR_ELEMENT && element->lxb_elmt) {
+        // TODO: Add Lexbor border-collapse and border-spacing reading
+        // For now, use defaults set in view_pool.cpp
+    } else if (element->type == MARK_ELEMENT && element->dom_element) {
+        // Lambda CSS path - read border-collapse and border-spacing
+        DomElement* dom_elem = element->dom_element;
+
+        if (dom_elem->specified_style) {
+            // Read border-collapse property (203)
+            CssDeclaration* collapse_decl = style_tree_get_declaration(
+                dom_elem->specified_style,
+                CSS_PROPERTY_BORDER_COLLAPSE);
+
+            if (collapse_decl && collapse_decl->value) {
+                CssValue* val = (CssValue*)collapse_decl->value;
+                if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
+                    if (strcmp(val->data.keyword, "collapse") == 0) {
+                        table->border_collapse = true;
+                        log_debug("Table border-collapse: collapse (true)");
+                    } else if (strcmp(val->data.keyword, "separate") == 0) {
+                        table->border_collapse = false;
+                        log_debug("Table border-collapse: separate (false)");
+                    }
+                }
+            }
+
+            // Read border-spacing property (204)
+            CssDeclaration* spacing_decl = style_tree_get_declaration(
+                dom_elem->specified_style,
+                CSS_PROPERTY_BORDER_SPACING);
+
+            if (spacing_decl && spacing_decl->value) {
+                CssValue* val = (CssValue*)spacing_decl->value;
+
+                // border-spacing can be a single length or a list of two lengths
+                if (val->type == CSS_VALUE_LENGTH) {
+                    // Single value applies to both horizontal and vertical
+                    table->border_spacing_h = val->data.length.value;
+                    table->border_spacing_v = val->data.length.value;
+                    log_debug("Table border-spacing: %.2fpx (both h and v)", val->data.length.value);
+                } else if (val->type == CSS_VALUE_LIST && val->data.list.count >= 2) {
+                    // Two values: horizontal and vertical
+                    CssValue* h_val = val->data.list.values[0];
+                    CssValue* v_val = val->data.list.values[1];
+
+                    if (h_val && h_val->type == CSS_VALUE_LENGTH) {
+                        table->border_spacing_h = h_val->data.length.value;
+                        log_debug("Table border-spacing horizontal: %.2fpx", h_val->data.length.value);
+                    }
+                    if (v_val && v_val->type == CSS_VALUE_LENGTH) {
+                        table->border_spacing_v = v_val->data.length.value;
+                        log_debug("Table border-spacing vertical: %.2fpx", v_val->data.length.value);
+                    }
+                } else if (val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
+                    // Handle numeric values (convert to length)
+                    float spacing = (val->type == CSS_VALUE_NUMBER) ?
+                        val->data.number.value : (float)val->data.integer.value;
+                    table->border_spacing_h = spacing;
+                    table->border_spacing_v = spacing;
+                    log_debug("Table border-spacing: %.2fpx (numeric, both h and v)", spacing);
+                }
+            }
+        }
+    }
+
     // Check if table-layout was already set to FIXED by CSS (via custom property)
     // If so, respect the CSS value and don't override it
     if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED) {
