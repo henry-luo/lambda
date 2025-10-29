@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "../lambda/input/css/dom_element.h"
+#include "../lambda/element_reader.h"
 }
 
 // DomNode member function implementations
@@ -55,7 +56,7 @@ uintptr_t DomNode::tag() {
 // Helper function to convert tag name string to Lexbor tag ID
 uintptr_t DomNode::tag_name_to_lexbor_id(const char* tag_name) {
     if (!tag_name) return 0;
-    
+
     // Use case-insensitive comparison for HTML tags
     // Map common HTML tags to their Lexbor constants
     if (strcasecmp(tag_name, "img") == 0) return LXB_TAG_IMG;
