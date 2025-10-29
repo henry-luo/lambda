@@ -663,6 +663,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
     // Special case: margin and padding with CSS_VALUE_LIST should be handled by switch statement
     // Don't treat them as shorthands that need expansion
+    // Same for border-width, border-style, border-color with CSS_VALUE_LIST
     bool handle_in_switch = false;
     if ((prop_id == CSS_PROPERTY_MARGIN || prop_id == CSS_PROPERTY_PADDING) &&
         value->type == CSS_VALUE_LIST) {
@@ -670,8 +671,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         handle_in_switch = true;
         is_shorthand = false; // Override: treat as longhand for switch processing
     }
-
-    if (is_shorthand) {
+    if ((prop_id == CSS_PROPERTY_BORDER_WIDTH || prop_id == CSS_PROPERTY_BORDER_STYLE ||
+         prop_id == CSS_PROPERTY_BORDER_COLOR) && value->type == CSS_VALUE_LIST) {
+        log_debug("[Lambda CSS Property] Multi-value border shorthand will be handled in switch statement");
+        handle_in_switch = true;
+        is_shorthand = false; // Override: treat as longhand for switch processing
+    }    if (is_shorthand) {
         log_debug("[Lambda CSS Shorthand] Property %d is a shorthand, expanding...", prop_id);
 
         if (prop_id == CSS_PROPERTY_BACKGROUND) {
