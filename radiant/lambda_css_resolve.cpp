@@ -1074,7 +1074,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_STRING) {
-                // Font family name as string
+                // Font family name as string (quotes already stripped during parsing)
                 const char* family = value->data.string;
                 if (family && strlen(family) > 0) {
                     span->font->family = strdup(family);
@@ -1094,7 +1094,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     family = map_lambda_font_family_keyword(keyword);
                     log_debug("[CSS] Font family generic keyword: %s -> %s", keyword, family);
                 } else {
-                    // Specific font name (e.g., Arial, Times) - use directly
+                    // Specific font name (e.g., Arial, Times) - quotes already stripped during parsing
                     family = keyword;
                     log_debug("[CSS] Font family specific name: %s", family);
                 }
@@ -1111,8 +1111,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     if (!item) continue;
 
                     const char* family = NULL;
+                    log_debug("[CSS] Font family list item type: %d", item->type);
                     if (item->type == CSS_VALUE_STRING && item->data.string) {
                         family = item->data.string;
+                        log_debug("[CSS] Font family STRING value: '%s'", family);
                     } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
                         // Check if it's a generic font family keyword
                         const char* keyword = item->data.keyword;
@@ -1124,12 +1126,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                             // Generic keyword - map it
                             family = map_lambda_font_family_keyword(keyword);
                         } else {
-                            // Specific font name (e.g., Arial, Times) - use directly
+                            // Specific font name (quotes already stripped during parsing)
                             family = keyword;
                         }
                     }
 
                     if (family && strlen(family) > 0) {
+                        // Quotes already stripped during parsing
                         span->font->family = strdup(family);
                         log_debug("[CSS] Font family from list[%zu]: %s", i, family);
                         break; // Use first font in the list

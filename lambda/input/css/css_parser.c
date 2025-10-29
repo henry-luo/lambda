@@ -507,14 +507,34 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             // Determine value type from token
             if (tokens[i].type == CSS_TOKEN_IDENT) {
                 value->type = CSS_VALUE_KEYWORD;
+                const char* token_val = NULL;
                 if (tokens[i].value) {
-                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                    token_val = tokens[i].value;
                 } else if (tokens[i].start && tokens[i].length > 0) {
                     char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
                     if (keyword_buf) {
                         memcpy(keyword_buf, tokens[i].start, tokens[i].length);
                         keyword_buf[tokens[i].length] = '\0';
-                        value->data.keyword = keyword_buf;
+                        token_val = keyword_buf;
+                    }
+                }
+
+                // Strip quotes from keyword (font names can be quoted)
+                if (token_val) {
+                    size_t len = strlen(token_val);
+                    if (len >= 2 && ((token_val[0] == '\'' && token_val[len-1] == '\'') ||
+                                     (token_val[0] == '"' && token_val[len-1] == '"'))) {
+                        // Create unquoted copy
+                        char* unquoted = (char*)pool_calloc(pool, len - 1);
+                        if (unquoted) {
+                            memcpy(unquoted, token_val + 1, len - 2);
+                            unquoted[len - 2] = '\0';
+                            value->data.keyword = unquoted;
+                        } else {
+                            value->data.keyword = pool_strdup(pool, token_val);
+                        }
+                    } else {
+                        value->data.keyword = pool_strdup(pool, token_val);
                     }
                 }
             } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
@@ -622,14 +642,34 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
             if (tokens[i].type == CSS_TOKEN_IDENT) {
                 value->type = CSS_VALUE_KEYWORD;
+                const char* token_val = NULL;
                 if (tokens[i].value) {
-                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                    token_val = tokens[i].value;
                 } else if (tokens[i].start && tokens[i].length > 0) {
                     char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
                     if (keyword_buf) {
                         memcpy(keyword_buf, tokens[i].start, tokens[i].length);
                         keyword_buf[tokens[i].length] = '\0';
-                        value->data.keyword = keyword_buf;
+                        token_val = keyword_buf;
+                    }
+                }
+
+                // Strip quotes from keyword (font names can be quoted)
+                if (token_val) {
+                    size_t len = strlen(token_val);
+                    if (len >= 2 && ((token_val[0] == '\'' && token_val[len-1] == '\'') ||
+                                     (token_val[0] == '"' && token_val[len-1] == '"'))) {
+                        // Create unquoted copy
+                        char* unquoted = (char*)pool_calloc(pool, len - 1);
+                        if (unquoted) {
+                            memcpy(unquoted, token_val + 1, len - 2);
+                            unquoted[len - 2] = '\0';
+                            value->data.keyword = unquoted;
+                        } else {
+                            value->data.keyword = pool_strdup(pool, token_val);
+                        }
+                    } else {
+                        value->data.keyword = pool_strdup(pool, token_val);
                     }
                 }
             } else if (tokens[i].type == CSS_TOKEN_NUMBER) {

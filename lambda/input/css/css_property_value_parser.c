@@ -110,18 +110,31 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
 
     value->type = CSS_VALUE_KEYWORD;
 
-    // Copy keyword string
+    // Strip quotes from keyword (font names can be quoted)
     size_t len = strlen(keyword);
-    char* keyword_copy = (char*)pool_alloc(pool, len + 1);
+    const char* keyword_to_copy = keyword;
+    char* unquoted = NULL;
+
+    if (len >= 2 && ((keyword[0] == '\'' && keyword[len-1] == '\'') ||
+                     (keyword[0] == '"' && keyword[len-1] == '"'))) {
+        // Allocate space for unquoted string
+        unquoted = (char*)pool_alloc(pool, len - 1);
+        if (unquoted) {
+            memcpy(unquoted, keyword + 1, len - 2);
+            unquoted[len - 2] = '\0';
+            keyword_to_copy = unquoted;
+        }
+    }
+
+    // Copy keyword string
+    char* keyword_copy = (char*)pool_alloc(pool, strlen(keyword_to_copy) + 1);
     if (keyword_copy) {
-        strcpy(keyword_copy, keyword);
+        strcpy(keyword_copy, keyword_to_copy);
         value->data.keyword = keyword_copy;
     }
 
     return value;
-}
-
-CssValue* css_value_create_number(Pool* pool, double number) {
+}CssValue* css_value_create_number(Pool* pool, double number) {
     if (!pool) return NULL;
 
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
@@ -228,12 +241,26 @@ CssValue* css_value_create_string(Pool* pool, const char* string) {
     if (!value) return NULL;
 
     value->type = CSS_VALUE_STRING;
-    value->data.string = pool_strdup(pool, string);
+
+    // Strip quotes from string values (both single and double quotes)
+    size_t len = strlen(string);
+    if (len >= 2 && ((string[0] == '\'' && string[len-1] == '\'') ||
+                     (string[0] == '"' && string[len-1] == '"'))) {
+        // Allocate space for unquoted string
+        char* unquoted = (char*)pool_alloc(pool, len - 1);
+        if (unquoted) {
+            memcpy(unquoted, string + 1, len - 2);
+            unquoted[len - 2] = '\0';
+            value->data.string = unquoted;
+        } else {
+            value->data.string = pool_strdup(pool, string);
+        }
+    } else {
+        value->data.string = pool_strdup(pool, string);
+    }
 
     return value;
-}
-
-CssValue* css_value_create_url(Pool* pool, const char* url) {
+}CssValue* css_value_create_url(Pool* pool, const char* url) {
     if (!pool || !url) return NULL;
 
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));

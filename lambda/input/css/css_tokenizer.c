@@ -605,13 +605,30 @@ void css_tokenizer_enhanced_destroy(CSSTokenizer* tokenizer) {
 
 /**
  * Extract and store the token value as a null-terminated string
+ * For STRING tokens, strips surrounding quotes
  */
 static void css_token_set_value(CssToken* token, Pool* pool) {
     if (!token || !pool || token->length == 0 || !token->start) {
         return;
     }
 
-    // Allocate space for value + null terminator
+    // For STRING tokens, strip quotes
+    if (token->type == CSS_TOKEN_STRING && token->length >= 2) {
+        char quote = token->start[0];
+        if ((quote == '\'' || quote == '"') && token->start[token->length - 1] == quote) {
+            // Strip quotes: copy from start+1, length-2
+            size_t unquoted_len = token->length - 2;
+            char* value = (char*)pool_alloc(pool, unquoted_len + 1);
+            if (value) {
+                memcpy(value, token->start + 1, unquoted_len);
+                value[unquoted_len] = '\0';
+                token->value = value;
+            }
+            return;
+        }
+    }
+
+    // Default: copy entire token value
     char* value = (char*)pool_alloc(pool, token->length + 1);
     if (value) {
         memcpy(value, token->start, token->length);
