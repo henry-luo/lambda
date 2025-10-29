@@ -1435,11 +1435,33 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "margin:");
+                strbuf_append_str(buf, " margin:");
                 char margin_str[32];
                 snprintf(margin_str, sizeof(margin_str), "%.2fpx",
                     val->type == CSS_VALUE_LENGTH ? val->data.length.value : val->type == CSS_VALUE_NUMBER ? val->data.number.value : val->data.integer.value);
                 strbuf_append_str(buf, margin_str);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_LIST && val->data.list.values && val->data.list.count > 0) {
+                // handle list values (e.g., "10px 0" or "10px 20px 30px 40px")
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, " margin:");
+                for (int i = 0; i < val->data.list.count; i++) {
+                    CssValue* item = val->data.list.values[i];
+                    if (item) {
+                        if (i > 0) strbuf_append_char(buf, ' ');
+                        char margin_str[32];
+                        if (item->type == CSS_VALUE_LENGTH) {
+                            snprintf(margin_str, sizeof(margin_str), "%.2fpx", item->data.length.value);
+                        } else if (item->type == CSS_VALUE_NUMBER) {
+                            snprintf(margin_str, sizeof(margin_str), "%.2fpx", item->data.number.value);
+                        } else if (item->type == CSS_VALUE_INTEGER) {
+                            snprintf(margin_str, sizeof(margin_str), "%.2fpx", (double)item->data.integer.value);
+                        } else {
+                            snprintf(margin_str, sizeof(margin_str), "?");
+                        }
+                        strbuf_append_str(buf, margin_str);
+                    }
+                }
                 has_props = true;
             }
         }
@@ -1548,13 +1570,17 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             }
         }
 
-        // Background color property
+        // Background color property (try longhand first, then shorthand)
         decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BACKGROUND_COLOR);
+        if (!decl || !decl->value) {
+            // try shorthand 'background' property
+            decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BACKGROUND);
+        }
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_COLOR) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "background-color:");
+                strbuf_append_str(buf, " background:");
                 char color_str[64];
                 snprintf(color_str, sizeof(color_str), "rgba(%d,%d,%d,%.2f)",
                     val->data.color.data.rgba.r,
