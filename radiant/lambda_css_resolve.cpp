@@ -1152,25 +1152,46 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
+            // Allocate lxb_css_property_line_height_t structure (compatible with Lexbor)
+            lxb_css_property_line_height_t* line_height =
+                (lxb_css_property_line_height_t*)alloc_prop(lycon, sizeof(lxb_css_property_line_height_t));
+
+            if (!line_height) {
+                log_debug("[CSS] Failed to allocate line_height structure");
+                break;
+            }
+
             // Line height can be number (multiplier), length, percentage, or 'normal'
-            // Store as-is for later computation
             if (value->type == CSS_VALUE_NUMBER) {
                 // Unitless number - multiply by font size
-                float multiplier = value->data.number.value;
-                log_debug("[CSS] Line height number: %.2f", multiplier);
-                // Store for later: line_height = font_size * multiplier
-                // For now, store the multiplier (need to update BlockProp structure)
+                line_height->type = LXB_CSS_VALUE__NUMBER;
+                line_height->u.number.num = value->data.number.value;
+                log_debug("[CSS] Line height number: %.2f", value->data.number.value);
+                block->blk->line_height = line_height;
             } else if (value->type == CSS_VALUE_LENGTH) {
-                float line_height = value->data.length.value;
-                log_debug("[CSS] Line height length: %.2f px", line_height);
-                // TODO: Store line_height in block->blk
+                line_height->type = LXB_CSS_VALUE__LENGTH;
+                line_height->u.length.num = value->data.length.value;
+                line_height->u.length.is_float = true;
+                // Set unit - convert from CSS_UNIT to lxb_css_unit_t
+                line_height->u.length.unit = (lxb_css_unit_t)value->data.length.unit;
+                log_debug("[CSS] Line height length: %.2f px (unit: %d)", value->data.length.value, value->data.length.unit);
+                block->blk->line_height = line_height;
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                log_debug("[CSS] Line height percentage: %.2f%%", percentage);
-                // line_height = font_size * (percentage / 100)
+                line_height->type = LXB_CSS_VALUE__PERCENTAGE;
+                line_height->u.percentage.num = value->data.percentage.value;
+                log_debug("[CSS] Line height percentage: %.2f%%", value->data.percentage.value);
+                block->blk->line_height = line_height;
             } else if (value->type == CSS_VALUE_KEYWORD) {
-                // 'normal' keyword - typically 1.2 × font-size
-                log_debug("[CSS] Line height keyword: normal");
+                const char* keyword = value->data.keyword;
+                if (keyword && strcasecmp(keyword, "normal") == 0) {
+                    line_height->type = LXB_CSS_VALUE_NORMAL;
+                    log_debug("[CSS] Line height keyword: normal");
+                    block->blk->line_height = line_height;
+                } else if (keyword && strcasecmp(keyword, "inherit") == 0) {
+                    line_height->type = LXB_CSS_VALUE_INHERIT;
+                    log_debug("[CSS] Line height keyword: inherit");
+                    block->blk->line_height = line_height;
+                }
             }
             break;
         }
