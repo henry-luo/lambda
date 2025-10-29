@@ -1412,6 +1412,13 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                 snprintf(width_str, sizeof(width_str), "%.2fpx", val->data.length.value);
                 strbuf_append_str(buf, width_str);
                 has_props = true;
+            } else if (val->type == CSS_VALUE_PERCENTAGE) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, " width:");
+                char width_str[32];
+                snprintf(width_str, sizeof(width_str), "%.2f%%", val->data.percentage.value);
+                strbuf_append_str(buf, width_str);
+                has_props = true;
             }
         }
 
@@ -1477,6 +1484,36 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                 snprintf(padding_str, sizeof(padding_str), "%.2fpx",
                     val->type == CSS_VALUE_LENGTH ? val->data.length.value : val->type == CSS_VALUE_NUMBER ? val->data.number.value : val->data.integer.value);
                 strbuf_append_str(buf, padding_str);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_PERCENTAGE) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, "padding:");
+                char padding_str[32];
+                snprintf(padding_str, sizeof(padding_str), "%.2f%%", val->data.percentage.value);
+                strbuf_append_str(buf, padding_str);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_LIST && val->data.list.values && val->data.list.count > 0) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, "padding:");
+                for (int i = 0; i < val->data.list.count; i++) {
+                    if (i > 0) strbuf_append_str(buf, " ");
+                    CssValue* item = val->data.list.values[i];
+                    if (item) {
+                        char item_str[32];
+                        if (item->type == CSS_VALUE_LENGTH) {
+                            snprintf(item_str, sizeof(item_str), "%.2fpx", item->data.length.value);
+                        } else if (item->type == CSS_VALUE_PERCENTAGE) {
+                            snprintf(item_str, sizeof(item_str), "%.2f%%", item->data.percentage.value);
+                        } else if (item->type == CSS_VALUE_NUMBER) {
+                            snprintf(item_str, sizeof(item_str), "%.2f", item->data.number.value);
+                        } else if (item->type == CSS_VALUE_INTEGER) {
+                            snprintf(item_str, sizeof(item_str), "%d", item->data.integer.value);
+                        } else {
+                            continue;
+                        }
+                        strbuf_append_str(buf, item_str);
+                    }
+                }
                 has_props = true;
             }
         }
