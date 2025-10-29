@@ -451,16 +451,35 @@ float map_lambda_font_size_keyword(const char* keyword) {
     return 16.0f; // default medium size
 }
 
-int map_lambda_font_weight_keyword(const char* keyword) {
-    if (!keyword) return 400;
+// map Lambda CSS font-weight keywords/numbers to Lexbor PropValue enum
+PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
+    if (!value) return LXB_CSS_VALUE_NORMAL;
 
-    // Map font-weight keywords to numeric values
-    if (strcasecmp(keyword, "normal") == 0) return 400;
-    if (strcasecmp(keyword, "bold") == 0) return 700;
-    if (strcasecmp(keyword, "bolder") == 0) return 900;  // simplified
-    if (strcasecmp(keyword, "lighter") == 0) return 300; // simplified
+    if (value->type == CSS_VALUE_KEYWORD) {
+        const char* keyword = value->data.keyword;
+        if (!keyword) return LXB_CSS_VALUE_NORMAL;
 
-    return 400; // default normal
+        // map keywords to Lexbor enum values
+        if (strcasecmp(keyword, "normal") == 0) return LXB_CSS_VALUE_NORMAL;
+        if (strcasecmp(keyword, "bold") == 0) return LXB_CSS_VALUE_BOLD;
+        if (strcasecmp(keyword, "bolder") == 0) return LXB_CSS_VALUE_BOLDER;
+        if (strcasecmp(keyword, "lighter") == 0) return LXB_CSS_VALUE_LIGHTER;
+
+        return LXB_CSS_VALUE_NORMAL; // default
+    }
+    else if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+        // numeric weights: map to closest keyword or return as-is
+        int weight = (int)value->data.number.value;
+
+        // Lexbor uses enum values for numeric weights too, but for simplicity
+        // we'll map common numeric values to their keyword equivalents
+        if (weight <= 350) return LXB_CSS_VALUE_LIGHTER;
+        if (weight <= 550) return LXB_CSS_VALUE_NORMAL;  // 400
+        if (weight <= 750) return LXB_CSS_VALUE_BOLD;    // 700
+        return LXB_CSS_VALUE_BOLDER;  // 900
+    }
+
+    return LXB_CSS_VALUE_NORMAL; // default
 }
 
 const char* map_lambda_font_family_keyword(const char* keyword) {
@@ -985,7 +1004,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
             if (!span->font) {
-                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+                span->font = alloc_font_prop(lycon);
             }
 
             float font_size = 0.0f;
@@ -1012,22 +1031,20 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_FONT_WEIGHT: {
             log_debug("[CSS] Processing font-weight property");
             if (!span->font) {
-                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+                span->font = alloc_font_prop(lycon);
+                log_debug("[CSS]   Created new FontProp with defaults");
             }
 
-            int weight = 0;
-            if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
-                // Numeric weight: 100, 200, ..., 900
-                weight = (int)value->data.number.value;
-                log_debug("[CSS] Font weight number: %d", weight);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
-                // Keyword: normal (400), bold (700), lighter, bolder
-                weight = map_lambda_font_weight_keyword(value->data.keyword);
-                log_debug("[CSS] Font weight keyword: %s -> %d", value->data.keyword, weight);
-            }
+            // Map Lambda CSS value to Lexbor PropValue enum
+            PropValue lexbor_weight = map_lambda_font_weight_to_lexbor(value);
+            span->font->font_weight = lexbor_weight;
 
-            if (weight >= 100 && weight <= 900) {
-                span->font->font_weight = weight;
+            if (value->type == CSS_VALUE_KEYWORD) {
+                log_debug("[CSS] Font weight keyword: '%s' -> Lexbor enum: %d",
+                         value->data.keyword, lexbor_weight);
+            } else if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+                log_debug("[CSS] Font weight number: %d -> Lexbor enum: %d",
+                         (int)value->data.number.value, lexbor_weight);
             }
             break;
         }
@@ -1035,7 +1052,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_FONT_FAMILY: {
             log_debug("[CSS] Processing font-family property");
             if (!span->font) {
-                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+                span->font = alloc_font_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_STRING) {
@@ -1162,7 +1179,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_TEXT_DECORATION: {
             log_debug("[CSS] Processing text-decoration property");
             if (!span->font) {
-                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+                span->font = alloc_font_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
