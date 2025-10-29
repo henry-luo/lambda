@@ -1308,14 +1308,24 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk->given_width_type = LXB_CSS_VALUE_INITIAL;
                 log_debug("[CSS] Width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
-                // For now, store percentage as-is (need parent width for proper calculation)
+                // Calculate percentage width based on parent width
                 float percentage = value->data.percentage.value;
                 // per CSS spec, negative percentages for width are invalid
                 if (percentage < 0.0f) {
                     log_debug("[CSS] Width: %.2f%% (negative, ignored per CSS spec)", percentage);
                     break;
                 }
-                log_debug("[CSS] Width: %.2f%% (percentage not yet fully supported)", percentage);
+                // Calculate pixel value from percentage
+                float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
+                float width = percentage * parent_width / 100.0f;
+                if (width < 0.0f) {
+                    log_debug("[CSS] Width: %.2f%% (calculated %.2f px, negative, ignored)", percentage, width);
+                    break;
+                }
+                block->blk->given_width = width;
+                lycon->block.given_width = width;
+                block->blk->given_width_type = LXB_CSS_VALUE__PERCENTAGE;
+                log_debug("[CSS] Width: %.2f%% of parent %.2f px = %.2f px", percentage, parent_width, width);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Width: auto");
@@ -1683,9 +1693,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 3 values: top, left/right, bottom
             // 4 values: top, right, bottom, left
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_PERCENTAGE) {
                 // Single value - all sides get same value
-                float padding = value->data.length.value;
+                float padding;
+                if (value->type == CSS_VALUE_LENGTH) {
+                    padding = convert_lambda_length_to_px(value, lycon, prop_id);
+                } else {
+                    // Padding percentages are relative to parent width (per CSS spec)
+                    float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
+                    padding = value->data.percentage.value * parent_width / 100.0f;
+                }
                 span->bound->padding.top = padding;
                 span->bound->padding.right = padding;
                 span->bound->padding.bottom = padding;
@@ -1700,10 +1717,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && values[0]->type == CSS_VALUE_LENGTH && values[1]->type == CSS_VALUE_LENGTH) {
+                // Helper to convert value to pixels
+                auto convert_val = [&](CssValue* v) -> float {
+                    if (v->type == CSS_VALUE_LENGTH) {
+                        return convert_lambda_length_to_px(v, lycon, prop_id);
+                    } else if (v->type == CSS_VALUE_PERCENTAGE) {
+                        float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
+                        return v->data.percentage.value * parent_width / 100.0f;
+                    }
+                    return 0.0f;
+                };
+
+                if (count == 2) {
                     // top/bottom, left/right
-                    float vertical = values[0]->data.length.value;
-                    float horizontal = values[1]->data.length.value;
+                    float vertical = convert_val(values[0]);
+                    float horizontal = convert_val(values[1]);
                     span->bound->padding.top = vertical;
                     span->bound->padding.bottom = vertical;
                     span->bound->padding.left = horizontal;
@@ -1713,12 +1741,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->padding.bottom_specificity = specificity;
                     span->bound->padding.left_specificity = specificity;
                     log_debug("[CSS] Padding (vertical/horizontal): %.2f %.2f px", vertical, horizontal);
-                } else if (count == 3 && values[0]->type == CSS_VALUE_LENGTH &&
-                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH) {
+                } else if (count == 3) {
                     // top, left/right, bottom
-                    float top = values[0]->data.length.value;
-                    float horizontal = values[1]->data.length.value;
-                    float bottom = values[2]->data.length.value;
+                    float top = convert_val(values[0]);
+                    float horizontal = convert_val(values[1]);
+                    float bottom = convert_val(values[2]);
                     span->bound->padding.top = top;
                     span->bound->padding.left = horizontal;
                     span->bound->padding.right = horizontal;
@@ -1728,21 +1755,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->padding.bottom_specificity = specificity;
                     span->bound->padding.left_specificity = specificity;
                     log_debug("[CSS] Padding (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
-                } else if (count == 4 && values[0]->type == CSS_VALUE_LENGTH &&
-                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH &&
-                           values[3]->type == CSS_VALUE_LENGTH) {
+                } else if (count == 4) {
                     // top, right, bottom, left
-                    span->bound->padding.top = values[0]->data.length.value;
-                    span->bound->padding.right = values[1]->data.length.value;
-                    span->bound->padding.bottom = values[2]->data.length.value;
-                    span->bound->padding.left = values[3]->data.length.value;
+                    span->bound->padding.top = convert_val(values[0]);
+                    span->bound->padding.right = convert_val(values[1]);
+                    span->bound->padding.bottom = convert_val(values[2]);
+                    span->bound->padding.left = convert_val(values[3]);
                     span->bound->padding.top_specificity = specificity;
                     span->bound->padding.right_specificity = specificity;
                     span->bound->padding.bottom_specificity = specificity;
                     span->bound->padding.left_specificity = specificity;
                     log_debug("[CSS] Padding (4 values): %.2f %.2f %.2f %.2f px",
-                            values[0]->data.length.value, values[1]->data.length.value,
-                            values[2]->data.length.value, values[3]->data.length.value);
+                            span->bound->padding.top, span->bound->padding.right,
+                            span->bound->padding.bottom, span->bound->padding.left);
                 }
             }
             break;
