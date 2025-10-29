@@ -4110,9 +4110,118 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_FLEX: {
             log_debug("[CSS] Processing flex shorthand property");
             // flex is a shorthand for flex-grow, flex-shrink, and flex-basis
-            // Common values: auto (1 1 auto), none (0 0 auto), <grow> (grow 1 0)
-            // For now, just log
-            log_debug("[CSS] flex: shorthand parsing not yet fully implemented");
+            // Syntax: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
+
+            ViewSpan* span = (ViewSpan*)lycon->view;
+
+            // Initialize with defaults
+            float flex_grow = 1.0f;      // default when using shorthand
+            float flex_shrink = 1.0f;    // default
+            float flex_basis = -1.0f;    // auto
+            bool flex_basis_is_percent = false;
+
+            // Handle single keyword values
+            if (value->type == CSS_VALUE_KEYWORD) {
+                if (strcasecmp(value->data.keyword, "none") == 0) {
+                    flex_grow = 0;
+                    flex_shrink = 0;
+                    flex_basis = -1;  // auto
+                    log_debug("[CSS] flex: none -> grow=0 shrink=0 basis=auto");
+                } else if (strcasecmp(value->data.keyword, "auto") == 0) {
+                    flex_grow = 1;
+                    flex_shrink = 1;
+                    flex_basis = -1;  // auto
+                    log_debug("[CSS] flex: auto -> grow=1 shrink=1 basis=auto");
+                } else if (strcasecmp(value->data.keyword, "initial") == 0) {
+                    flex_grow = 0;
+                    flex_shrink = 1;
+                    flex_basis = -1;  // auto
+                    log_debug("[CSS] flex: initial -> grow=0 shrink=1 basis=auto");
+                }
+
+                span->flex_grow = flex_grow;
+                span->flex_shrink = flex_shrink;
+                span->flex_basis = flex_basis;
+                span->flex_basis_is_percent = flex_basis_is_percent;
+                break;
+            }
+
+            // Parse multi-value flex shorthand (e.g., "1 0 100px" or "2 1 50px")
+            if (value->type == CSS_VALUE_LIST) {
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                int value_index = 0;
+                bool found_basis = false;
+
+                log_debug("[CSS] flex shorthand with %zu values", count);
+
+                // Parse up to 3 values: grow, shrink, basis
+                for (size_t i = 0; i < count && i < 3; i++) {
+                    CssValue* val = values[i];
+
+                    if (val->type == CSS_VALUE_NUMBER) {
+                        // Numbers are grow and shrink (unitless)
+                        if (value_index == 0) {
+                            flex_grow = (float)val->data.number.value;
+                            log_debug("[CSS]   flex-grow: %.2f", flex_grow);
+                            value_index++;
+                        } else if (value_index == 1) {
+                            flex_shrink = (float)val->data.number.value;
+                            log_debug("[CSS]   flex-shrink: %.2f", flex_shrink);
+                            value_index++;
+                        }
+                    } else if (val->type == CSS_VALUE_LENGTH) {
+                        // Length is basis
+                        flex_basis = val->data.length.value;
+                        flex_basis_is_percent = false;
+                        found_basis = true;
+                        log_debug("[CSS]   flex-basis: %.2fpx", flex_basis);
+                    } else if (val->type == CSS_VALUE_PERCENTAGE) {
+                        // Percentage is basis
+                        flex_basis = val->data.percentage.value;
+                        flex_basis_is_percent = true;
+                        found_basis = true;
+                        log_debug("[CSS]   flex-basis: %.2f%%", flex_basis);
+                    } else if (val->type == CSS_VALUE_KEYWORD) {
+                        if (strcasecmp(val->data.keyword, "auto") == 0) {
+                            flex_basis = -1;  // auto
+                            flex_basis_is_percent = false;
+                            found_basis = true;
+                            log_debug("[CSS]   flex-basis: auto");
+                        }
+                    }
+                }
+
+                // If only one number was provided, it's grow with implicit 1 0
+                if (count == 1 && value_index == 1 && !found_basis) {
+                    flex_shrink = 1.0f;
+                    flex_basis = 0;  // 0px basis when single number
+                    log_debug("[CSS] flex: <grow> -> grow=%.2f shrink=1 basis=0", flex_grow);
+                }
+
+                span->flex_grow = flex_grow;
+                span->flex_shrink = flex_shrink;
+                span->flex_basis = flex_basis;
+                span->flex_basis_is_percent = flex_basis_is_percent;
+
+                log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
+                         flex_grow, flex_shrink, flex_basis,
+                         flex_basis_is_percent ? "%" : (flex_basis == -1 ? " (auto)" : "px"));
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // Single number without list wrapper: just flex-grow
+                flex_grow = (float)value->data.number.value;
+                flex_shrink = 1.0f;
+                flex_basis = 0;  // 0px when single unitless number
+
+                span->flex_grow = flex_grow;
+                span->flex_shrink = flex_shrink;
+                span->flex_basis = flex_basis;
+                span->flex_basis_is_percent = false;
+
+                log_debug("[CSS] flex: %.2f -> grow=%.2f shrink=1 basis=0", flex_grow, flex_grow);
+            }
+
             break;
         }
 

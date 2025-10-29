@@ -185,7 +185,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 log_debug("Finished layout_grid_container");
             }
             else if (display.inner == LXB_CSS_VALUE_TABLE) {
-                log_debug("Table detected inner=%d", display.outer, display.inner);
+                log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
+                        display.outer, display.inner, block->node->name());
                 layout_table(lycon, block->node, display);
                 return;
             }
