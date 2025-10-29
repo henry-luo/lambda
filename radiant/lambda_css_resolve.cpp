@@ -1026,22 +1026,51 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             float font_size = 0.0f;
+            bool valid = false;
+
             if (value->type == CSS_VALUE_LENGTH) {
-                font_size = value->data.length.value; // Use struct accessor
-                log_debug("[CSS] Font size length: %.2f px", font_size);
+                font_size = convert_lambda_length_to_px(value, lycon, prop_id);
+                log_debug("[CSS] Font size length: %.2f px (after conversion)", font_size);
+                // Per CSS spec, negative font-size values are invalid, but 0 is valid
+                if (font_size >= 0) {
+                    valid = true;
+                } else {
+                    log_debug("[CSS] Font size: %.2f px invalid (must be >= 0), ignoring", font_size);
+                }
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 // Percentage of parent font size
                 float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
                 font_size = parent_size * (value->data.percentage.value / 100.0f);
                 log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px", value->data.percentage.value, font_size);
+                if (font_size >= 0) {
+                    valid = true;
+                } else {
+                    log_debug("[CSS] Font size: %.2f px invalid (must be >= 0), ignoring", font_size);
+                }
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // Named font sizes: small, medium, large, etc.
                 font_size = map_lambda_font_size_keyword(value->data.keyword);
                 log_debug("[CSS] Font size keyword: %s -> %.2f px", value->data.keyword, font_size);
+                if (font_size > 0) {
+                    valid = true;
+                }
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                // Per CSS spec, unitless zero is valid and treated as 0px
+                // Other unitless numbers are invalid for font-size
+                font_size = value->data.number.value;
+                if (font_size == 0.0f) {
+                    valid = true;
+                    log_debug("[CSS] Font size: unitless 0 (treated as 0px)");
+                } else {
+                    log_debug("[CSS] Font size number: %.2f (non-zero unitless values invalid for font-size)", font_size);
+                }
             }
 
-            if (font_size > 0) {
+            if (valid) {
                 span->font->font_size = font_size;
+                log_debug("[CSS] Font size set to: %.2f px", font_size);
+            } else {
+                log_debug("[CSS] Font size not set (invalid value)");
             }
             break;
         }
