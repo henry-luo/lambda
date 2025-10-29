@@ -43,7 +43,7 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
     if (!compound) return NULL;
 
     // Allocate initial array for simple selectors
-    int capacity = 4;
+    size_t capacity = 4;
     compound->simple_selectors = (CssSimpleSelector**)pool_calloc(pool, capacity * sizeof(CssSimpleSelector*));
     if (!compound->simple_selectors) return NULL;
     compound->simple_selector_count = 0;
@@ -118,7 +118,7 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
     if (!selector) return NULL;
 
     // Allocate arrays
-    int capacity = 4;
+    size_t capacity = 4;
     selector->compound_selectors = (CssCompoundSelector**)pool_calloc(pool, capacity * sizeof(CssCompoundSelector*));
     selector->combinators = (CssCombinator*)pool_calloc(pool, capacity * sizeof(CssCombinator));
     if (!selector->compound_selectors || !selector->combinators) return NULL;
@@ -382,6 +382,258 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         fprintf(stderr, "[CSS Parser] Universal selector: '*'\n");
         (*pos)++;
         matched = true;
+    } else if (token->type == CSS_TOKEN_FUNCTION) {
+        // Functional pseudo-class like nth-child(1)
+        // Token value contains the function name without the opening parenthesis
+        fprintf(stderr, "[CSS Parser] Detected CSS_TOKEN_FUNCTION: '%s'\n", token->value ? token->value : "(null)");
+        const char* func_name = token->value;
+        if (!func_name && token->start && token->length > 0) {
+            char* name_buf = (char*)pool_calloc(pool, token->length + 1);
+            if (name_buf) {
+                memcpy(name_buf, token->start, token->length);
+                name_buf[token->length] = '\0';
+                func_name = name_buf;
+            }
+        }
+
+        // Function tokens include the opening '(', strip it
+        size_t func_len = func_name ? strlen(func_name) : 0;
+        if (func_len > 0 && func_name[func_len - 1] == '(') {
+            char* clean_name = (char*)pool_calloc(pool, func_len);
+            if (clean_name) {
+                memcpy(clean_name, func_name, func_len - 1);
+                clean_name[func_len - 1] = '\0';
+                func_name = clean_name;
+            }
+        }
+
+        (*pos)++; // skip FUNCTION token
+
+        // Collect tokens until matching ')'
+        int arg_start = *pos;
+        int paren_depth = 1; // Already inside the function
+        while (*pos < token_count && paren_depth > 0) {
+            if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
+                paren_depth++;
+            } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+                paren_depth--;
+                if (paren_depth == 0) break;
+            }
+            (*pos)++;
+        }
+
+        // Extract argument as string
+        char* pseudo_arg = NULL;
+        if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+            int arg_end = *pos;
+            // Build argument string from tokens
+            size_t arg_len = 0;
+            for (int i = arg_start; i < arg_end; i++) {
+                if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+                if (tokens[i].value) {
+                    arg_len += strlen(tokens[i].value);
+                } else if (tokens[i].length > 0) {
+                    arg_len += tokens[i].length;
+                }
+            }
+
+            if (arg_len > 0) {
+                pseudo_arg = (char*)pool_calloc(pool, arg_len + 1);
+                if (pseudo_arg) {
+                    char* p = pseudo_arg;
+                    for (int i = arg_start; i < arg_end; i++) {
+                        if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+                        if (tokens[i].value) {
+                            size_t len = strlen(tokens[i].value);
+                            memcpy(p, tokens[i].value, len);
+                            p += len;
+                        } else if (tokens[i].start && tokens[i].length > 0) {
+                            memcpy(p, tokens[i].start, tokens[i].length);
+                            p += tokens[i].length;
+                        }
+                    }
+                    *p = '\0';
+                }
+            }
+
+            (*pos)++; // skip ')'
+        }
+
+        // Map function name to pseudo-class type
+        if (strcmp(func_name, "nth-child") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_NTH_CHILD;
+        } else if (strcmp(func_name, "nth-of-type") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
+        } else if (strcmp(func_name, "nth-last-child") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
+        } else if (strcmp(func_name, "not") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_NOT;
+        } else {
+            // Unknown pseudo-class function, skip it
+            fprintf(stderr, "[CSS Parser] WARNING: Unknown pseudo-class function '%s()', skipping\n", func_name);
+            return NULL;
+        }
+
+        selector->value = func_name;
+        selector->argument = pseudo_arg;
+
+        fprintf(stderr, "[CSS Parser] Functional pseudo-class: '%s(%s)'\n",
+               func_name, pseudo_arg ? pseudo_arg : "");
+        matched = true;
+    } else if (token->type == CSS_TOKEN_COLON) {
+        // Pseudo-class selector: :hover, :nth-child(), etc.
+        (*pos)++;
+        if (*pos < token_count) {
+            const CssToken* pseudo_token = &tokens[*pos];
+
+            // Check for pseudo-element (double colon ::before, ::after)
+            if (pseudo_token->type == CSS_TOKEN_COLON) {
+                // This is a pseudo-element, skip for now
+                fprintf(stderr, "[CSS Parser] Skipping pseudo-element (::)\n");
+                (*pos)++;
+                if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
+                    (*pos)++;
+                }
+                return NULL; // Don't handle pseudo-elements yet
+            }
+
+            // Single colon - pseudo-class
+            if (pseudo_token->type == CSS_TOKEN_IDENT) {
+                const char* pseudo_name = pseudo_token->value;
+                if (!pseudo_name && pseudo_token->start && pseudo_token->length > 0) {
+                    char* name_buf = (char*)pool_calloc(pool, pseudo_token->length + 1);
+                    if (name_buf) {
+                        memcpy(name_buf, pseudo_token->start, pseudo_token->length);
+                        name_buf[pseudo_token->length] = '\0';
+                        pseudo_name = name_buf;
+                    }
+                }
+
+                (*pos)++;
+
+                // Map pseudo-class name to type
+                if (strcmp(pseudo_name, "first-child") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_FIRST_CHILD;
+                } else if (strcmp(pseudo_name, "last-child") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_LAST_CHILD;
+                } else if (strcmp(pseudo_name, "only-child") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ONLY_CHILD;
+                } else if (strcmp(pseudo_name, "hover") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_HOVER;
+                } else if (strcmp(pseudo_name, "active") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ACTIVE;
+                } else if (strcmp(pseudo_name, "focus") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_FOCUS;
+                } else {
+                    // Unknown pseudo-class, skip it
+                    fprintf(stderr, "[CSS Parser] WARNING: Unknown pseudo-class ':%s', skipping\n", pseudo_name);
+                    return NULL;
+                }
+
+                selector->value = pseudo_name;
+                selector->argument = NULL;
+
+                fprintf(stderr, "[CSS Parser] Simple pseudo-class: ':%s'\n", pseudo_name);
+                matched = true;
+
+            } else if (pseudo_token->type == CSS_TOKEN_FUNCTION) {
+                // Functional pseudo-class after colon: :nth-child(...)
+                const char* func_name = pseudo_token->value;
+                if (!func_name && pseudo_token->start && pseudo_token->length > 0) {
+                    char* name_buf = (char*)pool_calloc(pool, pseudo_token->length + 1);
+                    if (name_buf) {
+                        memcpy(name_buf, pseudo_token->start, pseudo_token->length);
+                        name_buf[pseudo_token->length] = '\0';
+                        func_name = name_buf;
+                    }
+                }
+
+                // Function tokens include the opening '(', strip it
+                size_t func_len = func_name ? strlen(func_name) : 0;
+                if (func_len > 0 && func_name[func_len - 1] == '(') {
+                    char* clean_name = (char*)pool_calloc(pool, func_len);
+                    if (clean_name) {
+                        memcpy(clean_name, func_name, func_len - 1);
+                        clean_name[func_len - 1] = '\0';
+                        func_name = clean_name;
+                    }
+                }
+
+                (*pos)++; // skip FUNCTION token
+
+                // Collect tokens until matching ')'
+                int arg_start = *pos;
+                int paren_depth = 1; // Already inside the function
+                while (*pos < token_count && paren_depth > 0) {
+                    if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
+                        paren_depth++;
+                    } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+                        paren_depth--;
+                        if (paren_depth == 0) break;
+                    }
+                    (*pos)++;
+                }
+
+                // Extract argument as string
+                char* pseudo_arg = NULL;
+                if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+                    int arg_end = *pos;
+                    // Build argument string from tokens
+                    size_t arg_len = 0;
+                    for (int i = arg_start; i < arg_end; i++) {
+                        if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+                        if (tokens[i].value) {
+                            arg_len += strlen(tokens[i].value);
+                        } else if (tokens[i].length > 0) {
+                            arg_len += tokens[i].length;
+                        }
+                    }
+
+                    if (arg_len > 0) {
+                        pseudo_arg = (char*)pool_calloc(pool, arg_len + 1);
+                        if (pseudo_arg) {
+                            char* p = pseudo_arg;
+                            for (int i = arg_start; i < arg_end; i++) {
+                                if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+                                if (tokens[i].value) {
+                                    size_t len = strlen(tokens[i].value);
+                                    memcpy(p, tokens[i].value, len);
+                                    p += len;
+                                } else if (tokens[i].start && tokens[i].length > 0) {
+                                    memcpy(p, tokens[i].start, tokens[i].length);
+                                    p += tokens[i].length;
+                                }
+                            }
+                            *p = '\0';
+                        }
+                    }
+
+                    (*pos)++; // skip ')'
+                }
+
+                // Map function name to pseudo-class type
+                if (strcmp(func_name, "nth-child") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_NTH_CHILD;
+                } else if (strcmp(func_name, "nth-of-type") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
+                } else if (strcmp(func_name, "nth-last-child") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
+                } else if (strcmp(func_name, "not") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_NOT;
+                } else {
+                    // Unknown pseudo-class function, skip it
+                    fprintf(stderr, "[CSS Parser] WARNING: Unknown pseudo-class function ':%s()', skipping\n", func_name);
+                    return NULL;
+                }
+
+                selector->value = func_name;
+                selector->argument = pseudo_arg;
+
+                fprintf(stderr, "[CSS Parser] Functional pseudo-class after colon: ':%s(%s)'\n",
+                       func_name, pseudo_arg ? pseudo_arg : "");
+                matched = true;
+            }
+        }
     }
 
     // If no valid selector was matched, return NULL

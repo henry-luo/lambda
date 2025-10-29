@@ -661,7 +661,8 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
                 if (selector_matcher_parse_nth_formula(pseudo_arg, &formula)) {
                     bool from_end = (pseudo_type == CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD ||
                                     pseudo_type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE);
-                    return selector_matcher_matches_nth_child(matcher, &formula, element, from_end);
+                    bool result = selector_matcher_matches_nth_child(matcher, &formula, element, from_end);
+                    return result;
                 }
             }
             return false;
