@@ -470,7 +470,7 @@ bool html5_has_element_in_scope(Html5Parser* parser, const char* tag_name) {
 
     Html5StackEntry* entry = parser->open_elements->top;
     bool first = true;  // Don't check scope boundary for the first element
-    
+
     while (entry) {
         TypeElmt* type = (TypeElmt*)entry->element->type;
         if (!type) {
