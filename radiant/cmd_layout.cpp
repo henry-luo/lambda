@@ -692,6 +692,14 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
                 CssSelector* group_sel = selector_group->selectors[sel_idx];
                 if (!group_sel) continue;
 
+                // calculate and cache specificity if not already done
+                if (group_sel->specificity.inline_style == 0 &&
+                    group_sel->specificity.ids == 0 &&
+                    group_sel->specificity.classes == 0 &&
+                    group_sel->specificity.elements == 0) {
+                    group_sel->specificity = selector_matcher_calculate_specificity(matcher, group_sel);
+                }
+
                 MatchResult match_result;
                 if (selector_matcher_matches(matcher, group_sel, root, &match_result)) {
                     log_debug("[CSS] Rule %d selector [%zu] MATCHES <%s>",

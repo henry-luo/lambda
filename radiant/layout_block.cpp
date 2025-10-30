@@ -383,6 +383,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
     lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
+    log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->name());
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
@@ -406,7 +407,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_init(lycon);
     block->x = pa_line.left;  block->y = pa_block.advance_y;
-    log_debug("block init position: %f, %f", block->x, block->y);
+    const char* tag_init = block->node ? block->node->name() : "unknown";
+    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag_init, block->x, block->y, pa_block.advance_y);
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
         size_t value_len;  const lxb_char_t *value;
@@ -568,8 +570,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO) block->bound->margin.right = 0;
         }
         log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
+        float y_before_margin = block->y;
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
+        log_debug("Y coordinate: before margin=%f, margin.top=%f, after margin=%f (tag=%s)",
+                  y_before_margin, block->bound->margin.top, block->y, tag_init);
         if (block->bound->border) {
             lycon->line.advance_x += block->bound->border->width.left;
             lycon->block.advance_y += block->bound->border->width.top;
@@ -589,10 +594,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
+    // DEBUG: Track Y coordinate changes for inner div
+    bool is_inner_div = (strcmp(tag_init, "div") == 0 && block->parent && block->parent->node &&
+                         strcmp(block->parent->node->name(), "div") == 0);
+    if (is_inner_div) log_debug("[TRACK] After layout-block-sizes: block->y = %.2f", block->y);
+
     // layout block content
+    if (is_inner_div) log_debug("[TRACK] Before layout_block_content: block->y = %.2f", block->y);
     if (elmt_name != LXB_TAG_IMG) {
         layout_block_content(lycon, block, display);
     }
+    if (is_inner_div) log_debug("[TRACK] After layout_block_content: block->y = %.2f", block->y);
 
     // check for margin collapsing with children
     if (block->bound) {
@@ -615,9 +627,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // Apply CSS positioning after normal layout
+    if (is_inner_div) log_debug("[TRACK] Before CSS positioning: block->y = %.2f", block->y);
     if (block->position) {
         log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
-        log_debug("Position offsets: top=%d(%s), right=%d(%s), bottom=%d(%s), left=%d(%s)",
+        log_debug("Position offsets: top=%.2f(%s), right=%.2f(%s), bottom=%.2f(%s), left=%.2f(%s)",
             block->position->top, block->position->has_top ? "set" : "unset",
             block->position->right, block->position->has_right ? "set" : "unset",
             block->position->bottom, block->position->has_bottom ? "set" : "unset",
@@ -645,11 +658,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Apply CSS clear property after float layout
     if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
+        if (is_inner_div) log_debug("[TRACK] Before clear layout: block->y = %.2f, block=%p", block->y, (void*)block);
         layout_clear_element(lycon, block);
+        if (is_inner_div) log_debug("[TRACK] After clear layout: block->y = %.2f, block=%p", block->y, (void*)block);
     }
 
     // flow the block in parent context
-    log_debug("flow block in parent context");
+    log_debug("flow block in parent context, block->y before restoration: %.2f", block->y);
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
     // Skip normal flow positioning for absolutely positioned elements
@@ -730,7 +745,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         parent->y += margin_top - parent->bound->margin.top;
                         parent->bound->margin.top = margin_top;
                         block->y = 0;  block->bound->margin.top = 0;
-                        log_debug("collapsed margin between block and first child: %f, parent y: %f", margin_top, parent->y);
+                        log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f", margin_top, parent->y, block->y);
                     }
                     else {
                         log_debug("no parent margin collapsing: parent->bound=%p, border-top=%f, padding-top=%f",
@@ -750,7 +765,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
                         block->y -= collapse;
                         block->bound->margin.top -= collapse;
-                        log_debug("collapsed margin between sibling blocks: %f", collapse);
+                        log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
                     }
                 }
             }
@@ -766,6 +781,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->block.max_width, lycon->block.advance_y, block->height);
     }
     lycon->prev_view = (View*)block;
-    log_debug("block view: %d, end block", block->type);
+    const char* tag = block->node ? block->node->name() : "unknown";
+    float initial_y = pa_block.advance_y;  // This was the initial Y when block was created
+    log_debug("block view: %d (%s), end block, initial y=%.2f, final y=%.2f (diff=%.2f)",
+              block->type, tag, initial_y, block->y, block->y - initial_y);
     log_leave();
 }

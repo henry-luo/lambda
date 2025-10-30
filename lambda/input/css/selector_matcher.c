@@ -1018,6 +1018,11 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
         }
     }
 
+    // Cache the calculated specificity in the selector
+    selector->specificity = spec;
+    log_debug("[SPECIFICITY] Calculated and cached specificity for selector: (%d, %d, %d, %d)",
+              spec.inline_style, spec.ids, spec.classes, spec.elements);
+
     return spec;
 }
 
