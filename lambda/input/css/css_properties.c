@@ -559,20 +559,52 @@ CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool)
         prop->specificity.important = true;
     }
 
-    // Create a simple value (just store as keyword for now)
+    // Create a value structure
     prop->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!prop->value) {
         return NULL;
     }
 
-    // Simple value parsing - just store as keyword for now
+    // Parse common value types
+    // Try parsing as length (e.g., "20px", "1.5em", "100%")
+    char* endptr;
+    double num_value = strtod(value, &endptr);
+
+    if (endptr != value && *endptr != '\0') {
+        // Successfully parsed a number, check unit
+        if (strcmp(endptr, "px") == 0) {
+            prop->value->type = CSS_VALUE_LENGTH;
+            prop->value->data.length.value = num_value;
+            prop->value->data.length.unit = CSS_UNIT_PX;
+            return prop;
+        } else if (strcmp(endptr, "em") == 0) {
+            prop->value->type = CSS_VALUE_LENGTH;
+            prop->value->data.length.value = num_value;
+            prop->value->data.length.unit = CSS_UNIT_EM;
+            return prop;
+        } else if (strcmp(endptr, "rem") == 0) {
+            prop->value->type = CSS_VALUE_LENGTH;
+            prop->value->data.length.value = num_value;
+            prop->value->data.length.unit = CSS_UNIT_REM;
+            return prop;
+        } else if (strcmp(endptr, "%") == 0) {
+            prop->value->type = CSS_VALUE_PERCENTAGE;
+            prop->value->data.percentage.value = num_value;
+            return prop;
+        }
+    } else if (endptr != value && *endptr == '\0') {
+        // Plain number without unit
+        prop->value->type = CSS_VALUE_NUMBER;
+        prop->value->data.number.value = num_value;
+        return prop;
+    }
+
+    // Fallback: store as keyword
     prop->value->type = CSS_VALUE_KEYWORD;
     prop->value->data.keyword = pool_strdup(pool, value);
 
     return prop;
-}
-
-void css_property_free(CSSProperty* property) {
+}void css_property_free(CSSProperty* property) {
     // Memory managed by pool, nothing to do
     (void)property;
 }
@@ -1232,7 +1264,7 @@ bool css_parse_keyword(const char* value_str, CssPropertyId property_id, CssKeyw
     return true;
 }
 
-bool css_parse_function(const char* value_str, CssFunction* function, Pool* pool) {
+static bool css_parse_function_local(const char* value_str, CssFunction* function, Pool* pool) {
     if (!value_str || !function || !pool) return false;
 
     // Simple function parsing (calc, var, rgb, etc.)
