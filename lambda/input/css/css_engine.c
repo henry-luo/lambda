@@ -220,7 +220,7 @@ static void css_enhanced_apply_rule_to_element(CssRule* rule, CssStyleNode* elem
 }
 
 // Enhanced CSS Engine creation
-CssEngine* css_enhanced_engine_create(Pool* pool) {
+CssEngine* css_engine_create(Pool* pool) {
     if (!pool) return NULL;
 
     // Initialize CSS property system FIRST (required for property lookups)
@@ -279,7 +279,7 @@ CssEngine* css_enhanced_engine_create(Pool* pool) {
     return engine;
 }
 
-void css_enhanced_engine_destroy(CssEngine* engine) {
+void css_engine_destroy(CssEngine* engine) {
     if (!engine) return;
 
     // Cleanup components
@@ -299,7 +299,7 @@ void css_enhanced_engine_destroy(CssEngine* engine) {
 }
 
 // Configuration functions
-void css_enhanced_engine_enable_feature(CssEngine* engine, const char* feature_name, bool enabled) {
+void css_engine_enable_feature(CssEngine* engine, const char* feature_name, bool enabled) {
     if (!engine || !feature_name) return;
 
     if (strcmp(feature_name, "css-nesting") == 0) {
@@ -325,14 +325,14 @@ void css_enhanced_engine_enable_feature(CssEngine* engine, const char* feature_n
     }
 }
 
-void css_enhanced_engine_set_viewport(CssEngine* engine, double width, double height) {
+void css_engine_set_viewport(CssEngine* engine, double width, double height) {
     if (!engine) return;
 
     engine->context.viewport_width = width;
     engine->context.viewport_height = height;
 }
 
-void css_enhanced_engine_set_color_scheme(CssEngine* engine, const char* scheme) {
+void css_engine_set_color_scheme(CssEngine* engine, const char* scheme) {
     if (!engine || !scheme) return;
 
     // Copy scheme string
@@ -344,7 +344,7 @@ void css_enhanced_engine_set_color_scheme(CssEngine* engine, const char* scheme)
     }
 }
 
-void css_enhanced_engine_set_root_font_size(CssEngine* engine, double size) {
+void css_engine_set_root_font_size(CssEngine* engine, double size) {
     if (!engine || size <= 0) return;
 
     engine->context.root_font_size = size;
@@ -660,7 +660,7 @@ bool css_enhanced_selector_matches_element(CssEngine* engine,
 #endif  // DISABLED
 
 // Statistics and monitoring
-void css_enhanced_engine_update_stats(CssEngine* engine) {
+void css_engine_update_stats(CssEngine* engine) {
     if (!engine) return;
 
     // Update memory usage (actual memory tracking would require walking all pools)
@@ -669,7 +669,7 @@ void css_enhanced_engine_update_stats(CssEngine* engine) {
     // Other statistics are updated during parsing and cascade operations
 }
 
-void css_enhanced_engine_print_stats(CssEngine* engine) {
+void css_engine_print_stats(CssEngine* engine) {
     if (!engine) return;
 
     printf("CSS Enhanced Engine Statistics:\n");
@@ -689,11 +689,11 @@ void css_enhanced_engine_print_stats(CssEngine* engine) {
     printf("  Color Level 4: %s\n", engine->features.css_color_4 ? "Yes" : "No");
 }
 
-double css_enhanced_engine_get_parse_time(CssEngine* engine) {
+double css_engine_get_parse_time(CssEngine* engine) {
     return engine ? engine->stats.parse_time : 0.0;
 }
 
-size_t css_enhanced_engine_get_memory_usage(CssEngine* engine) {
+size_t css_engine_get_memory_usage(CssEngine* engine) {
     return engine ? engine->stats.memory_usage : 0;
 }
 
@@ -745,19 +745,6 @@ bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssSty
     // For now, return false as this requires full selector matching context
     (void)selector; (void)node;
     return false; // Requires DOM element context
-}
-
-// Wrapper functions for API compatibility
-CssEngine* css_engine_create(Pool* pool) {
-    return css_enhanced_engine_create(pool);
-}
-
-void css_engine_destroy(CssEngine* engine) {
-    return css_enhanced_engine_destroy(engine);
-}
-
-void css_engine_set_viewport(CssEngine* engine, double width, double height) {
-    return css_enhanced_engine_set_viewport(engine, width, height);
 }
 
 CssEngineStats css_engine_get_stats(const CssEngine* engine) {
