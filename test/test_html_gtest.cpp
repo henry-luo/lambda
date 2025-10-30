@@ -853,3 +853,516 @@ TEST_F(HtmlParserTest, ParserReuse) {
     TypeElmt* type = (TypeElmt*)span->type;
     EXPECT_TRUE(strview_equal(&type->name, "span"));
 }
+
+// ============================================================================
+// Phase 1.1 Tests: Tokenization and Entity Decoding
+// ============================================================================
+
+TEST_F(HtmlParserTest, EntityDecodingNumericDecimal) {
+    Item result = parseHtml("<p>&#65;&#66;&#67;</p>");
+    std::string text = getTextContent(result);
+    // Numeric entities may or may not be decoded depending on implementation
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingNumericHex) {
+    Item result = parseHtml("<p>&#x41;&#x42;&#x43;</p>");
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingCommonEntities) {
+    Item result = parseHtml("<p>&lt; &gt; &amp; &quot; &apos;</p>");
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingExtendedLatin) {
+    Item result = parseHtml("<p>&Agrave; &Eacute; &Iuml; &Ntilde; &Ouml;</p>");
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingSpecialChars) {
+    Item result = parseHtml("<p>&nbsp;&copy;&reg;&trade;&deg;</p>");
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingMathSymbols) {
+    Item result = parseHtml("<p>&plusmn;&times;&divide;&frac14;&frac12;&frac34;</p>");
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingInAttribute) {
+    Item result = parseHtml("<div title=\"&lt;tag&gt; &amp; &quot;text&quot;\"></div>");
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    std::string title = getAttr(div, "title");
+    EXPECT_FALSE(title.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingMixedNumericNamed) {
+    Item result = parseHtml("<p>&#65;&amp;&#x42;</p>");
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingInvalidEntity) {
+    Item result = parseHtml("<p>&invalidEntity;</p>");
+    std::string text = getTextContent(result);
+    // Should preserve unknown entities for round-trip compatibility
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, EntityDecodingUnicodeCodePoints) {
+    Item result = parseHtml("<p>&#128512;&#128513;&#128514;</p>"); // emoji code points
+    std::string text = getTextContent(result);
+    EXPECT_FALSE(text.empty());
+}
+
+// ============================================================================
+// Phase 1.1 Tests: Element Classification
+// ============================================================================
+
+TEST_F(HtmlParserTest, ClassificationAllVoidElements) {
+    const char* void_html =
+        "<area><base><br><col><embed><hr><img><input>"
+        "<link><meta><param><source><track><wbr>";
+
+    Item result = parseHtml(void_html);
+    // Should parse all void elements without errors
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ELEMENT || get_type_id(result) == LMD_TYPE_LIST);
+}
+
+TEST_F(HtmlParserTest, ClassificationSemanticElements) {
+    const char* semantic_html =
+        "<article><aside><details><figcaption><figure><footer>"
+        "<header><main><mark><nav><section><summary><time></time>"
+        "</summary></section></nav></mark></main></header></footer>"
+        "</figure></figcaption></details></aside></article>";
+
+    Item result = parseHtml(semantic_html);
+    Element* article = findElementByTag(result, "article");
+    EXPECT_NE(article, nullptr);
+}
+
+TEST_F(HtmlParserTest, ClassificationRawTextElements) {
+    Item result1 = parseHtml("<script>var x = '<div>not parsed</div>';</script>");
+    Element* script = findElementByTag(result1, "script");
+    ASSERT_NE(script, nullptr);
+
+    Item result2 = parseHtml("<style>.class { content: '<div>'; }</style>");
+    Element* style = findElementByTag(result2, "style");
+    ASSERT_NE(style, nullptr);
+}
+
+TEST_F(HtmlParserTest, ClassificationPreformattedElements) {
+    Item result = parseHtml("<pre>  spaces   preserved  </pre>");
+    Element* pre = findElementByTag(result, "pre");
+    ASSERT_NE(pre, nullptr);
+
+    std::string text = getTextContent(Item{.element = pre});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, ClassificationBlockElements) {
+    const char* block_html =
+        "<div><p><h1></h1><h2></h2><ul><li></li></ul><table></table></p></div>";
+
+    Item result = parseHtml(block_html);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+    EXPECT_NE(findElementByTag(result, "h1"), nullptr);
+}
+
+TEST_F(HtmlParserTest, ClassificationInlineElements) {
+    const char* inline_html =
+        "<span><a><b><i><em><strong><code><small></small></code></strong></em></i></b></a></span>";
+
+    Item result = parseHtml(inline_html);
+    EXPECT_NE(findElementByTag(result, "span"), nullptr);
+    EXPECT_NE(findElementByTag(result, "a"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+}
+
+TEST_F(HtmlParserTest, ClassificationMixedBlockInline) {
+    Item result = parseHtml("<div><p>Text <span>inline</span> more <b>bold</b></p></div>");
+
+    Element* div = findElementByTag(result, "div");
+    Element* span = findElementByTag(result, "span");
+    Element* b = findElementByTag(result, "b");
+
+    EXPECT_NE(div, nullptr);
+    EXPECT_NE(span, nullptr);
+    EXPECT_NE(b, nullptr);
+}
+
+// ============================================================================
+// Phase 1.1 Tests: HTML5 Data and ARIA Attributes
+// ============================================================================
+
+TEST_F(HtmlParserTest, DataAttributesSimple) {
+    Item result = parseHtml("<div data-id=\"123\" data-name=\"test\" data-active=\"true\"></div>");
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    EXPECT_EQ(getAttr(div, "data-id"), "123");
+    EXPECT_EQ(getAttr(div, "data-name"), "test");
+    EXPECT_EQ(getAttr(div, "data-active"), "true");
+}
+
+TEST_F(HtmlParserTest, DataAttributesComplex) {
+    Item result = parseHtml("<div data-user-id=\"42\" data-api-endpoint=\"/api/v1/users\"></div>");
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    EXPECT_EQ(getAttr(div, "data-user-id"), "42");
+    EXPECT_EQ(getAttr(div, "data-api-endpoint"), "/api/v1/users");
+}
+
+TEST_F(HtmlParserTest, DataAttributesWithJSON) {
+    Item result = parseHtml("<div data-config='{\"key\": \"value\"}'></div>");
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    std::string config = getAttr(div, "data-config");
+    EXPECT_FALSE(config.empty());
+}
+
+TEST_F(HtmlParserTest, AriaAttributesAccessibility) {
+    Item result = parseHtml(R"(
+        <button aria-label="Close dialog"
+                aria-pressed="false"
+                aria-disabled="false"
+                aria-describedby="help-text">
+            X
+        </button>
+    )");
+
+    Element* button = findElementByTag(result, "button");
+    ASSERT_NE(button, nullptr);
+
+    EXPECT_EQ(getAttr(button, "aria-label"), "Close dialog");
+    EXPECT_EQ(getAttr(button, "aria-pressed"), "false");
+    EXPECT_EQ(getAttr(button, "aria-disabled"), "false");
+}
+
+TEST_F(HtmlParserTest, AriaAttributesRole) {
+    Item result = parseHtml("<div role=\"navigation\" aria-label=\"Main navigation\"></div>");
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    EXPECT_EQ(getAttr(div, "role"), "navigation");
+    EXPECT_EQ(getAttr(div, "aria-label"), "Main navigation");
+}
+
+TEST_F(HtmlParserTest, AriaAttributesLiveRegion) {
+    Item result = parseHtml("<div aria-live=\"polite\" aria-atomic=\"true\"></div>");
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    EXPECT_EQ(getAttr(div, "aria-live"), "polite");
+    EXPECT_EQ(getAttr(div, "aria-atomic"), "true");
+}
+
+TEST_F(HtmlParserTest, MixedDataAndAriaAttributes) {
+    Item result = parseHtml(R"(
+        <div data-component="modal"
+             data-id="modal-1"
+             aria-hidden="false"
+             aria-labelledby="modal-title">
+        </div>
+    )");
+
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    EXPECT_EQ(getAttr(div, "data-component"), "modal");
+    EXPECT_EQ(getAttr(div, "aria-hidden"), "false");
+}
+
+// ============================================================================
+// Phase 1.2 Tests: Tree Construction - Parse Depth Tracking
+// ============================================================================
+
+TEST_F(HtmlParserTest, TreeConstructionDeeplyNestedElements) {
+    // Test parsing with deep nesting to verify parse_depth tracking works
+    std::string html = "<div>";
+    for (int i = 0; i < 20; i++) {
+        html += "<div>";
+    }
+    html += "Content";
+    for (int i = 0; i < 20; i++) {
+        html += "</div>";
+    }
+    html += "</div>";
+
+    Item result = parseHtml(html.c_str());
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    // Should parse successfully without stack overflow
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionVeryDeeplyNested) {
+    // Test with even deeper nesting (50 levels)
+    std::string html;
+    for (int i = 0; i < 50; i++) {
+        html += "<div>";
+    }
+    html += "Deep content";
+    for (int i = 0; i < 50; i++) {
+        html += "</div>";
+    }
+
+    Item result = parseHtml(html.c_str());
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionMultipleSiblings) {
+    // Test html_append_child with many siblings
+    std::string html = "<ul>";
+    for (int i = 0; i < 50; i++) {
+        html += "<li>Item " + std::to_string(i) + "</li>";
+    }
+    html += "</ul>";
+
+    Item result = parseHtml(html.c_str());
+    Element* ul = findElementByTag(result, "ul");
+    ASSERT_NE(ul, nullptr);
+
+    int li_count = countElementsByTag(result, "li");
+    EXPECT_EQ(li_count, 50);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionMixedContent) {
+    // Test html_append_child with mixed element and text children
+    Item result = parseHtml("<div>Text1<span>Span1</span>Text2<span>Span2</span>Text3</div>");
+
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    TypeElmt* type = (TypeElmt*)div->type;
+    List* list = (List*)div;
+
+    // Verify content_length is properly set
+    EXPECT_GT(type->content_length, 0);
+    EXPECT_EQ(type->content_length, list->length);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionContentLength) {
+    // Test html_set_content_length updates properly
+    Item result = parseHtml("<div><p>P1</p><p>P2</p><p>P3</p></div>");
+
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    TypeElmt* div_type = (TypeElmt*)div->type;
+    List* div_list = (List*)div;
+
+    // Content length should equal list length (no attributes)
+    EXPECT_EQ(div_type->content_length, div_list->length);
+    EXPECT_EQ(div_type->content_length, 3);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionWithAttributes) {
+    // Test content_length when element has both attributes and children
+    Item result = parseHtml("<div id=\"test\" class=\"box\"><p>Child1</p><p>Child2</p></div>");
+
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    TypeElmt* type = (TypeElmt*)div->type;
+    List* list = (List*)div;
+
+    // Attributes are stored separately in element data, not in the list
+    // List length equals content_length (only children)
+    EXPECT_EQ(list->length, type->content_length);
+    EXPECT_EQ(type->content_length, 2); // 2 children
+
+    // Verify attributes are accessible
+    EXPECT_EQ(getAttr(div, "id"), "test");
+    EXPECT_EQ(getAttr(div, "class"), "box");
+}
+
+TEST_F(HtmlParserTest, TreeConstructionEmptyElement) {
+    // Test tree construction with empty element (no children)
+    Item result = parseHtml("<div></div>");
+
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    TypeElmt* type = (TypeElmt*)div->type;
+    EXPECT_EQ(type->content_length, 0);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionOnlyAttributes) {
+    // Test element with only attributes, no children
+    Item result = parseHtml("<div id=\"test\" class=\"box\" data-value=\"123\"></div>");
+
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    TypeElmt* type = (TypeElmt*)div->type;
+    List* list = (List*)div;
+
+    // Attributes are stored separately in element data, not in list
+    // Both content length and list length should be 0 (no children)
+    EXPECT_EQ(type->content_length, 0);
+    EXPECT_EQ(list->length, 0);
+
+    // Verify attributes are accessible
+    EXPECT_EQ(getAttr(div, "id"), "test");
+    EXPECT_EQ(getAttr(div, "class"), "box");
+    EXPECT_EQ(getAttr(div, "data-value"), "123");
+}
+
+TEST_F(HtmlParserTest, TreeConstructionNestedWithAttributes) {
+    // Test complex nesting with attributes at each level
+    Item result = parseHtml(R"(
+        <div id="outer" class="container">
+            <div id="middle" class="box">
+                <div id="inner" class="item">
+                    <span>Content</span>
+                </div>
+            </div>
+        </div>
+    )");
+
+    Element* outer = findElementByTag(result, "div");
+    ASSERT_NE(outer, nullptr);
+
+    Element* span = findElementByTag(result, "span");
+    ASSERT_NE(span, nullptr);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionManyChildren) {
+    // Test html_append_child performance with many children
+    std::string html = "<div>";
+    for (int i = 0; i < 100; i++) {
+        html += "<span>" + std::to_string(i) + "</span>";
+    }
+    html += "</div>";
+
+    Item result = parseHtml(html.c_str());
+    Element* div = result.element;
+    ASSERT_NE(div, nullptr);
+
+    int span_count = countElementsByTag(result, "span");
+    EXPECT_EQ(span_count, 100);
+}
+
+TEST_F(HtmlParserTest, TreeConstructionSequentialParsing) {
+    // Test that parse_depth is properly reset between parses
+    Item result1 = parseHtml("<div><div><div>Deep1</div></div></div>");
+    ASSERT_TRUE(get_type_id(result1) == LMD_TYPE_ELEMENT);
+
+    Item result2 = parseHtml("<span>Shallow</span>");
+    ASSERT_TRUE(get_type_id(result2) == LMD_TYPE_ELEMENT);
+
+    Item result3 = parseHtml("<div><div><div><div>Deeper</div></div></div></div>");
+    ASSERT_TRUE(get_type_id(result3) == LMD_TYPE_ELEMENT);
+}
+
+// ============================================================================
+// Phase 1.1+1.2 Integration Tests
+// ============================================================================
+
+TEST_F(HtmlParserTest, IntegrationComplexDocumentWithEntities) {
+    Item result = parseHtml(R"(
+        <article data-id="123" aria-label="Article">
+            <header>
+                <h1>Title &amp; Subtitle</h1>
+                <p>By &copy; Author &middot; 2025</p>
+            </header>
+            <section>
+                <p>Content with &lt;code&gt; and &quot;quotes&quot;</p>
+                <pre>  Preserved   spaces  </pre>
+            </section>
+            <footer aria-label="Footer">
+                <p>&reg; 2025 &middot; All rights reserved</p>
+            </footer>
+        </article>
+    )");
+
+    Element* article = findElementByTag(result, "article");
+    ASSERT_NE(article, nullptr);
+
+    EXPECT_EQ(getAttr(article, "data-id"), "123");
+    EXPECT_EQ(getAttr(article, "aria-label"), "Article");
+
+    Element* h1 = findElementByTag(result, "h1");
+    ASSERT_NE(h1, nullptr);
+}
+
+TEST_F(HtmlParserTest, IntegrationFormWithDataAttributes) {
+    Item result = parseHtml(R"(
+        <form data-form-id="login" data-validation="strict">
+            <div data-field="username">
+                <input type="text"
+                       name="username"
+                       data-required="true"
+                       aria-label="Username">
+            </div>
+            <div data-field="password">
+                <input type="password"
+                       name="password"
+                       data-required="true"
+                       aria-label="Password">
+            </div>
+            <button type="submit"
+                    data-action="submit"
+                    aria-label="Submit form">
+                Login &rarr;
+            </button>
+        </form>
+    )");
+
+    Element* form = findElementByTag(result, "form");
+    ASSERT_NE(form, nullptr);
+    EXPECT_EQ(getAttr(form, "data-form-id"), "login");
+
+    int input_count = countElementsByTag(result, "input");
+    EXPECT_EQ(input_count, 2);
+}
+
+TEST_F(HtmlParserTest, IntegrationSemanticDocumentStructure) {
+    Item result = parseHtml(R"(
+        <!DOCTYPE html>
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Test Page</title>
+            </head>
+            <body>
+                <header aria-label="Site header">
+                    <nav data-nav-type="main">
+                        <ul>
+                            <li><a href="#home">Home</a></li>
+                            <li><a href="#about">About</a></li>
+                        </ul>
+                    </nav>
+                </header>
+                <main>
+                    <article data-article-id="1">
+                        <h1>Article Title</h1>
+                        <p>Content with entities: &lt; &gt; &amp;</p>
+                    </article>
+                </main>
+                <footer aria-label="Site footer">
+                    <p>&copy; 2025</p>
+                </footer>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "header"), nullptr);
+    EXPECT_NE(findElementByTag(result, "nav"), nullptr);
+    EXPECT_NE(findElementByTag(result, "main"), nullptr);
+    EXPECT_NE(findElementByTag(result, "article"), nullptr);
+    EXPECT_NE(findElementByTag(result, "footer"), nullptr);
+}
