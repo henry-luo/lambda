@@ -466,12 +466,28 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             selector->type = CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
         } else if (strcmp(func_name, "nth-last-child") == 0) {
             selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
+        } else if (strcmp(func_name, "nth-last-of-type") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
         } else if (strcmp(func_name, "not") == 0) {
             selector->type = CSS_SELECTOR_PSEUDO_NOT;
+        } else if (strcmp(func_name, "is") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_IS;
+        } else if (strcmp(func_name, "where") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_WHERE;
+        } else if (strcmp(func_name, "has") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_HAS;
+        } else if (strcmp(func_name, "lang") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_LANG;
+        } else if (strcmp(func_name, "dir") == 0) {
+            selector->type = CSS_SELECTOR_PSEUDO_DIR;
+        } else if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0) {
+            // :host() is for Shadow DOM
+            selector->type = CSS_SELECTOR_PSEUDO_IS; // treat similar to :is()
+            fprintf(stderr, "[CSS Parser] Shadow DOM function: '%s()'\n", func_name);
         } else {
-            // Unknown pseudo-class function, skip it
-            fprintf(stderr, "[CSS Parser] WARNING: Unknown pseudo-class function '%s()', skipping\n", func_name);
-            return NULL;
+            // Accept unknown pseudo-class functions
+            selector->type = CSS_SELECTOR_PSEUDO_NOT; // default fallback
+            fprintf(stderr, "[CSS Parser] Generic functional pseudo-class: '%s()'\n", func_name);
         }
 
         selector->value = func_name;
@@ -488,17 +504,58 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
             // Check for pseudo-element (double colon ::before, ::after)
             if (pseudo_token->type == CSS_TOKEN_COLON) {
-                // This is a pseudo-element, skip for now
-                fprintf(stderr, "[CSS Parser] Skipping pseudo-element (::)\n");
+                // This is a pseudo-element
                 (*pos)++;
                 if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
+                    const char* elem_name = tokens[*pos].value;
+                    if (!elem_name && tokens[*pos].start && tokens[*pos].length > 0) {
+                        char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+                        if (name_buf) {
+                            memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
+                            name_buf[tokens[*pos].length] = '\0';
+                            elem_name = name_buf;
+                        }
+                    }
+
                     (*pos)++;
+
+                    // Map pseudo-element name to type
+                    if (strcmp(elem_name, "before") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE;
+                    } else if (strcmp(elem_name, "after") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_AFTER;
+                    } else if (strcmp(elem_name, "first-line") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE;
+                    } else if (strcmp(elem_name, "first-letter") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER;
+                    } else if (strcmp(elem_name, "selection") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION;
+                    } else if (strcmp(elem_name, "backdrop") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP;
+                    } else if (strcmp(elem_name, "placeholder") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER;
+                    } else if (strcmp(elem_name, "marker") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_MARKER;
+                    } else if (strcmp(elem_name, "file-selector-button") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
+                    } else {
+                        // Accept but treat as generic pseudo-element
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE; // default fallback
+                        fprintf(stderr, "[CSS Parser] Generic pseudo-element: '::%s'\n", elem_name);
+                    }
+
+                    selector->value = elem_name;
+                    selector->argument = NULL;
+                    fprintf(stderr, "[CSS Parser] Pseudo-element: '::%s'\n", elem_name);
+                    matched = true;
                 }
-                return NULL; // Don't handle pseudo-elements yet
+                if (!matched) {
+                    return NULL;
+                }
             }
 
             // Single colon - pseudo-class
-            if (pseudo_token->type == CSS_TOKEN_IDENT) {
+            else if (pseudo_token->type == CSS_TOKEN_IDENT) {
                 const char* pseudo_name = pseudo_token->value;
                 if (!pseudo_name && pseudo_token->start && pseudo_token->length > 0) {
                     char* name_buf = (char*)pool_calloc(pool, pseudo_token->length + 1);
@@ -511,23 +568,77 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 (*pos)++;
 
-                // Map pseudo-class name to type
+                // Map pseudo-class name to type (comprehensive list)
                 if (strcmp(pseudo_name, "first-child") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_FIRST_CHILD;
                 } else if (strcmp(pseudo_name, "last-child") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_LAST_CHILD;
                 } else if (strcmp(pseudo_name, "only-child") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_ONLY_CHILD;
+                } else if (strcmp(pseudo_name, "first-of-type") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_FIRST_OF_TYPE;
+                } else if (strcmp(pseudo_name, "last-of-type") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_LAST_OF_TYPE;
+                } else if (strcmp(pseudo_name, "only-of-type") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ONLY_OF_TYPE;
+                } else if (strcmp(pseudo_name, "root") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ROOT;
+                } else if (strcmp(pseudo_name, "empty") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_EMPTY;
                 } else if (strcmp(pseudo_name, "hover") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_HOVER;
                 } else if (strcmp(pseudo_name, "active") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_ACTIVE;
                 } else if (strcmp(pseudo_name, "focus") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_FOCUS;
+                } else if (strcmp(pseudo_name, "focus-visible") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_FOCUS_VISIBLE;
+                } else if (strcmp(pseudo_name, "focus-within") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_FOCUS_WITHIN;
+                } else if (strcmp(pseudo_name, "visited") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_VISITED;
+                } else if (strcmp(pseudo_name, "link") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_LINK;
+                } else if (strcmp(pseudo_name, "any-link") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ANY_LINK;
+                } else if (strcmp(pseudo_name, "enabled") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_ENABLED;
+                } else if (strcmp(pseudo_name, "disabled") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_DISABLED;
+                } else if (strcmp(pseudo_name, "checked") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_CHECKED;
+                } else if (strcmp(pseudo_name, "indeterminate") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_INDETERMINATE;
+                } else if (strcmp(pseudo_name, "valid") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_VALID;
+                } else if (strcmp(pseudo_name, "invalid") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_INVALID;
+                } else if (strcmp(pseudo_name, "required") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_REQUIRED;
+                } else if (strcmp(pseudo_name, "optional") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_OPTIONAL;
+                } else if (strcmp(pseudo_name, "read-only") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_READ_ONLY;
+                } else if (strcmp(pseudo_name, "read-write") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_READ_WRITE;
+                } else if (strcmp(pseudo_name, "placeholder-shown") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN;
+                } else if (strcmp(pseudo_name, "default") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_DEFAULT;
+                } else if (strcmp(pseudo_name, "in-range") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_IN_RANGE;
+                } else if (strcmp(pseudo_name, "out-of-range") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_OUT_OF_RANGE;
+                } else if (strcmp(pseudo_name, "target") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_TARGET;
+                } else if (strcmp(pseudo_name, "scope") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_SCOPE;
+                } else if (strcmp(pseudo_name, "fullscreen") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_FULLSCREEN;
                 } else {
-                    // Unknown pseudo-class, skip it
-                    fprintf(stderr, "[CSS Parser] WARNING: Unknown pseudo-class ':%s', skipping\n", pseudo_name);
-                    return NULL;
+                    // Accept unknown pseudo-classes but use a generic type
+                    selector->type = CSS_SELECTOR_PSEUDO_HOVER; // default fallback
+                    fprintf(stderr, "[CSS Parser] Generic pseudo-class: ':%s'\n", pseudo_name);
                 }
 
                 selector->value = pseudo_name;
@@ -618,12 +729,28 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_NTH_OF_TYPE;
                 } else if (strcmp(func_name, "nth-last-child") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD;
+                } else if (strcmp(func_name, "nth-last-of-type") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
                 } else if (strcmp(func_name, "not") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_NOT;
+                } else if (strcmp(func_name, "is") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_IS;
+                } else if (strcmp(func_name, "where") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_WHERE;
+                } else if (strcmp(func_name, "has") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_HAS;
+                } else if (strcmp(func_name, "lang") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_LANG;
+                } else if (strcmp(func_name, "dir") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_DIR;
+                } else if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0) {
+                    // :host() is for Shadow DOM
+                    selector->type = CSS_SELECTOR_PSEUDO_IS; // treat similar to :is()
+                    fprintf(stderr, "[CSS Parser] Shadow DOM pseudo-class: ':%s()'\n", func_name);
                 } else {
-                    // Unknown pseudo-class function, skip it
-                    fprintf(stderr, "[CSS Parser] WARNING: Unknown pseudo-class function ':%s()', skipping\n", func_name);
-                    return NULL;
+                    // Accept unknown functional pseudo-classes
+                    selector->type = CSS_SELECTOR_PSEUDO_NOT; // default fallback
+                    fprintf(stderr, "[CSS Parser] Generic functional pseudo-class: ':%s()'\n", func_name);
                 }
 
                 selector->value = func_name;
@@ -1099,20 +1226,247 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
     // Check for @-rules
     if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
-        fprintf(stderr, "[CSS Parser] Skipping @-rule (not yet supported)\n");
-        // For now, skip @-rules (we don't parse them yet)
-        // Find the ending semicolon or closing brace
-        while (pos < token_count &&
-               tokens[pos].type != CSS_TOKEN_SEMICOLON &&
-               tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
-            pos++;
-        }
-        if (pos < token_count) pos++; // consume the semicolon/brace
-        *out_rule = NULL; // Skip @-rules for now
-        return pos - start_pos; // Return tokens consumed
-    }
+        const char* at_keyword = tokens[pos].value;
+        fprintf(stderr, "[CSS Parser] Parsing @-rule: %s\n", at_keyword ? at_keyword : "(null)");
+        pos++; // consume @keyword token
 
-    // Parse selector(s) using enhanced parser (supports compound, descendant, and comma-separated selectors)
+        // Skip leading '@' in keyword name if present
+        const char* keyword_name = at_keyword;
+        if (keyword_name && keyword_name[0] == '@') {
+            keyword_name++;
+        }
+
+        // Create rule structure
+        CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+        if (!rule) {
+            fprintf(stderr, "[CSS Parser] ERROR: Failed to allocate rule\n");
+            return 0;
+        }
+        rule->pool = pool;
+
+        // Determine rule type and parse accordingly
+        if (keyword_name && (strcmp(keyword_name, "media") == 0 ||
+                          strcmp(keyword_name, "supports") == 0 ||
+                          strcmp(keyword_name, "container") == 0)) {
+            // Conditional at-rules: @media, @supports, @container
+            rule->type = strcmp(keyword_name, "media") == 0 ? CSS_RULE_MEDIA :
+                        strcmp(keyword_name, "supports") == 0 ? CSS_RULE_SUPPORTS :
+                        CSS_RULE_CONTAINER;            // Parse condition (everything until '{')
+            int cond_start = pos;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_LEFT_BRACE) {
+                pos++;
+            }
+
+            // Extract condition text
+            if (pos > cond_start) {
+                size_t cond_length = 0;
+                for (int i = cond_start; i < pos; i++) {
+                    if (tokens[i].value) {
+                        cond_length += strlen(tokens[i].value) + 1; // +1 for space
+                    }
+                }
+
+                char* condition = (char*)pool_alloc(pool, cond_length + 1);
+                if (condition) {
+                    condition[0] = '\0';
+                    for (int i = cond_start; i < pos; i++) {
+                        if (tokens[i].value) {
+                            if (condition[0] != '\0') strcat(condition, " ");
+                            strcat(condition, tokens[i].value);
+                        }
+                    }
+                    rule->data.conditional_rule.condition = condition;
+                }
+            }
+
+            // Parse block with nested rules
+            if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                pos++; // consume '{'
+
+                // Parse nested rules
+                int nested_capacity = 4;
+                rule->data.conditional_rule.rules = (CssRule**)pool_calloc(pool,
+                    nested_capacity * sizeof(CssRule*));
+                rule->data.conditional_rule.rule_count = 0;
+
+                while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                    // Skip whitespace
+                    pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+                    if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
+
+                    // Recursively parse nested rule
+                    CssRule* nested_rule = NULL;
+                    int nested_consumed = css_parse_rule_from_tokens_internal(
+                        tokens + pos, token_count - pos, pool, &nested_rule);
+
+                    if (nested_consumed > 0) {
+                        pos += nested_consumed;
+                        if (nested_rule) {
+                            // Expand array if needed
+                            if (rule->data.conditional_rule.rule_count >= nested_capacity) {
+                                nested_capacity *= 2;
+                                CssRule** new_rules = (CssRule**)pool_alloc(pool,
+                                    nested_capacity * sizeof(CssRule*));
+                                memcpy(new_rules, rule->data.conditional_rule.rules,
+                                    rule->data.conditional_rule.rule_count * sizeof(CssRule*));
+                                rule->data.conditional_rule.rules = new_rules;
+                            }
+                            rule->data.conditional_rule.rules[rule->data.conditional_rule.rule_count++] = nested_rule;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                if (pos < token_count && tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) {
+                    pos++; // consume '}'
+                }
+            }
+
+            *out_rule = rule;
+            fprintf(stderr, "[CSS Parser] Parsed conditional @-rule with %zu nested rules\n",
+                rule->data.conditional_rule.rule_count);
+            return pos - start_pos;
+
+        } else if (keyword_name && (strcmp(keyword_name, "import") == 0 ||
+                                 strcmp(keyword_name, "charset") == 0)) {
+            // Simple at-rules with no block
+            rule->type = strcmp(keyword_name, "import") == 0 ? CSS_RULE_IMPORT : CSS_RULE_CHARSET;            // Parse until semicolon
+            int value_start = pos;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_SEMICOLON) {
+                pos++;
+            }
+
+            // Extract value
+            if (pos > value_start && tokens[value_start].value) {
+                if (rule->type == CSS_RULE_IMPORT) {
+                    rule->data.import_rule.url = tokens[value_start].value;
+                } else {
+                    rule->data.charset_rule.charset = tokens[value_start].value;
+                }
+            }
+
+            if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                pos++; // consume ';'
+            }
+
+            *out_rule = rule;
+            fprintf(stderr, "[CSS Parser] Parsed simple @-rule: %s\n", keyword_name);
+            return pos - start_pos;
+
+        } else {
+            // Other at-rules (like @font-face, @keyframes) - store raw content
+            // Determine specific type
+            if (keyword_name && strcmp(keyword_name, "font-face") == 0) {
+                rule->type = CSS_RULE_FONT_FACE;
+            } else if (keyword_name && strcmp(keyword_name, "keyframes") == 0) {
+                rule->type = CSS_RULE_KEYFRAMES;
+            } else {
+                // Unknown at-rule - skip it
+                fprintf(stderr, "[CSS Parser] Skipping unknown @-rule: %s\n", keyword_name ? keyword_name : "null");
+                return 0;
+            }
+
+            // Store the name
+            rule->data.generic_rule.name = keyword_name;
+
+            // Build prefix content (e.g., animation name for @keyframes)
+            // This is everything between the at-keyword and the opening brace
+            int prefix_start = pos;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_LEFT_BRACE &&
+                   tokens[pos].type != CSS_TOKEN_SEMICOLON) {
+                pos++;
+            }
+            int prefix_end = pos;
+
+            if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                int brace_start = pos;
+                pos++; // consume '{'
+                int content_start = pos; // Content starts after '{'
+
+                // Skip contents until closing brace
+                int brace_depth = 1;
+                while (pos < token_count && brace_depth > 0) {
+                    if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                        brace_depth++;
+                    } else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) {
+                        brace_depth--;
+                    }
+                    pos++;
+                }
+                int content_end = pos - 1; // Content ends before '}'
+
+                // Build content string: prefix + { + content + }
+                size_t content_length = 0;
+                // Calculate prefix length
+                for (int i = prefix_start; i < prefix_end; i++) {
+                    if (tokens[i].value && tokens[i].type != CSS_TOKEN_WHITESPACE) {
+                        content_length += strlen(tokens[i].value) + 1;
+                    }
+                }
+                // Calculate body content length
+                for (int i = content_start; i < content_end; i++) {
+                    if (tokens[i].value) {
+                        content_length += strlen(tokens[i].value) + 1;
+                    }
+                }
+                content_length += 10; // for { }, spaces, etc.
+
+                char* content = (char*)pool_alloc(pool, content_length + 1);
+                content[0] = '\0';
+
+                // Build prefix (e.g., "fadeIn")
+                for (int i = prefix_start; i < prefix_end; i++) {
+                    if (tokens[i].value && tokens[i].type != CSS_TOKEN_WHITESPACE) {
+                        if (content[0] != '\0') {
+                            strcat(content, " ");
+                        }
+                        strcat(content, tokens[i].value);
+                    }
+                }
+
+                // Add opening brace
+                if (content[0] != '\0') {
+                    strcat(content, " ");
+                }
+                strcat(content, "{");
+
+                // Build body content
+                for (int i = content_start; i < content_end; i++) {
+                    if (tokens[i].value) {
+                        if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
+                            // Preserve some whitespace for readability
+                            strcat(content, " ");
+                        } else {
+                            // Add space before tokens that need it
+                            if (strlen(content) > 0 && content[strlen(content)-1] != '{' &&
+                                content[strlen(content)-1] != ' ' &&
+                                tokens[i].type != CSS_TOKEN_SEMICOLON &&
+                                tokens[i].type != CSS_TOKEN_COLON &&
+                                tokens[i].type != CSS_TOKEN_COMMA &&
+                                tokens[i].type != CSS_TOKEN_RIGHT_BRACE) {
+                                strcat(content, " ");
+                            }
+                            strcat(content, tokens[i].value);
+                        }
+                    }
+                }
+
+                // Add closing brace
+                strcat(content, " }");
+
+                rule->data.generic_rule.content = content;
+                fprintf(stderr, "[CSS Parser] Stored content for %s: '%s'\n", keyword_name, content);
+
+            } else if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                pos++; // consume ';'
+            }
+
+            *out_rule = rule;
+            fprintf(stderr, "[CSS Parser] Parsed generic @-rule: %s\n", keyword_name);
+            return pos - start_pos;
+        }
+    }    // Parse selector(s) using enhanced parser (supports compound, descendant, and comma-separated selectors)
     fprintf(stderr, "[CSS Parser] Parsing selectors at position %d\n", pos);
 
     // Parse selector group (handles single selectors and comma-separated groups)

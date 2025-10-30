@@ -452,6 +452,8 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                 }
 
                 if (stylesheet->rule_count < stylesheet->rule_capacity) {
+                    fprintf(stderr, "[CSS Integration] Adding rule type %d to stylesheet (count was %zu)\n",
+                            rule->type, stylesheet->rule_count);
                     stylesheet->rules[stylesheet->rule_count++] = rule;
 
                     // Update feature usage flags

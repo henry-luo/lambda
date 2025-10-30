@@ -820,6 +820,11 @@ typedef struct CssRule {
             const char* prefix;
             const char* namespace_url;
         } namespace_rule;
+
+        struct {
+            const char* name;       // e.g. "font-face", "keyframes"
+            const char* content;    // Raw content inside the at-rule
+        } generic_rule; // For @font-face, @keyframes, etc.
     } data;
 
     // Source information
