@@ -1088,43 +1088,8 @@ CssValue* css_value_create_length(Pool* pool, double value, CssUnit unit) {
 }
 
 const char* css_get_property_name(CssPropertyId property_id) {
-    switch (property_id) {
-        case CSS_PROPERTY_COLOR: return "color";
-        case CSS_PROPERTY_BACKGROUND_COLOR: return "background-color";
-        case CSS_PROPERTY_FONT_SIZE: return "font-size";
-        case CSS_PROPERTY_FONT_FAMILY: return "font-family";
-        case CSS_PROPERTY_FONT_WEIGHT: return "font-weight";
-        case CSS_PROPERTY_FONT_STYLE: return "font-style";
-        case CSS_PROPERTY_TEXT_DECORATION: return "text-decoration";
-        case CSS_PROPERTY_MARGIN: return "margin";
-        case CSS_PROPERTY_MARGIN_TOP: return "margin-top";
-        case CSS_PROPERTY_MARGIN_RIGHT: return "margin-right";
-        case CSS_PROPERTY_MARGIN_BOTTOM: return "margin-bottom";
-        case CSS_PROPERTY_MARGIN_LEFT: return "margin-left";
-        case CSS_PROPERTY_PADDING: return "padding";
-        case CSS_PROPERTY_PADDING_TOP: return "padding-top";
-        case CSS_PROPERTY_PADDING_RIGHT: return "padding-right";
-        case CSS_PROPERTY_PADDING_BOTTOM: return "padding-bottom";
-        case CSS_PROPERTY_PADDING_LEFT: return "padding-left";
-        case CSS_PROPERTY_BORDER: return "border";
-        case CSS_PROPERTY_BORDER_WIDTH: return "border-width";
-        case CSS_PROPERTY_BORDER_STYLE: return "border-style";
-        case CSS_PROPERTY_BORDER_COLOR: return "border-color";
-        case CSS_PROPERTY_WIDTH: return "width";
-        case CSS_PROPERTY_HEIGHT: return "height";
-        case CSS_PROPERTY_DISPLAY: return "display";
-        case CSS_PROPERTY_POSITION: return "position";
-        case CSS_PROPERTY_TOP: return "top";
-        case CSS_PROPERTY_RIGHT: return "right";
-        case CSS_PROPERTY_BOTTOM: return "bottom";
-        case CSS_PROPERTY_LEFT: return "left";
-        case CSS_PROPERTY_FLOAT: return "float";
-        case CSS_PROPERTY_CLEAR: return "clear";
-        case CSS_PROPERTY_OVERFLOW: return "overflow";
-        case CSS_PROPERTY_VISIBILITY: return "visibility";
-        case CSS_PROPERTY_Z_INDEX: return "z-index";
-        default: return "unknown";
-    }
+    const CssProperty* prop = css_property_get_by_id(property_id);
+    return prop ? prop->name : NULL;
 }
 
 CssValue* css_get_initial_value(CssPropertyId property_id, Pool* pool) {
