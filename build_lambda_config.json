@@ -1195,6 +1195,22 @@
                         "binary": "test_mime_detect_gtest.exe"
                     },
                     {
+                        "source": "test_html5_parser_infra_gtest.cpp",
+                        "name": "🏗️  HTML5 Parser Infrastructure Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/input/html5_parser.cpp"
+                        ],
+                        "binary": "test_html5_parser_infra_gtest.exe"
+                    },
+                    {
                         "source": "test_math_gtest.cpp",
                         "name": "🔢 Math Roundtrip Tests (GTest)",
                         "dependencies": [
