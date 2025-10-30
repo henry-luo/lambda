@@ -2,6 +2,7 @@
 #define HTML5_PARSER_H
 
 #include "input.h"
+#include "html5_tokenizer.h"
 #include "../../lib/mempool.h"
 #include "../../lib/stringbuf.h"
 
@@ -43,18 +44,7 @@ typedef enum {
     QUIRKS_MODE_LIMITED_QUIRKS   // Limited quirks mode
 } QuirksMode;
 
-// Token types for HTML5 tokenization
-typedef enum {
-    TOKEN_DOCTYPE,
-    TOKEN_START_TAG,
-    TOKEN_END_TAG,
-    TOKEN_COMMENT,
-    TOKEN_CHARACTER,
-    TOKEN_EOF
-} TokenType;
-
-// Forward declarations
-typedef struct Html5Token Html5Token;
+// Forward declarations (Html5Token comes from html5_tokenizer.h)
 typedef struct Html5Parser Html5Parser;
 typedef struct Html5Stack Html5Stack;
 typedef struct Html5StackEntry Html5StackEntry;
@@ -70,41 +60,6 @@ struct Html5Stack {
     Html5StackEntry* top;
     size_t size;
     Pool* pool;
-};
-
-// Token structure
-struct Html5Token {
-    TokenType type;
-
-    // For DOCTYPE tokens
-    struct {
-        String* name;
-        String* public_id;
-        String* system_id;
-        bool force_quirks;
-    } doctype;
-
-    // For tag tokens (START_TAG, END_TAG)
-    struct {
-        String* name;
-        Element* attributes;  // Element used as attribute container
-        bool self_closing;
-    } tag;
-
-    // For character tokens
-    struct {
-        char character;
-        String* data;  // For multiple characters
-    } character;
-
-    // For comment tokens
-    struct {
-        String* data;
-    } comment;
-
-    // Source location for error reporting
-    int line;
-    int column;
 };
 
 // Active formatting element entry
@@ -158,9 +113,9 @@ struct Html5Parser {
     bool frameset_ok;
     QuirksMode quirks_mode;
 
-    // Tokenizer state
-    const char* token_start;
-    Html5Token current_token;
+    // Tokenizer
+    Html5Tokenizer* tokenizer;
+    Html5Token* current_token;
 
     // Error tracking
     Html5ParseError* errors;
@@ -207,6 +162,9 @@ void html5_formatting_list_replace(Html5FormattingList* list, Element* old_eleme
 
 Html5Parser* html5_parser_create(Input* input, const char* html, Pool* pool);
 void html5_parser_destroy(Html5Parser* parser);
+
+// Main parsing function - tree construction
+Element* html5_parse(Input* input, const char* html, size_t length, Pool* pool);
 
 // State transitions
 void html5_parser_set_mode(Html5Parser* parser, Html5InsertionMode mode);

@@ -270,12 +270,30 @@ void array_push(Array* arr, Item item) {
 
 void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
-    log_debug("list_push: pushing item: type_id: %d", type_id);
+    // Safety check: if type_id says LIST but bitfield says STRING, trust the bitfield
+    if (type_id == LMD_TYPE_LIST && item.type_id == LMD_TYPE_STRING) {
+        fprintf(stderr, "WARNING: get_type_id returned LIST but bitfield is STRING! Treating as STRING. item.item=%016lx\n", item.item);
+        fflush(stderr);
+        type_id = LMD_TYPE_STRING;
+    }
+    log_debug("list_push: pushing item: type_id: %d, item.item: %lx", type_id, item.item);
     if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (type_id == LMD_TYPE_LIST) { // nest list is flattened
-        log_debug("list_push: pushing nested list: %p, type_id: %d", item.list, type_id);
+        log_debug("list_push: pushing nested list: %p, type_id: %d, length: %ld", item.list, type_id, item.list->length);
         // copy over the items
         List *nest_list = item.list;
+        fprintf(stderr, "DEBUG: nest_list pointer = %p, type_id=%d, item.item=%016lx\n", (void*)nest_list, type_id, item.item);
+        fflush(stderr);
+        if (nest_list == NULL || (uintptr_t)nest_list < 0x1000) {
+            fprintf(stderr, "CRITICAL: Nested list pointer is invalid! type_id=%d, item.item=%016lx\n", type_id, item.item);
+            fflush(stderr);
+            return;
+        }
+        if (nest_list->items == NULL) {
+            fprintf(stderr, "CRITICAL: Nested list has NULL items array! length=%ld, list=%p\n", nest_list->length, (void*)nest_list);
+            fflush(stderr);
+            return;
+        }
         for (int i = 0; i < nest_list->length; i++) {
             Item nest_item = nest_list->items[i];
             list_push(list, nest_item);
@@ -284,7 +302,7 @@ void list_push(List *list, Item item) {
     }
     else if (type_id == LMD_TYPE_STRING) {
         // need to merge with previous string if any (unless disabled)
-        if (list->length > 0 && !input_context->disable_string_merging) {
+        if (list->length > 0 && list->items != NULL && !input_context->disable_string_merging) {
             log_debug("list_push: checking for string merging, list length: %ld", list->length);
             Item prev_item = list->items[list->length - 1];
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
@@ -318,6 +336,11 @@ void list_push(List *list, Item item) {
     // store the value in the list (and we may need two slots for long/double)
     log_debug("list pushing item: type: %d, length: %ld", type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
+    // Safety check: ensure items array was allocated
+    if (list->items == NULL) {
+        log_error("CRITICAL: list->items is NULL after expand_list! length=%ld, capacity=%ld", list->length, list->capacity);
+        return;  // Prevent crash
+    }
     // Note: TYPE_ERROR will be stored as it is
     list->items[list->length++] = item;
     switch (item.type_id) {
