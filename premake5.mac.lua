@@ -4851,16 +4851,16 @@ project "test_css_frameworks_gtest"
     filter {}
     
 
-project "test_css_all_files_gtest"
+project "test_css_to_lambda_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
-    targetname "test_css_all_files_gtest"
+    targetname "test_css_to_lambda_roundtrip_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_all_files_gtest.cpp",
+        "test/test_css_to_lambda_roundtrip_gtest.cpp",
     }
     
     includedirs {

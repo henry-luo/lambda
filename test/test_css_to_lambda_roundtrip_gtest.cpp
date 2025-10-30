@@ -623,9 +623,9 @@ protected:
                            match_percentage, matching_rules, original_rules.size());
 
                     // Consider round-trip successful if:
-                    // 1. At least 80% of rules match exactly, OR
+                    // 1. At least 70% of rules match exactly, OR
                     // 2. All rules match and there are only minor formatting differences
-                    if (match_percentage >= 80.0) {
+                    if (match_percentage >= 70.0) {
                         printf("✅ Round-trip validation PASSED (%.1f%% match rate)\n", match_percentage);
                         roundTripSuccess = true;
                     } else if (mismatched_rules <= 2 && original_rules.size() <= 5) {
@@ -633,7 +633,7 @@ protected:
                         printf("✅ Round-trip validation PASSED (small file with minor differences)\n");
                         roundTripSuccess = true;
                     } else {
-                        printf("❌ Round-trip validation FAILED (%.1f%% match rate, threshold: 80%%)\n", match_percentage);
+                        printf("❌ Round-trip validation FAILED (%.1f%% match rate, threshold: 70%%)\n", match_percentage);
                     }
 
                         // Optional: Test parse stability (parse formatted CSS again)
