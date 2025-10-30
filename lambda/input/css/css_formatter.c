@@ -513,9 +513,14 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         }
         stringbuf_append_str(formatter->output, "}");
 
-    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS) {
-        // Format conditional at-rules (@media, @supports, etc.)
-        const char* rule_name = (rule->type == CSS_RULE_MEDIA) ? "media" : "supports";
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER) {
+        // Format conditional at-rules (@media, @supports, @container, etc.)
+        const char* rule_name = (rule->type == CSS_RULE_MEDIA) ? "media" :
+                               (rule->type == CSS_RULE_SUPPORTS) ? "supports" : "container";
+
+        fprintf(stderr, "[CSS Formatter] Formatting conditional @%s with %zu nested rules\n",
+                rule_name, rule->data.conditional_rule.rule_count);
 
         stringbuf_append_str(formatter->output, "@");
         stringbuf_append_str(formatter->output, rule_name);
@@ -540,10 +545,19 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
             if (formatter->options.newline_after_brace) {
                 append_indent(formatter);
             }
-            const char* nested_rule = css_format_rule(formatter, rule->data.conditional_rule.rules[i]);
-            if (nested_rule) {
-                stringbuf_append_str(formatter->output, nested_rule);
+
+            // Format nested rule using temporary buffer (same approach as stylesheet formatter)
+            StringBuf* saved_output = formatter->output;
+            formatter->output = stringbuf_new(formatter->pool);
+
+            const char* nested_rule_str = css_format_rule(formatter, rule->data.conditional_rule.rules[i]);
+
+            // Restore main buffer and append nested rule
+            formatter->output = saved_output;
+            if (nested_rule_str) {
+                stringbuf_append_str(formatter->output, nested_rule_str);
             }
+
             if (formatter->options.newline_after_brace) {
                 append_newline(formatter);
             }
@@ -592,9 +606,31 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
             stringbuf_append_str(formatter->output, ")");
         }
         stringbuf_append_str(formatter->output, ";");
+
+    } else if (rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_KEYFRAMES) {
+        // Format generic at-rules (@font-face, @keyframes, etc.)
+        fprintf(stderr, "[CSS Formatter] Formatting generic @-rule: %s\n",
+                rule->data.generic_rule.name ? rule->data.generic_rule.name : "null");
+
+        stringbuf_append_str(formatter->output, "@");
+        if (rule->data.generic_rule.name) {
+            stringbuf_append_str(formatter->output, rule->data.generic_rule.name);
+        }
+
+        if (rule->data.generic_rule.content) {
+            fprintf(stderr, "[CSS Formatter] Content: '%s'\n", rule->data.generic_rule.content);
+            append_space(formatter);
+            stringbuf_append_str(formatter->output, rule->data.generic_rule.content);
+        }
+
+        if (formatter->options.newline_after_brace) {
+            append_newline(formatter);
+        }
     }
 
     String* result = stringbuf_to_string(formatter->output);
+    fprintf(stderr, "[CSS Formatter] Returning from css_format_rule (rule type %d), buffer='%.80s...'\n",
+            rule ? rule->type : -1, result->chars ? result->chars : "(null)");
     return (result && result->chars) ? result->chars : "";
 }
 
@@ -628,6 +664,8 @@ const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* styles
         // Restore the main output buffer and append the rule
         formatter->output = saved_output;
         if (rule_str) {
+            fprintf(stderr, "[CSS Formatter Stylesheet] Appending rule %zu (type %d), length=%zu: '%.80s...'\n",
+                    i, stylesheet->rules[i]->type, strlen(rule_str), rule_str);
             stringbuf_append_str(formatter->output, rule_str);
         }
     }

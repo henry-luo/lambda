@@ -555,6 +555,16 @@ TEST_P(CssFileRoundtripTest, FileRoundtrip) {
     // Verify output
     EXPECT_GT(strlen(formatted), 0) << "Empty formatted output for: " << basename;
 
+    // Debug: Write formatted CSS to temp file for complete_css_grammar
+    if (basename == "complete_css_grammar.css") {
+        FILE* f = fopen("temp/formatted_complete_css_grammar.css", "w");
+        if (f) {
+            fprintf(f, "%s", formatted);
+            fclose(f);
+            fprintf(stderr, "\n[Test] Wrote formatted CSS to temp/formatted_complete_css_grammar.css\n\n");
+        }
+    }
+
     // Re-parse formatted output
     CssStylesheet* stylesheet2 = ParseCSS(formatted);
     if (stylesheet2) {
