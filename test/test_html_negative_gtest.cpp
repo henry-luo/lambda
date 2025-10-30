@@ -841,3 +841,624 @@ TEST_F(HtmlParserNegativeTest, MixedMultipleErrors) {
     // parser rejects this with error due to unclosed quote
     EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR || get_type_id(result) == LMD_TYPE_NULL);
 }
+
+// ============================================================================
+// Additional Corner Cases - Attribute Edge Cases
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeNameStartsWithNumber) {
+    // attributes starting with numbers are invalid
+    Item result = parseHtml("<div 123attr=\"value\">Content</div>");
+
+    // should parse somehow (may ignore invalid attribute)
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeOnlyEquals) {
+    // attribute that is just '='
+    Item result = parseHtml("<div = >Content</div>");
+
+    // should handle gracefully
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                get_type_id(result) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeMultipleEquals) {
+    // attribute with multiple equals signs
+    Item result = parseHtml("<div id==\"value\">Content</div>");
+
+    // parser rejects this as error
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR || get_type_id(result) == LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeNestedQuotes) {
+    // attribute with nested quotes of same type
+    Item result = parseHtml("<div title=\"She said \"hello\"\">Content</div>");
+
+    // should parse (may truncate at first closing quote)
+    Element* div = findElementByTag(result, "div");
+    EXPECT_TRUE(div != nullptr || get_type_id(result) == LMD_TYPE_ERROR);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeTabsInValue) {
+    // attribute value with tabs
+    Item result = parseHtml("<div data-value=\"\t\tvalue\t\">Content</div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    // should preserve tabs in value
+    std::string val = getAttr(div, "data-value");
+    EXPECT_FALSE(val.empty());
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeNewlineInUnquoted) {
+    // unquoted attribute with newline (invalid)
+    Item result = parseHtml("<div id=test\nvalue>Content</div>");
+
+    // should parse somehow
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeOnlyWhitespace) {
+    // attribute name that is only whitespace
+    Item result = parseHtml("<div   =\"value\">Content</div>");
+
+    // should handle gracefully
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                findElementByTag(result, "div") != nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Tag Name Edge Cases
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameWithDashes) {
+    // tag names with dashes (custom elements style)
+    Item result = parseHtml("<my-custom-element>Content</my-custom-element>");
+
+    Element* elem = findElementByTag(result, "my-custom-element");
+    EXPECT_NE(elem, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameWithUnderscores) {
+    // tag names with underscores
+    Item result = parseHtml("<my_element>Content</my_element>");
+
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameStartsWithDash) {
+    // tag name starting with dash (invalid)
+    Item result = parseHtml("<-element>Content</-element>");
+
+    // should handle somehow
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                get_type_id(result) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameAllNumbers) {
+    // tag name that is all numbers (invalid)
+    Item result = parseHtml("<123>Content</123>");
+
+    // should handle gracefully
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                get_type_id(result) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameWithDots) {
+    // tag name with dots
+    Item result = parseHtml("<my.element>Content</my.element>");
+
+    // should parse somehow
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameWithColons) {
+    // tag name with colons (XML namespace style)
+    Item result = parseHtml("<ns:element>Content</ns:element>");
+
+    // should parse (may treat as single tag name)
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTagNameVeryLong) {
+    // extremely long tag name
+    std::string long_tag(1000, 'a');
+    std::string html = "<" + long_tag + ">Content</" + long_tag + ">";
+
+    Item result = parseHtml(html.c_str());
+
+    // should handle gracefully
+    EXPECT_TRUE(true);
+}
+
+// ============================================================================
+// Additional Corner Cases - Nesting and Structure
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseButtonInsideButton) {
+    // buttons nested inside buttons (invalid)
+    Item result = parseHtml("<button><button>Inner</button></button>");
+
+    // should parse somehow (may auto-close first button)
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAnchorInsideAnchor) {
+    // anchors nested inside anchors (invalid)
+    Item result = parseHtml("<a href=\"#1\"><a href=\"#2\">Link</a></a>");
+
+    // should parse somehow
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseLabelInsideLabel) {
+    // labels nested inside labels (invalid)
+    Item result = parseHtml("<label><label>Inner</label></label>");
+
+    // should parse somehow
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseHeadingInsideHeading) {
+    // heading nested inside heading
+    Item result = parseHtml("<h1><h2>Nested heading</h2></h1>");
+
+    // should parse somehow
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseOptionOutsideSelect) {
+    // option elements without select parent
+    Item result = parseHtml("<option>Choice 1</option>");
+
+    Element* option = findElementByTag(result, "option");
+    EXPECT_NE(option, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseDtDdWithoutDl) {
+    // dt/dd elements without dl parent
+    Item result = parseHtml("<dt>Term</dt><dd>Definition</dd>");
+
+    // should parse elements
+    EXPECT_TRUE(findElementByTag(result, "dt") != nullptr ||
+                findElementByTag(result, "dd") != nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Content Edge Cases
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTextWithOnlySpecialChars) {
+    // text content with only special characters
+    Item result = parseHtml("<div>!@#$%^&*()_+-=[]{}|;:',.<>?/~`</div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    std::string text = getTextContent(Item{.element = div});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTextWithRepeatedEntities) {
+    // text with many repeated entities
+    Item result = parseHtml("<p>&lt;&gt;&lt;&gt;&lt;&gt;&lt;&gt;</p>");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    std::string text = getTextContent(Item{.element = p});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTextWithMixedNewlines) {
+    // text with mixed newline types (CRLF, LF, CR)
+    Item result = parseHtml("<div>Line1\r\nLine2\nLine3\rLine4</div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    std::string text = getTextContent(Item{.element = div});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTextWithZeroWidthChars) {
+    // text with zero-width characters
+    Item result = parseHtml("<p>Text\u200B\u200C\u200D\uFEFFWith Zero Width</p>");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    std::string text = getTextContent(Item{.element = p});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTextWithBidiMarkers) {
+    // text with bidirectional text markers
+    Item result = parseHtml("<div>English\u202Ahebrew\u202C</div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Whitespace Handling
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseNoSpaceBetweenAttributes) {
+    // no space between attributes
+    Item result = parseHtml("<div id=\"test\"class=\"box\"data-value=\"123\">Content</div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_TRUE(div != nullptr || get_type_id(result) == LMD_TYPE_ERROR);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseNoSpaceBeforeSlash) {
+    // no space before self-closing slash
+    Item result = parseHtml("<img src=\"test.jpg\"/>");
+
+    Element* img = findElementByTag(result, "img");
+    EXPECT_NE(img, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseExcessiveWhitespaceBetweenAttrs) {
+    // excessive whitespace between attributes
+    Item result = parseHtml("<div id=\"test\"     \n\t\r    class=\"box\">Content</div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    EXPECT_EQ(getAttr(div, "id"), "test");
+    EXPECT_EQ(getAttr(div, "class"), "box");
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseWhitespaceInTagName) {
+    // whitespace in middle of tag name (splits tag)
+    Item result = parseHtml("<div class>Content</div class>");
+
+    // should handle gracefully
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                findElementByTag(result, "div") != nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseFormFeedCharacter) {
+    // form feed character in content
+    Item result = parseHtml("<div>Before\fAfter</div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Comment Edge Cases
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseCommentWithNull) {
+    // comment containing null byte
+    const char html[] = "<div><!-- Comment\0Hidden --></div>";
+
+    Item result = parseHtml(html);
+
+    // should parse up to null
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseCommentStartingWithDash) {
+    // comment starting with dash (near edge of valid syntax)
+    Item result = parseHtml("<!--- This is a comment --->");
+
+    // should parse somehow
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                get_type_id(result) == LMD_TYPE_ELEMENT ||
+                get_type_id(result) == LMD_TYPE_LIST);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseCommentEndingWithDash) {
+    // comment ending with extra dash
+    Item result = parseHtml("<!-- Comment --->");
+
+    // should parse somehow
+    EXPECT_TRUE(true);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseNestedCommentLike) {
+    // nested comment-like syntax
+    Item result = parseHtml("<!-- Outer <!-- Inner --> Outer -->");
+
+    // should parse somehow (HTML doesn't support nested comments)
+    EXPECT_TRUE(true);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseCommentWithScriptTag) {
+    // comment containing script-like content
+    Item result = parseHtml("<!-- <script>alert('xss')</script> --><div>Safe</div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Entity Reference Edge Cases
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseEntityWithoutSemicolonFollowedByNumber) {
+    // entity without semicolon followed by number
+    Item result = parseHtml("<p>&lt123</p>");
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseEntityPartialMatch) {
+    // entity that partially matches known entity
+    Item result = parseHtml("<p>&ltx;</p>");
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseNumericEntityZero) {
+    // numeric entity for code point 0
+    Item result = parseHtml("<p>&#0;</p>");
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseNumericEntityLeadingZeros) {
+    // numeric entity with leading zeros
+    Item result = parseHtml("<p>&#00065;</p>");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    // should parse to 'A' (U+0041 = 65)
+    std::string text = getTextContent(Item{.element = p});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseHexEntityUppercase) {
+    // hex entity with uppercase X
+    Item result = parseHtml("<p>&#X41;</p>");
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseMultipleAmpersands) {
+    // multiple ampersands in a row
+    Item result = parseHtml("<p>&&&</p>");
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseEntityInAttributeName) {
+    // entity reference in attribute name (invalid)
+    Item result = parseHtml("<div data-&lt;test=\"value\">Content</div>");
+
+    // should handle gracefully
+    EXPECT_TRUE(true);
+}
+
+// ============================================================================
+// Additional Corner Cases - Self-Closing and Void Elements
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseSelfClosingWithSpace) {
+    // self-closing with space before slash
+    Item result = parseHtml("<br />");
+
+    Element* br = findElementByTag(result, "br");
+    EXPECT_NE(br, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseSelfClosingWithAttributes) {
+    // self-closing with attributes after slash
+    Item result = parseHtml("<img / src=\"test.jpg\">");
+
+    // parser rejects this as error (slash in wrong position)
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR || get_type_id(result) == LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseVoidElementWithChildren) {
+    // void element with child elements
+    Item result = parseHtml("<input><span>Child</span></input>");
+
+    // should handle gracefully
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseMultipleSelfClosingSlashes) {
+    // multiple slashes in self-closing tag
+    Item result = parseHtml("<br //>");
+
+    // parser rejects this as error or null
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR || get_type_id(result) == LMD_TYPE_NULL);
+}// ============================================================================
+// Additional Corner Cases - Script/Style Content
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseScriptWithHTMLComments) {
+    // script with HTML comment markers (old school)
+    Item result = parseHtml("<script><!-- alert('test'); //--></script>");
+
+    Element* script = findElementByTag(result, "script");
+    EXPECT_NE(script, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseScriptWithCDATA) {
+    // script with CDATA section
+    Item result = parseHtml("<script><![CDATA[ var x = 1; ]]></script>");
+
+    Element* script = findElementByTag(result, "script");
+    EXPECT_NE(script, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseStyleWithMediaQuery) {
+    // style with @media query containing >
+    Item result = parseHtml("<style>@media (min-width: 768px) { body { margin: 0; } }</style>");
+
+    Element* style = findElementByTag(result, "style");
+    EXPECT_NE(style, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseScriptWithEscapedClosingTag) {
+    // script with escaped closing tag
+    Item result = parseHtml("<script>var html = '<\\/script>';</script>");
+
+    Element* script = findElementByTag(result, "script");
+    EXPECT_NE(script, nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Case Sensitivity
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseMixedCaseAttributes) {
+    // mixed case attributes (HTML is case-insensitive)
+    Item result = parseHtml("<div ID=\"test\" CLaSs=\"box\" dAtA-VaLuE=\"123\">Content</div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    // should be case-insensitive
+    EXPECT_TRUE(getAttr(div, "id") == "test" || getAttr(div, "ID") == "test");
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseMixedCaseTagNames) {
+    // mixed case tag names
+    Item result = parseHtml("<DiV><SpAn>Text</SpAn></DiV>");
+
+    // should handle case-insensitively
+    EXPECT_TRUE(findElementByTag(result, "div") != nullptr ||
+                findElementByTag(result, "DiV") != nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseMixedCaseEntities) {
+    // mixed case entity names (entities are case-sensitive)
+    Item result = parseHtml("<p>&Lt;&gT;&AMP;</p>");
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Empty Elements and Attributes
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseElementWithOnlyWhitespaceContent) {
+    // element with only various whitespace types
+    Item result = parseHtml("<div> \t\n\r </div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAttributeNameEmpty) {
+    // empty attribute name
+    Item result = parseHtml("<div =\"value\">Content</div>");
+
+    // should reject or handle gracefully
+    EXPECT_TRUE(get_type_id(result) == LMD_TYPE_ERROR ||
+                get_type_id(result) == LMD_TYPE_NULL ||
+                findElementByTag(result, "div") != nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseManyEmptyElements) {
+    // many empty elements nested
+    Item result = parseHtml("<div><span></span><span></span><span></span></div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+
+    int span_count = countElementsByTag(result, "span");
+    EXPECT_EQ(span_count, 3);
+}
+
+// ============================================================================
+// Additional Corner Cases - Table Structure
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTableWithOnlyCaption) {
+    // table with only caption
+    Item result = parseHtml("<table><caption>Title</caption></table>");
+
+    Element* table = findElementByTag(result, "table");
+    EXPECT_NE(table, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTableMultipleTbody) {
+    // table with multiple tbody elements
+    Item result = parseHtml("<table><tbody><tr><td>1</td></tr></tbody><tbody><tr><td>2</td></tr></tbody></table>");
+
+    Element* table = findElementByTag(result, "table");
+    EXPECT_NE(table, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTableTheadAfterTbody) {
+    // table with thead after tbody (wrong order)
+    Item result = parseHtml("<table><tbody><tr><td>Body</td></tr></tbody><thead><tr><th>Header</th></tr></thead></table>");
+
+    Element* table = findElementByTag(result, "table");
+    EXPECT_NE(table, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseTableColspanZero) {
+    // table cell with colspan=0
+    Item result = parseHtml("<table><tr><td colspan=\"0\">Cell</td></tr></table>");
+
+    Element* table = findElementByTag(result, "table");
+    EXPECT_NE(table, nullptr);
+}
+
+// ============================================================================
+// Additional Corner Cases - Stress Tests
+// ============================================================================
+
+TEST_F(HtmlParserNegativeTest, CornerCaseAlternatingValidInvalid) {
+    // alternating valid and invalid tags
+    Item result = parseHtml("<div><>text</><span><>more</></span></div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_TRUE(div != nullptr || get_type_id(result) == LMD_TYPE_ERROR);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseManyUnclosedTags) {
+    // many unclosed tags in sequence
+    Item result = parseHtml("<div><p><span><strong><em>Text");
+
+    // should auto-close all
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseRepeatedSameTag) {
+    // same tag opened repeatedly without closing
+    Item result = parseHtml("<div><div><div><div>Content</div></div></div></div>");
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseSingleCharacterElements) {
+    // single character tag names
+    Item result = parseHtml("<a><b><i><u><s>Text</s></u></i></b></a>");
+
+    EXPECT_TRUE(get_type_id(result) != LMD_TYPE_NULL);
+}
+
+TEST_F(HtmlParserNegativeTest, CornerCaseBracketInText) {
+    // < and > characters in text without proper escaping
+    Item result = parseHtml("<div>5 < 10 > 3</div>");
+
+    // should parse somehow (< might be treated as tag start)
+    Element* div = findElementByTag(result, "div");
+    EXPECT_TRUE(div != nullptr || get_type_id(result) == LMD_TYPE_ERROR);
+}

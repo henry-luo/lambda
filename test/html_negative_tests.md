@@ -6,7 +6,7 @@ The `test_html_negative_gtest.cpp` file contains comprehensive negative test cas
 
 ## Test Coverage
 
-The test suite includes **60 test cases** organized into the following categories:
+The test suite includes **125 test cases** organized into the following categories:
 
 ### 1. Malformed Tags (8 tests)
 - Unclosed tags
@@ -94,9 +94,100 @@ The test suite includes **60 test cases** organized into the following categorie
 - Invalid content in middle of valid content
 - Multiple different error types
 
+### 14. Additional Attribute Edge Cases (7 tests)
+- Attribute names starting with numbers
+- Attribute that is just '='
+- Multiple equals signs in attribute
+- Nested quotes of same type
+- Tabs in attribute values
+- Newlines in unquoted attributes
+- Attribute names with only whitespace
+
+### 15. Tag Name Edge Cases (7 tests)
+- Tag names with dashes (custom elements)
+- Tag names with underscores
+- Tag names starting with dash
+- Tag names that are all numbers
+- Tag names with dots
+- Tag names with colons (namespace style)
+- Extremely long tag names (1000+ chars)
+
+### 16. Nesting and Structure Corner Cases (6 tests)
+- Buttons nested inside buttons
+- Anchors nested inside anchors
+- Labels nested inside labels
+- Headings nested inside headings
+- Option elements without select parent
+- Dt/dd elements without dl parent
+
+### 17. Content Edge Cases (5 tests)
+- Text with only special characters
+- Text with repeated entities
+- Text with mixed newline types (CRLF, LF, CR)
+- Text with zero-width characters
+- Text with bidirectional text markers
+
+### 18. Whitespace Handling Corner Cases (5 tests)
+- No space between attributes
+- No space before self-closing slash
+- Excessive whitespace between attributes
+- Whitespace in middle of tag name
+- Form feed character in content
+
+### 19. Comment Edge Cases (5 tests)
+- Comment containing null byte
+- Comment starting with dash
+- Comment ending with extra dash
+- Nested comment-like syntax
+- Comment containing script tag
+
+### 20. Entity Reference Corner Cases (7 tests)
+- Entity without semicolon followed by number
+- Entity that partially matches known entity
+- Numeric entity for code point 0
+- Numeric entity with leading zeros
+- Hex entity with uppercase X
+- Multiple ampersands in a row
+- Entity reference in attribute name
+
+### 21. Self-Closing and Void Element Corner Cases (4 tests)
+- Self-closing with space before slash
+- Self-closing with attributes after slash
+- Void element with child elements
+- Multiple self-closing slashes
+
+### 22. Script/Style Content Corner Cases (4 tests)
+- Script with HTML comment markers
+- Script with CDATA section
+- Style with @media query containing >
+- Script with escaped closing tag
+
+### 23. Case Sensitivity Corner Cases (3 tests)
+- Mixed case attributes
+- Mixed case tag names
+- Mixed case entity names
+
+### 24. Empty Elements and Attributes (3 tests)
+- Element with only whitespace content
+- Empty attribute name
+- Many empty elements nested
+
+### 25. Table Structure Corner Cases (4 tests)
+- Table with only caption
+- Table with multiple tbody elements
+- Table with thead after tbody (wrong order)
+- Table cell with colspan=0
+
+### 26. Stress Tests (5 tests)
+- Alternating valid and invalid tags
+- Many unclosed tags in sequence
+- Repeated same tag without closing
+- Single character tag names
+- Bracket characters in text without escaping
+
 ## Test Results
 
-**Status:** ✅ All 60 tests passing
+**Status:** ✅ All 125 tests passing
 
 The test suite verifies that the HTML parser:
 1. **Handles errors gracefully** - doesn't crash on malformed input
