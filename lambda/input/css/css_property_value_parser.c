@@ -741,59 +741,6 @@ bool css_value_is_function(const CssValue* value, const char* function_name) {
            value->data.function.name && strcmp(value->data.function.name, function_name) == 0;
 }
 
-// Debug utilities
-const char* css_value_enhanced_type_to_string(CSSValueTypeEnhanced type) {
-    switch (type) {
-        case CSS_VALUE_ENHANCED_KEYWORD: return "keyword";
-        case CSS_VALUE_ENHANCED_LENGTH: return "length";
-        case CSS_VALUE_ENHANCED_PERCENTAGE: return "percentage";
-        case CSS_VALUE_ENHANCED_NUMBER: return "number";
-        case CSS_VALUE_ENHANCED_COLOR: return "color";
-        case CSS_VALUE_ENHANCED_STRING: return "string";
-        case CSS_VALUE_ENHANCED_URL: return "url";
-        case CSS_VALUE_ENHANCED_FUNCTION: return "function";
-        case CSS_VALUE_ENHANCED_CALC: return "calc";
-        case CSS_VALUE_ENHANCED_VAR: return "var";
-        case CSS_VALUE_ENHANCED_ENV: return "env";
-        case CSS_VALUE_ENHANCED_ATTR: return "attr";
-        case CSS_VALUE_ENHANCED_COLOR_MIX: return "color-mix";
-        case CSS_VALUE_ENHANCED_LIST: return "list";
-        default: return "unknown";
-    }
-}
-
-void css_value_enhanced_print_debug(const CssValue* value) {
-    if (!value) {
-        printf("(null value)\n");
-        return;
-    }
-
-    printf("Value type: %s", css_value_enhanced_type_to_string(value->type));
-
-    switch (value->type) {
-        case CSS_VALUE_ENHANCED_KEYWORD:
-            printf(", keyword: %s", value->data.keyword ? value->data.keyword : "(null)");
-            break;
-        case CSS_VALUE_ENHANCED_NUMBER:
-            printf(", number: %g", value->data.number);
-            break;
-        case CSS_VALUE_ENHANCED_LENGTH:
-            printf(", length: %g%s", value->data.length.value,
-                   value->data.length.unit ? value->data.length.unit : "");
-            break;
-        case CSS_VALUE_ENHANCED_PERCENTAGE:
-            printf(", percentage: %g%%", value->data.percentage);
-            break;
-        case CSS_VALUE_ENHANCED_VAR:
-            printf(", var: --%s", value->data.var_ref ? value->data.var_ref->name : "(null)");
-            break;
-        default:
-            break;
-    }
-
-    printf("\n");
-}
-
 // CSS property value parser utility functions
 
 // Environment variable setter for parser
@@ -819,32 +766,13 @@ CSSColorMix* css_parse_color_mix_function(CssPropertyValueParser* parser,
     return NULL;
 }
 
-// implementation removed - now implemented in css_tokenizer.c
-
-// Enhanced value to string conversion
-char* css_value_enhanced_to_string(const CssValue* value, Pool* pool) {
-    // Implementation for value to string conversion
-    if (!value || !pool) {
-        return pool_strdup(pool, "invalid");
-    }
-
-    switch (value->type) {
-        case CSS_VALUE_ENHANCED_KEYWORD:
-            return pool_strdup(pool, value->data.keyword ? value->data.keyword : "unknown");
-        case CSS_VALUE_ENHANCED_STRING:
-            return pool_strdup(pool, value->data.string ? value->data.string : "");
-        case CSS_VALUE_ENHANCED_FUNCTION:
-            return pool_strdup(pool, value->data.function.name ? value->data.function.name : "function()");
-        default:
-            return pool_strdup(pool, "unknown-value");
-    }
-}CssValue* css_value_list_create(Pool* pool, bool comma_separated) {
+CssValue* css_value_list_create(Pool* pool, bool comma_separated) {
     if (!pool) return NULL;
 
     CssValue* list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!list) return NULL;
 
-    list->type = CSS_VALUE_ENHANCED_LIST;
+    list->type = CSS_VALUE_LIST;
     list->data.list.comma_separated = comma_separated;
     list->data.list.count = 0;
 
@@ -862,7 +790,7 @@ void css_value_list_add(CssValue* list, CssValue* value) {
     // Add value to list with dynamic array handling
     // Note: This version doesn't expand the array, it just adds up to initial capacity
     // Full implementation would require storing pool reference or using reallocation strategy
-    if (!list || !value || list->type != CSS_VALUE_ENHANCED_LIST) return;
+    if (!list || !value || list->type != CSS_VALUE_LIST) return;
 
     // Check if there's space (assuming initial capacity was sufficient)
     // In a production implementation, we'd need to expand the array here

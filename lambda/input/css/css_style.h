@@ -186,28 +186,6 @@ typedef enum CssValueType {
     CSS_VALUE_NUMBER_PERCENTAGE  // number or percentage values
 } CssValueType;
 
-// Enhanced value types for debugging and validation
-typedef enum CSSValueTypeEnhanced {
-    CSS_VALUE_ENHANCED_KEYWORD,
-    CSS_VALUE_ENHANCED_LENGTH,
-    CSS_VALUE_ENHANCED_PERCENTAGE,
-    CSS_VALUE_ENHANCED_NUMBER,
-    CSS_VALUE_ENHANCED_COLOR,
-    CSS_VALUE_ENHANCED_STRING,
-    CSS_VALUE_ENHANCED_URL,
-    CSS_VALUE_ENHANCED_ANGLE,
-    CSS_VALUE_ENHANCED_TIME,
-    CSS_VALUE_ENHANCED_FREQUENCY,
-    CSS_VALUE_ENHANCED_RESOLUTION,
-    CSS_VALUE_ENHANCED_FLEX,
-    CSS_VALUE_ENHANCED_POSITION,
-    CSS_VALUE_ENHANCED_FUNCTION,
-    CSS_VALUE_ENHANCED_ENV,
-    CSS_VALUE_ENHANCED_ATTR,
-    CSS_VALUE_ENHANCED_COLOR_MIX,
-    CSS_VALUE_ENHANCED_LIST
-} CSSValueTypeEnhanced;
-
 // ============================================================================
 // CSS Property IDs (comprehensive CSS specification)
 // ============================================================================
