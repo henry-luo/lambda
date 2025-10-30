@@ -9,8 +9,9 @@
  * - Syntax errors and recovery mechanisms
  * - Invalid property values and units
  * - Brace mismatch and nesting errors
+ * - Fuzzy testing with random/malformed input
  *
- * Target: 60+ negative tests with comprehensive error coverage
+ * Target: 70+ negative tests with comprehensive error coverage
  */
 
 #include <gtest/gtest.h>
@@ -911,6 +912,137 @@ TEST_F(CssEngineNegativeTest, ExtremelyLongPropertyValue) {
     CssStylesheet* sheet = css_parse_stylesheet(engine, css.c_str(), nullptr);
 
     // Should handle without crashing
+}
+
+// ============================================================================
+// Category 8: Fuzzy Testing (10 tests)
+// ============================================================================
+
+// Test 8.1: Random ASCII characters
+TEST_F(CssEngineNegativeTest, Fuzz_RandomASCII) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "!@#$%^&*()_+-=[]\\{}|;':\",./<>?`~";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Should handle random special characters without crashing
+}
+
+// Test 8.2: Random braces and brackets
+TEST_F(CssEngineNegativeTest, Fuzz_RandomBraces) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "{{{{}}}}[[[[]]]](((()))){{}}[]()";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Should handle nested/mismatched braces
+}
+
+// Test 8.3: Random mixing of valid CSS tokens
+TEST_F(CssEngineNegativeTest, Fuzz_MixedTokens) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "div { : ; } @ # . : color red 123 px url ( )";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Mixed valid tokens in invalid order
+}
+
+// Test 8.4: Repeated symbols
+TEST_F(CssEngineNegativeTest, Fuzz_RepeatedSymbols) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = ":::::::::::::::::::::::::::::::::::";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Excessive colons
+}
+
+// Test 8.5: Random numbers and units
+TEST_F(CssEngineNegativeTest, Fuzz_RandomNumbers) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "123.456.789px 999em -5555rem 0.0.0.0% 1e99999px";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Malformed numeric values
+}
+
+// Test 8.6: Random strings and quotes
+TEST_F(CssEngineNegativeTest, Fuzz_RandomStrings) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "\"\"\"\"'''''''\"'\"'\"'\\\\\\\\\"\"";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Mixed quotes and escapes
+}
+
+// Test 8.7: Random at-rules
+TEST_F(CssEngineNegativeTest, Fuzz_RandomAtRules) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "@@@@@media@import@charset@@@keyframes@@@@";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Malformed at-rules
+}
+
+// Test 8.8: Random selectors
+TEST_F(CssEngineNegativeTest, Fuzz_RandomSelectors) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "....####[[[:]]]:::***>>>+++~~~";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Random selector-like characters
+}
+
+// Test 8.9: Mixed valid and invalid CSS soup
+TEST_F(CssEngineNegativeTest, Fuzz_CSSSoup) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = 
+        "div { color: red; !@#$ } "
+        "@media $$$ { p { font: %%% } } "
+        "[[[ .class { @@@ : ### } ]]] "
+        "url((())) rgb(999,999,999) "
+        "#id#id#id .class.class.class "
+        "{ } { } { } : : : ; ; ;";
+    
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Complex mix of valid CSS and garbage
+}
+
+// Test 8.10: Binary-like random bytes
+TEST_F(CssEngineNegativeTest, Fuzz_RandomBytes) {
+    auto tokenizer = CreateTokenizer();
+    ASSERT_NE(tokenizer, nullptr);
+
+    // Random byte sequence (printable for test stability)
+    const unsigned char css[] = {
+        0x7B, 0x7D, 0x3A, 0x3B, 0x21, 0x40, 0x23, 0x24,
+        0x25, 0x5E, 0x26, 0x2A, 0x28, 0x29, 0x5F, 0x2B,
+        0x5B, 0x5D, 0x7C, 0x5C, 0x2F, 0x3C, 0x3E, 0x3F,
+        0x00  // null terminator
+    };
+    
+    CssToken* tokens = nullptr;
+    int token_count = css_tokenizer_tokenize(tokenizer, (const char*)css, 
+                                             sizeof(css) - 1, &tokens);
+
+    // Should tokenize without crashing
+    EXPECT_TRUE(token_count >= 0);
 }
 
 // ============================================================================
