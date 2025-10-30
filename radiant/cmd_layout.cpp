@@ -213,17 +213,17 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
     const char* style_text = extract_element_attribute(html_elem, "style", pool);
 
     if (style_text && strlen(style_text) > 0) {
-        fprintf(stderr, "[CSS] Applying inline style to <%s>: %s\n",
+        log_debug("[CSS] Applying inline style to <%s>: %s",
                 dom_elem->tag_name, style_text);
 
         // Apply the inline style using the DOM element API
         int decl_count = dom_element_apply_inline_style(dom_elem, style_text);
 
         if (decl_count > 0) {
-            fprintf(stderr, "[CSS] Applied %d inline declarations to <%s>\n",
+            log_debug("[CSS] Applied %d inline declarations to <%s>",
                     decl_count, dom_elem->tag_name);
         } else {
-            fprintf(stderr, "[CSS] Warning: Failed to parse inline style for <%s>\n",
+            log_debug("[CSS] Warning: Failed to parse inline style for <%s>",
                     dom_elem->tag_name);
         }
     }
@@ -344,7 +344,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
         // 3. Resolve relative path using base_path
         // 4. Load and parse CSS file
         // 5. Add to engine's stylesheet list
-        fprintf(stderr, "[CSS] Found <link> element (attribute extraction not yet implemented)\n");
+        log_debug("[CSS] Found <link> element (attribute extraction not yet implemented)");
     }
 
     // Recursively process children
@@ -388,7 +388,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
                     // Parse the inline CSS
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
                     if (stylesheet && stylesheet->rule_count > 0) {
-                        fprintf(stderr, "[CSS] Parsed inline <style>: %zu rules\n", stylesheet->rule_count);
+                        log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
 
                         // Add to list
                         *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
@@ -429,12 +429,12 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
                 String* css_text = (String*)child_item.pointer;
                 if (css_text && css_text->len > 0) {
-                    fprintf(stderr, "[CSS] Found <style> element with %d bytes of CSS\n", css_text->len);
+                    log_debug("[CSS] Found <style> element with %d bytes of CSS", css_text->len);
 
                     // Parse the inline CSS
                     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
                     if (stylesheet) {
-                        fprintf(stderr, "[CSS] Parsed inline <style>: %zu rules\n", stylesheet->rule_count);
+                        log_debug("[CSS] Parsed inline <style>: %zu rules", stylesheet->rule_count);
                         // Note: stylesheet is already added to engine's internal list
                     }
                 }
@@ -459,21 +459,21 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
-    fprintf(stderr, "[CSS] Extracting CSS from HTML document...\n");
+    log_debug("[CSS] Extracting CSS from HTML document...");
 
     *stylesheet_count = 0;
     CssStylesheet** stylesheets = nullptr;
 
     // Step 1: Collect and parse <link rel="stylesheet"> references
-    fprintf(stderr, "[CSS] Step 1: Collecting linked stylesheets...\n");
+    log_debug("[CSS] Step 1: Collecting linked stylesheets...");
     collect_linked_stylesheets(html_root, engine, base_path, pool);
     // TODO: Add linked stylesheets to array when implemented
 
     // Step 2: Collect and parse <style> inline CSS
-    fprintf(stderr, "[CSS] Step 2: Collecting inline <style> elements...\n");
+    log_debug("[CSS] Step 2: Collecting inline <style> elements...");
     collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count);
 
-    fprintf(stderr, "[CSS] Collected %d stylesheet(s) from HTML\n", *stylesheet_count);
+    log_debug("[CSS] Collected %d stylesheet(s) from HTML", *stylesheet_count);
     return stylesheets;
 }
 
@@ -1005,9 +1005,9 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
 ViewGroup* compute_layout_tree(DomNode* root_node, int viewport_width, int viewport_height, Pool* pool) {
     if (!root_node) return nullptr;
 
-    fprintf(stderr, "[Layout] Radiant layout computation currently requires full UI context\n");
-    fprintf(stderr, "[Layout] CSS styling complete - layout computation pending\n");
-    fprintf(stderr, "[Layout] For full layout, run: ./radiant.exe %s\n", "(html_file)");
+    log_debug("[Layout] Radiant layout computation currently requires full UI context");
+    log_debug("[Layout] CSS styling complete - layout computation pending");
+    log_debug("[Layout] For full layout, run: ./radiant.exe %s", "(html_file)");
 
     // TODO: Implement minimal layout computation without full UiContext
     // This requires:
@@ -1048,7 +1048,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
             if (i + 1 < argc) {
                 opts->output_file = argv[++i];
             } else {
-                fprintf(stderr, "Error: -o requires an argument\n");
+                log_error("Error: -o requires an argument");
                 return false;
             }
         }
@@ -1056,7 +1056,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
             if (i + 1 < argc) {
                 opts->css_file = argv[++i];
             } else {
-                fprintf(stderr, "Error: -c requires an argument\n");
+                log_error("Error: -c requires an argument");
                 return false;
             }
         }
@@ -1064,7 +1064,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
             if (i + 1 < argc) {
                 opts->viewport_width = atoi(argv[++i]);
             } else {
-                fprintf(stderr, "Error: -w requires an argument\n");
+                log_error("Error: -w requires an argument");
                 return false;
             }
         }
@@ -1072,7 +1072,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
             if (i + 1 < argc) {
                 opts->viewport_height = atoi(argv[++i]);
             } else {
-                fprintf(stderr, "Error: -h requires an argument\n");
+                log_error("Error: -h requires an argument");
                 return false;
             }
         }
@@ -1085,8 +1085,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     }
 
     if (!opts->input_file) {
-        fprintf(stderr, "Error: input file required\n");
-        fprintf(stderr, "Usage: lambda layout <input.html> [options]\n");
+        log_error("Error: input file required");
+        log_error("Usage: lambda layout <input.html> [options]");
         return false;
     }
 
