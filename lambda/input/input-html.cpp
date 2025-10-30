@@ -5,7 +5,7 @@
 #include "input-html-context.h"
 #include <stdarg.h>
 
-static Item parse_element(Input *input, const char **html, const char *html_start);
+static Item parse_element(Input *input, const char **html, const char *html_start, HtmlParserContext* context);
 
 // Global length limit for text content, strings, and raw text elements
 static const int MAX_CONTENT_CHARS = 256 * 1024; // 256KB
@@ -324,7 +324,7 @@ static bool is_aria_attribute(const char* attr_name) {
     return html_is_aria_attribute(attr_name);
 }
 
-static Item parse_element(Input *input, const char **html, const char *html_start) {
+static Item parse_element(Input *input, const char **html, const char *html_start, HtmlParserContext* context) {
     html_enter_element();
     int parse_depth = html_get_parse_depth();
 
@@ -346,7 +346,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         skip_doctype(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html, html_start); // Try next element
+            Item result = parse_element(input, html, html_start, context); // Try next element
             html_exit_element();
             return result;
         }
@@ -360,7 +360,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         skip_processing_instruction(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html, html_start); // Try next element
+            Item result = parse_element(input, html, html_start, context); // Try next element
             html_exit_element();
             return result;
         }
@@ -374,7 +374,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         skip_cdata(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html, html_start); // Try next element
+            Item result = parse_element(input, html, html_start, context); // Try next element
             html_exit_element();
             return result;
         }
@@ -412,6 +412,17 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input");
         return {.item = ITEM_ERROR};
+    }
+
+    // Phase 4.1: Track explicit html/head/body tags in context
+    if (context) {
+        if (strcasecmp(tag_name->chars, "html") == 0) {
+            html_context_set_html(context, element);
+        } else if (strcasecmp(tag_name->chars, "head") == 0) {
+            html_context_set_head(context, element);
+        } else if (strcasecmp(tag_name->chars, "body") == 0) {
+            html_context_set_body(context, element);
+        }
     }
 
     // Parse attributes directly into the element
@@ -511,7 +522,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
                     } else {
                         // Parse child element
                         const char* before_child_parse = *html;
-                        Item child = parse_element(input, html, html_start);
+                        Item child = parse_element(input, html, html_start, context);
 
                         TypeId child_type = get_type_id(child);
                         if (child_type == LMD_TYPE_ERROR) {
@@ -793,7 +804,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse regular element (should be <html> or similar)
         if (*html == '<' && *(html + 1) != '/' && *(html + 1) != '!') {
-            Item element_item = parse_element(input, &html, html_string);
+            Item element_item = parse_element(input, &html, html_string, context);
             if (element_item.item != ITEM_ERROR && element_item.item != ITEM_NULL) {
                 list_push(root_list, element_item);
             }
