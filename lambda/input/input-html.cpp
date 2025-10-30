@@ -2,6 +2,7 @@
 #include "input-html-scan.h"
 #include "input-html-tokens.h"
 #include "input-html-tree.h"
+#include "input-html-context.h"
 #include <stdarg.h>
 
 static Item parse_element(Input *input, const char **html, const char *html_start);
@@ -720,6 +721,14 @@ void parse_html_impl(Input* input, const char* html_string) {
     input->sb = stringbuf_new(input->pool);
     const char *html = html_string;
 
+    // Create parser context to track document structure
+    HtmlParserContext* context = html_context_create(input);
+    if (!context) {
+        log_error("Failed to create HTML parser context");
+        input->root = (Item){.item = ITEM_ERROR};
+        return;
+    }
+
     // Create a root-level list to collect DOCTYPE, comments, and the main element
     List* root_list = (List*)pool_calloc(input->pool, sizeof(List));
     if (root_list) {
@@ -814,4 +823,7 @@ void parse_html_impl(Input* input, const char* html_string) {
         // Empty document - return null
         input->root = (Item){.item = ITEM_NULL};
     }
+
+    // Clean up parser context
+    html_context_destroy(context);
 }
