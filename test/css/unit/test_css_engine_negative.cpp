@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <cstdlib>
 #include <string>
+#include <iostream>
 #include "../helpers/css_test_helpers.hpp"
 
 extern "C" {
@@ -1075,6 +1076,10 @@ TEST_F(CssEngineNegativeTest, Fuzz_RandomInputStressTest) {
         for (int i = 0; i < length; i++) {
             random_css += charset[rand() % charset_size];
         }
+
+        // Print the generated random input
+        std::cout << "Iteration " << (iteration + 1) << "/" << 100 
+                  << " (length=" << length << "): " << random_css << std::endl;
 
         // Try to parse the random input - should not crash or hang
         CssStylesheet* sheet = css_parse_stylesheet(engine, random_css.c_str(), nullptr);
