@@ -6,9 +6,11 @@
 
 extern "C" {
     #include "../lambda/input/input.h"
+    #include "../lambda/input/input-html-context.h"
     #include "../lib/mempool.h"
     #include "../lib/stringbuf.h"
     #include "../lib/strview.h"
+    #include "../lib/arraylist.h"
     #include "../lib/log.h"
     void rpmalloc_initialize();
     void rpmalloc_finalize();
@@ -1365,4 +1367,355 @@ TEST_F(HtmlParserTest, IntegrationSemanticDocumentStructure) {
     EXPECT_NE(findElementByTag(result, "main"), nullptr);
     EXPECT_NE(findElementByTag(result, "article"), nullptr);
     EXPECT_NE(findElementByTag(result, "footer"), nullptr);
+}
+
+// ============================================================================
+// Phase 2 Tests: HTML5 Void Element Handling
+// ============================================================================
+
+TEST_F(HtmlParserTest, VoidElementsAlwaysSelfClosing) {
+    // Void elements should be self-closing even without slash syntax
+    Item result = parseHtml("<div><img src=\"test.jpg\"><p>After image</p></div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    Element* img = findElementByTag(result, "img");
+    ASSERT_NE(img, nullptr);
+    EXPECT_EQ(getAttr(img, "src"), "test.jpg");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, VoidElementsWithTrailingSlash) {
+    // Void elements with self-closing slash should still work
+    Item result = parseHtml("<div><br /><hr /><p>Text</p></div>");
+
+    Element* br = findElementByTag(result, "br");
+    Element* hr = findElementByTag(result, "hr");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(br, nullptr);
+    EXPECT_NE(hr, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, NonVoidElementSelfClosingIgnored) {
+    // HTML5: Self-closing slash on non-void elements should be ignored
+    // <div/> should be treated as <div> (not self-closing)
+    Item result = parseHtml("<div/><p>Content in div</p></div>");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    // The <p> should be a child of <div> since <div/> doesn't self-close
+    std::string text = getTextContent(Item{.element = div});
+    EXPECT_FALSE(text.empty());
+}
+
+TEST_F(HtmlParserTest, VoidElementsInComplexStructure) {
+    Item result = parseHtml(R"(
+        <div>
+            <p>Line 1<br>Line 2<br>Line 3</p>
+            <img src="a.jpg" alt="A">
+            <img src="b.jpg" alt="B">
+            <hr>
+            <input type="text" name="field1">
+            <input type="checkbox" name="field2">
+        </div>
+    )");
+
+    EXPECT_EQ(countElementsByTag(result, "br"), 2);
+    EXPECT_EQ(countElementsByTag(result, "img"), 2);
+    EXPECT_EQ(countElementsByTag(result, "hr"), 1);
+    EXPECT_EQ(countElementsByTag(result, "input"), 2);
+}
+
+TEST_F(HtmlParserTest, AllVoidElementsWithAttributes) {
+    const char* html = R"(
+        <area shape="rect" coords="0,0,10,10" href="#area">
+        <base href="http://example.com/">
+        <br class="break">
+        <col span="2">
+        <embed src="file.swf" type="application/x-shockwave-flash">
+        <hr class="divider">
+        <img src="test.png" alt="Test">
+        <input type="text" value="input">
+        <link rel="stylesheet" href="style.css">
+        <meta name="viewport" content="width=device-width">
+        <param name="autoplay" value="true">
+        <source src="video.mp4" type="video/mp4">
+        <track kind="subtitles" src="subs.vtt" srclang="en">
+        <wbr>
+    )";
+
+    Item result = parseHtml(html);
+
+    // All void elements should be parsed successfully
+    EXPECT_NE(findElementByTag(result, "area"), nullptr);
+    EXPECT_NE(findElementByTag(result, "base"), nullptr);
+    EXPECT_NE(findElementByTag(result, "br"), nullptr);
+    EXPECT_NE(findElementByTag(result, "col"), nullptr);
+    EXPECT_NE(findElementByTag(result, "embed"), nullptr);
+    EXPECT_NE(findElementByTag(result, "hr"), nullptr);
+    EXPECT_NE(findElementByTag(result, "img"), nullptr);
+    EXPECT_NE(findElementByTag(result, "input"), nullptr);
+    EXPECT_NE(findElementByTag(result, "link"), nullptr);
+    EXPECT_NE(findElementByTag(result, "meta"), nullptr);
+    EXPECT_NE(findElementByTag(result, "param"), nullptr);
+    EXPECT_NE(findElementByTag(result, "source"), nullptr);
+    EXPECT_NE(findElementByTag(result, "track"), nullptr);
+    EXPECT_NE(findElementByTag(result, "wbr"), nullptr);
+}
+
+TEST_F(HtmlParserTest, VoidElementsWithInvalidClosingTag) {
+    // HTML5: Closing tags on void elements should be ignored/handled gracefully
+    // <br></br> - the </br> is an error but parser should handle it
+    Item result = parseHtml("<p>Line1<br></br>Line2</p>");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    Element* br = findElementByTag(result, "br");
+    EXPECT_NE(br, nullptr);
+}
+
+TEST_F(HtmlParserTest, MixedVoidAndNonVoidWithSlashes) {
+    // Test mixing void and non-void elements with self-closing syntax
+    Item result = parseHtml(R"(
+        <div>
+            <img src="test.jpg" />
+            <span/>Content after span</span>
+            <br />
+            <p/>Paragraph content</p>
+        </div>
+    )");
+
+    Element* div = findElementByTag(result, "div");
+    ASSERT_NE(div, nullptr);
+
+    // img and br are void, should be self-closing
+    EXPECT_NE(findElementByTag(result, "img"), nullptr);
+    EXPECT_NE(findElementByTag(result, "br"), nullptr);
+
+    // span and p are non-void, slash should be ignored
+    Element* span = findElementByTag(result, "span");
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(span, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+// ============================================================================
+// Phase 3 Tests: Parser Context and Implicit Elements
+// ============================================================================
+
+TEST_F(HtmlParserTest, ParserContextCreation) {
+    // Create a properly initialized input structure for testing
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    // Verify initial state
+    EXPECT_EQ(ctx->html_element, nullptr);
+    EXPECT_EQ(ctx->head_element, nullptr);
+    EXPECT_EQ(ctx->body_element, nullptr);
+    EXPECT_FALSE(ctx->has_explicit_html);
+    EXPECT_FALSE(ctx->has_explicit_head);
+    EXPECT_FALSE(ctx->has_explicit_body);
+    EXPECT_FALSE(ctx->in_head);
+    EXPECT_FALSE(ctx->head_closed);
+    EXPECT_FALSE(ctx->in_body);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
+}
+
+TEST_F(HtmlParserTest, ParserContextEnsureHtml) {
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    Element* html = html_context_ensure_html(ctx);
+    ASSERT_NE(html, nullptr);
+
+    // Verify it's an html element
+    TypeElmt* type = (TypeElmt*)html->type;
+    EXPECT_TRUE(strview_equal(&type->name, "html"));
+
+    // Should be implicit
+    EXPECT_FALSE(ctx->has_explicit_html);
+
+    // Calling again should return same element
+    Element* html2 = html_context_ensure_html(ctx);
+    EXPECT_EQ(html, html2);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
+}
+
+TEST_F(HtmlParserTest, ParserContextEnsureHead) {
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    Element* head = html_context_ensure_head(ctx);
+    ASSERT_NE(head, nullptr);
+
+    // Verify it's a head element
+    TypeElmt* type = (TypeElmt*)head->type;
+    EXPECT_TRUE(strview_equal(&type->name, "head"));
+
+    // Should also have created html
+    EXPECT_NE(ctx->html_element, nullptr);
+
+    // Should be implicit
+    EXPECT_FALSE(ctx->has_explicit_head);
+    EXPECT_FALSE(ctx->has_explicit_html);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
+}
+
+TEST_F(HtmlParserTest, ParserContextEnsureBody) {
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    Element* body = html_context_ensure_body(ctx);
+    ASSERT_NE(body, nullptr);
+
+    // Verify it's a body element
+    TypeElmt* type = (TypeElmt*)body->type;
+    EXPECT_TRUE(strview_equal(&type->name, "body"));
+
+    // Should also have created html
+    EXPECT_NE(ctx->html_element, nullptr);
+
+    // Should be implicit
+    EXPECT_FALSE(ctx->has_explicit_body);
+    EXPECT_FALSE(ctx->has_explicit_html);
+
+    // Body creation should set in_body flag
+    EXPECT_TRUE(ctx->in_body);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
+}
+
+TEST_F(HtmlParserTest, ParserContextGetInsertionPointHeadElement) {
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    // Get insertion point for a head element (title)
+    Element* insertion_point = html_context_get_insertion_point(ctx, "title");
+    ASSERT_NE(insertion_point, nullptr);
+
+    // Should be the head element
+    TypeElmt* type = (TypeElmt*)insertion_point->type;
+    EXPECT_TRUE(strview_equal(&type->name, "head"));
+
+    // Context should show we're in head
+    EXPECT_TRUE(ctx->in_head);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
+}
+
+TEST_F(HtmlParserTest, ParserContextGetInsertionPointBodyElement) {
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    // Get insertion point for a body element (div)
+    Element* insertion_point = html_context_get_insertion_point(ctx, "div");
+    ASSERT_NE(insertion_point, nullptr);
+
+    // Should be the body element
+    TypeElmt* type = (TypeElmt*)insertion_point->type;
+    EXPECT_TRUE(strview_equal(&type->name, "body"));
+
+    // Context should show we're in body
+    EXPECT_TRUE(ctx->in_body);
+
+    // Head should be closed
+    EXPECT_TRUE(ctx->head_closed);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
+}
+
+TEST_F(HtmlParserTest, ParserContextExplicitElements) {
+    Input test_input;
+    test_input.pool = pool_create();
+    test_input.sb = stringbuf_new(test_input.pool);
+    test_input.type_list = arraylist_new(10);
+
+    HtmlParserContext* ctx = html_context_create(&test_input);
+    ASSERT_NE(ctx, nullptr);
+
+    // Create explicit html element
+    Element* html = input_create_element(&test_input, "html");
+    html_context_set_html(ctx, html);
+
+    EXPECT_EQ(ctx->html_element, html);
+    EXPECT_TRUE(ctx->has_explicit_html);
+
+    // Create explicit head element
+    Element* head = input_create_element(&test_input, "head");
+    html_context_set_head(ctx, head);
+
+    EXPECT_EQ(ctx->head_element, head);
+    EXPECT_TRUE(ctx->has_explicit_head);
+    EXPECT_TRUE(ctx->in_head);
+
+    // Create explicit body element
+    Element* body = input_create_element(&test_input, "body");
+    html_context_set_body(ctx, body);
+
+    EXPECT_EQ(ctx->body_element, body);
+    EXPECT_TRUE(ctx->has_explicit_body);
+    EXPECT_TRUE(ctx->in_body);
+
+    // Head should be closed when body starts
+    EXPECT_TRUE(ctx->head_closed);
+    EXPECT_FALSE(ctx->in_head);
+
+    html_context_destroy(ctx);
+    arraylist_free(test_input.type_list);
+    pool_destroy(test_input.pool);
 }

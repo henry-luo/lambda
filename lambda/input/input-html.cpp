@@ -420,10 +420,10 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         return {.item = ITEM_ERROR};
     }
 
-    // Check for self-closing tag
-    bool is_self_closing = false;
+    // Check for self-closing syntax (HTML5: only meaningful for void elements)
+    bool has_self_closing_slash = false;
     if (**html == '/') {
-        is_self_closing = true;
+        has_self_closing_slash = true;
         (*html)++; // Skip /
     }
 
@@ -434,8 +434,17 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     }
     (*html)++; // Skip >
 
-    // Handle content for non-void elements
-    if (!is_self_closing && !is_void_element(tag_name->chars)) {
+    // HTML5 spec: Void elements are ALWAYS self-closing regardless of syntax
+    // Self-closing slash on non-void elements is ignored
+    bool is_void = is_void_element(tag_name->chars);
+
+    // Log when self-closing slash is present but ignored (HTML5 compliance)
+    if (has_self_closing_slash && !is_void) {
+        log_debug("Ignoring self-closing slash on non-void element <%s> per HTML5 spec", tag_name->chars);
+    }
+
+    // Handle content only for non-void elements
+    if (!is_void) {
         // Parse content until closing tag (preserve all whitespace)
         char closing_tag[256];
         snprintf(closing_tag, sizeof(closing_tag), "</%s>", tag_name->chars);

@@ -631,6 +631,7 @@ project "lambda"
         "lambda/input/input-html-tree.cpp",
         "lambda/input/input-yaml.cpp",
         "lambda/input/input-html.cpp",
+        "lambda/input/input-html-context.cpp",
         "lambda/input/input-eml.cpp",
         "lambda/input/input-html-scan.cpp",
         "lambda/input/input-rtf.cpp",
