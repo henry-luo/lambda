@@ -272,8 +272,8 @@ TEST_F(CssTokenizerUnitTest, String_DoubleQuoted) {
     ASSERT_EQ(tokens.count(), 1);
     ASSERT_CSS_TOKEN_TYPE(tokens[0], CSS_TOKEN_STRING);
     ASSERT_NE(tokens[0]->value, nullptr);
-    // String tokens include the quotes in the value
-    EXPECT_STREQ(tokens[0]->value, "\"hello world\"");
+    // String tokens are stored without quotes in the value
+    EXPECT_STREQ(tokens[0]->value, "hello world");
 }
 
 TEST_F(CssTokenizerUnitTest, String_SingleQuoted) {
@@ -282,8 +282,8 @@ TEST_F(CssTokenizerUnitTest, String_SingleQuoted) {
     ASSERT_EQ(tokens.count(), 1);
     ASSERT_CSS_TOKEN_TYPE(tokens[0], CSS_TOKEN_STRING);
     ASSERT_NE(tokens[0]->value, nullptr);
-    // String tokens include the quotes in the value
-    EXPECT_STREQ(tokens[0]->value, "'hello world'");
+    // String tokens are stored without quotes in the value
+    EXPECT_STREQ(tokens[0]->value, "hello world");
 }
 
 TEST_F(CssTokenizerUnitTest, String_Empty) {
