@@ -1,7 +1,7 @@
 {
-  "total_files": 93,
-  "generated": 1,
-  "skipped": 92,
+  "total_files": 98,
+  "generated": 5,
+  "skipped": 93,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -351,6 +351,30 @@
     },
     {
       "category": "baseline",
+      "file": "border-002.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "border-width-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "border-width-shorthand-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "box_001_basic_div.html",
       "success": true,
       "was_skipped": true,
@@ -559,9 +583,17 @@
     },
     {
       "category": "baseline",
-      "file": "flex_basis_simple.html",
+      "file": "flex_022_gap_variants.html",
       "success": true,
       "was_skipped": false,
+      "node_count": 25,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_basis_simple.html",
+      "success": true,
+      "was_skipped": true,
       "node_count": 14,
       "error": null
     },
@@ -730,6 +762,14 @@
       "file": "text-align-001.html",
       "success": true,
       "was_skipped": true,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "text-decoration-001.html",
+      "success": true,
+      "was_skipped": false,
       "node_count": 24,
       "error": null
     },
