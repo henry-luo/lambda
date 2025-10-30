@@ -408,10 +408,64 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->embed && block->embed->flex) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{flex-container: ");
-        strbuf_append_format(buf, "row-gap:%d column-gap:%d ",
+        
+        // flex-direction
+        const char* direction_str = "row";
+        switch (block->embed->flex->direction) {
+            case DIR_ROW: direction_str = "row"; break;
+            case DIR_ROW_REVERSE: direction_str = "row-reverse"; break;
+            case DIR_COLUMN: direction_str = "column"; break;
+            case DIR_COLUMN_REVERSE: direction_str = "column-reverse"; break;
+        }
+        strbuf_append_format(buf, "direction:%s ", direction_str);
+        
+        // flex-wrap
+        const char* wrap_str = "nowrap";
+        switch (block->embed->flex->wrap) {
+            case WRAP_NOWRAP: wrap_str = "nowrap"; break;
+            case WRAP_WRAP: wrap_str = "wrap"; break;
+            case WRAP_WRAP_REVERSE: wrap_str = "wrap-reverse"; break;
+        }
+        strbuf_append_format(buf, "wrap:%s ", wrap_str);
+        
+        // justify-content (handle custom value LXB_CSS_VALUE_SPACE_EVENLY = 0x0199)
+        const char* justify_str = "flex-start";
+        if (block->embed->flex->justify == LXB_CSS_VALUE_SPACE_EVENLY) {
+            justify_str = "space-evenly";
+        } else {
+            const lxb_css_data_t* justify_value = lxb_css_value_by_id(block->embed->flex->justify);
+            if (justify_value && justify_value->name) {
+                justify_str = (const char*)justify_value->name;
+            }
+        }
+        strbuf_append_format(buf, "justify:%s ", justify_str);
+        
+        // align-items (handle custom value for space-evenly)
+        const char* align_items_str = "stretch";
+        if (block->embed->flex->align_items == LXB_CSS_VALUE_SPACE_EVENLY) {
+            align_items_str = "space-evenly";
+        } else {
+            const lxb_css_data_t* align_items_value = lxb_css_value_by_id(block->embed->flex->align_items);
+            if (align_items_value && align_items_value->name) {
+                align_items_str = (const char*)align_items_value->name;
+            }
+        }
+        strbuf_append_format(buf, "align-items:%s ", align_items_str);
+        
+        // align-content (handle custom value for space-evenly)
+        const char* align_content_str = "stretch";
+        if (block->embed->flex->align_content == LXB_CSS_VALUE_SPACE_EVENLY) {
+            align_content_str = "space-evenly";
+        } else {
+            const lxb_css_data_t* align_content_value = lxb_css_value_by_id(block->embed->flex->align_content);
+            if (align_content_value && align_content_value->name) {
+                align_content_str = (const char*)align_content_value->name;
+            }
+        }
+        strbuf_append_format(buf, "align-content:%s ", align_content_str);
+        
+        strbuf_append_format(buf, "row-gap:%d column-gap:%d",
             block->embed->flex->row_gap, block->embed->flex->column_gap);
-        // strbuf_append_format(buf, "main-axis:%d cross-axis:%d",
-        //                   block->embed->flex->main_axis_size, block->embed->flex->cross_axis_size);
         strbuf_append_str(buf, "}\n");
     }
 
@@ -831,14 +885,71 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     if (block->embed && block->embed->flex) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"flex_container\": {\n");
+        
+        // flex-direction
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        const char* direction_str = "row";
+        switch (block->embed->flex->direction) {
+            case DIR_ROW: direction_str = "row"; break;
+            case DIR_ROW_REVERSE: direction_str = "row-reverse"; break;
+            case DIR_COLUMN: direction_str = "column"; break;
+            case DIR_COLUMN_REVERSE: direction_str = "column-reverse"; break;
+        }
+        strbuf_append_format(buf, "\"direction\": \"%s\",\n", direction_str);
+        
+        // flex-wrap
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        const char* wrap_str = "nowrap";
+        switch (block->embed->flex->wrap) {
+            case WRAP_NOWRAP: wrap_str = "nowrap"; break;
+            case WRAP_WRAP: wrap_str = "wrap"; break;
+            case WRAP_WRAP_REVERSE: wrap_str = "wrap-reverse"; break;
+        }
+        strbuf_append_format(buf, "\"wrap\": \"%s\",\n", wrap_str);
+        
+        // justify-content (handle custom value LXB_CSS_VALUE_SPACE_EVENLY = 0x0199)
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        const char* justify_str = "flex-start";
+        if (block->embed->flex->justify == LXB_CSS_VALUE_SPACE_EVENLY) {
+            justify_str = "space-evenly";
+        } else {
+            const lxb_css_data_t* justify_value = lxb_css_value_by_id(block->embed->flex->justify);
+            if (justify_value && justify_value->name) {
+                justify_str = (const char*)justify_value->name;
+            }
+        }
+        strbuf_append_format(buf, "\"justify\": \"%s\",\n", justify_str);
+        
+        // align-items (handle custom value for space-evenly)
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        const char* align_items_str = "stretch";
+        if (block->embed->flex->align_items == LXB_CSS_VALUE_SPACE_EVENLY) {
+            align_items_str = "space-evenly";
+        } else {
+            const lxb_css_data_t* align_items_value = lxb_css_value_by_id(block->embed->flex->align_items);
+            if (align_items_value && align_items_value->name) {
+                align_items_str = (const char*)align_items_value->name;
+            }
+        }
+        strbuf_append_format(buf, "\"align_items\": \"%s\",\n", align_items_str);
+        
+        // align-content (handle custom value for space-evenly)
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        const char* align_content_str = "stretch";
+        if (block->embed->flex->align_content == LXB_CSS_VALUE_SPACE_EVENLY) {
+            align_content_str = "space-evenly";
+        } else {
+            const lxb_css_data_t* align_content_value = lxb_css_value_by_id(block->embed->flex->align_content);
+            if (align_content_value && align_content_value->name) {
+                align_content_str = (const char*)align_content_value->name;
+            }
+        }
+        strbuf_append_format(buf, "\"align_content\": \"%s\",\n", align_content_str);
+        
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"row_gap\": %.1f,\n", block->embed->flex->row_gap);
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"column_gap\": %.1f\n", block->embed->flex->column_gap);
-        // strbuf_append_char_n(buf, ' ', indent + 6);
-        // strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex->main_axis_size);
-        // strbuf_append_char_n(buf, ' ', indent + 6);
-        // strbuf_append_format(buf, "\"cross_axis_size\": %d\n", block->embed->flex->cross_axis_size);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "},\n");
     }
