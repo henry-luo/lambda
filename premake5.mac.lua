@@ -3278,10 +3278,14 @@ project "test_css_dom_integration"
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
         "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_formatter.c",
         "lambda/input/css/dom_element.c",
         "lambda/input/css/selector_matcher.c",
         "lib/mempool.c",
         "lib/string.c",
+        "lib/strbuf.c",
+        "lib/stringbuf.c",
+        "lib/log.c",
         "lib/hashmap.c",
         "lib/arraylist.c",
     }
@@ -3351,10 +3355,14 @@ project "test_css_style_application_gtest"
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
         "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_formatter.c",
         "lambda/input/css/dom_element.c",
         "lambda/input/css/selector_matcher.c",
         "lib/mempool.c",
         "lib/string.c",
+        "lib/strbuf.c",
+        "lib/stringbuf.c",
+        "lib/log.c",
         "lib/hashmap.c",
         "lib/arraylist.c",
     }
@@ -3957,6 +3965,7 @@ project "test_dom_element_print"
         "lambda/input/css/css_properties.c",
         "lambda/input/css/css_parser.c",
         "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_formatter.c",
     }
     
     includedirs {
