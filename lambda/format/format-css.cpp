@@ -10,9 +10,39 @@ static void format_css_rule(StringBuf* sb, Element* rule, int indent);
 static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent);
 static void format_css_keyframes(StringBuf* sb, Array* keyframes, int indent);
 static void format_css_selectors(StringBuf* sb, Item selectors_item);
-static void format_css_value(StringBuf* sb, Item value);
+static void format_css_value(StringBuf* sb, Item value, const char* property_name);
 static void format_css_declarations(StringBuf* sb, Element* rule, int indent);
 static void format_css_function(StringBuf* sb, Element* function);
+
+// Helper function to check if a CSS property uses comma-separated multiple values
+static bool property_uses_comma_separator(const char* prop_name, size_t prop_len) {
+    if (!prop_name || prop_len == 0) return false;
+
+    // Properties that use comma-separated lists for multiple values
+    const char* comma_props[] = {
+        "background-image",
+        "background",
+        "font-family",
+        "transition",
+        "transition-property",
+        "transition-timing-function",
+        "animation",
+        "animation-name",
+        "animation-timing-function"
+        // NOTE: box-shadow and text-shadow use SPACE separation within each shadow
+        // Multiple shadows are represented as separate property declarations
+        // NOTE: transform and filter use SPACE separation, not commas
+    };
+
+    for (size_t i = 0; i < sizeof(comma_props) / sizeof(comma_props[0]); i++) {
+        size_t len = strlen(comma_props[i]);
+        if (prop_len == len && strncmp(prop_name, comma_props[i], len) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 // Helper function to check if a font name needs quotes
 // Returns true if the font name contains spaces, special characters, or starts with a digit
@@ -45,6 +75,50 @@ static bool font_name_needs_quotes(const char* name, size_t len) {
     return false;
 }
 
+// Helper function to check if a property value should be quoted
+// CSS strings need quotes for: content property, certain text values, etc.
+static bool property_value_needs_quotes(const char* property_name, const char* str_value, size_t str_len) {
+    if (!str_value || str_len == 0) return false;
+    if (!property_name) return false;
+
+    size_t prop_len = strlen(property_name);
+
+    // content property values are always strings and need quotes (except keywords like 'none', 'normal')
+    if (prop_len == 7 && strncmp(property_name, "content", 7) == 0) {
+        // Check for keywords that don't need quotes
+        if ((str_len == 4 && strncmp(str_value, "none", 4) == 0) ||
+            (str_len == 6 && strncmp(str_value, "normal", 6) == 0) ||
+            (str_len == 10 && strncmp(str_value, "open-quote", 10) == 0) ||
+            (str_len == 11 && strncmp(str_value, "close-quote", 11) == 0) ||
+            (str_len == 13 && strncmp(str_value, "no-open-quote", 13) == 0) ||
+            (str_len == 14 && strncmp(str_value, "no-close-quote", 14) == 0)) {
+            return false;
+        }
+        return true; // All other content values need quotes
+    }
+
+    // quotes property values need quotes
+    if (prop_len == 6 && strncmp(property_name, "quotes", 6) == 0) {
+        if (str_len == 4 && strncmp(str_value, "none", 4) == 0) {
+            return false;
+        }
+        return true;
+    }
+
+    // text-overflow with ellipsis string value needs quotes
+    if (prop_len == 13 && strncmp(property_name, "text-overflow", 13) == 0) {
+        // "..." needs quotes, but keywords like 'clip' and 'ellipsis' don't
+        if ((str_len == 4 && strncmp(str_value, "clip", 4) == 0) ||
+            (str_len == 8 && strncmp(str_value, "ellipsis", 8) == 0)) {
+            return false;
+        }
+        // Any other string value (like "...") needs quotes
+        return true;
+    }
+
+    return false;
+}
+
 // Helper function to add indentation
 static void add_css_indent(StringBuf* sb, int indent) {
     for (int i = 0; i < indent; i++) {
@@ -53,7 +127,7 @@ static void add_css_indent(StringBuf* sb, int indent) {
 }
 
 // Format CSS value item
-static void format_css_value(StringBuf* sb, Item value) {
+static void format_css_value(StringBuf* sb, Item value, const char* property_name) {
     TypeId type = get_type_id(value);
 
     switch (type) {
@@ -81,7 +155,16 @@ static void format_css_value(StringBuf* sb, Item value) {
                 }
 
                 if (clean_len > 0) {
-                    stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
+                    // Check if this string value needs quotes based on the property
+                    bool needs_quotes = property_value_needs_quotes(property_name, content, clean_len);
+
+                    if (needs_quotes) {
+                        stringbuf_append_str(sb, "\"");
+                        stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
+                        stringbuf_append_str(sb, "\"");
+                    } else {
+                        stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
+                    }
                 } else {
                     stringbuf_append_str(sb, "\"corrupted-string\"");
                 }
@@ -106,10 +189,24 @@ static void format_css_value(StringBuf* sb, Item value) {
         case LMD_TYPE_ARRAY: {
             Array* arr = (Array*)value.pointer;
             if (arr && arr->length > 0) {
-                // Use comma separation for font-related arrays (font-family values are typically Symbol strings)
+                // Determine separator based on property name
+                bool use_comma = false;
                 bool likely_font_family = false;
-                if (arr->length >= 2) {
-                    // Check if this looks like a font-family array (Symbol values)
+
+                // Check if this property uses comma separation
+                if (property_name) {
+                    size_t prop_len = strlen(property_name);
+                    use_comma = property_uses_comma_separator(property_name, prop_len);
+
+                    // Check for font-family specifically
+                    if (prop_len == 11 && strncmp(property_name, "font-family", 11) == 0) {
+                        likely_font_family = true;
+                        use_comma = true;
+                    }
+                }
+
+                // Fallback: check if this looks like a font-family array (Symbol values)
+                if (!use_comma && arr->length >= 2) {
                     for (int j = 0; j < arr->length && j < 3; j++) {
                         if (get_type_id(arr->items[j]) == LMD_TYPE_SYMBOL) {
                             String* sym = (String*)arr->items[j].pointer;
@@ -119,6 +216,7 @@ static void format_css_value(StringBuf* sb, Item value) {
                                     strstr(sym->chars, "Arial") || strstr(sym->chars, "Times") ||
                                     strstr(sym->chars, "Helvetica") || strstr(sym->chars, "monospace")) {
                                     likely_font_family = true;
+                                    use_comma = true;
                                     break;
                                 }
                             }
@@ -126,9 +224,39 @@ static void format_css_value(StringBuf* sb, Item value) {
                     }
                 }
 
-                const char* separator = likely_font_family ? ", " : " ";
+                const char* separator = use_comma ? ", " : " ";
                 for (int i = 0; i < arr->length; i++) {
-                    if (i > 0) stringbuf_append_str(sb, separator);
+                    // Check if this item is a separator marker (single-char symbol: ',' or '/')
+                    if (get_type_id(arr->items[i]) == LMD_TYPE_SYMBOL) {
+                        String* sym = (String*)arr->items[i].pointer;
+                        if (sym && sym->len == 1 && (sym->chars[0] == ',' || sym->chars[0] == '/')) {
+                            // This is a separator marker, output it with proper spacing
+                            if (sym->chars[0] == ',') {
+                                stringbuf_append_str(sb, ", ");
+                            } else if (sym->chars[0] == '/') {
+                                stringbuf_append_str(sb, " / ");
+                            }
+                            continue; // Skip to next item
+                        }
+                    }
+
+                    // Add separator before non-separator items (but not before first item)
+                    if (i > 0) {
+                        // Check if previous item was a separator marker
+                        bool prev_was_separator = false;
+                        if (i > 0 && get_type_id(arr->items[i-1]) == LMD_TYPE_SYMBOL) {
+                            String* prev_sym = (String*)arr->items[i-1].pointer;
+                            if (prev_sym && prev_sym->len == 1 &&
+                                (prev_sym->chars[0] == ',' || prev_sym->chars[0] == '/')) {
+                                prev_was_separator = true;
+                            }
+                        }
+
+                        // Only add automatic separator if previous wasn't a separator marker
+                        if (!prev_was_separator) {
+                            stringbuf_append_str(sb, separator);
+                        }
+                    }
 
                     // Special handling for font-family symbols
                     if (likely_font_family && get_type_id(arr->items[i]) == LMD_TYPE_SYMBOL) {
@@ -144,7 +272,8 @@ static void format_css_value(StringBuf* sb, Item value) {
                             }
                         }
                     } else {
-                        format_css_value(sb, arr->items[i]);
+                        // Don't pass property_name to nested values - only top-level uses property-based separator
+                        format_css_value(sb, arr->items[i], NULL);
                     }
                 }
             }
@@ -331,10 +460,10 @@ static void format_css_function(StringBuf* sb, Element* function) {
                     }
                     stringbuf_append_char(sb, '"');
                 } else {
-                    format_css_value(sb, param_value);
+                    format_css_value(sb, param_value, NULL);
                 }
             } else {
-                format_css_value(sb, param_value);
+                format_css_value(sb, param_value, NULL);
             }
         }
 
@@ -380,11 +509,11 @@ static void format_css_selectors(StringBuf* sb, Item selectors_item) {
         if (selectors && selectors->length > 0) {
             for (int i = 0; i < selectors->length; i++) {
                 if (i > 0) stringbuf_append_str(sb, ", ");
-                format_css_value(sb, selectors->items[i]);
+                format_css_value(sb, selectors->items[i], NULL);
             }
         }
     } else {
-        format_css_value(sb, selectors_item);
+        format_css_value(sb, selectors_item, NULL);
     }
 }
 
@@ -465,7 +594,9 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
         // Get the property value
         void* field_data = (char*)rule->data + field->byte_offset;
         Item property_value = create_item_from_field_data(field_data, field->type->type_id);
-        format_css_value(sb, property_value);
+
+        // Pass property name to formatter for proper separator detection
+        format_css_value(sb, property_value, clean_len > 0 ? prop_name : NULL);
 
         // Check if this property has an !important flag
         // Look for a field named "propertyname-important"
@@ -559,7 +690,7 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
             if (strncmp(field->name->str, "name", field->name->length) == 0) {
                 void* field_data = (char*)at_rule->data + field->byte_offset;
                 Item name_item = create_item_from_field_data(field_data, field->type->type_id);
-                format_css_value(sb, name_item);
+                format_css_value(sb, name_item, NULL);
                 break;
             }
 
@@ -585,7 +716,7 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
                 void* field_data = (char*)at_rule->data + field->byte_offset;
                 Item prelude_item = create_item_from_field_data(field_data, field->type->type_id);
                 stringbuf_append_char(sb, ' ');
-                format_css_value(sb, prelude_item);
+                format_css_value(sb, prelude_item, NULL);
                 break;
             }
 
@@ -721,7 +852,7 @@ static void format_css_keyframes(StringBuf* sb, Array* keyframes, int indent) {
                 if (strncmp(field->name->str, "selector", field->name->length) == 0) {
                     void* field_data = (char*)keyframe->data + field->byte_offset;
                     Item selector_item = create_item_from_field_data(field_data, field->type->type_id);
-                    format_css_value(sb, selector_item);
+                    format_css_value(sb, selector_item, NULL);
                     break;
                 }
 
@@ -864,7 +995,7 @@ String* format_css(Pool *pool, Item item) {
         }
     } else {
         // Fallback - try to format as value
-        format_css_value(sb, item);
+        format_css_value(sb, item, NULL);
     }
 
     String* result = stringbuf_to_string(sb);

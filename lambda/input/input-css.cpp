@@ -1056,6 +1056,12 @@ static Array* parse_css_function_params(Input *input, const char **css) {
                     continue;
                 }
 
+                // Check if this looks like a negative number (- followed by digit or .)
+                if (**css == '-' && (*(*css + 1) == '.' || is_css_digit(*(*css + 1)))) {
+                    // This is a negative number, not an operator - it will be parsed in next iteration
+                    continue;
+                }
+
                 // Capture the operator as a separate parameter (symbol)
                 char op_char = **css;
                 (*css)++; // advance past operator
@@ -1210,10 +1216,26 @@ static Array* parse_css_value_list(Input *input, const char **css) {
         // Check for value separators BEFORE calling skip_css_comments
         // because skip_css_comments would consume the space we want to detect
         if (**css == ',') {
+            // Preserve comma separator by adding a marker symbol
+            String* comma_marker = input_create_string(input, ",");
+            if (comma_marker) {
+                Item comma_item = {.item = y2it(comma_marker)};
+                array_append(values, comma_item, input->pool);
+            }
             (*css)++;
             skip_css_comments(css);
         } else if (**css == '/') {
-            // Handle slash separator (e.g., rgba(255 0 0 / 0.5))
+            // Check if this is a slash separator (not division operator)
+            // In CSS, slash is used for: border-radius (horizontal/vertical), rgba alpha separator
+            // We need to look ahead to distinguish from comment
+            if (*(*css + 1) != '*' && *(*css + 1) != '/') {
+                // Preserve slash separator by adding a marker symbol
+                String* slash_marker = input_create_string(input, "/");
+                if (slash_marker) {
+                    Item slash_item = {.item = y2it(slash_marker)};
+                    array_append(values, slash_item, input->pool);
+                }
+            }
             (*css)++;
             skip_css_comments(css);
         } else if (**css == ' ' || **css == '\t' || **css == '\n' || **css == '\r') {
@@ -1228,6 +1250,26 @@ static Array* parse_css_value_list(Input *input, const char **css) {
                     *css += 2; // Skip */
                 }
                 skip_css_whitespace(css);
+            }
+            // After skipping whitespace, check if we now have a separator
+            if (**css == ',') {
+                // Preserve comma separator
+                String* comma_marker = input_create_string(input, ",");
+                if (comma_marker) {
+                    Item comma_item = {.item = y2it(comma_marker)};
+                    array_append(values, comma_item, input->pool);
+                }
+                (*css)++;
+                skip_css_comments(css);
+            } else if (**css == '/' && *(*css + 1) != '*' && *(*css + 1) != '/') {
+                // Preserve slash separator
+                String* slash_marker = input_create_string(input, "/");
+                if (slash_marker) {
+                    Item slash_item = {.item = y2it(slash_marker)};
+                    array_append(values, slash_item, input->pool);
+                }
+                (*css)++;
+                skip_css_comments(css);
             }
             // Space-separated values continue
         } else {
