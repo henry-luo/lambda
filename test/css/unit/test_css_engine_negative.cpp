@@ -15,6 +15,8 @@
  */
 
 #include <gtest/gtest.h>
+#include <cstdlib>
+#include <string>
 #include "../helpers/css_test_helpers.hpp"
 
 extern "C" {
@@ -1043,6 +1045,46 @@ TEST_F(CssEngineNegativeTest, Fuzz_RandomBytes) {
 
     // Should tokenize without crashing
     EXPECT_TRUE(token_count >= 0);
+}
+
+// Test 8.11: Random input stress test - 100 iterations
+TEST_F(CssEngineNegativeTest, Fuzz_RandomInputStressTest) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    // CSS-relevant characters to generate from
+    const char charset[] = "abcdefghijklmnopqrstuvwxyz"
+                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          "0123456789"
+                          " \t\n\r"
+                          "{}[]():;,."
+                          "#@!$%^&*+-=|\\/'\"<>?`~";
+    const int charset_size = sizeof(charset) - 1;
+
+    // Seed random number generator
+    srand(12345); // Use fixed seed for reproducibility
+
+    // Run 100 iterations with different random inputs
+    for (int iteration = 0; iteration < 100; iteration++) {
+        // Generate random length between 10 and 200 characters
+        int length = 10 + (rand() % 190);
+        std::string random_css;
+        random_css.reserve(length + 1);
+
+        // Generate random CSS-like string
+        for (int i = 0; i < length; i++) {
+            random_css += charset[rand() % charset_size];
+        }
+
+        // Try to parse the random input - should not crash or hang
+        CssStylesheet* sheet = css_parse_stylesheet(engine, random_css.c_str(), nullptr);
+        
+        // Parser should handle gracefully without crashing
+        // No specific assertions needed - just surviving the parse is the test
+    }
+
+    // If we reach here, all 100 iterations completed successfully
+    SUCCEED();
 }
 
 // ============================================================================
