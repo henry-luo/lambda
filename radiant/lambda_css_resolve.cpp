@@ -193,7 +193,7 @@ static const KeywordMapping keyword_map[] = {
 
     {"space-around", 0x0009}, // LXB_CSS_VALUE_SPACE_AROUND
     {"space-between", 0x0008}, // LXB_CSS_VALUE_SPACE_BETWEEN
-    {"space-evenly", 0x005d}, // LXB_CSS_VALUE_SPACE_EVENLY
+    {"space-evenly", 0x0199}, // LXB_CSS_VALUE_SPACE_EVENLY (LXB_CSS_VALUE__LAST_ENTRY + 28)
     {"square", 0x0225},    // Custom value for list-style-type square
     {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
     {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
