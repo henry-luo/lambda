@@ -1081,8 +1081,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             bool valid = false;
 
             if (value->type == CSS_VALUE_LENGTH) {
-                font_size = convert_lambda_length_to_px(value, lycon, prop_id);
-                log_debug("[CSS] Font size length: %.2f px (after conversion)", font_size);
+                // Special handling for em units: em is relative to parent font size for font-size property
+                if (value->data.length.unit == CSS_UNIT_EM) {
+                    float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
+                    font_size = value->data.length.value * parent_size;
+                    log_debug("[CSS] Font size em: %.2fem -> %.2f px (parent size: %.2f px)", 
+                              value->data.length.value, font_size, parent_size);
+                } else {
+                    font_size = convert_lambda_length_to_px(value, lycon, prop_id);
+                    log_debug("[CSS] Font size length: %.2f px (after conversion)", font_size);
+                }
                 // Per CSS spec, negative font-size values are invalid, but 0 is valid
                 if (font_size >= 0) {
                     valid = true;
@@ -1093,7 +1101,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // Percentage of parent font size
                 float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
                 font_size = parent_size * (value->data.percentage.value / 100.0f);
-                log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px", value->data.percentage.value, font_size);
+                log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px (parent size: %.2f px)", 
+                          value->data.percentage.value, font_size, parent_size);
                 if (font_size >= 0) {
                     valid = true;
                 } else {
