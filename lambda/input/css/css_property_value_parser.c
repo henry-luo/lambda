@@ -1087,11 +1087,6 @@ CssValue* css_value_create_length(Pool* pool, double value, CssUnit unit) {
     return css_value;
 }
 
-const char* css_get_property_name(CssPropertyId property_id) {
-    const CssProperty* prop = css_property_get_by_id(property_id);
-    return prop ? prop->name : NULL;
-}
-
 CssValue* css_get_initial_value(CssPropertyId property_id, Pool* pool) {
     if (!pool) return NULL;
 

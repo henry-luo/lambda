@@ -770,6 +770,11 @@ CssPropertyId css_property_get_id_by_name(const char* name) {
     return prop ? prop->id : 0;
 }
 
+const char* css_get_property_name(CssPropertyId property_id) {
+    const CssProperty* prop = css_property_get_by_id(property_id);
+    return prop ? prop->name : NULL;
+}
+
 bool css_property_exists(CssPropertyId property_id) {
     return css_property_get_by_id(property_id) != NULL;
 }

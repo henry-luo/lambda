@@ -943,12 +943,6 @@ CssValue* css_value_create_url(Pool* pool, const char* url);
 CssValue* css_value_create_list(Pool* pool, CssValue** values, size_t count);
 void css_value_destroy(CssValue* value);
 
-// Property information
-const CssPropertyInfo* css_get_property_info(CssPropertyId property_id);
-const CssPropertyInfo* css_get_property_info_by_name(const char* name);
-CssPropertyId css_get_property_id(const char* name);
-const char* css_get_property_name(CssPropertyId property_id);
-
 // Unit and value utilities
 const char* css_unit_to_string(CssUnit unit);
 const char* css_color_type_to_string(CssColorType type);
@@ -1077,6 +1071,9 @@ const CssProperty* css_property_get_by_name(const char* name);
  * @return Property ID or 0 if not found
  */
 CssPropertyId css_property_get_id_by_name(const char* name);
+
+const char* css_get_property_name(CssPropertyId property_id);
+
 
 /**
  * Check if a property exists
