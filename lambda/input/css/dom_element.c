@@ -1442,8 +1442,13 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
 
         // Height property
         decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_HEIGHT);
+        log_debug("[PRINT] Element <%s>: height decl=%p, value=%p",
+                  element->tag_name ? element->tag_name : "null",
+                  decl, decl ? decl->value : NULL);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
+            log_debug("[PRINT] Height value type=%d (CSS_VALUE_LENGTH=%d)",
+                      val->type, CSS_VALUE_LENGTH);
             if (val->type == CSS_VALUE_LENGTH) {
                 if (has_props) strbuf_append_str(buf, ", ");
                 strbuf_append_str(buf, "height:");
