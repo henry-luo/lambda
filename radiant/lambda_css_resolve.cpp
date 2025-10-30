@@ -3408,7 +3408,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float top = value->data.length.value;
+                float top = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_TOP);
                 block->position->top = top;
                 block->position->has_top = true;
                 log_debug("[CSS] Top: %.2f px", top);
@@ -3431,7 +3431,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float left = value->data.length.value;
+                float left = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_LEFT);
                 block->position->left = left;
                 block->position->has_left = true;
                 log_debug("[CSS] Left: %.2f px", left);
@@ -3456,7 +3456,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float right = value->data.length.value;
+                float right = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_RIGHT);
                 block->position->right = right;
                 block->position->has_right = true;
                 log_debug("[CSS] Right: %.2f px", right);
@@ -3479,7 +3479,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
-                float bottom = value->data.length.value;
+                float bottom = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_BOTTOM);
                 block->position->bottom = bottom;
                 block->position->has_bottom = true;
                 log_debug("[CSS] Bottom: %.2f px", bottom);

@@ -598,14 +598,20 @@ void append_json_string(StrBuf* buf, const char* str) {
 void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, TextRect* rect = nullptr) {
     // calculate absolute position for view
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
+    float initial_y = abs_y;
+    const char* view_tag = view->node ? view->node->name() : "unknown";
+    log_debug("[Coord] %s: initial y=%.2f", view_tag, initial_y);
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = view->parent;
     while (parent) {
         if (parent->is_block()) {
+            const char* parent_tag = parent->node ? parent->node->name() : "unknown";
+            log_debug("[Coord]   + parent %s: y=%.2f (abs_y: %.2f -> %.2f)", parent_tag, parent->y, abs_y, abs_y + parent->y);
             abs_x += parent->x;  abs_y += parent->y;
         }
         parent = parent->parent;
     }
+    log_debug("[Coord] %s: final abs_y=%.2f", view_tag, abs_y);
 
     // Convert absolute view dimensions to CSS pixels
     float css_x = abs_x / pixel_ratio;
