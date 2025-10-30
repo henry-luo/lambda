@@ -410,6 +410,15 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
             continue;
         }
 
+        // Skip at-rule meta fields (name, prelude, selector)
+        if (strncmp(field->name->str, "name", field->name->length) == 0 ||
+            strncmp(field->name->str, "prelude", field->name->length) == 0 ||
+            strncmp(field->name->str, "selector", field->name->length) == 0) {
+            field = field->next;
+            field_count++;
+            continue;
+        }
+
         // Skip type system fields
         if (field->name->length >= 2 && strncmp(field->name->str, "__", 2) == 0) {
             field = field->next;
@@ -585,13 +594,16 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
         }
     }
 
-    // Check if this at-rule has nested rules or keyframes
+    // Check if this at-rule has nested rules, keyframes, or declarations
     bool has_body = false;
+    bool has_declarations = false;
+
     if (at_rule->type) {
         TypeMap* type_map = (TypeMap*)at_rule->type;
         ShapeEntry* field = type_map->shape;
         int field_count = 0;
 
+        // First pass: check for rules or keyframes
         while (field && field_count < type_map->length) {
             if (!field->name) {
                 field = field->next;
@@ -624,6 +636,53 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
 
             field = field->next;
             field_count++;
+        }
+
+        // Second pass: check for declarations (for at-rules like @font-face)
+        if (!has_body) {
+            field = type_map->shape;
+            field_count = 0;
+
+            // Count non-meta fields that look like declarations
+            int declaration_count = 0;
+            while (field && field_count < type_map->length) {
+                if (!field->name) {
+                    field = field->next;
+                    field_count++;
+                    continue;
+                }
+
+                // Skip meta fields (name, prelude, etc.)
+                if (strncmp(field->name->str, "name", field->name->length) == 0 ||
+                    strncmp(field->name->str, "prelude", field->name->length) == 0 ||
+                    (field->name->length >= 2 && strncmp(field->name->str, "__", 2) == 0)) {
+                    field = field->next;
+                    field_count++;
+                    continue;
+                }
+
+                // Skip -important flag fields
+                if (field->name->length > 10 &&
+                    strncmp(field->name->str + field->name->length - 10, "-important", 10) == 0) {
+                    field = field->next;
+                    field_count++;
+                    continue;
+                }
+
+                // This looks like a declaration property
+                declaration_count++;
+                field = field->next;
+                field_count++;
+            }
+
+            if (declaration_count > 0) {
+                has_declarations = true;
+                has_body = true;
+                stringbuf_append_str(sb, " {\n");
+                format_css_declarations(sb, at_rule, indent);
+                add_css_indent(sb, indent);
+                stringbuf_append_str(sb, "}");
+            }
         }
     }
 

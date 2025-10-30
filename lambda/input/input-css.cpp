@@ -221,6 +221,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
 
     // Parse at-rule name
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer to avoid accumulating previous content
     while (is_css_identifier_char(**css)) {
         stringbuf_append_char(sb, **css);
         (*css)++;
