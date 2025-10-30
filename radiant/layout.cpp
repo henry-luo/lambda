@@ -216,8 +216,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
-        log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%f, line=%f, blk=%f",
-            block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
+        log_debug("vertical-adjusted-inline-block: y=%f, adv_y=%f, offset=%f, line=%f, blk=%f, max_asc=%f, max_desc=%f",
+            block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height, lycon->line.max_ascender, lycon->line.max_descender);
     }
     else if (view->type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children

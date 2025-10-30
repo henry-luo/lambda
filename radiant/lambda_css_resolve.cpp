@@ -21,207 +21,125 @@ struct KeywordMapping {
     int lexbor_value;
 };
 
-// note: keywords are sorted alphabetically for binary search optimization
+// NOTE: keywords MUST be sorted alphabetically for binary search to work correctly
 static const KeywordMapping keyword_map[] = {
-    // Display and layout values
-    {"absolute", 0x014f},  // LXB_CSS_VALUE_ABSOLUTE
-
-    // Animation keywords
-    {"alternate", 0x0095}, // LXB_CSS_VALUE_ALTERNATE (animation-direction)
+    {"absolute", 0x014f},        // LXB_CSS_VALUE_ABSOLUTE
+    {"alternate", 0x0095},       // LXB_CSS_VALUE_ALTERNATE (animation-direction)
     {"alternate-reverse", 0x0096}, // LXB_CSS_VALUE_ALTERNATE_REVERSE
-    {"auto", 0x000c},      // LXB_CSS_VALUE_AUTO
-    {"baseline", 0x000b},  // LXB_CSS_VALUE_BASELINE
-    {"block", 0x00ef},     // LXB_CSS_VALUE_BLOCK
-    {"border-box", 0x002a}, // LXB_CSS_VALUE_BORDER_BOX
-    {"both", 0x0174},      // LXB_CSS_VALUE_BOTH
-    {"bottom", 0x0019},    // LXB_CSS_VALUE_BOTTOM
-    {"break-all", 0x0039}, // LXB_CSS_VALUE_BREAK_ALL (word-break)
-    {"break-word", 0x003a}, // LXB_CSS_VALUE_BREAK_WORD (word-wrap)
-
-    // Animation fill modes
-    {"backwards", 0x009a}, // LXB_CSS_VALUE_BACKWARDS (animation-fill-mode)
-
-    // Font and text values
-    {"bold", 0x013d},      // LXB_CSS_VALUE_BOLD
-    {"bolder", 0x013e},    // LXB_CSS_VALUE_BOLDER
-
-    // Text transformation
-    {"capitalize", 0x0053}, // LXB_CSS_VALUE_CAPITALIZE
-    {"center", 0x0007},    // LXB_CSS_VALUE_CENTER
-    {"circle", 0x0220},    // Custom value for list-style-type circle
-    {"clip", 0x003c},      // LXB_CSS_VALUE_CLIP (text-overflow)
-    {"collapse", 0x0210},  // Custom value for border-collapse collapse
-    {"column", 0x010e},    // LXB_CSS_VALUE_COLUMN (flex-direction)
-    {"column-reverse", 0x010f}, // LXB_CSS_VALUE_COLUMN_REVERSE
-    {"content-box", 0x0029}, // LXB_CSS_VALUE_CONTENT_BOX
-    {"currentcolor", 0x0031}, // LXB_CSS_VALUE_CURRENTCOLOR
-
-    // Border styles
-    {"dashed", 0x0022},    // LXB_CSS_VALUE_DASHED
-    {"decimal", 0x0221},   // Custom value for list-style-type decimal
-    {"disc", 0x0222},      // Custom value for list-style-type disc
-    {"dotted", 0x0021},    // LXB_CSS_VALUE_DOTTED
-    {"double", 0x0024},    // LXB_CSS_VALUE_DOUBLE
-
-    // Background size keywords
-    {"contain", 0x0200},   // Custom value for background-size contain
-    {"cover", 0x0201},     // Custom value for background-size cover
-
-    // Animation timing functions
-    {"ease", 0x0083},      // LXB_CSS_VALUE_EASE (animation-timing-function)
-    {"ease-in", 0x0084},   // LXB_CSS_VALUE_EASE_IN
-    {"ease-in-out", 0x0085}, // LXB_CSS_VALUE_EASE_IN_OUT
-    {"ease-out", 0x0086},  // LXB_CSS_VALUE_EASE_OUT
-
-    // Text overflow
-    {"ellipsis", 0x0056},  // LXB_CSS_VALUE_ELLIPSIS
-
-    // Display types
-    {"flex", 0x00f5},      // LXB_CSS_VALUE_FLEX
-    {"flex-end", 0x0006},  // LXB_CSS_VALUE_FLEX_END
-    {"flex-start", 0x0005}, // LXB_CSS_VALUE_FLEX_START
-    {"fixed", 0x0151},     // LXB_CSS_VALUE_FIXED
-
-    // Animation fill modes
-    {"forwards", 0x009b},  // LXB_CSS_VALUE_FORWARDS (animation-fill-mode)
-
-    // Colors - Common colors
-    {"black", 0x003b},     // LXB_CSS_VALUE_BLACK
-    {"blue", 0x003d},      // LXB_CSS_VALUE_BLUE
-    {"brown", 0x003f},     // LXB_CSS_VALUE_BROWN
-    {"gold", 0x0067},      // LXB_CSS_VALUE_GOLD
-    {"gray", 0x0069},      // LXB_CSS_VALUE_GRAY
-    {"green", 0x006a},     // LXB_CSS_VALUE_GREEN
-    {"grid", 0x00f6},      // LXB_CSS_VALUE_GRID
-
-    // Visibility and overflow
-    {"hidden", 0x0020},    // LXB_CSS_VALUE_HIDDEN
-    {"hide", 0x0211},      // Custom value for empty-cells hide
-
-    // Layout display
-    // Animation iteration count and play state
-    {"infinite", 0x0097},  // LXB_CSS_VALUE_INFINITE (animation-iteration-count)
-    {"inline", 0x00f0},    // LXB_CSS_VALUE_INLINE
-    {"inline-block", 0x00f1}, // LXB_CSS_VALUE_INLINE_BLOCK
-    {"inline-flex", 0x00f2},  // LXB_CSS_VALUE_INLINE_FLEX
-    {"inline-grid", 0x00f3},  // LXB_CSS_VALUE_INLINE_GRID
-
-    // Font styles
-    {"inside", 0x0223},    // Custom value for list-style-position inside
-    {"italic", 0x013b},    // LXB_CSS_VALUE_ITALIC
-
-    // Text alignment
-    {"justify", 0x0152},   // LXB_CSS_VALUE_JUSTIFY
-
-    // Word breaking
-    {"keep-all", 0x0058},  // LXB_CSS_VALUE_KEEP_ALL (word-break)
-
-    // Alignment
-    {"left", 0x002f},      // LXB_CSS_VALUE_LEFT
-
-    // Animation timing functions
-    {"linear", 0x0087},    // LXB_CSS_VALUE_LINEAR (animation-timing-function)
-    {"line-through", 0x0159}, // LXB_CSS_VALUE_LINE_THROUGH
-
-    // Background attachment
-    {"local", 0x0202},     // Custom value for background-attachment local
-
-    {"lowercase", 0x0060}, // LXB_CSS_VALUE_LOWERCASE
-
-    // Vertical alignment
-    {"middle", 0x0010},    // LXB_CSS_VALUE_MIDDLE
-    {"move", 0x00ec},      // LXB_CSS_VALUE_MOVE
-
-    // Background blend modes
-    {"multiply", 0x0204},  // Custom value for background-blend-mode multiply
-
-    // Display and text
-    {"none", 0x001f},      // LXB_CSS_VALUE_NONE
-    {"normal", 0x0132},    // LXB_CSS_VALUE_NORMAL
-    {"nowrap", 0x0111},    // LXB_CSS_VALUE_NOWRAP
-
-    // Font styles
-    {"oblique", 0x013c},   // LXB_CSS_VALUE_OBLIQUE
-
-    // Colors
-    {"orange", 0x009d},    // LXB_CSS_VALUE_ORANGE
-
-    // Background blend modes
-    {"overlay", 0x0205},   // Custom value for background-blend-mode overlay
-
-    {"overline", 0x0158},  // LXB_CSS_VALUE_OVERLINE
-    {"outside", 0x0224},   // Custom value for list-style-position outside
-
-    // Background origin/clip
-    {"padding-box", 0x0203}, // Custom value for background-origin/clip padding-box
-
-    // Colors
-    {"pink", 0x00a7},      // LXB_CSS_VALUE_PINK
-    {"pointer", 0x00e6},   // LXB_CSS_VALUE_POINTER
-    {"pre", 0x016e},       // LXB_CSS_VALUE_PRE
-    {"pre-line", 0x0171},  // LXB_CSS_VALUE_PRE_LINE
-    {"pre-wrap", 0x016f},  // LXB_CSS_VALUE_PRE_WRAP
-    {"purple", 0x00aa},    // LXB_CSS_VALUE_PURPLE
-
-    // Colors
-    {"red", 0x00ac},       // LXB_CSS_VALUE_RED
-    {"relative", 0x014e},  // LXB_CSS_VALUE_RELATIVE
-
-    // Animation direction
-    {"reverse", 0x0098},   // LXB_CSS_VALUE_REVERSE (animation-direction)
-    {"right", 0x0030},     // LXB_CSS_VALUE_RIGHT
-
-    // Background repeat
-    {"round", 0x0206},     // Custom value for background-repeat round
-
-    {"row", 0x010c},       // LXB_CSS_VALUE_ROW (flex-direction)
-    {"row-reverse", 0x010d}, // LXB_CSS_VALUE_ROW_REVERSE
-
-    // Animation play state
-    {"running", 0x009c},   // LXB_CSS_VALUE_RUNNING (animation-play-state)
-
-    // Overflow
-    {"scroll", 0x014b},    // LXB_CSS_VALUE_SCROLL
-    {"separate", 0x0212},  // Custom value for border-collapse separate
-    {"show", 0x0213},      // Custom value for empty-cells show
-    {"silver", 0x00b5},    // LXB_CSS_VALUE_SILVER
-    {"small-caps", 0x0062}, // LXB_CSS_VALUE_SMALL_CAPS (font-variant)
-    {"solid", 0x0023},     // LXB_CSS_VALUE_SOLID
-
-    // Background repeat
-    {"space", 0x0207},     // Custom value for background-repeat space
-
-    {"space-around", 0x0009}, // LXB_CSS_VALUE_SPACE_AROUND
-    {"space-between", 0x0008}, // LXB_CSS_VALUE_SPACE_BETWEEN
-    {"space-evenly", 0x0199}, // LXB_CSS_VALUE_SPACE_EVENLY (LXB_CSS_VALUE__LAST_ENTRY + 28)
-    {"square", 0x0225},    // Custom value for list-style-type square
-    {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
-    {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
-    {"stretch", 0x000a},   // LXB_CSS_VALUE_STRETCH
-    {"sub", 0x0016},       // LXB_CSS_VALUE_SUB
-    {"super", 0x0017},     // LXB_CSS_VALUE_SUPER
-
-    // Vertical alignment
-    {"text-bottom", 0x000d}, // LXB_CSS_VALUE_TEXT_BOTTOM
-    {"text-top", 0x0013},    // LXB_CSS_VALUE_TEXT_TOP
-    {"text", 0x00e7},        // LXB_CSS_VALUE_TEXT (cursor)
-    {"top", 0x0018},         // LXB_CSS_VALUE_TOP
-    {"transparent", 0x0032}, // LXB_CSS_VALUE_TRANSPARENT
-
-    // Text decoration
-    {"underline", 0x0157},   // LXB_CSS_VALUE_UNDERLINE
-    {"uppercase", 0x0065},   // LXB_CSS_VALUE_UPPERCASE
-
-    // Overflow
-    {"visible", 0x0149},     // LXB_CSS_VALUE_VISIBLE
-
-    // Flexbox wrap
-    {"wrap", 0x0112},        // LXB_CSS_VALUE_WRAP
-    {"wrap-reverse", 0x0113}, // LXB_CSS_VALUE_WRAP_REVERSE
-
-    // Colors
-    {"white", 0x00c4},       // LXB_CSS_VALUE_WHITE
-    {"yellow", 0x00c6},      // LXB_CSS_VALUE_YELLOW
+    {"auto", 0x000c},            // LXB_CSS_VALUE_AUTO
+    {"backwards", 0x009a},       // LXB_CSS_VALUE_BACKWARDS (animation-fill-mode)
+    {"baseline", 0x000b},        // LXB_CSS_VALUE_BASELINE
+    {"black", 0x003b},           // LXB_CSS_VALUE_BLACK
+    {"block", 0x00ef},           // LXB_CSS_VALUE_BLOCK
+    {"blue", 0x003d},            // LXB_CSS_VALUE_BLUE
+    {"bold", 0x013d},            // LXB_CSS_VALUE_BOLD
+    {"bolder", 0x013e},          // LXB_CSS_VALUE_BOLDER
+    {"border-box", 0x002a},      // LXB_CSS_VALUE_BORDER_BOX
+    {"both", 0x0174},            // LXB_CSS_VALUE_BOTH
+    {"bottom", 0x0019},          // LXB_CSS_VALUE_BOTTOM
+    {"break-all", 0x0039},       // LXB_CSS_VALUE_BREAK_ALL (word-break)
+    {"break-word", 0x003a},      // LXB_CSS_VALUE_BREAK_WORD (word-wrap)
+    {"brown", 0x003f},           // LXB_CSS_VALUE_BROWN
+    {"capitalize", 0x0053},      // LXB_CSS_VALUE_CAPITALIZE
+    {"center", 0x0007},          // LXB_CSS_VALUE_CENTER
+    {"circle", 0x0220},          // Custom value for list-style-type circle
+    {"clip", 0x003c},            // LXB_CSS_VALUE_CLIP (text-overflow)
+    {"collapse", 0x0210},        // Custom value for border-collapse collapse
+    {"column", 0x010e},          // LXB_CSS_VALUE_COLUMN (flex-direction)
+    {"column-reverse", 0x010f},  // LXB_CSS_VALUE_COLUMN_REVERSE
+    {"contain", 0x0200},         // Custom value for background-size contain
+    {"content-box", 0x0029},     // LXB_CSS_VALUE_CONTENT_BOX
+    {"cover", 0x0201},           // Custom value for background-size cover
+    {"currentcolor", 0x0031},    // LXB_CSS_VALUE_CURRENTCOLOR
+    {"dashed", 0x0022},          // LXB_CSS_VALUE_DASHED
+    {"decimal", 0x0221},         // Custom value for list-style-type decimal
+    {"disc", 0x0222},            // Custom value for list-style-type disc
+    {"dotted", 0x0021},          // LXB_CSS_VALUE_DOTTED
+    {"double", 0x0024},          // LXB_CSS_VALUE_DOUBLE
+    {"ease", 0x0083},            // LXB_CSS_VALUE_EASE (animation-timing-function)
+    {"ease-in", 0x0084},         // LXB_CSS_VALUE_EASE_IN
+    {"ease-in-out", 0x0085},     // LXB_CSS_VALUE_EASE_IN_OUT
+    {"ease-out", 0x0086},        // LXB_CSS_VALUE_EASE_OUT
+    {"ellipsis", 0x0056},        // LXB_CSS_VALUE_ELLIPSIS
+    {"fixed", 0x0151},           // LXB_CSS_VALUE_FIXED
+    {"flex", 0x00f5},            // LXB_CSS_VALUE_FLEX
+    {"flex-end", 0x0006},        // LXB_CSS_VALUE_FLEX_END
+    {"flex-start", 0x0005},      // LXB_CSS_VALUE_FLEX_START
+    {"forwards", 0x009b},        // LXB_CSS_VALUE_FORWARDS (animation-fill-mode)
+    {"gold", 0x0067},            // LXB_CSS_VALUE_GOLD
+    {"gray", 0x0069},            // LXB_CSS_VALUE_GRAY
+    {"green", 0x006a},           // LXB_CSS_VALUE_GREEN
+    {"grid", 0x00f6},            // LXB_CSS_VALUE_GRID
+    {"hidden", 0x0020},          // LXB_CSS_VALUE_HIDDEN
+    {"hide", 0x0211},            // Custom value for empty-cells hide
+    {"infinite", 0x0097},        // LXB_CSS_VALUE_INFINITE (animation-iteration-count)
+    {"inline", 0x00f0},          // LXB_CSS_VALUE_INLINE
+    {"inline-block", 0x00f1},    // LXB_CSS_VALUE_INLINE_BLOCK
+    {"inline-flex", 0x00f2},     // LXB_CSS_VALUE_INLINE_FLEX
+    {"inline-grid", 0x00f3},     // LXB_CSS_VALUE_INLINE_GRID
+    {"inside", 0x0223},          // Custom value for list-style-position inside
+    {"italic", 0x013b},          // LXB_CSS_VALUE_ITALIC
+    {"justify", 0x0152},         // LXB_CSS_VALUE_JUSTIFY
+    {"keep-all", 0x0058},        // LXB_CSS_VALUE_KEEP_ALL (word-break)
+    {"left", 0x002f},            // LXB_CSS_VALUE_LEFT
+    {"line-through", 0x0159},    // LXB_CSS_VALUE_LINE_THROUGH
+    {"linear", 0x0087},          // LXB_CSS_VALUE_LINEAR (animation-timing-function)
+    {"local", 0x0202},           // Custom value for background-attachment local
+    {"lowercase", 0x0060},       // LXB_CSS_VALUE_LOWERCASE
+    {"middle", 0x0010},          // LXB_CSS_VALUE_MIDDLE
+    {"move", 0x00ec},            // LXB_CSS_VALUE_MOVE
+    {"multiply", 0x0204},        // Custom value for background-blend-mode multiply
+    {"none", 0x001f},            // LXB_CSS_VALUE_NONE
+    {"normal", 0x0132},          // LXB_CSS_VALUE_NORMAL
+    {"nowrap", 0x0111},          // LXB_CSS_VALUE_NOWRAP
+    {"oblique", 0x013c},         // LXB_CSS_VALUE_OBLIQUE
+    {"orange", 0x009d},          // LXB_CSS_VALUE_ORANGE
+    {"outside", 0x0224},         // Custom value for list-style-position outside
+    {"overlay", 0x0205},         // Custom value for background-blend-mode overlay
+    {"overline", 0x0158},        // LXB_CSS_VALUE_OVERLINE
+    {"padding-box", 0x0203},     // Custom value for background-origin/clip padding-box
+    {"pink", 0x00a7},            // LXB_CSS_VALUE_PINK
+    {"pointer", 0x00e6},         // LXB_CSS_VALUE_POINTER
+    {"pre", 0x016e},             // LXB_CSS_VALUE_PRE
+    {"pre-line", 0x0171},        // LXB_CSS_VALUE_PRE_LINE
+    {"pre-wrap", 0x016f},        // LXB_CSS_VALUE_PRE_WRAP
+    {"purple", 0x00aa},          // LXB_CSS_VALUE_PURPLE
+    {"red", 0x00ac},             // LXB_CSS_VALUE_RED
+    {"relative", 0x014e},        // LXB_CSS_VALUE_RELATIVE
+    {"reverse", 0x0098},         // LXB_CSS_VALUE_REVERSE (animation-direction)
+    {"right", 0x0030},           // LXB_CSS_VALUE_RIGHT
+    {"round", 0x0206},           // Custom value for background-repeat round
+    {"row", 0x010c},             // LXB_CSS_VALUE_ROW (flex-direction)
+    {"row-reverse", 0x010d},     // LXB_CSS_VALUE_ROW_REVERSE
+    {"running", 0x009c},         // LXB_CSS_VALUE_RUNNING (animation-play-state)
+    {"scroll", 0x014b},          // LXB_CSS_VALUE_SCROLL
+    {"separate", 0x0212},        // Custom value for border-collapse separate
+    {"show", 0x0213},            // Custom value for empty-cells show
+    {"silver", 0x00b5},          // LXB_CSS_VALUE_SILVER
+    {"small-caps", 0x0062},      // LXB_CSS_VALUE_SMALL_CAPS (font-variant)
+    {"solid", 0x0023},           // LXB_CSS_VALUE_SOLID
+    {"space", 0x0207},           // Custom value for background-repeat space
+    {"space-around", 0x0009},    // LXB_CSS_VALUE_SPACE_AROUND
+    {"space-between", 0x0008},   // LXB_CSS_VALUE_SPACE_BETWEEN
+    {"space-evenly", 0x0199},    // LXB_CSS_VALUE_SPACE_EVENLY (LXB_CSS_VALUE__LAST_ENTRY + 28)
+    {"square", 0x0225},          // Custom value for list-style-type square
+    {"static", 0x014d},          // LXB_CSS_VALUE_STATIC
+    {"sticky", 0x0150},          // LXB_CSS_VALUE_STICKY
+    {"stretch", 0x000a},         // LXB_CSS_VALUE_STRETCH
+    {"sub", 0x0016},             // LXB_CSS_VALUE_SUB
+    {"super", 0x0017},           // LXB_CSS_VALUE_SUPER
+    {"text", 0x00e7},            // LXB_CSS_VALUE_TEXT (cursor)
+    {"text-bottom", 0x000d},     // LXB_CSS_VALUE_TEXT_BOTTOM
+    {"text-top", 0x0013},        // LXB_CSS_VALUE_TEXT_TOP
+    {"top", 0x0018},             // LXB_CSS_VALUE_TOP
+    {"transparent", 0x0032},     // LXB_CSS_VALUE_TRANSPARENT
+    {"underline", 0x0157},       // LXB_CSS_VALUE_UNDERLINE
+    {"uppercase", 0x0164},       // LXB_CSS_VALUE_UPPERCASE
+    {"visible", 0x0149},         // LXB_CSS_VALUE_VISIBLE
+    {"white", 0x00c4},           // LXB_CSS_VALUE_WHITE
+    {"wrap", 0x0112},            // LXB_CSS_VALUE_WRAP
+    {"wrap-reverse", 0x0113},    // LXB_CSS_VALUE_WRAP_REVERSE
+    {"yellow", 0x00c6},          // LXB_CSS_VALUE_YELLOW
 };
 
 static const size_t keyword_map_size = sizeof(keyword_map) / sizeof(keyword_map[0]);
@@ -1085,7 +1003,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (value->data.length.unit == CSS_UNIT_EM) {
                     float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
                     font_size = value->data.length.value * parent_size;
-                    log_debug("[CSS] Font size em: %.2fem -> %.2f px (parent size: %.2f px)", 
+                    log_debug("[CSS] Font size em: %.2fem -> %.2f px (parent size: %.2f px)",
                               value->data.length.value, font_size, parent_size);
                 } else {
                     font_size = convert_lambda_length_to_px(value, lycon, prop_id);
@@ -1101,7 +1019,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // Percentage of parent font size
                 float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
                 font_size = parent_size * (value->data.percentage.value / 100.0f);
-                log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px (parent size: %.2f px)", 
+                log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px (parent size: %.2f px)",
                           value->data.percentage.value, font_size, parent_size);
                 if (font_size >= 0) {
                     valid = true;
@@ -1335,6 +1253,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (valign_value > 0) {
                     span->in_line->vertical_align = valign_value;
                     log_debug("[CSS] Vertical-align: %s -> 0x%04X", value->data.keyword, valign_value);
+                } else {
+                    log_debug("[CSS] Vertical-align: unknown keyword '%s'", value->data.keyword);
                 }
             } else if (value->type == CSS_VALUE_LENGTH) {
                 // Length values for vertical-align (e.g., 10px, -5px)
@@ -1343,6 +1263,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 // Percentage values relative to line-height
                 log_debug("[CSS] Vertical-align percentage: %.2f%% (not yet fully supported)", value->data.percentage.value);
+            } else {
+                log_debug("[CSS] Vertical-align: unsupported value type %d", value->type);
             }
             break;
         }
@@ -2964,7 +2886,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) && 
+                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
                            (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER)) {
                     // top/bottom, left/right
                     float vertical = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
@@ -2989,7 +2911,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     }
                     log_debug("[CSS] Border-width (2 values): %.2f %.2f px", vertical, horizontal);
                 } else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
                     // top, left/right, bottom
                     float top = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
@@ -3015,7 +2937,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     }
                     log_debug("[CSS] Border-width (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
                 } else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
                            (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
                     // top, right, bottom, left
@@ -3211,7 +3133,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) && 
+                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
                            (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER)) {
                     // top-left/bottom-right, top-right/bottom-left
                     float diagonal1 = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
@@ -3235,7 +3157,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     }
                     log_debug("[CSS] Border-radius (2 values): %.2f %.2f px", diagonal1, diagonal2);
                 } else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
                     // top-left, top-right/bottom-left, bottom-right
                     float top_left = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
@@ -3260,7 +3182,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     }
                     log_debug("[CSS] Border-radius (3 values): %.2f %.2f %.2f px", top_left, diagonal, bottom_right);
                 } else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
                            (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
                     // top-left, top-right, bottom-right, bottom-left

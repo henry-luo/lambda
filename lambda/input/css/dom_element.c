@@ -1883,6 +1883,37 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             }
         }
 
+        // vertical-align property (ID 118)
+        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_VERTICAL_ALIGN);
+        if (decl && decl->value) {
+            CssValue* val = (CssValue*)decl->value;
+            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_format(buf, " vertical-align:%s", val->data.keyword);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_LENGTH) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, " vertical-align:");
+                char length_str[32];
+                // print with unit
+                const char* unit = "";
+                switch (val->data.length.unit) {
+                    case CSS_UNIT_PX: unit = "px"; break;
+                    case CSS_UNIT_IN: unit = "in"; break;
+                    case CSS_UNIT_CM: unit = "cm"; break;
+                    case CSS_UNIT_MM: unit = "mm"; break;
+                    case CSS_UNIT_PT: unit = "pt"; break;
+                    case CSS_UNIT_PC: unit = "pc"; break;
+                    case CSS_UNIT_EM: unit = "em"; break;
+                    case CSS_UNIT_REM: unit = "rem"; break;
+                    case CSS_UNIT_VW: unit = "vw"; break;
+                }
+                snprintf(length_str, sizeof(length_str), "%.2f%s", val->data.length.value, unit);
+                strbuf_append_str(buf, length_str);
+                has_props = true;
+            }
+        }
+
         strbuf_append_str(buf, "}]");
     }
 
