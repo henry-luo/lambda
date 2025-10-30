@@ -1,7 +1,11 @@
 #define _POSIX_C_SOURCE 200809L
 #include "dom_element.h"
+#include "css_formatter.h"
+#include "css_style_node.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/stringbuf.h"
+#include "../../../lib/string.h"
 #include "../../../lib/log.h"
 #include <string.h>
 #include <stdio.h>
@@ -1329,6 +1333,75 @@ const char* dom_comment_get_content(DomComment* comment_node) {
 // ============================================================================
 
 /**
+ * Context for style property printing callback
+ */
+typedef struct {
+    StrBuf* buf;
+    bool* has_props;
+} StylePrintContext;
+
+/**
+ * Callback function for printing each style property
+ * Called by style_tree_foreach for each property in the style tree
+ */
+static bool print_style_property_callback(StyleNode* node, void* context) {
+    if (!node || !node->winning_decl || !context) {
+        return true;  // continue iteration
+    }
+
+    StylePrintContext* ctx = (StylePrintContext*)context;
+    CssDeclaration* decl = node->winning_decl;
+    
+    if (!decl->value) {
+        return true;  // skip properties without values
+    }
+
+    // Add comma separator if not first property
+    if (*ctx->has_props) {
+        strbuf_append_str(ctx->buf, ", ");
+    }
+
+    // Get property name using the property database
+    const char* prop_name = css_get_property_name(decl->property_id);
+    
+    if (!prop_name) {
+        // If no name available, print with property ID for debugging
+        char prop_id_buf[32];
+        snprintf(prop_id_buf, sizeof(prop_id_buf), "property-%d", (int)decl->property_id);
+        strbuf_append_str(ctx->buf, prop_id_buf);
+    } else {
+        // Print property name
+        strbuf_append_str(ctx->buf, prop_name);
+    }
+    strbuf_append_char(ctx->buf, ':');
+
+    // Format the value using the CSS formatter
+    CssValue* val = (CssValue*)decl->value;
+    
+    // Create a temporary pool and formatter for value formatting
+    Pool* temp_pool = pool_create();
+    if (temp_pool) {
+        CssFormatter* formatter = css_formatter_create(temp_pool, CSS_FORMAT_COMPACT);
+        if (formatter) {
+            // Format the value
+            css_format_value(formatter, val);
+            
+            // Get the formatted string from the formatter's output buffer
+            String* result = stringbuf_to_string(formatter->output);
+            if (result && result->len > 0) {
+                strbuf_append_str(ctx->buf, result->chars);
+            }
+            
+            css_formatter_destroy(formatter);
+        }
+        pool_destroy(temp_pool);
+    }
+
+    *ctx->has_props = true;
+    return true;  // continue iteration
+}
+
+/**
  * Print a DOM element and its children to a string buffer
  * Outputs the element in a tree-like format with proper indentation
  */
@@ -1386,6 +1459,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     if (element->id || element->class_count > 0 || element->specified_style) {
         int has_text = false;
         strbuf_append_str(buf, "[");
+        
         // print id
         if (element->id && element->id[0] != '\0') {
             strbuf_append_format(buf, "id:'%s'", element->id);
@@ -1404,535 +1478,27 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             has_text = true;
         }
 
-        strbuf_append_str(buf, has_text ? ", styles:{" : "styles:{");
-        CssDeclaration* decl;  bool has_props = false;
-
-        // Display property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_DISPLAY);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " display:");
-                strbuf_append_str(buf, val->data.keyword);
-                has_props = true;
-            }
+        // print styles generically using style_tree_foreach
+        if (element->specified_style && element->specified_style->tree) {
+            strbuf_append_str(buf, has_text ? ", styles:{" : "styles:{");
+            
+            bool has_props = false;
+            StylePrintContext ctx = { buf, &has_props };
+            
+            // Iterate through all properties in the style tree
+            style_tree_foreach(element->specified_style, print_style_property_callback, &ctx);
+            
+            strbuf_append_str(buf, "}");
         }
-
-        // Width property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_WIDTH);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " width:");
-                char width_str[32];
-                snprintf(width_str, sizeof(width_str), "%.2fpx", val->data.length.value);
-                strbuf_append_str(buf, width_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_PERCENTAGE) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " width:");
-                char width_str[32];
-                snprintf(width_str, sizeof(width_str), "%.2f%%", val->data.percentage.value);
-                strbuf_append_str(buf, width_str);
-                has_props = true;
-            }
-        }
-
-        // Height property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_HEIGHT);
-        log_debug("[PRINT] Element <%s>: height decl=%p, value=%p",
-                  element->tag_name ? element->tag_name : "null",
-                  decl, decl ? decl->value : NULL);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            log_debug("[PRINT] Height value type=%d (CSS_VALUE_LENGTH=%d)",
-                      val->type, CSS_VALUE_LENGTH);
-            if (val->type == CSS_VALUE_LENGTH) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "height:");
-                char height_str[32];
-                snprintf(height_str, sizeof(height_str), "%.2fpx", val->data.length.value);
-                strbuf_append_str(buf, height_str);
-                has_props = true;
-            }
-        }
-
-        // Margin property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_MARGIN);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " margin:");
-                char margin_str[32];
-                snprintf(margin_str, sizeof(margin_str), "%.2fpx",
-                    val->type == CSS_VALUE_LENGTH ? val->data.length.value : val->type == CSS_VALUE_NUMBER ? val->data.number.value : val->data.integer.value);
-                strbuf_append_str(buf, margin_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_LIST && val->data.list.values && val->data.list.count > 0) {
-                // handle list values (e.g., "10px 0" or "10px 20px 30px 40px")
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " margin:");
-                for (int i = 0; i < val->data.list.count; i++) {
-                    CssValue* item = val->data.list.values[i];
-                    if (item) {
-                        if (i > 0) strbuf_append_char(buf, ' ');
-                        char margin_str[32];
-                        if (item->type == CSS_VALUE_LENGTH) {
-                            snprintf(margin_str, sizeof(margin_str), "%.2fpx", item->data.length.value);
-                        } else if (item->type == CSS_VALUE_NUMBER) {
-                            snprintf(margin_str, sizeof(margin_str), "%.2fpx", item->data.number.value);
-                        } else if (item->type == CSS_VALUE_INTEGER) {
-                            snprintf(margin_str, sizeof(margin_str), "%.2fpx", (double)item->data.integer.value);
-                        } else {
-                            snprintf(margin_str, sizeof(margin_str), "?");
-                        }
-                        strbuf_append_str(buf, margin_str);
-                    }
-                }
-                has_props = true;
-            }
-        }
-
-        // Padding property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "padding:");
-                char padding_str[32];
-                snprintf(padding_str, sizeof(padding_str), "%.2fpx",
-                    val->type == CSS_VALUE_LENGTH ? val->data.length.value : val->type == CSS_VALUE_NUMBER ? val->data.number.value : val->data.integer.value);
-                strbuf_append_str(buf, padding_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_PERCENTAGE) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "padding:");
-                char padding_str[32];
-                snprintf(padding_str, sizeof(padding_str), "%.2f%%", val->data.percentage.value);
-                strbuf_append_str(buf, padding_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_LIST && val->data.list.values && val->data.list.count > 0) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "padding:");
-                for (int i = 0; i < val->data.list.count; i++) {
-                    if (i > 0) strbuf_append_str(buf, " ");
-                    CssValue* item = val->data.list.values[i];
-                    if (item) {
-                        char item_str[32];
-                        if (item->type == CSS_VALUE_LENGTH) {
-                            snprintf(item_str, sizeof(item_str), "%.2fpx", item->data.length.value);
-                        } else if (item->type == CSS_VALUE_PERCENTAGE) {
-                            snprintf(item_str, sizeof(item_str), "%.2f%%", item->data.percentage.value);
-                        } else if (item->type == CSS_VALUE_NUMBER) {
-                            snprintf(item_str, sizeof(item_str), "%.2f", item->data.number.value);
-                        } else if (item->type == CSS_VALUE_INTEGER) {
-                            snprintf(item_str, sizeof(item_str), "%d", item->data.integer.value);
-                        } else {
-                            continue;
-                        }
-                        strbuf_append_str(buf, item_str);
-                    }
-                }
-                has_props = true;
-            }
-        }
-
-        // Border property (shorthand) - try this first
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LIST && val->data.list.count >= 2) {
-                // border: width style color
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " border:");
-
-                // Width
-                CssValue* width = val->data.list.values[0];
-                if (width && width->type == CSS_VALUE_LENGTH) {
-                    char width_str[32];
-                    snprintf(width_str, sizeof(width_str), "%.2fpx", width->data.length.value);
-                    strbuf_append_str(buf, width_str);
-                }
-
-                // Style
-                strbuf_append_str(buf, " ");
-                CssValue* style = val->data.list.values[1];
-                if (style && style->type == CSS_VALUE_KEYWORD && style->data.keyword) {
-                    strbuf_append_str(buf, style->data.keyword);
-                }
-
-                // Color (optional)
-                if (val->data.list.count >= 3) {
-                    strbuf_append_str(buf, " ");
-                    CssValue* color = val->data.list.values[2];
-                    if (color && color->type == CSS_VALUE_COLOR) {
-                        char color_str[64];
-                        snprintf(color_str, sizeof(color_str), "#%02x%02x%02x",
-                            color->data.color.data.rgba.r,
-                            color->data.color.data.rgba.g,
-                            color->data.color.data.rgba.b);
-                        strbuf_append_str(buf, color_str);
-                    }
-                }
-                has_props = true;
-            }
-        }
-
-        // If no border shorthand, try individual border-width
-        if (!decl || !decl->value) {
-            decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_WIDTH);
-            if (decl && decl->value) {
-                CssValue* val = (CssValue*)decl->value;
-                if (val->type == CSS_VALUE_LENGTH) {
-                    if (has_props) strbuf_append_str(buf, ", ");
-                    strbuf_append_str(buf, " border-width:");
-                    char width_str[32];
-                    snprintf(width_str, sizeof(width_str), "%.2fpx", val->data.length.value);
-                    strbuf_append_str(buf, width_str);
-                    has_props = true;
-                }
-            }
-        }
-
-        // Font size property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_FONT_SIZE);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " font-size:");
-                char size_str[32];
-                const char* unit = "px";
-                switch (val->data.length.unit) {
-                    case CSS_UNIT_PX: unit = "px"; break;
-                    case CSS_UNIT_EM: unit = "em"; break;
-                    case CSS_UNIT_REM: unit = "rem"; break;
-                    case CSS_UNIT_PT: unit = "pt"; break;
-                    case CSS_UNIT_PC: unit = "pc"; break;
-                    case CSS_UNIT_IN: unit = "in"; break;
-                    case CSS_UNIT_CM: unit = "cm"; break;
-                    case CSS_UNIT_MM: unit = "mm"; break;
-                    case CSS_UNIT_VW: unit = "vw"; break;
-                    case CSS_UNIT_VH: unit = "vh"; break;
-                    case CSS_UNIT_PERCENT: unit = "%"; break;
-                    default: unit = "px"; break;
-                }
-                snprintf(size_str, sizeof(size_str), "%.2f%s", val->data.length.value, unit);
-                strbuf_append_str(buf, size_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_PERCENTAGE) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " font-size:");
-                char size_str[32];
-                snprintf(size_str, sizeof(size_str), "%.2f%%", val->data.percentage.value);
-                strbuf_append_str(buf, size_str);
-                has_props = true;
-            }
-        }
-
-        // Font family property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_FONT_FAMILY);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if ((val->type == CSS_VALUE_STRING || val->type == CSS_VALUE_KEYWORD) &&
-                (val->data.string || val->data.keyword)) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "font-family:");
-                strbuf_append_str(buf, val->data.string ? val->data.string : val->data.keyword);
-                has_props = true;
-            }
-            else if (val->type == CSS_VALUE_LIST && val->data.list.count > 0) {
-                // For lists, concatenate the family names
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "font-family:[");
-                for (size_t i = 0; i < val->data.list.count; i++) {
-                    CssValue* item = val->data.list.values[i];
-                    if (item) {
-                        if (i > 0) strbuf_append_str(buf, ", ");
-                        if (item->type == CSS_VALUE_STRING && item->data.string) {
-                            strbuf_append_str(buf, item->data.string);
-                        } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
-                            strbuf_append_str(buf, item->data.keyword);
-                        }
-                    }
-                }
-                strbuf_append_str(buf, "]");
-            }
-        }
-
-        // Font weight property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_FONT_WEIGHT);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            log_debug("[DOM ELEMENT] font-weight for <%s>: type=%d", element->tag_name, val->type);
-            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                log_debug("[DOM ELEMENT]   keyword value: '%s'", val->data.keyword);
-            }
-            if (val->type == CSS_VALUE_INTEGER) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "font-weight:");
-                char weight_str[16];
-                snprintf(weight_str, sizeof(weight_str), "%d", val->data.integer.value);
-                strbuf_append_str(buf, weight_str);
-                has_props = true;
-            }
-            else if (val->type == CSS_VALUE_KEYWORD) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                // Keywords: normal (400), bold (700), etc.
-                strbuf_append_format(buf, "font-weight: %s", val->data.keyword);
-                has_props = true;
-            }
-        } else {
-            log_debug("[DOM ELEMENT] font-weight for <%s>: NO DECLARATION FOUND (decl=%p)",
-                     element->tag_name, (void*)decl);
-        }
-
-        // Color property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_COLOR);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_COLOR) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "color:");
-                char color_str[64];
-                snprintf(color_str, sizeof(color_str), "rgba(%d,%d,%d,%.2f)",
-                    val->data.color.data.rgba.r,
-                    val->data.color.data.rgba.g,
-                    val->data.color.data.rgba.b,
-                    val->data.color.data.rgba.a / 255.0);
-                strbuf_append_str(buf, color_str);
-                has_props = true;
-            }
-        }
-
-        // Background color property (try longhand first, then shorthand)
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BACKGROUND_COLOR);
-        if (!decl || !decl->value) {
-            // try shorthand 'background' property
-            decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BACKGROUND);
-        }
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_COLOR) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " background:");
-                char color_str[64];
-                snprintf(color_str, sizeof(color_str), "rgba(%d,%d,%d,%.2f)",
-                    val->data.color.data.rgba.r,
-                    val->data.color.data.rgba.g,
-                    val->data.color.data.rgba.b,
-                    val->data.color.data.rgba.a / 255.0);
-                strbuf_append_str(buf, color_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                // handle named colors and keywords like 'transparent', 'blue', 'red', etc.
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " background:");
-                strbuf_append_str(buf, val->data.keyword);
-                has_props = true;
-            }
-        }
-
-        // Position property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_POSITION);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " position:");
-                strbuf_append_str(buf, val->data.keyword);
-                has_props = true;
-            }
-        }
-
-        // Top property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_TOP);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " top:");
-                char length_str[32];
-                // print with unit
-                const char* unit = "";
-                switch (val->data.length.unit) {
-                    case CSS_UNIT_PX: unit = "px"; break;
-                    case CSS_UNIT_IN: unit = "in"; break;
-                    case CSS_UNIT_CM: unit = "cm"; break;
-                    case CSS_UNIT_MM: unit = "mm"; break;
-                    case CSS_UNIT_PT: unit = "pt"; break;
-                    case CSS_UNIT_PC: unit = "pc"; break;
-                    case CSS_UNIT_EM: unit = "em"; break;
-                    case CSS_UNIT_REM: unit = "rem"; break;
-                    case CSS_UNIT_VW: unit = "vw"; break;
-                    case CSS_UNIT_VH: unit = "vh"; break;
-                    case CSS_UNIT_VMIN: unit = "vmin"; break;
-                    case CSS_UNIT_VMAX: unit = "vmax"; break;
-                    case CSS_UNIT_PERCENT: unit = "%"; break;
-                    default: unit = ""; break;
-                }
-                snprintf(length_str, sizeof(length_str), "%.2f%s", val->data.length.value, unit);
-                strbuf_append_str(buf, length_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " top:");
-                strbuf_append_str(buf, val->data.keyword);
-                has_props = true;
-            }
-        }
-
-        // Left property
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_LEFT);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " left:");
-                char length_str[32];
-                // print with unit
-                const char* unit = "";
-                switch (val->data.length.unit) {
-                    case CSS_UNIT_PX: unit = "px"; break;
-                    case CSS_UNIT_IN: unit = "in"; break;
-                    case CSS_UNIT_CM: unit = "cm"; break;
-                    case CSS_UNIT_MM: unit = "mm"; break;
-                    case CSS_UNIT_PT: unit = "pt"; break;
-                    case CSS_UNIT_PC: unit = "pc"; break;
-                    case CSS_UNIT_EM: unit = "em"; break;
-                    case CSS_UNIT_REM: unit = "rem"; break;
-                    case CSS_UNIT_VW: unit = "vw"; break;
-                    case CSS_UNIT_VH: unit = "vh"; break;
-                    case CSS_UNIT_VMIN: unit = "vmin"; break;
-                    case CSS_UNIT_VMAX: unit = "vmax"; break;
-                    case CSS_UNIT_PERCENT: unit = "%"; break;
-                    default: unit = ""; break;
-                }
-                snprintf(length_str, sizeof(length_str), "%.2f%s", val->data.length.value, unit);
-                strbuf_append_str(buf, length_str);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " left:");
-                strbuf_append_str(buf, val->data.keyword);
-                has_props = true;
-            }
-        }
-
-        // Line height property (inherited)
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_LINE_HEIGHT);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH && val->data.length.value > 0) {
-                strbuf_append_format(buf, ", line-height: %.2f", val->data.length.value);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_NUMBER && val->data.number.value > 0) {
-                strbuf_append_format(buf, ", line-height: %.2f", val->data.number.value);
-                has_props = true;
-            }
-        }
-
-        // Text align property (ID 89)
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_TEXT_ALIGN);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_KEYWORD) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                // TODO: Extract actual keyword (start, end, left, right, center, justify)
-                strbuf_append_format(buf, "text-align: %s", val->data.keyword);
-                has_props = true;
-            }
-        }
-
-        // Border collapse property (ID 203) - for table elements
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_COLLAPSE);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_format(buf, " border-collapse:%s", val->data.keyword);
-                has_props = true;
-            }
-        }
-
-        // Border spacing property (ID 204) - for table elements
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_BORDER_SPACING);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_LENGTH) {
-                // Single value applies to both horizontal and vertical
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_format(buf, " border-spacing:%.2fpx", val->data.length.value);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_LIST && val->data.list.count >= 2) {
-                // Two values: horizontal and vertical
-                CssValue* h_val = val->data.list.values[0];
-                CssValue* v_val = val->data.list.values[1];
-                if (h_val && v_val && h_val->type == CSS_VALUE_LENGTH && v_val->type == CSS_VALUE_LENGTH) {
-                    if (has_props) strbuf_append_str(buf, ", ");
-                    strbuf_append_format(buf, " border-spacing:%.2fpx %.2fpx",
-                        h_val->data.length.value, v_val->data.length.value);
-                    has_props = true;
-                }
-            } else if (val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
-                // Handle numeric values
-                float spacing = (val->type == CSS_VALUE_NUMBER) ?
-                    val->data.number.value : (float)val->data.integer.value;
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_format(buf, " border-spacing:%.2fpx", spacing);
-                has_props = true;
-            }
-        }
-
-        // vertical-align property (ID 118)
-        decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_VERTICAL_ALIGN);
-        if (decl && decl->value) {
-            CssValue* val = (CssValue*)decl->value;
-            if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_format(buf, " vertical-align:%s", val->data.keyword);
-                has_props = true;
-            } else if (val->type == CSS_VALUE_LENGTH) {
-                if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, " vertical-align:");
-                char length_str[32];
-                // print with unit
-                const char* unit = "";
-                switch (val->data.length.unit) {
-                    case CSS_UNIT_PX: unit = "px"; break;
-                    case CSS_UNIT_IN: unit = "in"; break;
-                    case CSS_UNIT_CM: unit = "cm"; break;
-                    case CSS_UNIT_MM: unit = "mm"; break;
-                    case CSS_UNIT_PT: unit = "pt"; break;
-                    case CSS_UNIT_PC: unit = "pc"; break;
-                    case CSS_UNIT_EM: unit = "em"; break;
-                    case CSS_UNIT_REM: unit = "rem"; break;
-                    case CSS_UNIT_VW: unit = "vw"; break;
-                }
-                snprintf(length_str, sizeof(length_str), "%.2f%s", val->data.length.value, unit);
-                strbuf_append_str(buf, length_str);
-                has_props = true;
-            }
-        }
-
-        strbuf_append_str(buf, "}]");
+        
+        strbuf_append_char(buf, ']');
     }
 
-    // Check if element has children
-    bool has_children = false;
+    // Print children
     void* child = element->first_child;
 
     // Count and print children
     while (child) {
-        // if (!has_children) {
-        //     strbuf_append_char(buf, '\n');
-        //     has_children = true;
-        // }
-
         DomNodeType child_type = dom_node_get_type(child);
 
         if (child_type == DOM_NODE_ELEMENT) {
