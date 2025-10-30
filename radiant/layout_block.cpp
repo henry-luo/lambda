@@ -686,14 +686,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             float item_height = block->height + (block->bound ?
                 block->bound->margin.top + block->bound->margin.bottom : 0);
             float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
+            float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
             float offset = calculate_vertical_align_offset(
-                lycon, block->in_line->vertical_align, item_height, lycon->block.line_height,
+                lycon, block->in_line->vertical_align, item_height, line_height,
                 lycon->line.max_ascender, item_baseline);
             block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
-            log_debug("vertical-aligned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d, %d",
-                offset, lycon->block.line_height, block->height, lycon->block.advance_y, block->y,
-                block->in_line->vertical_align, LXB_CSS_VALUE_BOTTOM);
+            log_debug("valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d",
+                offset, line_height, block->height, lycon->block.advance_y, block->y, block->in_line->vertical_align);
+            lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - lycon->line.max_ascender);
+            log_debug("new max_descender=%f", lycon->line.max_descender);
         } else {
+            log_debug("valigned-inline-block: default baseline align");
             block->y = lycon->block.advance_y;
         }
         lycon->line.advance_x += block->width;
