@@ -506,11 +506,11 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
     if (!input || !pool || !token_count) return NULL;
 
     // Use the tokenizer
-    CSSTokenizer* enhanced = css_tokenizer_enhanced_create(pool);
+    CSSTokenizer* enhanced = css_tokenizer_create(pool);
     if (!enhanced) return NULL;
 
     CssToken* enhanced_tokens;
-    int enhanced_count = css_tokenizer_enhanced_tokenize(enhanced, input, length, &enhanced_tokens);
+    int enhanced_count = css_tokenizer_tokenize(enhanced, input, length, &enhanced_tokens);
 
     if (enhanced_count <= 0) {
         *token_count = 0;
@@ -580,7 +580,7 @@ bool css_is_newline(int c) {
 }
 
 // Enhanced tokenizer implementation
-CSSTokenizer* css_tokenizer_enhanced_create(Pool* pool) {
+CSSTokenizer* css_tokenizer_create(Pool* pool) {
     if (!pool) return NULL;
 
     CSSTokenizer* tokenizer = pool_alloc(pool, sizeof(CSSTokenizer));
@@ -598,7 +598,7 @@ CSSTokenizer* css_tokenizer_enhanced_create(Pool* pool) {
     return tokenizer;
 }
 
-void css_tokenizer_enhanced_destroy(CSSTokenizer* tokenizer) {
+void css_tokenizer_destroy(CSSTokenizer* tokenizer) {
     // Memory managed by pool, no explicit cleanup needed
     (void)tokenizer;
 }
@@ -637,7 +637,7 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
     }
 }
 
-int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
+int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                                    const char* input, size_t length,
                                    CssToken** tokens) {
     if (!tokenizer || !input || !tokens) return 0;

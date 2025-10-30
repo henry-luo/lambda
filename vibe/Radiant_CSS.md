@@ -269,7 +269,7 @@ typedef struct StyleNode {
 
 ### Key Achievements
 
-#### Enhanced CSS Tokenizer (`css_tokenizer_enhanced.h/c`)
+#### Enhanced CSS Tokenizer (`css_tokenizer.h/c`)
 - **100+ CSS3+ Token Types**: Complete token type coverage including CSS functions, Unicode ranges, container queries
 - **Unicode Support**: Full Unicode identifier support with proper character classification
 - **CSS Function Database**: 70+ CSS functions with parameter validation and categorization

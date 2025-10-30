@@ -235,7 +235,7 @@ CssEngine* css_enhanced_engine_create(Pool* pool) {
     engine->pool = pool;
 
     // Initialize core components
-    engine->tokenizer = css_tokenizer_enhanced_create(pool);
+    engine->tokenizer = css_tokenizer_create(pool);
     // Removed: engine->selector_parser (legacy linked-list parser removed)
     engine->value_parser = css_property_value_parser_create(pool);
 
@@ -283,7 +283,7 @@ void css_enhanced_engine_destroy(CssEngine* engine) {
     if (!engine) return;
 
     // Cleanup components
-    css_tokenizer_enhanced_destroy(engine->tokenizer);
+    css_tokenizer_destroy(engine->tokenizer);
     // Removed: css_selector_parser_destroy (legacy parser removed)
     css_property_value_parser_destroy(engine->value_parser);
 
@@ -386,7 +386,7 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     CssToken* tokens;
     fprintf(stderr, "[CSS Integration] Starting tokenization...\n");
     log_debug("Tokenizing CSS input");
-    int token_count = css_tokenizer_enhanced_tokenize(engine->tokenizer, css_text, strlen(css_text), &tokens);
+    int token_count = css_tokenizer_tokenize(engine->tokenizer, css_text, strlen(css_text), &tokens);
 
     if (token_count <= 0) {
         fprintf(stderr, "[CSS Integration] WARNING: Tokenization returned %d tokens\n", token_count);

@@ -234,15 +234,15 @@ void css_apply_styles_to_element(CssEngine* engine,
                                 int stylesheet_count);
 
 // CSS-in-JS integration
-typedef struct CSSInJSRule {
+typedef struct CssInJSRule {
     const char* selector_template;
     const char** property_templates;
     CssValue** dynamic_values;
     int property_count;
-} CSSInJSRule;
+} CssInJSRule;
 
 CssRule* css_compile_css_in_js(CssEngine* engine,
-                               CSSInJSRule* template_rule,
+                               CssInJSRule* template_rule,
                                void* dynamic_context);
 
 // Error handling and diagnostics
