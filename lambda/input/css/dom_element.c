@@ -1599,9 +1599,31 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH) {
                 if (has_props) strbuf_append_str(buf, ", ");
-                strbuf_append_str(buf, "font-size:");
+                strbuf_append_str(buf, " font-size:");
                 char size_str[32];
-                snprintf(size_str, sizeof(size_str), "%.2fpx", val->data.length.value);
+                const char* unit = "px";
+                switch (val->data.length.unit) {
+                    case CSS_UNIT_PX: unit = "px"; break;
+                    case CSS_UNIT_EM: unit = "em"; break;
+                    case CSS_UNIT_REM: unit = "rem"; break;
+                    case CSS_UNIT_PT: unit = "pt"; break;
+                    case CSS_UNIT_PC: unit = "pc"; break;
+                    case CSS_UNIT_IN: unit = "in"; break;
+                    case CSS_UNIT_CM: unit = "cm"; break;
+                    case CSS_UNIT_MM: unit = "mm"; break;
+                    case CSS_UNIT_VW: unit = "vw"; break;
+                    case CSS_UNIT_VH: unit = "vh"; break;
+                    case CSS_UNIT_PERCENT: unit = "%"; break;
+                    default: unit = "px"; break;
+                }
+                snprintf(size_str, sizeof(size_str), "%.2f%s", val->data.length.value, unit);
+                strbuf_append_str(buf, size_str);
+                has_props = true;
+            } else if (val->type == CSS_VALUE_PERCENTAGE) {
+                if (has_props) strbuf_append_str(buf, ", ");
+                strbuf_append_str(buf, " font-size:");
+                char size_str[32];
+                snprintf(size_str, sizeof(size_str), "%.2f%%", val->data.percentage.value);
                 strbuf_append_str(buf, size_str);
                 has_props = true;
             }
