@@ -1227,6 +1227,24 @@
                         "binary": "test_html5_tokenizer_gtest.exe"
                     },
                     {
+                        "source": "test_html5_tree_construction_gtest.cpp",
+                        "name": "🌳 HTML5 Tree Construction Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/input/html5_parser.cpp",
+                            "lambda/input/html5_tokenizer.cpp",
+                            "lambda/input/html5_tree_construction.cpp"
+                        ],
+                        "binary": "test_html5_tree_construction_gtest.exe"
+                    },
+                    {
                         "source": "test_math_gtest.cpp",
                         "name": "🔢 Math Roundtrip Tests (GTest)",
                         "dependencies": [
