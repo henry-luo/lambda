@@ -819,7 +819,7 @@ CSSColorMix* css_parse_color_mix_function(CssPropertyValueParser* parser,
     return NULL;
 }
 
-// implementation removed - now implemented in css_tokenizer_enhanced.c
+// implementation removed - now implemented in css_tokenizer.c
 
 // Enhanced value to string conversion
 char* css_value_enhanced_to_string(const CssValue* value, Pool* pool) {

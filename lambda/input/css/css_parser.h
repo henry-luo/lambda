@@ -563,16 +563,16 @@ bool css_token_is_recoverable_error(CssToken* token);
 void css_token_fix_common_errors(CssToken* token, Pool* pool);
 
 // Tokenizer creation and management
-CssTokenizer* css_tokenizer_enhanced_create(Pool* pool);
-void css_tokenizer_enhanced_destroy(CssTokenizer* tokenizer);
-int css_tokenizer_enhanced_tokenize(CssTokenizer* tokenizer,
+CssTokenizer* css_tokenizer_create(Pool* pool);
+void css_tokenizer_destroy(CssTokenizer* tokenizer);
+int css_tokenizer_tokenize(CssTokenizer* tokenizer,
                                    const char* input, size_t length,
                                    CssToken** tokens);
 
 // Tokenizer aliases for compatibility
-#define css_tokenizer_create css_tokenizer_enhanced_create
-#define css_tokenizer_destroy css_tokenizer_enhanced_destroy
-#define css_tokenizer_tokenize css_tokenizer_enhanced_tokenize
+#define css_tokenizer_create css_tokenizer_create
+#define css_tokenizer_destroy css_tokenizer_destroy
+#define css_tokenizer_tokenize css_tokenizer_tokenize
 
 // ============================================================================
 // CSS Rule Parsing Functions (from css_parser.c)

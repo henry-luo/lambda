@@ -16,7 +16,7 @@ extern "C" {
  * CSS Tokenizer Compatibility Header
  * 
  * This file provides backward compatibility for code that included
- * the old css_tokenizer_enhanced.h. All tokenizer types and functions
+ * the old css_tokenizer.h. All tokenizer types and functions
  * are now defined in css_parser.h.
  */
 
@@ -26,12 +26,6 @@ typedef CssTokenType CSSTokenType;
 typedef CssTokenStream CSSTokenStream;
 typedef CssTokenizer CSSTokenizer;
 typedef CssToken CSSToken;
-
-// Function aliases for backward compatibility
-#define css_tokenizer_enhanced_create css_tokenizer_create
-#define css_tokenizer_enhanced_destroy css_tokenizer_destroy
-#define css_tokenizer_enhanced_tokenize css_tokenizer_tokenize
-#define css_tokenize_enhanced css_tokenize
 
 #ifdef __cplusplus
 }

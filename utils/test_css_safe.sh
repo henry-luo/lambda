@@ -13,7 +13,7 @@ clang -I. -I./lib/mem-pool/include -I./lambda/input \
       -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib \
       -lcriterion -o test_css_minimal \
       test/test_enhanced_css_parser.c \
-      lambda/input/css_tokenizer_enhanced.c \
+      lambda/input/css_tokenizer.c \
       lambda/input/css_selector_parser.c \
       lambda/input/css_property_value_parser.c \
       lambda/input/css_enhanced_integration.c \

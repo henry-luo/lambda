@@ -1,6 +1,6 @@
 #include <criterion/criterion.h>
 #include <criterion/theories.h>
-#include "../lambda/input/css/css_tokenizer_enhanced.h"
+#include "../lambda/input/css/css_tokenizer.h"
 #include "../lambda/input/css/css_selector_parser.h"
 #include "../lambda/input/css/css_property_value_parser.h"
 #include "../lib/mempool.h"
@@ -13,13 +13,13 @@ static CSSPropertyValueParser* value_parser;
 
 void setup_enhanced_css_tests(void) {
     pool = pool_create(8192);
-    tokenizer = css_tokenizer_enhanced_create(pool);
+    tokenizer = css_tokenizer_create(pool);
     selector_parser = css_selector_parser_create(pool);
     value_parser = css_property_value_parser_create(pool);
 }
 
 void teardown_enhanced_css_tests(void) {
-    if (tokenizer) css_tokenizer_enhanced_destroy(tokenizer);
+    if (tokenizer) css_tokenizer_destroy(tokenizer);
     if (selector_parser) css_selector_parser_destroy(selector_parser);
     if (value_parser) css_property_value_parser_destroy(value_parser);
     if (pool) pool_destroy(pool);
@@ -31,7 +31,7 @@ TestSuite(enhanced_css_tokenizer, .init = setup_enhanced_css_tests, .fini = tear
 Test(enhanced_css_tokenizer, test_unicode_identifiers) {
     const char* css = "α-test 测试 العربية";
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, css, strlen(css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
     
     cr_assert_eq(count, 3, "Expected 3 Unicode identifier tokens");
     cr_assert_eq(tokens[0].type, CSS_TOKEN_ENHANCED_IDENT);
@@ -45,7 +45,7 @@ Test(enhanced_css_tokenizer, test_unicode_identifiers) {
 Test(enhanced_css_tokenizer, test_css3_color_tokens) {
     const char* css = "#ff0000 rgb(255, 0, 0) hsl(0, 100%, 50%) hwb(0 0% 0%) lab(50% 20 30)";
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, css, strlen(css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
     
     cr_assert_geq(count, 5, "Expected at least 5 color-related tokens");
     
@@ -61,7 +61,7 @@ Test(enhanced_css_tokenizer, test_css3_color_tokens) {
 Test(enhanced_css_tokenizer, test_css_functions) {
     const char* css = "calc(100% - 20px) min(10px, 5vw) max(100px, 10em) clamp(1rem, 2.5vw, 2rem)";
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, css, strlen(css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
     
     cr_assert_geq(count, 4, "Expected at least 4 function tokens");
     
@@ -80,7 +80,7 @@ Test(enhanced_css_tokenizer, test_css_functions) {
 Test(enhanced_css_tokenizer, test_custom_properties) {
     const char* css = "--primary-color: #3498db; var(--primary-color, blue)";
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, css, strlen(css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
     
     cr_assert_geq(count, 6, "Expected at least 6 tokens for custom property");
     
@@ -100,7 +100,7 @@ Test(enhanced_css_tokenizer, test_custom_properties) {
 Test(enhanced_css_tokenizer, test_at_rules) {
     const char* css = "@media (prefers-color-scheme: dark) { } @supports (display: grid) { }";
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, css, strlen(css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, css, strlen(css), &tokens);
     
     cr_assert_geq(count, 2, "Expected at least 2 @-rule tokens");
     
@@ -309,7 +309,7 @@ Test(css_enhanced_integration, test_full_css3_rule) {
     
     // Tokenize the entire rule
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, css_rule, strlen(css_rule), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, css_rule, strlen(css_rule), &tokens);
     
     cr_assert_geq(count, 20, "Expected at least 20 tokens for complex CSS rule");
     
@@ -352,7 +352,7 @@ Test(css_enhanced_integration, test_css_nesting_with_functions) {
     
     // Tokenize and verify we can handle nested CSS with functions
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, nested_css, strlen(nested_css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, nested_css, strlen(nested_css), &tokens);
     
     cr_assert_geq(count, 15, "Expected sufficient tokens for nested CSS");
     
@@ -388,7 +388,7 @@ Test(css_enhanced_performance, test_large_css_tokenization) {
     // Measure tokenization performance
     clock_t start = clock();
     CSSTokenEnhanced* tokens;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, large_css, strlen(large_css), &tokens);
+    int count = css_tokenizer_tokenize(tokenizer, large_css, strlen(large_css), &tokens);
     clock_t end = clock();
     
     double time_taken = ((double)(end - start)) / CLOCKS_PER_SEC;
