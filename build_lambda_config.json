@@ -1273,6 +1273,19 @@
                         "binary": "test_html_gtest.exe"
                     },
                     {
+                        "source": "test_html_negative_gtest.cpp",
+                        "name": "🚨 HTML Parser Negative Tests (GTest) - Invalid HTML",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_html_negative_gtest.exe"
+                    },
+                    {
                         "source": "test_lambda_domnode_gtest.cpp",
                         "name": "🔗 Lambda DomNode Tests (GTest)",
                         "dependencies": [
