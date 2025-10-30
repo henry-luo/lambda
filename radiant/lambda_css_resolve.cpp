@@ -648,6 +648,18 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
     log_debug("[Lambda CSS Property] Processing property %d, value type=%d", prop_id, value->type);
 
+    // DEBUG: Special logging for margin property
+    if (prop_id == CSS_PROPERTY_MARGIN) {
+        log_debug("[MARGIN DEBUG] Property=%d, value_type=%d", prop_id, value->type);
+        if (value->type == CSS_VALUE_LIST) {
+            log_debug("[MARGIN DEBUG] CSS_VALUE_LIST detected with count=%zu", value->data.list.count);
+        } else if (value->type == CSS_VALUE_NUMBER) {
+            log_debug("[MARGIN DEBUG] CSS_VALUE_NUMBER detected with value=%.2f", value->data.number.value);
+        } else if (value->type == CSS_VALUE_LENGTH) {
+            log_debug("[MARGIN DEBUG] CSS_VALUE_LENGTH detected with value=%.2f", value->data.length.value);
+        }
+    }
+
     // handle shorthand properties by expanding to longhands
     bool is_shorthand = css_property_is_shorthand(prop_id);
     log_debug("[Lambda CSS Property] is_shorthand=%d for prop_id=%d", is_shorthand, prop_id);
@@ -1652,6 +1664,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->margin.top = vertical;
                         span->bound->margin.bottom = vertical;
                         log_debug("[CSS Switch] Set margin top/bottom = %.2f", vertical);
+                    } else if (values[0]->type == CSS_VALUE_NUMBER) {
+                        float vertical = values[0]->data.number.value;
+                        span->bound->margin.top = vertical;
+                        span->bound->margin.bottom = vertical;
+                        log_debug("[CSS Switch] Set margin top/bottom = %.2f (from number)", vertical);
                     } else if (values[0]->type == CSS_VALUE_KEYWORD) {
                         span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
                         span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
@@ -1665,6 +1682,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->margin.left = horizontal;
                         span->bound->margin.right = horizontal;
                         log_debug("[CSS Switch] Set margin left/right = %.2f", horizontal);
+                        log_debug("[CSS] Margin (2 values): %.2f %.2f px",
+                                values[0]->data.length.value, horizontal);
+                    } else if (values[1]->type == CSS_VALUE_NUMBER) {
+                        float horizontal = values[1]->data.number.value;
+                        span->bound->margin.left = horizontal;
+                        span->bound->margin.right = horizontal;
+                        log_debug("[CSS Switch] Set margin left/right = %.2f (from number)", horizontal);
                         log_debug("[CSS] Margin (2 values): %.2f %.2f px",
                                 values[0]->data.length.value, horizontal);
                     } else if (values[1]->type == CSS_VALUE_KEYWORD) {
@@ -1787,6 +1811,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     } else if (v->type == CSS_VALUE_PERCENTAGE) {
                         float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
                         return v->data.percentage.value * parent_width / 100.0f;
+                    } else if (v->type == CSS_VALUE_NUMBER) {
+                        // Unitless number, treat as pixels (like margin fix)
+                        return (float)v->data.number.value;
                     }
                     return 0.0f;
                 };
@@ -2922,10 +2949,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && values[0]->type == CSS_VALUE_LENGTH && values[1]->type == CSS_VALUE_LENGTH) {
+                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) && 
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER)) {
                     // top/bottom, left/right
-                    float vertical = values[0]->data.length.value;
-                    float horizontal = values[1]->data.length.value;
+                    float vertical = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float horizontal = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->width.top_specificity) {
@@ -2945,12 +2973,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->width.right_specificity = specificity;
                     }
                     log_debug("[CSS] Border-width (2 values): %.2f %.2f px", vertical, horizontal);
-                } else if (count == 3 && values[0]->type == CSS_VALUE_LENGTH &&
-                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH) {
+                } else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
                     // top, left/right, bottom
-                    float top = values[0]->data.length.value;
-                    float horizontal = values[1]->data.length.value;
-                    float bottom = values[2]->data.length.value;
+                    float top = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float horizontal = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->width.top_specificity) {
@@ -2970,14 +2999,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->width.bottom_specificity = specificity;
                     }
                     log_debug("[CSS] Border-width (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
-                } else if (count == 4 && values[0]->type == CSS_VALUE_LENGTH &&
-                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH &&
-                           values[3]->type == CSS_VALUE_LENGTH) {
+                } else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
+                           (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
                     // top, right, bottom, left
-                    float top = values[0]->data.length.value;
-                    float right = values[1]->data.length.value;
-                    float bottom = values[2]->data.length.value;
-                    float left = values[3]->data.length.value;
+                    float top = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float right = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float left = (values[3]->type == CSS_VALUE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->width.top_specificity) {
@@ -3166,10 +3196,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && values[0]->type == CSS_VALUE_LENGTH && values[1]->type == CSS_VALUE_LENGTH) {
+                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) && 
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER)) {
                     // top-left/bottom-right, top-right/bottom-left
-                    float diagonal1 = values[0]->data.length.value;
-                    float diagonal2 = values[1]->data.length.value;
+                    float diagonal1 = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float diagonal2 = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = diagonal1;
@@ -3188,12 +3219,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->radius.bl_specificity = specificity;
                     }
                     log_debug("[CSS] Border-radius (2 values): %.2f %.2f px", diagonal1, diagonal2);
-                } else if (count == 3 && values[0]->type == CSS_VALUE_LENGTH &&
-                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH) {
+                } else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
                     // top-left, top-right/bottom-left, bottom-right
-                    float top_left = values[0]->data.length.value;
-                    float diagonal = values[1]->data.length.value;
-                    float bottom_right = values[2]->data.length.value;
+                    float top_left = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float diagonal = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom_right = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = top_left;
@@ -3212,14 +3244,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->radius.bl_specificity = specificity;
                     }
                     log_debug("[CSS] Border-radius (3 values): %.2f %.2f %.2f px", top_left, diagonal, bottom_right);
-                } else if (count == 4 && values[0]->type == CSS_VALUE_LENGTH &&
-                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH &&
-                           values[3]->type == CSS_VALUE_LENGTH) {
+                } else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) && 
+                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
+                           (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
                     // top-left, top-right, bottom-right, bottom-left
-                    float top_left = values[0]->data.length.value;
-                    float top_right = values[1]->data.length.value;
-                    float bottom_right = values[2]->data.length.value;
-                    float bottom_left = values[3]->data.length.value;
+                    float top_left = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float top_right = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom_right = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float bottom_left = (values[3]->type == CSS_VALUE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = top_left;
