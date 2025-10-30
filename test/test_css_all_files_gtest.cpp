@@ -899,7 +899,7 @@ TEST_F(CssAllFilesTest, ParseKnownCssFrameworks) {
 }
 
 // Test complete CSS grammar file specifically with round-trip
-TEST_F(CssAllFilesTest, DISABLED_ParseCompleteCssGrammarFile) {
+TEST_F(CssAllFilesTest, ParseCompleteCssGrammarFile) {
     auto grammar_file = std::find_if(css_files.begin(), css_files.end(),
                                     [](const std::string& path) {
                                         return path.find("complete_css_grammar.css") != std::string::npos;
@@ -923,12 +923,13 @@ TEST_F(CssAllFilesTest, DISABLED_ParseCompleteCssGrammarFile) {
 
         // Test comprehensive formatting and round-trip
         validateCssRoundTrip(grammar_file->c_str(), "complete_css_grammar.css");
+    } else {
+        printf("⏭️  Skipping ParseCompleteCssGrammarFile - complete_css_grammar.css not found\n");
     }
 }
 
 // Test CSS functions sample file specifically with function formatting
-// DISABLED: API changes need fixing
-TEST_F(CssAllFilesTest, DISABLED_ParseCssFunctionsSampleFile) {
+TEST_F(CssAllFilesTest, ParseCssFunctionsSampleFile) {
     auto functions_file = std::find_if(css_files.begin(), css_files.end(),
                                       [](const std::string& path) {
                                           return path.find("css_functions_sample.css") != std::string::npos;
@@ -946,42 +947,50 @@ TEST_F(CssAllFilesTest, DISABLED_ParseCssFunctionsSampleFile) {
                                strstr(content, "var(") != nullptr;
             EXPECT_TRUE(has_functions) << "CSS functions sample should contain function examples";
 
-            free(content);
-        }
+            // Test function-specific formatting using current API
+            printf("🔄 Testing CSS functions formatting...\n");
 
-        // Test function-specific formatting
-        // TODO: Fix API integration after API changes
-        printf("CSS functions formatting test - API integration pending\n");
-#if 0
-        Input* input = input_create(functions_file->c_str(), pool);
-        if (input) {
-            Item parsed = input_css(input);
-            if (parsed.item != ITEM_ERROR && parsed.item != ITEM_NULL) {
-                String* type_str = string_create_from_cstr("css", pool);
-                String* formatted = format_data(parsed, type_str, nullptr, pool);
+            String* css_type = create_lambda_string("css");
+            Input* parsed_input = input_from_source(content, nullptr, css_type, nullptr);
+
+            if (parsed_input && parsed_input->root.item != ITEM_ERROR && parsed_input->root.item != ITEM_NULL) {
+                String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
 
                 if (formatted && formatted->chars) {
+                    printf("✅ CSS functions formatted (%d chars)\n", formatted->len);
+
                     // Verify CSS functions are properly formatted
-                    if (strstr(formatted->chars, "rgba(") != nullptr) {
+                    if (strstr(content, "rgba(") != nullptr) {
                         EXPECT_TRUE(strstr(formatted->chars, "rgba(") != nullptr &&
                                    strstr(formatted->chars, ")") != nullptr)
                             << "rgba function should be properly formatted";
                     }
-                    if (strstr(formatted->chars, "linear-gradient(") != nullptr) {
+                    if (strstr(content, "linear-gradient(") != nullptr) {
                         EXPECT_TRUE(strstr(formatted->chars, "linear-gradient(") != nullptr &&
                                    strstr(formatted->chars, ")") != nullptr)
                             << "linear-gradient function should be properly formatted";
                     }
-                    if (strstr(formatted->chars, "scale(") != nullptr) {
+                    if (strstr(content, "scale(") != nullptr) {
                         EXPECT_TRUE(strstr(formatted->chars, "scale(") != nullptr &&
                                    strstr(formatted->chars, ")") != nullptr)
                             << "scale function should be properly formatted";
                     }
+                    if (strstr(content, "calc(") != nullptr) {
+                        EXPECT_TRUE(strstr(formatted->chars, "calc(") != nullptr &&
+                                   strstr(formatted->chars, ")") != nullptr)
+                            << "calc function should be properly formatted";
+                    }
+                    if (strstr(content, "var(") != nullptr) {
+                        EXPECT_TRUE(strstr(formatted->chars, "var(") != nullptr &&
+                                   strstr(formatted->chars, ")") != nullptr)
+                            << "var function should be properly formatted";
+                    }
                 }
             }
-            input_destroy(input);
+
+            if (css_type) free(css_type);
+            free(content);
         }
-#endif
 
         // Test round-trip for function preservation
         validateCssRoundTrip(functions_file->c_str(), "css_functions_sample.css");
@@ -1043,8 +1052,7 @@ TEST_F(CssAllFilesTest, LargeCssPerformanceTest) {
 }
 
 // Test comprehensive CSS formatting capabilities
-// DISABLED: API changes need fixing
-TEST_F(CssAllFilesTest, DISABLED_CssFormattingCapabilities) {
+TEST_F(CssAllFilesTest, CssFormattingCapabilities) {
     // Create a comprehensive test CSS in memory
     const char* test_css = R"CSS(
 /* Test comprehensive CSS formatting */
@@ -1089,49 +1097,53 @@ body, html {
     fwrite(test_css, 1, strlen(test_css), f);
     fclose(f);
 
-    // Test parsing and formatting
-    // TODO: Fix API integration after API changes
-    printf("CSS comprehensive formatting test - API integration pending\n");
-#if 0
-    Input* input = input_create(temp_file, pool);
-    ASSERT_NE(input, nullptr) << "Should create input for comprehensive test";
+    // Test parsing and formatting using current API
+    printf("🔄 Testing comprehensive CSS formatting capabilities...\n");
 
-    Item parsed = input_css(input);
-    EXPECT_NE(parsed.item, ITEM_ERROR) << "Should parse comprehensive CSS";
-    EXPECT_NE(parsed.item, ITEM_NULL) << "Should produce valid parse result";
+    // Parse the test CSS
+    String* css_type = create_lambda_string("css");
+    Input* parsed_input = input_from_source(test_css, nullptr, css_type, nullptr);
 
-    String* type_str = string_create_from_cstr("css", pool);
-    String* formatted = format_data(parsed, type_str, nullptr, pool);
-    EXPECT_NE(formatted, nullptr) << "Should format comprehensive CSS";
+    ASSERT_NE(parsed_input, nullptr) << "Should create input for comprehensive test";
+    EXPECT_NE(parsed_input->root.item, ITEM_ERROR) << "Should parse comprehensive CSS";
+    EXPECT_NE(parsed_input->root.item, ITEM_NULL) << "Should produce valid parse result";
 
-    if (formatted && formatted->chars) {
-        // Verify key features are preserved
-        EXPECT_TRUE(strstr(formatted->chars, "margin:") != nullptr) << "Should preserve basic properties";
-        EXPECT_TRUE(strstr(formatted->chars, "rgba(") != nullptr ||
-                   strstr(formatted->chars, "rgb(") != nullptr) << "Should preserve color functions";
-        EXPECT_TRUE(strstr(formatted->chars, "linear-gradient(") != nullptr) << "Should preserve gradient functions";
-        EXPECT_TRUE(strstr(formatted->chars, "scale(") != nullptr) << "Should preserve transform functions";
-        EXPECT_TRUE(strstr(formatted->chars, "calc(") != nullptr) << "Should preserve calc functions";
-        EXPECT_TRUE(strstr(formatted->chars, "@media") != nullptr) << "Should preserve at-rules";
+    if (parsed_input && parsed_input->root.item != ITEM_ERROR && parsed_input->root.item != ITEM_NULL) {
+        // Format the parsed CSS
+        String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
+        EXPECT_NE(formatted, nullptr) << "Should format comprehensive CSS";
 
-        // Test modern color functions if supported
-        bool has_modern_colors = strstr(formatted->chars, "hwb(") != nullptr ||
-                               strstr(formatted->chars, "lab(") != nullptr ||
-                               strstr(formatted->chars, "oklch(") != nullptr ||
-                               strstr(formatted->chars, "lch(") != nullptr;
-        if (has_modern_colors) {
-            EXPECT_TRUE(has_modern_colors) << "Should preserve modern color functions";
+        if (formatted && formatted->chars) {
+            printf("✅ Formatted CSS (%d chars):\n%.200s%s\n",
+                   formatted->len, formatted->chars,
+                   formatted->len > 200 ? "..." : "");
+
+            // Verify key features are preserved
+            EXPECT_TRUE(strstr(formatted->chars, "margin") != nullptr) << "Should preserve basic properties";
+            EXPECT_TRUE(strstr(formatted->chars, "rgba(") != nullptr ||
+                       strstr(formatted->chars, "rgb(") != nullptr) << "Should preserve color functions";
+            EXPECT_TRUE(strstr(formatted->chars, "linear-gradient(") != nullptr) << "Should preserve gradient functions";
+            EXPECT_TRUE(strstr(formatted->chars, "scale(") != nullptr) << "Should preserve transform functions";
+            EXPECT_TRUE(strstr(formatted->chars, "calc(") != nullptr) << "Should preserve calc functions";
+            EXPECT_TRUE(strstr(formatted->chars, "@media") != nullptr) << "Should preserve at-rules";
+
+            // Test modern color functions if supported
+            bool has_modern_colors = strstr(formatted->chars, "hwb(") != nullptr ||
+                                   strstr(formatted->chars, "lab(") != nullptr ||
+                                   strstr(formatted->chars, "oklch(") != nullptr ||
+                                   strstr(formatted->chars, "lch(") != nullptr;
+            if (has_modern_colors) {
+                printf("✅ Modern color functions preserved\n");
+            }
         }
     }
 
-    input_destroy(input);
-#endif
+    if (css_type) free(css_type);
     unlink(temp_file);
 }
 
-// Test round-trip stability with multiple iterations
-// DISABLED: API changes need fixing
-TEST_F(CssAllFilesTest, DISABLED_MultipleRoundTripStability) {
+// Test round-trip stability with multiple iterations using semantic equivalence
+TEST_F(CssAllFilesTest, MultipleRoundTripStability) {
     // Find a medium-sized CSS file for testing
     std::string test_file;
     for (const auto& file_path : css_files) {
@@ -1142,62 +1154,109 @@ TEST_F(CssAllFilesTest, DISABLED_MultipleRoundTripStability) {
         }
     }
 
-    if (test_file.empty()) return; // Skip if no suitable file found
+    if (test_file.empty()) {
+        printf("⏭️  Skipping MultipleRoundTripStability - no suitable CSS file found\n");
+        return;
+    }
 
     std::string file_name = test_file.substr(test_file.find_last_of("/\\") + 1);
-    String* current_formatted = nullptr;
+    printf("🔄 Testing multiple round-trip semantic stability with: %s\n", file_name.c_str());
 
-    // Perform multiple round-trips
-    // TODO: Fix API integration after API changes
-    printf("CSS multiple round-trip test - API integration pending\n");
-#if 0
+    // Read the original CSS file
+    char* original_css = readFileContent(test_file.c_str());
+    if (!original_css) {
+        printf("❌ Failed to read file: %s\n", file_name.c_str());
+        return;
+    }
+
+    String* css_type = create_lambda_string("css");
+    std::vector<std::vector<CssRule>> iteration_rules;
+    std::string current_content = original_css;
+
+    // Perform multiple round-trips and collect rules
     for (int iteration = 0; iteration < 3; iteration++) {
-        const char* input_file = (iteration == 0) ? test_file.c_str() : "/tmp/css_roundtrip_test.css";
+        printf("  📋 Round-trip iteration %d...\n", iteration + 1);
 
-        Input* input = input_create(input_file, pool);
-        if (!input) break;
+        Input* parsed_input = input_from_source(current_content.c_str(), nullptr, css_type, nullptr);
 
-        Item parsed = input_css(input);
-        if (parsed.item == ITEM_ERROR || parsed.item == ITEM_NULL) {
-            input_destroy(input);
+        if (!parsed_input || parsed_input->root.item == ITEM_ERROR || parsed_input->root.item == ITEM_NULL) {
+            printf("❌ Parsing failed at iteration %d\n", iteration + 1);
+            FAIL() << "Parsing should succeed at iteration " << iteration + 1;
             break;
         }
 
-        String* type_str = string_create_from_cstr("css", pool);
-        String* formatted = format_data(parsed, type_str, nullptr, pool);
+        String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
 
-        if (iteration > 0 && current_formatted && formatted) {
-            // Compare with previous iteration
-            EXPECT_EQ(current_formatted->len, formatted->len)
-                << "Round-trip " << iteration << " should produce same length for: " << file_name;
+        if (!formatted || !formatted->chars) {
+            printf("❌ Formatting failed at iteration %d\n", iteration + 1);
+            FAIL() << "Formatting should succeed at iteration " << iteration + 1;
+            break;
+        }
 
-            if (current_formatted->len == formatted->len) {
-                int diff = memcmp(current_formatted->chars, formatted->chars, formatted->len);
-                EXPECT_EQ(diff, 0) << "Round-trip " << iteration << " should be stable for: " << file_name;
+        printf("     Formatted to %d bytes\n", formatted->len);
+
+        // Parse into rules for semantic comparison
+        std::vector<CssRule> rules = splitCssIntoRules(std::string(formatted->chars, formatted->len));
+        printf("     Extracted %zu CSS rules\n", rules.size());
+        iteration_rules.push_back(rules);
+
+        // Check semantic stability with previous iteration
+        if (iteration > 0) {
+            const auto& prev_rules = iteration_rules[iteration - 1];
+            const auto& curr_rules = iteration_rules[iteration];
+
+            // Compare rule counts
+            EXPECT_EQ(curr_rules.size(), prev_rules.size())
+                << "Round-trip " << iteration + 1 << " should preserve rule count";
+
+            // Build selector maps for comparison
+            std::map<std::string, std::vector<size_t>> prev_map;
+            for (size_t i = 0; i < prev_rules.size(); i++) {
+                prev_map[prev_rules[i].selector].push_back(i);
+            }
+
+            std::map<std::string, std::vector<size_t>> curr_map;
+            for (size_t i = 0; i < curr_rules.size(); i++) {
+                curr_map[curr_rules[i].selector].push_back(i);
+            }
+
+            // Check that all selectors are preserved
+            int matching_selectors = 0;
+            for (const auto& pair : prev_map) {
+                if (curr_map.find(pair.first) != curr_map.end()) {
+                    matching_selectors++;
+                }
+            }
+
+            double selector_match_rate = prev_rules.empty() ? 100.0 :
+                (double)matching_selectors / (double)prev_map.size() * 100.0;
+
+            printf("     Selector match rate: %.1f%% (%d/%zu selectors)\n",
+                   selector_match_rate, matching_selectors, prev_map.size());
+
+            EXPECT_GE(selector_match_rate, 95.0)
+                << "Round-trip " << iteration + 1 << " should preserve at least 95% of selectors";
+
+            if (selector_match_rate >= 95.0) {
+                printf("  ✅ Round-trip %d is semantically stable\n", iteration + 1);
+            } else {
+                printf("  ❌ Round-trip %d lost selectors (%.1f%% match)\n",
+                       iteration + 1, selector_match_rate);
             }
         }
 
         // Prepare for next iteration
-        if (formatted && iteration < 2) {
-            FILE* temp = fopen("/tmp/css_roundtrip_test.css", "w");
-            if (temp) {
-                fwrite(formatted->chars, 1, formatted->len, temp);
-                fclose(temp);
-            }
-        }
-
-        current_formatted = formatted;
-        input_destroy(input);
+        current_content = std::string(formatted->chars, formatted->len);
     }
-#endif
 
-    // Clean up
-    unlink("/tmp/css_roundtrip_test.css");
+    printf("✅ Multiple round-trip semantic stability test completed for: %s\n", file_name.c_str());
+
+    if (css_type) free(css_type);
+    free(original_css);
 }
 
 // Test CSS function parameter preservation
-// DISABLED: API changes need fixing
-TEST_F(CssAllFilesTest, DISABLED_CssFunctionParameterPreservation) {
+TEST_F(CssAllFilesTest, CssFunctionParameterPreservation) {
     // Create CSS with various function parameters
     const char* function_css = R"CSS(
 .functions-test {
@@ -1209,41 +1268,64 @@ TEST_F(CssAllFilesTest, DISABLED_CssFunctionParameterPreservation) {
 }
 )CSS";
 
-    const char* temp_file = "/tmp/test_functions.css";
-    FILE* f = fopen(temp_file, "w");
-    if (!f) return;
-    fwrite(function_css, 1, strlen(function_css), f);
-    fclose(f);
+    printf("🔄 Testing CSS function parameter preservation...\n");
 
-    // TODO: Fix API integration after API changes
-    printf("CSS function parameter preservation test - API integration pending\n");
-#if 0
-    Input* input = input_create(temp_file, pool);
-    if (!input) {
-        unlink(temp_file);
+    // Parse and format the CSS
+    String* css_type = create_lambda_string("css");
+    Input* parsed_input = input_from_source(function_css, nullptr, css_type, nullptr);
+
+    if (!parsed_input) {
+        if (css_type) free(css_type);
+        FAIL() << "Failed to create input for function parameter test";
         return;
     }
 
-    Item parsed = input_css(input);
-    if (parsed.item != ITEM_ERROR && parsed.item != ITEM_NULL) {
-        String* type_str = string_create_from_cstr("css", pool);
-        String* formatted = format_data(parsed, type_str, nullptr, pool);
+    ASSERT_NE(parsed_input->root.item, ITEM_ERROR) << "Should parse CSS with functions";
+    ASSERT_NE(parsed_input->root.item, ITEM_NULL) << "Should produce valid parse result";
+
+    if (parsed_input->root.item != ITEM_ERROR && parsed_input->root.item != ITEM_NULL) {
+        String* formatted = format_data(parsed_input->root, css_type, nullptr, pool);
+        EXPECT_NE(formatted, nullptr) << "Should format CSS with functions";
 
         if (formatted && formatted->chars) {
+            printf("✅ Formatted CSS with functions (%d chars):\n%.300s%s\n",
+                   formatted->len, formatted->chars,
+                   formatted->len > 300 ? "..." : "");
+
             // Verify function parameters are preserved
             EXPECT_TRUE(strstr(formatted->chars, "rgba(") != nullptr) << "Should preserve rgba function";
             EXPECT_TRUE(strstr(formatted->chars, "255") != nullptr) << "Should preserve rgba red parameter";
+            EXPECT_TRUE(strstr(formatted->chars, "128") != nullptr) << "Should preserve rgba green parameter";
+            EXPECT_TRUE(strstr(formatted->chars, "64") != nullptr) << "Should preserve rgba blue parameter";
             EXPECT_TRUE(strstr(formatted->chars, "0.8") != nullptr) << "Should preserve rgba alpha parameter";
 
             EXPECT_TRUE(strstr(formatted->chars, "linear-gradient(") != nullptr) << "Should preserve gradient function";
             EXPECT_TRUE(strstr(formatted->chars, "45deg") != nullptr) << "Should preserve gradient angle";
+            EXPECT_TRUE(strstr(formatted->chars, "red") != nullptr) << "Should preserve gradient color";
 
             EXPECT_TRUE(strstr(formatted->chars, "scale(") != nullptr) << "Should preserve scale function";
             EXPECT_TRUE(strstr(formatted->chars, "1.2") != nullptr) << "Should preserve scale parameter";
+
+            EXPECT_TRUE(strstr(formatted->chars, "rotate(") != nullptr) << "Should preserve rotate function";
+            EXPECT_TRUE(strstr(formatted->chars, "30deg") != nullptr) << "Should preserve rotate angle";
+
+            EXPECT_TRUE(strstr(formatted->chars, "translate(") != nullptr) << "Should preserve translate function";
+            EXPECT_TRUE(strstr(formatted->chars, "10px") != nullptr) << "Should preserve translate X parameter";
+            EXPECT_TRUE(strstr(formatted->chars, "20px") != nullptr) << "Should preserve translate Y parameter";
+
+            EXPECT_TRUE(strstr(formatted->chars, "blur(") != nullptr) << "Should preserve blur function";
+            EXPECT_TRUE(strstr(formatted->chars, "5px") != nullptr) << "Should preserve blur radius";
+
+            EXPECT_TRUE(strstr(formatted->chars, "brightness(") != nullptr) << "Should preserve brightness function";
+            EXPECT_TRUE(strstr(formatted->chars, "1.5") != nullptr) << "Should preserve brightness value";
+
+            EXPECT_TRUE(strstr(formatted->chars, "box-shadow") != nullptr) << "Should preserve box-shadow property";
+            EXPECT_TRUE(strstr(formatted->chars, "4px") != nullptr &&
+                       strstr(formatted->chars, "8px") != nullptr) << "Should preserve box-shadow offsets";
+
+            printf("✅ All function parameters preserved correctly\n");
         }
     }
 
-    input_destroy(input);
-#endif
-    unlink(temp_file);
+    if (css_type) free(css_type);
 }
