@@ -662,7 +662,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
     // handle shorthand properties by expanding to longhands
     bool is_shorthand = css_property_is_shorthand(prop_id);
-    log_debug("[Lambda CSS Property] is_shorthand=%d for prop_id=%d", is_shorthand, prop_id);
+    log_debug("[Lambda CSS Property] is_shorthand=%d for prop_id=%d (CSS_PROPERTY_FLEX=%d)", is_shorthand, prop_id, CSS_PROPERTY_FLEX);
 
     // DEBUG: manually check the property
     const CssProperty* dbg_prop = css_property_get_by_id(prop_id);
@@ -1022,9 +1022,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             return;
         }
 
-        // other shorthands not yet implemented
-        log_debug("[Lambda CSS Shorthand] Shorthand %d expansion not yet implemented", prop_id);
-        return;
+        if (prop_id == CSS_PROPERTY_FLEX) {
+            // flex shorthand should be handled by the switch statement below
+            // don't return here - let it fall through
+            log_debug("[Lambda CSS Shorthand] flex shorthand (ID=%d): letting switch statement handle it", prop_id);
+        } else {
+            // other shorthands not yet implemented
+            log_debug("[Lambda CSS Shorthand] Shorthand %d expansion not yet implemented", prop_id);
+            return;
+        }
     }    int32_t specificity = get_lambda_specificity(decl);
     log_debug("[Lambda CSS Property] Specificity: %d", specificity);
 
