@@ -1588,6 +1588,19 @@
                         "binary": "test_css_engine_unit.exe"
                     },
                     {
+                        "source": "test/css/unit/test_css_engine_negative.cpp",
+                        "name": "🎨 CSS Engine Negative Tests (Error Handling)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_engine_negative.exe"
+                    },
+                    {
                         "source": "test/css/unit/test_dom_element_print.cpp",
                         "name": "🎨 DOM Element Print Tests",
                         "dependencies": [],
