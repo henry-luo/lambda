@@ -916,6 +916,19 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                         value->data.keyword = pool_strdup(pool, token_val);
                     }
                 }
+            } else if (tokens[i].type == CSS_TOKEN_STRING) {
+                // Handle string tokens (e.g., "«", "»" for content property)
+                value->type = CSS_VALUE_STRING;
+                const char* str_val = tokens[i].value;
+                if (!str_val && tokens[i].start && tokens[i].length > 0) {
+                    char* temp_str = (char*)pool_calloc(pool, tokens[i].length + 1);
+                    if (temp_str) {
+                        memcpy(temp_str, tokens[i].start, tokens[i].length);
+                        temp_str[tokens[i].length] = '\0';
+                        str_val = temp_str;
+                    }
+                }
+                value->data.string = str_val ? pool_strdup(pool, str_val) : "";
             } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
                 value->type = CSS_VALUE_NUMBER;
                 value->data.number.value = tokens[i].data.number_value;
@@ -1051,6 +1064,19 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                         value->data.keyword = pool_strdup(pool, token_val);
                     }
                 }
+            } else if (tokens[i].type == CSS_TOKEN_STRING) {
+                // Handle string tokens (e.g., "«", "»" for content property)
+                value->type = CSS_VALUE_STRING;
+                const char* str_val = tokens[i].value;
+                if (!str_val && tokens[i].start && tokens[i].length > 0) {
+                    char* temp_str = (char*)pool_calloc(pool, tokens[i].length + 1);
+                    if (temp_str) {
+                        memcpy(temp_str, tokens[i].start, tokens[i].length);
+                        temp_str[tokens[i].length] = '\0';
+                        str_val = temp_str;
+                    }
+                }
+                value->data.string = str_val ? pool_strdup(pool, str_val) : "";
             } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
                 value->type = CSS_VALUE_NUMBER;
                 value->data.number.value = tokens[i].data.number_value;
