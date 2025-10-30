@@ -1,6 +1,7 @@
 #include "input.h"
 #include "input-html-scan.h"
 #include "input-html-tokens.h"
+#include "input-html-tree.h"
 #include <stdarg.h>
 
 static Item parse_element(Input *input, const char **html, const char *html_start);
@@ -162,11 +163,11 @@ static Item parse_comment(Input* input, const char **html, const char* html_star
         }
         String* comment_text = stringbuf_to_string(sb);
         Item text_item = {.item = s2it(comment_text)};
-        list_push((List*)element, text_item);
+        html_append_child(element, text_item);
     }
 
     // Set content length
-    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+    html_set_content_length(element);
 
     *html += 3; // Skip -->
 
@@ -220,11 +221,11 @@ static Item parse_doctype(Input* input, const char **html, const char* html_star
         }
         String* doctype_text = stringbuf_to_string(sb);
         Item text_item = {.item = s2it(doctype_text)};
-        list_push((List*)element, text_item);
+        html_append_child(element, text_item);
     }
 
     // Set content length
-    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+    html_set_content_length(element);
 
     *html += 1; // Skip '>'
 
@@ -272,11 +273,11 @@ static Item parse_xml_declaration(Input* input, const char **html, const char* h
         }
         String* decl_text = stringbuf_to_string(sb);
         Item text_item = {.item = s2it(decl_text)};
-        list_push((List*)element, text_item);
+        html_append_child(element, text_item);
     }
 
     // Set content length
-    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+    html_set_content_length(element);
 
     return {.element = element};
 }
@@ -323,11 +324,11 @@ static bool is_aria_attribute(const char* attr_name) {
 }
 
 static Item parse_element(Input *input, const char **html, const char *html_start) {
-    static int parse_depth = 0;
-    parse_depth++;
+    html_enter_element();
+    int parse_depth = html_get_parse_depth();
 
     if (**html != '<') {
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected character '%c' at beginning of element", **html);
         return {.item = ITEM_ERROR};
     }
@@ -335,7 +336,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     // Parse comments as special elements
     if (strncmp(*html, "<!--", 4) == 0) {
         Item comment = parse_comment(input, html, html_start);
-        parse_depth--;
+        html_exit_element();
         return comment;
     }
 
@@ -345,10 +346,10 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         skip_whitespace(html);
         if (**html) {
             Item result = parse_element(input, html, html_start); // Try next element
-            parse_depth--;
+            html_exit_element();
             return result;
         }
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input after doctype");
         return {.item = ITEM_NULL};
     }
@@ -359,10 +360,10 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         skip_whitespace(html);
         if (**html) {
             Item result = parse_element(input, html, html_start); // Try next element
-            parse_depth--;
+            html_exit_element();
             return result;
         }
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input after processing instruction");
         return {.item = ITEM_NULL};
     }
@@ -373,10 +374,10 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         skip_whitespace(html);
         if (**html) {
             Item result = parse_element(input, html, html_start); // Try next element
-            parse_depth--;
+            html_exit_element();
             return result;
         }
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input after cdata");
         return {.item = ITEM_NULL};
     }
@@ -392,14 +393,14 @@ static Item parse_element(Input *input, const char **html, const char *html_star
             (*html)++;
         }
         if (**html) (*html)++; // Skip >
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input after end tag");
         return {.item = ITEM_NULL};
     }
 
     String* tag_name = parse_tag_name(input, html);
     if (!tag_name || tag_name->len == 0) {
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input after start tag");
         return {.item = ITEM_ERROR};
     }
@@ -407,14 +408,14 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     // Create element using shared function
     Element* element = input_create_element(input, tag_name->chars);
     if (!element) {
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input");
         return {.item = ITEM_ERROR};
     }
 
     // Parse attributes directly into the element
     if (!parse_attributes(input, element, html, html_start)) {
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Failed to parse attribute");
         return {.item = ITEM_ERROR};
     }
@@ -427,7 +428,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     }
 
     if (**html != '>') {
-        parse_depth--;
+        html_exit_element();
         log_parse_error(html_start, *html, "Unexpected character '%c' while parsing element", **html);
         return {.item = ITEM_ERROR};
     }
@@ -464,7 +465,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
             if (content_chars < MAX_CONTENT_CHARS && content_sb->length > 0) {
                 String *content_string = stringbuf_to_string(content_sb);
                 Item content_item = {.item = s2it(content_string)};
-                list_push((List*)element, content_item);
+                html_append_child(element, content_item);
             } else if (content_chars >= MAX_CONTENT_CHARS) {
                 log_warn("Raw text content exceeded limit (%d chars) in <%s> element", MAX_CONTENT_CHARS, tag_name->chars);
                 stringbuf_reset(content_sb);
@@ -509,7 +510,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
                             break;
                         }
                         else if (child_type != LMD_TYPE_NULL) {
-                            list_push((List*)element, child);
+                            html_append_child(element, child);
                         }
 
                         // Additional safety check for child parsing
@@ -538,7 +539,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
                         log_debug("got text content: '%t'", text_string->chars);
                         Item text_item = {.item = s2it(text_string)};
                         log_debug("pushing text to element %p", element);
-                        list_push((List*)element, text_item);
+                        html_append_child(element, text_item);
                     }
                 }
 
@@ -559,10 +560,10 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         }
 
         // Set content length based on element's list length
-        ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+        html_set_content_length(element);
     }
 
-    parse_depth--;
+    html_exit_element();
     return {.element = element};
 }
 

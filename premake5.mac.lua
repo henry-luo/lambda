@@ -628,6 +628,7 @@ project "lambda"
         "lambda/input/input-toml.cpp",
         "lambda/input/input-mdx.cpp",
         "lambda/input/input_dir.cpp",
+        "lambda/input/input-html-tree.cpp",
         "lambda/input/input-yaml.cpp",
         "lambda/input/input-html.cpp",
         "lambda/input/input-eml.cpp",
