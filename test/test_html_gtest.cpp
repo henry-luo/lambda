@@ -1719,3 +1719,72 @@ TEST_F(HtmlParserTest, ParserContextExplicitElements) {
     arraylist_free(test_input.type_list);
     pool_destroy(test_input.pool);
 }
+
+// ============================================================================
+// Phase 3 Integration Tests: Context Usage in Real Parsing
+// ============================================================================
+
+TEST_F(HtmlParserTest, IntegrationContextExplicitHtmlElement) {
+    // Parse HTML with explicit <html> tag
+    Item result = parseHtml("<html><body><p>Test</p></body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    ASSERT_NE(html, nullptr);
+
+    TypeElmt* type = (TypeElmt*)html->type;
+    EXPECT_TRUE(strview_equal(&type->name, "html"));
+
+    // Should find body and p as children
+    Element* body = findElementByTag(result, "body");
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(body, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, IntegrationContextExplicitHeadElement) {
+    // Parse HTML with explicit <head> tag
+    Item result = parseHtml("<html><head><title>Test</title></head><body></body></html>");
+
+    Element* head = findElementByTag(result, "head");
+    ASSERT_NE(head, nullptr);
+
+    Element* title = findElementByTag(result, "title");
+    EXPECT_NE(title, nullptr);
+}
+
+TEST_F(HtmlParserTest, IntegrationContextExplicitBodyElement) {
+    // Parse HTML with explicit <body> tag
+    Item result = parseHtml("<html><body><div>Content</div></body></html>");
+
+    Element* body = findElementByTag(result, "body");
+    ASSERT_NE(body, nullptr);
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserTest, IntegrationContextCompleteDocument) {
+    // Parse a complete HTML5 document structure
+    Item result = parseHtml(R"(
+        <!DOCTYPE html>
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Test Page</title>
+            </head>
+            <body>
+                <h1>Heading</h1>
+                <p>Paragraph</p>
+            </body>
+        </html>
+    )");
+
+    // Should find all structural elements
+    EXPECT_NE(findElementByTag(result, "html"), nullptr);
+    EXPECT_NE(findElementByTag(result, "head"), nullptr);
+    EXPECT_NE(findElementByTag(result, "meta"), nullptr);
+    EXPECT_NE(findElementByTag(result, "title"), nullptr);
+    EXPECT_NE(findElementByTag(result, "body"), nullptr);
+    EXPECT_NE(findElementByTag(result, "h1"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
