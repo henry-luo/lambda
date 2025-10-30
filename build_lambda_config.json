@@ -1432,10 +1432,14 @@
                             "lambda/input/css/css_style_node.c",
                             "lambda/input/css/css_properties.c",
                             "lambda/input/css/css_property_value_parser.c",
+                            "lambda/input/css/css_formatter.c",
                             "lambda/input/css/dom_element.c",
                             "lambda/input/css/selector_matcher.c",
                             "lib/mempool.c",
                             "lib/string.c",
+                            "lib/strbuf.c",
+                            "lib/stringbuf.c",
+                            "lib/log.c",
                             "lib/hashmap.c",
                             "lib/arraylist.c"
                         ],
@@ -1455,10 +1459,14 @@
                             "lambda/input/css/css_style_node.c",
                             "lambda/input/css/css_properties.c",
                             "lambda/input/css/css_property_value_parser.c",
+                            "lambda/input/css/css_formatter.c",
                             "lambda/input/css/dom_element.c",
                             "lambda/input/css/selector_matcher.c",
                             "lib/mempool.c",
                             "lib/string.c",
+                            "lib/strbuf.c",
+                            "lib/stringbuf.c",
+                            "lib/log.c",
                             "lib/hashmap.c",
                             "lib/arraylist.c"
                         ],
@@ -1552,7 +1560,8 @@
                             "lambda/input/css/css_style_node.c",
                             "lambda/input/css/css_properties.c",
                             "lambda/input/css/css_parser.c",
-                            "lambda/input/css/css_property_value_parser.c"
+                            "lambda/input/css/css_property_value_parser.c",
+                            "lambda/input/css/css_formatter.c"
                         ],
                         "libraries": [
                             "gtest",
