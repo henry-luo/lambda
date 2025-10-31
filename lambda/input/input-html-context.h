@@ -22,6 +22,32 @@ typedef struct Input Input;
 typedef struct Element Element;
 
 /**
+ * HTML5 Insertion Modes
+ * These define the parser's state machine for proper element placement
+ */
+typedef enum {
+    HTML_MODE_INITIAL,           // Before any content
+    HTML_MODE_BEFORE_HTML,       // Before <html> element
+    HTML_MODE_BEFORE_HEAD,       // After <html>, before <head>
+    HTML_MODE_IN_HEAD,           // Inside <head> element
+    HTML_MODE_AFTER_HEAD,        // After </head>, before <body>
+    HTML_MODE_IN_BODY,           // Inside <body> element (default for content)
+    HTML_MODE_AFTER_BODY,        // After </body>
+    HTML_MODE_AFTER_AFTER_BODY   // After final content (comments, whitespace only)
+} HtmlInsertionMode;
+
+/**
+ * Phase 5: Open Element Stack
+ * Tracks currently open elements for proper nesting and misnested tag handling
+ */
+typedef struct HtmlElementStack {
+    Element** elements;     // Array of element pointers
+    size_t length;          // Number of elements in stack
+    size_t capacity;        // Allocated capacity
+    Pool* pool;             // Memory pool for allocations
+} HtmlElementStack;
+
+/**
  * HTML parser context structure
  * Tracks document structure and parser state during HTML parsing
  */
@@ -33,6 +59,12 @@ typedef struct HtmlParserContext {
 
     // Current insertion point for new elements
     Element* current_node;
+
+    // Phase 4.2: HTML5 Insertion Mode State Machine
+    HtmlInsertionMode insertion_mode;  // Current parser state
+
+    // Phase 5: Open Element Stack
+    HtmlElementStack* open_elements;   // Stack of currently open elements
 
     // Flags for tracking document state
     bool has_explicit_html;     // Did the source contain <html>?
@@ -117,6 +149,136 @@ void html_context_set_body(HtmlParserContext* ctx, Element* element);
  * @param ctx Parser context
  */
 void html_context_close_head(HtmlParserContext* ctx);
+
+/**
+ * Phase 4.2: Get current insertion mode
+ * @param ctx Parser context
+ * @return Current insertion mode
+ */
+HtmlInsertionMode html_context_get_mode(HtmlParserContext* ctx);
+
+/**
+ * Phase 4.2: Set insertion mode
+ * @param ctx Parser context
+ * @param mode New insertion mode
+ */
+void html_context_set_mode(HtmlParserContext* ctx, HtmlInsertionMode mode);
+
+/**
+ * Phase 4.2: Transition insertion mode based on tag being inserted
+ * Updates the insertion mode state machine based on element being processed
+ * @param ctx Parser context
+ * @param tag_name The tag being inserted
+ * @param is_closing_tag True if this is a closing tag
+ */
+void html_context_transition_mode(HtmlParserContext* ctx, const char* tag_name, bool is_closing_tag);
+
+// ============================================================================
+// Phase 5: Open Element Stack Functions
+// ============================================================================
+
+/**
+ * Create a new element stack
+ * @param pool Memory pool for allocations
+ * @return Newly allocated element stack
+ */
+HtmlElementStack* html_stack_create(Pool* pool);
+
+/**
+ * Destroy an element stack
+ * @param stack The stack to destroy
+ */
+void html_stack_destroy(HtmlElementStack* stack);
+
+/**
+ * Push an element onto the stack
+ * @param stack The element stack
+ * @param element The element to push
+ */
+void html_stack_push(HtmlElementStack* stack, Element* element);
+
+/**
+ * Pop an element from the stack
+ * @param stack The element stack
+ * @return The popped element, or NULL if stack is empty
+ */
+Element* html_stack_pop(HtmlElementStack* stack);
+
+/**
+ * Peek at the top element without removing it
+ * @param stack The element stack
+ * @return The top element, or NULL if stack is empty
+ */
+Element* html_stack_peek(HtmlElementStack* stack);
+
+/**
+ * Get element at specific index (0 = bottom, length-1 = top)
+ * @param stack The element stack
+ * @param index Index from bottom of stack
+ * @return Element at index, or NULL if out of bounds
+ */
+Element* html_stack_get(HtmlElementStack* stack, size_t index);
+
+/**
+ * Get the current number of elements in the stack
+ * @param stack The element stack
+ * @return Number of elements
+ */
+size_t html_stack_length(HtmlElementStack* stack);
+
+/**
+ * Check if the stack is empty
+ * @param stack The element stack
+ * @return True if empty
+ */
+bool html_stack_is_empty(HtmlElementStack* stack);
+
+/**
+ * Check if stack contains an element with the given tag name
+ * @param stack The element stack
+ * @param tag_name Tag name to search for
+ * @return True if found
+ */
+bool html_stack_contains(HtmlElementStack* stack, const char* tag_name);
+
+/**
+ * Find the index of the most recent element with the given tag name
+ * @param stack The element stack
+ * @param tag_name Tag name to search for
+ * @return Index of element (from bottom), or -1 if not found
+ */
+int html_stack_find(HtmlElementStack* stack, const char* tag_name);
+
+/**
+ * Remove all elements from the stack up to and including the specified element
+ * This is used for closing tags - pops elements until the matching opening tag is found
+ * @param stack The element stack
+ * @param element The element to pop up to
+ * @return True if element was found and popped
+ */
+bool html_stack_pop_until(HtmlElementStack* stack, Element* element);
+
+/**
+ * Remove all elements from the stack up to and including the element with the given tag
+ * @param stack The element stack
+ * @param tag_name Tag name to pop up to
+ * @return True if element was found and popped
+ */
+bool html_stack_pop_until_tag(HtmlElementStack* stack, const char* tag_name);
+
+/**
+ * Clear all elements from the stack
+ * @param stack The element stack
+ */
+void html_stack_clear(HtmlElementStack* stack);
+
+/**
+ * Get the current insertion point from the stack
+ * Returns the top element, or NULL if stack is empty
+ * @param stack The element stack
+ * @return Current insertion point element
+ */
+Element* html_stack_current_node(HtmlElementStack* stack);
 
 #ifdef __cplusplus
 }
