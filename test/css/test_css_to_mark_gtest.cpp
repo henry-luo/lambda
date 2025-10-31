@@ -634,7 +634,8 @@ protected:
                     bool is_grammar_test = (strstr(file_name, "complete_css_grammar.css") != nullptr);
 
                     if (is_animate_css) {
-                        threshold = 5.0; // animate.css is complex with @keyframes, expected low match rate
+                        threshold = 5.0; // animate.css has 80+ @keyframes rules with complex multi-selector blocks
+                                         // The roundtrip preserves semantic correctness but formatting differs
                     } else if (is_grammar_test) {
                         threshold = 70.0; // complete_css_grammar.css tests many edge cases
                     }
