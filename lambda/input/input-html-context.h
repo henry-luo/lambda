@@ -48,6 +48,23 @@ typedef struct HtmlElementStack {
 } HtmlElementStack;
 
 /**
+ * Phase 6: Active Formatting Elements List
+ * Tracks formatting elements (b, i, strong, em, etc.) for reconstruction
+ * Used for HTML5 adoption agency algorithm (simplified version)
+ */
+typedef struct HtmlFormattingElement {
+    Element* element;       // The formatting element
+    size_t stack_depth;     // Depth in open elements stack when added
+} HtmlFormattingElement;
+
+typedef struct HtmlFormattingList {
+    HtmlFormattingElement* elements;  // Array of formatting elements
+    size_t length;          // Number of elements
+    size_t capacity;        // Allocated capacity
+    Pool* pool;             // Memory pool for allocations
+} HtmlFormattingList;
+
+/**
  * HTML parser context structure
  * Tracks document structure and parser state during HTML parsing
  */
@@ -65,6 +82,9 @@ typedef struct HtmlParserContext {
 
     // Phase 5: Open Element Stack
     HtmlElementStack* open_elements;   // Stack of currently open elements
+
+    // Phase 6: Active Formatting Elements List
+    HtmlFormattingList* active_formatting;  // List of active formatting elements
 
     // Flags for tracking document state
     bool has_explicit_html;     // Did the source contain <html>?
@@ -279,6 +299,75 @@ void html_stack_clear(HtmlElementStack* stack);
  * @return Current insertion point element
  */
 Element* html_stack_current_node(HtmlElementStack* stack);
+
+// ============================================================================
+// Phase 6: Active Formatting Elements Functions
+// ============================================================================
+
+/**
+ * Create a new formatting elements list
+ * @param pool Memory pool for allocations
+ * @return Newly allocated formatting list
+ */
+HtmlFormattingList* html_formatting_create(Pool* pool);
+
+/**
+ * Destroy a formatting elements list
+ * @param list The list to destroy
+ */
+void html_formatting_destroy(HtmlFormattingList* list);
+
+/**
+ * Add a formatting element to the list
+ * @param list The formatting list
+ * @param element The element to add
+ * @param stack_depth Current depth in open elements stack
+ */
+void html_formatting_push(HtmlFormattingList* list, Element* element, size_t stack_depth);
+
+/**
+ * Remove the most recent occurrence of an element from the list
+ * @param list The formatting list
+ * @param element The element to remove
+ * @return True if element was found and removed
+ */
+bool html_formatting_remove(HtmlFormattingList* list, Element* element);
+
+/**
+ * Remove the most recent element with the given tag name
+ * @param list The formatting list
+ * @param tag_name Tag name to remove
+ * @return True if element was found and removed
+ */
+bool html_formatting_remove_tag(HtmlFormattingList* list, const char* tag_name);
+
+/**
+ * Check if the list contains an element with the given tag name
+ * @param list The formatting list
+ * @param tag_name Tag name to search for
+ * @return True if found
+ */
+bool html_formatting_contains(HtmlFormattingList* list, const char* tag_name);
+
+/**
+ * Clear all elements from the formatting list
+ * @param list The formatting list
+ */
+void html_formatting_clear(HtmlFormattingList* list);
+
+/**
+ * Get the number of elements in the formatting list
+ * @param list The formatting list
+ * @return Number of elements
+ */
+size_t html_formatting_length(HtmlFormattingList* list);
+
+/**
+ * Check if a tag is a formatting element
+ * @param tag_name Tag name to check
+ * @return True if it's a formatting element
+ */
+bool html_is_formatting_element(const char* tag_name);
 
 #ifdef __cplusplus
 }
