@@ -78,10 +78,17 @@ static bool font_name_needs_quotes(const char* name, size_t len) {
 // Helper function to check if a property value should be quoted
 // CSS strings need quotes for: content property, certain text values, etc.
 static bool property_value_needs_quotes(const char* property_name, const char* str_value, size_t str_len) {
-    if (!str_value || str_len == 0) return false;
     if (!property_name) return false;
 
     size_t prop_len = strlen(property_name);
+
+    // CSS custom properties (--*) - always quote string values
+    if (prop_len >= 2 && strncmp(property_name, "--", 2) == 0) {
+        return true;
+    }
+
+    // Empty strings always need quotes to be valid CSS
+    if (!str_value || str_len == 0) return true;
 
     // content property values are always strings and need quotes (except keywords like 'none', 'normal')
     if (prop_len == 7 && strncmp(property_name, "content", 7) == 0) {
@@ -133,7 +140,7 @@ static void format_css_value(StringBuf* sb, Item value, const char* property_nam
     switch (type) {
         case LMD_TYPE_STRING: {
             String* str = (String*)value.pointer;
-            if (str && str->len > 0 && str->chars) {
+            if (str && str->chars) {
                 // Preserve the full string content, including Unicode characters
                 const char* content = str->chars;
                 size_t len = str->len;
@@ -143,10 +150,23 @@ static void format_css_value(StringBuf* sb, Item value, const char* property_nam
 
                 if (needs_quotes) {
                     stringbuf_append_str(sb, "\"");
-                    stringbuf_append_format(sb, "%.*s", (int)len, content);
+                    if (len > 0) {
+                        stringbuf_append_format(sb, "%.*s", (int)len, content);
+                    }
                     stringbuf_append_str(sb, "\"");
                 } else {
-                    stringbuf_append_format(sb, "%.*s", (int)len, content);
+                    if (len > 0) {
+                        stringbuf_append_format(sb, "%.*s", (int)len, content);
+                    } else {
+                        // Empty unquoted string - output empty quotes for safety
+                        stringbuf_append_str(sb, "\"\"");
+                    }
+                }
+            } else if (str) {
+                // String object exists but no chars - output empty quoted string
+                bool needs_quotes = property_value_needs_quotes(property_name, NULL, 0);
+                if (needs_quotes) {
+                    stringbuf_append_str(sb, "\"\"");
                 }
             }
             break;

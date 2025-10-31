@@ -1234,10 +1234,10 @@ TEST_F(CssAllFilesTest, MultipleRoundTripStability) {
             printf("     Selector match rate: %.1f%% (%d/%zu selectors)\n",
                    selector_match_rate, matching_selectors, prev_map.size());
 
-            EXPECT_GE(selector_match_rate, 95.0)
-                << "Round-trip " << iteration + 1 << " should preserve at least 95% of selectors";
+            EXPECT_GE(selector_match_rate, 100.0)
+                << "Round-trip " << iteration + 1 << " should preserve 100% of selectors";
 
-            if (selector_match_rate >= 95.0) {
+            if (selector_match_rate >= 100.0) {
                 printf("  ✅ Round-trip %d is semantically stable\n", iteration + 1);
             } else {
                 printf("  ❌ Round-trip %d lost selectors (%.1f%% match)\n",

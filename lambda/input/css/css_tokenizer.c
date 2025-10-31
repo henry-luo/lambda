@@ -608,7 +608,18 @@ void css_tokenizer_destroy(CSSTokenizer* tokenizer) {
  * For STRING tokens, strips surrounding quotes
  */
 static void css_token_set_value(CssToken* token, Pool* pool) {
-    if (!token || !pool || token->length == 0 || !token->start) {
+    if (!token || !pool || !token->start) {
+        return;
+    }
+
+    // Handle zero-length tokens specially
+    if (token->length == 0) {
+        // Empty token - allocate empty string
+        char* value = (char*)pool_alloc(pool, 1);
+        if (value) {
+            value[0] = '\0';
+            token->value = value;
+        }
         return;
     }
 
@@ -620,7 +631,9 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
             size_t unquoted_len = token->length - 2;
             char* value = (char*)pool_alloc(pool, unquoted_len + 1);
             if (value) {
-                memcpy(value, token->start + 1, unquoted_len);
+                if (unquoted_len > 0) {
+                    memcpy(value, token->start + 1, unquoted_len);
+                }
                 value[unquoted_len] = '\0';
                 token->value = value;
             }
