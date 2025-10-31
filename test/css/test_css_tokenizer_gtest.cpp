@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/css/css_tokenizer.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_tokenizer.h"
+#include "../../lib/mempool.h"
 #include <string.h>
 
 class CssTokenizerTest : public ::testing::Test {

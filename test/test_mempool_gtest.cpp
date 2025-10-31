@@ -753,6 +753,241 @@ TEST(MemoryPoolBasicTest, PoolDestructionWithAllocations) {
 }
 
 // ========================================================================
+// Additional Robustness Tests (from old variable pool tests)
+// ========================================================================
+
+TEST_F(MemoryPoolTest, DoubleFreeProtection) {
+    void* ptr = pool_alloc(pool, 100);
+    ASSERT_NE(ptr, nullptr) << "Initial allocation should succeed";
+    strcpy((char*)ptr, "Test data");
+
+    // First free should succeed
+    pool_free(pool, ptr);
+
+    // Second free - behavior depends on allocator
+    // rpmalloc may handle this gracefully or it may be undefined
+    // This test documents the expected behavior
+    pool_free(pool, ptr);
+    // If we get here without crashing, the allocator handled it
+
+    // Pool should remain functional
+    void* new_ptr = pool_alloc(pool, 150);
+    EXPECT_NE(new_ptr, nullptr) << "Pool should remain functional after double-free attempt";
+    pool_free(pool, new_ptr);
+}
+
+TEST_F(MemoryPoolTest, CorruptedPointerHandling) {
+    // Test that the pool handles NULL pointer gracefully
+    // Note: With rpmalloc, freeing invalid pointers (non-NULL) causes undefined behavior
+    // and crashes, so we only test the safe case (NULL)
+
+    // Test freeing NULL (should be safe)
+    pool_free(pool, nullptr);
+
+    // Test that pool remains functional after NULL free
+    void* valid_ptr = pool_alloc(pool, 100);
+    EXPECT_NE(valid_ptr, nullptr) << "Pool should remain functional after NULL free";
+
+    // Test data integrity
+    strcpy((char*)valid_ptr, "Test data after NULL free");
+    EXPECT_STREQ((char*)valid_ptr, "Test data after NULL free") << "Memory should be usable";
+
+    pool_free(pool, valid_ptr);
+}
+
+TEST_F(MemoryPoolTest, ExtensiveStressTest) {
+    // More intensive stress test with complex patterns
+    const int num_iterations = 50;
+    void* ptrs[20];
+
+    for (int iter = 0; iter < num_iterations; iter++) {
+        // Allocate with varying sizes
+        for (int i = 0; i < 20; i++) {
+            size_t size = 10 + (iter + i) % 500;
+            ptrs[i] = pool_alloc(pool, size);
+            ASSERT_NE(ptrs[i], nullptr) << "Allocation should succeed in iteration " << iter << ", block " << i;
+
+            // Fill with pattern
+            fill_pattern(ptrs[i], size, 0x55 + (i % 3));
+        }
+
+        // Realloc half of them
+        for (int i = 0; i < 10; i++) {
+            size_t old_size = 10 + (iter + i) % 500;
+            size_t new_size = 20 + (iter + i + 100) % 600;
+            ptrs[i] = pool_realloc(pool, ptrs[i], new_size);
+            ASSERT_NE(ptrs[i], nullptr) << "Realloc should succeed in iteration " << iter << ", block " << i;
+
+            // Verify at least some of the old data is preserved
+            EXPECT_TRUE(verify_pattern(ptrs[i], std::min(old_size, new_size), 0x55 + (i % 3)))
+                << "Data should be preserved during realloc in iteration " << iter << ", block " << i;
+        }
+
+        // Free all
+        for (int i = 0; i < 20; i++) {
+            pool_free(pool, ptrs[i]);
+        }
+    }
+}
+
+TEST_F(MemoryPoolTest, ReallocSameSize) {
+    // Test realloc with same size
+    void* ptr = pool_alloc(pool, 100);
+    ASSERT_NE(ptr, nullptr) << "Initial allocation should succeed";
+    strcpy((char*)ptr, "Same size test data");
+
+    void* same_ptr = pool_realloc(pool, ptr, 100);
+    EXPECT_NE(same_ptr, nullptr) << "Realloc with same size should succeed";
+    EXPECT_STREQ((char*)same_ptr, "Same size test data") << "Data should be preserved with same size realloc";
+
+    pool_free(pool, same_ptr);
+}
+
+TEST_F(MemoryPoolTest, AlternatingPatterns) {
+    // Test alternating allocation and free patterns
+    void* ptrs[50];
+
+    // Allocate all
+    for (int i = 0; i < 50; i++) {
+        ptrs[i] = pool_alloc(pool, 64 + i * 8);
+        ASSERT_NE(ptrs[i], nullptr) << "Allocation should succeed for block " << i;
+        snprintf((char*)ptrs[i], 32, "Block%d", i);
+    }
+
+    // Free odd indices
+    for (int i = 1; i < 50; i += 2) {
+        pool_free(pool, ptrs[i]);
+        ptrs[i] = nullptr;
+    }
+
+    // Reallocate freed slots with different sizes
+    for (int i = 1; i < 50; i += 2) {
+        ptrs[i] = pool_alloc(pool, 128 + i * 4);
+        ASSERT_NE(ptrs[i], nullptr) << "Reallocation should succeed for block " << i;
+        snprintf((char*)ptrs[i], 32, "New%d", i);
+    }
+
+    // Verify even indices still have original data
+    for (int i = 0; i < 50; i += 2) {
+        char expected[32];
+        snprintf(expected, sizeof(expected), "Block%d", i);
+        EXPECT_STREQ((char*)ptrs[i], expected) << "Original data should be preserved for block " << i;
+    }
+
+    // Verify odd indices have new data
+    for (int i = 1; i < 50; i += 2) {
+        char expected[32];
+        snprintf(expected, sizeof(expected), "New%d", i);
+        EXPECT_STREQ((char*)ptrs[i], expected) << "New data should be correct for block " << i;
+    }
+
+    // Free all
+    for (int i = 0; i < 50; i++) {
+        if (ptrs[i]) {
+            pool_free(pool, ptrs[i]);
+        }
+    }
+}
+
+TEST_F(MemoryPoolTest, GrowthAndShrinkageCycles) {
+    // Test repeated growth and shrinkage cycles
+    void* ptr = pool_alloc(pool, 32);
+    ASSERT_NE(ptr, nullptr) << "Initial allocation should succeed";
+    strcpy((char*)ptr, "Growth test");
+
+    size_t sizes[] = {64, 128, 256, 512, 1024, 2048, 4096, 2048, 1024, 512, 256, 128, 64, 32};
+
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        ptr = pool_realloc(pool, ptr, sizes[i]);
+        ASSERT_NE(ptr, nullptr) << "Realloc to size " << sizes[i] << " should succeed";
+        EXPECT_STREQ((char*)ptr, "Growth test") << "Data should be preserved at size " << sizes[i];
+    }
+
+    pool_free(pool, ptr);
+}
+
+TEST_F(MemoryPoolTest, ZeroToNonZeroRealloc) {
+    // Test realloc from zero size
+    void* ptr = pool_alloc(pool, 0);
+    // Zero-size allocation may return NULL or valid pointer
+
+    if (ptr) {
+        // If non-NULL, try to realloc to non-zero size
+        ptr = pool_realloc(pool, ptr, 100);
+        EXPECT_NE(ptr, nullptr) << "Realloc from zero to non-zero should succeed";
+        strcpy((char*)ptr, "After realloc");
+        EXPECT_STREQ((char*)ptr, "After realloc") << "Data should be writable";
+        pool_free(pool, ptr);
+    } else {
+        // If NULL was returned, allocate normally
+        ptr = pool_alloc(pool, 100);
+        EXPECT_NE(ptr, nullptr) << "Normal allocation should succeed";
+        pool_free(pool, ptr);
+    }
+}
+
+TEST_F(MemoryPoolTest, SequentialReallocPattern) {
+    // Simulate the StrBuf growth pattern from real usage
+    void* buffer = pool_alloc(pool, 32);
+    ASSERT_NE(buffer, nullptr) << "Initial buffer allocation should succeed";
+    strcpy((char*)buffer, "Header");
+
+    // Simulate repeated appends with realloc
+    size_t current_size = 32;
+    for (int i = 0; i < 10; i++) {
+        size_t new_size = current_size * 2;
+        buffer = pool_realloc(pool, buffer, new_size);
+        ASSERT_NE(buffer, nullptr) << "Realloc iteration " << i << " should succeed";
+        EXPECT_EQ(strncmp((char*)buffer, "Header", 6), 0) << "Header should be preserved at iteration " << i;
+
+        // Append more data
+        strcat((char*)buffer, " + Data");
+        current_size = new_size;
+    }
+
+    // Verify final content contains all data
+    EXPECT_NE(strstr((char*)buffer, "Header"), nullptr) << "Final buffer should contain header";
+    EXPECT_NE(strstr((char*)buffer, "Data"), nullptr) << "Final buffer should contain appended data";
+
+    pool_free(pool, buffer);
+}
+
+TEST_F(MemoryPoolTest, InterleeavedReallocAndAlloc) {
+    // Test interleaved realloc and alloc operations
+    void* realloc_ptr = pool_alloc(pool, 64);
+    ASSERT_NE(realloc_ptr, nullptr);
+    strcpy((char*)realloc_ptr, "Realloc target");
+
+    void* alloc_ptrs[10];
+
+    for (int i = 0; i < 10; i++) {
+        // Allocate new block
+        alloc_ptrs[i] = pool_alloc(pool, 50 + i * 10);
+        ASSERT_NE(alloc_ptrs[i], nullptr) << "Allocation " << i << " should succeed";
+        snprintf((char*)alloc_ptrs[i], 30, "Alloc%d", i);
+
+        // Grow realloc target
+        size_t new_size = 64 + (i + 1) * 32;
+        realloc_ptr = pool_realloc(pool, realloc_ptr, new_size);
+        ASSERT_NE(realloc_ptr, nullptr) << "Realloc " << i << " should succeed";
+        EXPECT_STREQ((char*)realloc_ptr, "Realloc target") << "Realloc data should be preserved at iteration " << i;
+    }
+
+    // Verify all allocations are intact
+    for (int i = 0; i < 10; i++) {
+        char expected[30];
+        snprintf(expected, sizeof(expected), "Alloc%d", i);
+        EXPECT_STREQ((char*)alloc_ptrs[i], expected) << "Alloc " << i << " data should be intact";
+    }
+
+    // Cleanup
+    for (int i = 0; i < 10; i++) {
+        pool_free(pool, alloc_ptrs[i]);
+    }
+    pool_free(pool, realloc_ptr);
+}
+
+// ========================================================================
 // Main Entry Point
 // ========================================================================
 

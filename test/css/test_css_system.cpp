@@ -4,9 +4,9 @@
 #include <memory>
 
 extern "C" {
-#include "../lambda/input/css/css_style.h"
-#include "../lambda/input/css/css_style_node.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_style.h"
+#include "../../lambda/input/css/css_style_node.h"
+#include "../../lib/mempool.h"
 }
 
 /**

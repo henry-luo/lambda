@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/css/css_style.h"
-#include "../lambda/input/css/css_style_node.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_style.h"
+#include "../../lambda/input/css/css_style_node.h"
+#include "../../lib/mempool.h"
 #include <cstring>
 
 class CssStyleNodeTest : public ::testing::Test {

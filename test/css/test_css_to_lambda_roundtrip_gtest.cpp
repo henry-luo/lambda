@@ -6,16 +6,16 @@
 #include <chrono>
 #include <algorithm>
 #include <cctype>
-#include "../lambda/input/css/css_tokenizer.h"
-#include "../lambda/input/css/css_property_value_parser.h"
-#include "../lambda/input/css/css_parser.h"
-#include "../lambda/input/css/css_style.h"
-#include "../lambda/input/input.h"
-#include "../lambda/format/format.h"
-#include "../lambda/lambda-data.hpp"
-#include "../lambda/name_pool.h"
-#include "../lib/mempool.h"
-#include "../lib/arraylist.h"
+#include "../../lambda/input/css/css_tokenizer.h"
+#include "../../lambda/input/css/css_property_value_parser.h"
+#include "../../lambda/input/css/css_parser.h"
+#include "../../lambda/input/css/css_style.h"
+#include "../../lambda/input/input.h"
+#include "../../lambda/format/format.h"
+#include "../../lambda/lambda-data.hpp"
+#include "../../lambda/name_pool.h"
+#include "../../lib/mempool.h"
+#include "../../lib/arraylist.h"
 
 // Forward declarations for CSS parsing and formatting
 extern "C" {

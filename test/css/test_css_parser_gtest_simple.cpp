@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/css/css_engine.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_engine.h"
+#include "../../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
 protected:

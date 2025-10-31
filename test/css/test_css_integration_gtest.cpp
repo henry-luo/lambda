@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 #include <string>
-#include "../lambda/input/css/css_tokenizer.h"
-#include "../lambda/input/css/css_property_value_parser.h"
-#include "../lambda/input/css/css_parser.h"
-#include "../lambda/input/css/css_style.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_tokenizer.h"
+#include "../../lambda/input/css/css_property_value_parser.h"
+#include "../../lambda/input/css/css_parser.h"
+#include "../../lambda/input/css/css_style.h"
+#include "../../lib/mempool.h"
 
 // Test fixture for CSS integration tests
 class CssIntegrationTest : public ::testing::Test {
