@@ -719,6 +719,9 @@ static Item parse_css_string(Input *input, const char **css) {
     char quote = **css;
     if (quote != '"' && quote != '\'') return {.item = ITEM_ERROR};
 
+    // Normalize: always use double quotes internally regardless of input quote style
+    // This ensures 'Segoe UI' and "Segoe UI" both normalize to "Segoe UI"
+
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing string
 

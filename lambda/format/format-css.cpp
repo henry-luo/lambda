@@ -82,13 +82,15 @@ static bool property_value_needs_quotes(const char* property_name, const char* s
 
     size_t prop_len = strlen(property_name);
 
-    // CSS custom properties (--*) - always quote string values
-    if (prop_len >= 2 && strncmp(property_name, "--", 2) == 0) {
-        return true;
-    }
-
     // Empty strings always need quotes to be valid CSS
     if (!str_value || str_len == 0) return true;
+
+    // CSS custom properties (--*) - only quote empty string values
+    // Non-empty values like "1s", "red", etc. should not be quoted
+    if (prop_len >= 2 && strncmp(property_name, "--", 2) == 0) {
+        // Already handled empty strings above, so return false for non-empty
+        return false;
+    }
 
     // content property values are always strings and need quotes (except keywords like 'none', 'normal')
     if (prop_len == 7 && strncmp(property_name, "content", 7) == 0) {
