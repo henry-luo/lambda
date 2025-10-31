@@ -122,6 +122,14 @@ typedef struct {
             double x, y, width, height;
         } rect;
 
+        struct {                // For m/l (moveto/lineto - reusing text_position)
+            double x, y;
+        } point;
+
+        struct {                // For c (cubic Bezier curve)
+            double x1, y1, x2, y2, x3, y3;
+        } curve;
+
         double number;          // For single number operands
     } operands;
 } PDFOperator;

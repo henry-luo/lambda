@@ -14,6 +14,8 @@ static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item);
 static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map);
 static void process_pdf_operator(Input* input, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
 static void create_text_view(Input* input, ViewBlock* parent, PDFStreamParser* parser, String* text);
+static void create_text_array_views(Input* input, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
+static void create_rect_view(Input* input, ViewBlock* parent, PDFStreamParser* parser);
 static void update_text_position(PDFStreamParser* parser, double tx, double ty);
 static void append_child_view(View* parent, View* child);
 
@@ -258,8 +260,10 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
 
         case PDF_OP_TJ:
             // Show text array (with kerning adjustments)
-            log_debug("Show text array (Phase 2 feature)");
-            // TODO: Implement in Phase 2
+            log_debug("Show text array");
+            if (op->operands.text_array.array) {
+                create_text_array_views(input, parent, parser, op->operands.text_array.array);
+            }
             break;
 
         case PDF_OP_q:
@@ -290,12 +294,150 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
                      op->operands.rgb_color.b);
             break;
 
+        // Path construction operators
+        case PDF_OP_m:
+            // Move to
+            log_debug("Move to: %.2f, %.2f",
+                     op->operands.text_position.tx,
+                     op->operands.text_position.ty);
+            break;
+
+        case PDF_OP_l:
+            // Line to
+            log_debug("Line to: %.2f, %.2f",
+                     op->operands.text_position.tx,
+                     op->operands.text_position.ty);
+            break;
+
+        case PDF_OP_c:
+            // Cubic Bezier curve
+            log_debug("Curve to: %.2f, %.2f, %.2f, %.2f, %.2f, %.2f",
+                     op->operands.text_matrix.a, op->operands.text_matrix.b,
+                     op->operands.text_matrix.c, op->operands.text_matrix.d,
+                     op->operands.text_matrix.e, op->operands.text_matrix.f);
+            break;
+
+        case PDF_OP_re:
+            // Rectangle
+            log_debug("Rectangle: %.2f, %.2f, %.2f x %.2f",
+                     op->operands.rect.x, op->operands.rect.y,
+                     op->operands.rect.width, op->operands.rect.height);
+            // Store for rendering when path is painted
+            break;
+
+        case PDF_OP_h:
+            // Close path
+            log_debug("Close path");
+            break;
+
+        // Path painting operators
+        case PDF_OP_S:
+            // Stroke path
+            log_debug("Stroke path");
+            break;
+
+        case PDF_OP_s:
+            // Close and stroke path
+            log_debug("Close and stroke path");
+            break;
+
+        case PDF_OP_f:
+        case PDF_OP_F:
+            // Fill path
+            log_debug("Fill path");
+            create_rect_view(input, parent, parser);
+            break;
+
+        case PDF_OP_f_star:
+            // Fill path (even-odd)
+            log_debug("Fill path (even-odd)");
+            create_rect_view(input, parent, parser);
+            break;
+
+        case PDF_OP_B:
+        case PDF_OP_B_star:
+            // Fill and stroke
+            log_debug("Fill and stroke path");
+            create_rect_view(input, parent, parser);
+            break;
+
+        case PDF_OP_b:
+        case PDF_OP_b_star:
+            // Close, fill and stroke
+            log_debug("Close, fill and stroke path");
+            create_rect_view(input, parent, parser);
+            break;
+
+        case PDF_OP_n:
+            // End path without painting
+            log_debug("End path (no paint)");
+            break;
+
         default:
             if (op->type != PDF_OP_UNKNOWN) {
                 log_debug("Unhandled operator type: %d (%s)", op->type, op->name);
             }
             break;
     }
+}
+
+/**
+ * Create a ViewBlock node for a rectangle/shape
+ * This is called after path painting operators (f, F, S, B, etc.)
+ */
+static void create_rect_view(Input* input, ViewBlock* parent,
+                             PDFStreamParser* parser) {
+    // For now, we only handle the last rectangle operator
+    // In a full implementation, we'd track path construction
+
+    // Get the rectangle from current position (simplified)
+    // In full implementation, we'd track the path state
+    double x = parser->state.current_x;
+    double y = parser->state.current_y;
+
+    // Create ViewBlock for the rectangle
+    ViewBlock* rect_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
+    if (!rect_view) {
+        log_error("Failed to allocate rect view");
+        return;
+    }
+
+    rect_view->type = RDT_VIEW_BLOCK;
+    rect_view->x = (float)x;
+    rect_view->y = (float)(parent->height - y);  // Convert to top-left origin
+    rect_view->width = 100;   // TODO: Track from 're' operator
+    rect_view->height = 100;  // TODO: Track from 're' operator
+
+    // Create empty DomElement for styling
+    DomElement* dom_elem = (DomElement*)pool_calloc(input->pool, sizeof(DomElement));
+    if (dom_elem) {
+        dom_elem->node_type = DOM_NODE_ELEMENT;
+        dom_elem->tag_name = "div";  // Treat as div for layout
+        dom_elem->parent = nullptr;
+        dom_elem->next_sibling = nullptr;
+        dom_elem->prev_sibling = nullptr;
+        dom_elem->first_child = nullptr;
+        dom_elem->pool = input->pool;
+    }
+
+    // Create DomNode wrapper
+    DomNode* elem_node = (DomNode*)pool_calloc(input->pool, sizeof(DomNode));
+    if (elem_node) {
+        elem_node->type = LEXBOR_ELEMENT;
+        elem_node->dom_element = dom_elem;
+        elem_node->style = nullptr;
+        elem_node->parent = nullptr;
+    }
+
+    rect_view->node = elem_node;
+
+    // TODO: Apply fill/stroke colors from parser->state.fill_color and stroke_color
+    // This will be implemented when we add color property support
+
+    // Add to parent
+    append_child_view((View*)parent, (View*)rect_view);
+
+    log_debug("Created rect view at (%.2f, %.2f)", x, parent->height - y);
 }
 
 /**
@@ -381,6 +523,58 @@ static void create_text_view(Input* input, ViewBlock* parent,
     append_child_view((View*)parent, (View*)text_view);
 
     log_debug("Created text view at (%.2f, %.2f): '%s'", x, radiant_y, text->chars);
+}
+
+/**
+ * Create ViewText nodes from TJ operator text array
+ * TJ array format: [(string) num (string) num ...] where num is horizontal displacement in 1/1000 em
+ */
+static void create_text_array_views(Input* input, ViewBlock* parent,
+                                    PDFStreamParser* parser, Array* text_array) {
+    if (!text_array || text_array->length == 0) return;
+
+    // TJ array contains alternating strings and numbers
+    // Strings are text to show, numbers are kerning adjustments (negative = move right)
+    double x_offset = 0.0;  // Accumulated horizontal offset
+
+    for (int i = 0; i < text_array->length; i++) {
+        Item item = text_array->items[i];
+
+        // Check if it's a string (text to show)
+        if (item.type_id == LMD_TYPE_STRING) {
+            String* text = (String*)item.item;
+            if (text && text->len > 0) {
+                // Temporarily adjust text matrix for this text segment
+                double saved_x = parser->state.tm[4];
+                parser->state.tm[4] += x_offset;
+
+                create_text_view(input, parent, parser, text);
+
+                // Restore x position
+                parser->state.tm[4] = saved_x;
+
+                // Advance by the width of the text (simplified - assumes 1 unit per character)
+                x_offset += text->len * parser->state.font_size * 0.5;
+            }
+        }
+        // Check if it's a number (kerning adjustment)
+        else if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_FLOAT) {
+            // Kerning is in 1/1000 of an em, negative values move to the right
+            double kerning = 0.0;
+            if (item.type_id == LMD_TYPE_INT) {
+                kerning = -(double)item.int_val / 1000.0 * parser->state.font_size;
+            } else {
+                // For float, need to dereference pointer
+                double* double_ptr = (double*)item.pointer;
+                if (double_ptr) {
+                    kerning = -*double_ptr / 1000.0 * parser->state.font_size;
+                }
+            }
+            x_offset += kerning;
+        }
+    }
+
+    log_debug("Processed TJ text array with %lld elements", text_array->length);
 }
 
 /**

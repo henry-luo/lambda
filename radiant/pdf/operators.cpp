@@ -502,6 +502,68 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.stroke_color[2] = numbers[2];
         }
     }
+    // Path construction operators
+    else if (strcmp(op_name, "m") == 0) {
+        op->type = PDF_OP_m;
+        if (num_count >= 2) {
+            op->operands.text_position.tx = numbers[0];  // reuse for x,y
+            op->operands.text_position.ty = numbers[1];
+            parser->state.current_x = numbers[0];
+            parser->state.current_y = numbers[1];
+        }
+    } else if (strcmp(op_name, "l") == 0) {
+        op->type = PDF_OP_l;
+        if (num_count >= 2) {
+            op->operands.text_position.tx = numbers[0];
+            op->operands.text_position.ty = numbers[1];
+            parser->state.current_x = numbers[0];
+            parser->state.current_y = numbers[1];
+        }
+    } else if (strcmp(op_name, "c") == 0) {
+        op->type = PDF_OP_c;
+        if (num_count >= 6) {
+            op->operands.text_matrix.a = numbers[0];  // x1
+            op->operands.text_matrix.b = numbers[1];  // y1
+            op->operands.text_matrix.c = numbers[2];  // x2
+            op->operands.text_matrix.d = numbers[3];  // y2
+            op->operands.text_matrix.e = numbers[4];  // x3
+            op->operands.text_matrix.f = numbers[5];  // y3
+            parser->state.current_x = numbers[4];
+            parser->state.current_y = numbers[5];
+        }
+    } else if (strcmp(op_name, "re") == 0) {
+        op->type = PDF_OP_re;
+        if (num_count >= 4) {
+            op->operands.rect.x = numbers[0];
+            op->operands.rect.y = numbers[1];
+            op->operands.rect.width = numbers[2];
+            op->operands.rect.height = numbers[3];
+        }
+    } else if (strcmp(op_name, "h") == 0) {
+        op->type = PDF_OP_h;
+    }
+    // Path painting operators
+    else if (strcmp(op_name, "S") == 0) {
+        op->type = PDF_OP_S;
+    } else if (strcmp(op_name, "s") == 0) {
+        op->type = PDF_OP_s;
+    } else if (strcmp(op_name, "f") == 0) {
+        op->type = PDF_OP_f;
+    } else if (strcmp(op_name, "F") == 0) {
+        op->type = PDF_OP_F;
+    } else if (strcmp(op_name, "f*") == 0) {
+        op->type = PDF_OP_f_star;
+    } else if (strcmp(op_name, "B") == 0) {
+        op->type = PDF_OP_B;
+    } else if (strcmp(op_name, "B*") == 0) {
+        op->type = PDF_OP_B_star;
+    } else if (strcmp(op_name, "b") == 0) {
+        op->type = PDF_OP_b;
+    } else if (strcmp(op_name, "b*") == 0) {
+        op->type = PDF_OP_b_star;
+    } else if (strcmp(op_name, "n") == 0) {
+        op->type = PDF_OP_n;
+    }
 
     return op;
 }
