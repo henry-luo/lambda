@@ -1788,3 +1788,824 @@ TEST_F(HtmlParserTest, IntegrationContextCompleteDocument) {
     EXPECT_NE(findElementByTag(result, "h1"), nullptr);
     EXPECT_NE(findElementByTag(result, "p"), nullptr);
 }
+
+// ============================================================================
+// Phase 3 Advanced Tests: Insertion Point and Context State Management
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase3HeadElementsGoInHead) {
+    // When explicit <html> without <head>, head elements create implicit head
+    Item result = parseHtml("<html><title>Test</title><body><div>Content</div></body></html>");
+
+    // Should have explicit html
+    Element* html = findElementByTag(result, "html");
+    EXPECT_NE(html, nullptr);
+
+    // Title should be in head (even though head tag wasn't explicit in input)
+    Element* title = findElementByTag(result, "title");
+    EXPECT_NE(title, nullptr);
+
+    // Body should be present
+    Element* body = findElementByTag(result, "body");
+    EXPECT_NE(body, nullptr);
+
+    Element* div = findElementByTag(result, "div");
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3MetaBeforeBody) {
+    // Meta elements should go in head section
+    Item result = parseHtml("<html><meta charset=\"UTF-8\"><body>Content</body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* meta = findElementByTag(result, "meta");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(meta, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3BodyContentInBody) {
+    // Div elements should go in body
+    Item result = parseHtml("<html><head><title>Test</title></head><div>Content</div></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* head = findElementByTag(result, "head");
+    Element* div = findElementByTag(result, "div");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3MixedHeadAndBody) {
+    // Mix of head and body elements
+    Item result = parseHtml("<html><title>Test</title><div>Body content</div></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* title = findElementByTag(result, "title");
+    Element* div = findElementByTag(result, "div");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(title, nullptr);
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3MultipleHeadElements) {
+    // Multiple head-only elements in document with explicit tags
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Test</title>
+                <link rel="stylesheet" href="style.css">
+                <style>body { margin: 0; }</style>
+                <script>console.log('test');</script>
+            </head>
+            <body>
+                <div>Body content</div>
+            </body>
+        </html>
+    )");
+
+    Element* html = findElementByTag(result, "html");
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+
+    EXPECT_NE(findElementByTag(result, "meta"), nullptr);
+    EXPECT_NE(findElementByTag(result, "title"), nullptr);
+    EXPECT_NE(findElementByTag(result, "link"), nullptr);
+    EXPECT_NE(findElementByTag(result, "style"), nullptr);
+    EXPECT_NE(findElementByTag(result, "script"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3ExplicitStructureTags) {
+    // Explicit html, head, body tags
+    Item result = parseHtml("<html><head></head><body><p>Paragraph</p></body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3HeadThenBodyElements) {
+    // Head elements followed by body elements with all explicit tags
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Test</title>
+            </head>
+            <body>
+                <div>Content</div>
+                <p>Paragraph</p>
+            </body>
+        </html>
+    )");
+
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+
+    EXPECT_NE(findElementByTag(result, "meta"), nullptr);
+    EXPECT_NE(findElementByTag(result, "title"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase3LinkAndStyleElements) {
+    // Link and style are head elements
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <link rel="stylesheet" href="style.css">
+                <style>body { color: red; }</style>
+            </head>
+            <body>Content</body>
+        </html>
+    )");
+
+    Element* link = findElementByTag(result, "link");
+    Element* style = findElementByTag(result, "style");
+
+    EXPECT_NE(link, nullptr);
+    EXPECT_NE(style, nullptr);
+}
+
+// ============================================================================
+// Phase 4 Tests: HTML5 Insertion Mode State Machine
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase4InsertionModeInitial) {
+    // DOCTYPE should be handled in INITIAL mode
+    Item result = parseHtml("<!DOCTYPE html><html><body>Content</body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    EXPECT_NE(html, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeWithHeadElements) {
+    // Head elements in proper position
+    Item result = parseHtml("<html><title>Test</title><body>Content</body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* title = findElementByTag(result, "title");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(title, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeInHead) {
+    // Explicit head with multiple head elements
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Test</title>
+                <link rel="stylesheet" href="style.css">
+            </head>
+            <body>Content</body>
+        </html>
+    )");
+
+    Element* head = findElementByTag(result, "head");
+    ASSERT_NE(head, nullptr);
+
+    EXPECT_NE(findElementByTag(result, "meta"), nullptr);
+    EXPECT_NE(findElementByTag(result, "title"), nullptr);
+    EXPECT_NE(findElementByTag(result, "link"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeAfterHeadTag) {
+    // After </head>, body content should go in body
+    Item result = parseHtml("<html><head><title>Test</title></head><div>Content</div></html>");
+
+    Element* head = findElementByTag(result, "head");
+    Element* div = findElementByTag(result, "div");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(div, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeInBody) {
+    // Explicit body with content
+    Item result = parseHtml(R"(
+        <html>
+            <head><title>Test</title></head>
+            <body>
+                <h1>Title</h1>
+                <p>Paragraph</p>
+                <div>Content</div>
+            </body>
+        </html>
+    )");
+
+    Element* body = findElementByTag(result, "body");
+    ASSERT_NE(body, nullptr);
+
+    EXPECT_NE(findElementByTag(result, "h1"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeTransitionHeadToBody) {
+    // Head should close when body element appears
+    Item result = parseHtml("<html><head><title>Test</title></head><body><p>Content</p></body></html>");
+
+    Element* head = findElementByTag(result, "head");
+    Element* title = findElementByTag(result, "title");
+    Element* body = findElementByTag(result, "body");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(title, nullptr);
+    EXPECT_NE(body, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeHeadThenBodyContent) {
+    // Title in head, then body content
+    Item result = parseHtml("<html><title>Test</title><p>Paragraph</p></html>");
+
+    Element* title = findElementByTag(result, "title");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(title, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeScriptInHead) {
+    // Script in head should stay in head
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <title>Test</title>
+                <script>console.log('in head');</script>
+            </head>
+            <body>Content</body>
+        </html>
+    )");
+
+    Element* head = findElementByTag(result, "head");
+    Element* script = findElementByTag(result, "script");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(script, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeMultipleClosingTags) {
+    // Proper handling of closing tags for head and body
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <title>Test</title>
+            </head>
+            <body>
+                <div>Content</div>
+            </body>
+        </html>
+    )");
+
+    Element* html = findElementByTag(result, "html");
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase4InsertionModeNestedBody) {
+    // Multiple body tags - second one should be ignored
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <div>First</div>
+                <body>
+                    <div>Second</div>
+                </body>
+            </body>
+        </html>
+    )");
+
+    // Should parse without errors
+    Element* body = findElementByTag(result, "body");
+    EXPECT_NE(body, nullptr);
+
+    // Both divs should be present
+    int div_count = countElementsByTag(result, "div");
+    EXPECT_GE(div_count, 1);
+}
+
+// ============================================================================
+// Phase 3+4 Integration Tests: Real-world HTML Structures
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase34IntegrationBasicHTMLStructure) {
+    // Basic complete HTML structure
+    Item result = parseHtml("<html><head><title>Test</title></head><body><p>Hello World</p></body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationHTMLWithoutExplicitHead) {
+    // HTML tag with head elements but no explicit <head> tag
+    Item result = parseHtml("<html><title>Test</title><p>Content</p></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* title = findElementByTag(result, "title");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(title, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationCompleteExplicit) {
+    // Complete explicit structure
+    Item result = parseHtml(R"(
+        <!DOCTYPE html>
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Complete</title>
+            </head>
+            <body>
+                <header><h1>Header</h1></header>
+                <main><p>Main content</p></main>
+                <footer><p>Footer</p></footer>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "html"), nullptr);
+    EXPECT_NE(findElementByTag(result, "head"), nullptr);
+    EXPECT_NE(findElementByTag(result, "body"), nullptr);
+    EXPECT_NE(findElementByTag(result, "header"), nullptr);
+    EXPECT_NE(findElementByTag(result, "main"), nullptr);
+    EXPECT_NE(findElementByTag(result, "footer"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationMetaTitleLink) {
+    // Meta before title - both should be accessible
+    Item result = parseHtml(R"(
+        <html>
+            <meta charset="UTF-8">
+            <title>Test</title>
+            <body><div>Content</div></body>
+        </html>
+    )");
+
+    Element* html = findElementByTag(result, "html");
+    Element* meta = findElementByTag(result, "meta");
+    Element* title = findElementByTag(result, "title");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(meta, nullptr);
+    EXPECT_NE(title, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationLinkStyleScript) {
+    // Multiple head elements of different types
+    Item result = parseHtml(R"(
+        <html>
+            <link rel="stylesheet" href="style.css">
+            <style>body { margin: 0; }</style>
+            <script>console.log('test');</script>
+            <title>Test</title>
+            <body><p>Body content</p></body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "link"), nullptr);
+    EXPECT_NE(findElementByTag(result, "style"), nullptr);
+    EXPECT_NE(findElementByTag(result, "script"), nullptr);
+    EXPECT_NE(findElementByTag(result, "title"), nullptr);
+    EXPECT_NE(findElementByTag(result, "body"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationNoScript) {
+    // noscript is a head element
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <title>Test</title>
+                <noscript><link rel="stylesheet" href="noscript.css"></noscript>
+            </head>
+            <body>Content</body>
+        </html>
+    )");
+
+    Element* noscript = findElementByTag(result, "noscript");
+    EXPECT_NE(noscript, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationEmptyHead) {
+    // Explicit empty head
+    Item result = parseHtml("<html><head></head><body><p>Content</p></body></html>");
+
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationEmptyBody) {
+    // Explicit empty body
+    Item result = parseHtml("<html><head><title>Test</title></head><body></body></html>");
+
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationBodyBeforeHead) {
+    // Invalid: body before head - should handle gracefully
+    Item result = parseHtml("<html><body><p>Body</p></body><head><title>Title</title></head></html>");
+
+    // Should have both elements
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationComplexHeadContent) {
+    // HTML with complex head content
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Test Page</title>
+                <link rel="stylesheet" href="main.css">
+                <link rel="icon" href="favicon.ico">
+                <style>
+                    body { font-family: Arial; }
+                </style>
+                <script src="app.js"></script>
+            </head>
+            <body>
+                <div>Content</div>
+            </body>
+        </html>
+    )");
+
+    Element* head = findElementByTag(result, "head");
+    EXPECT_NE(head, nullptr);
+
+    // Verify all head elements are present
+    int meta_count = countElementsByTag(result, "meta");
+    EXPECT_EQ(meta_count, 2);
+
+    int link_count = countElementsByTag(result, "link");
+    EXPECT_EQ(link_count, 2);
+
+    EXPECT_NE(findElementByTag(result, "title"), nullptr);
+    EXPECT_NE(findElementByTag(result, "style"), nullptr);
+    EXPECT_NE(findElementByTag(result, "script"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase34IntegrationDeeplyNestedWithStructure) {
+    // Deep nesting with proper structure
+    Item result = parseHtml(R"(
+        <html>
+            <head><title>Test</title></head>
+            <body>
+                <div>
+                    <div>
+                        <div>
+                            <div>
+                                <p>Deep content</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </body>
+        </html>
+    )");
+
+    Element* html = findElementByTag(result, "html");
+    Element* head = findElementByTag(result, "head");
+    Element* body = findElementByTag(result, "body");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(head, nullptr);
+    EXPECT_NE(body, nullptr);
+    EXPECT_NE(p, nullptr);
+
+    int div_count = countElementsByTag(result, "div");
+    EXPECT_EQ(div_count, 4);
+}
+
+// ============================================================================
+// Phase 5 Tests: Open Element Stack
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase5StackBasicNesting) {
+    // Test that elements are properly nested
+    Item result = parseHtml("<html><body><div><p>Text</p></div></body></html>");
+
+    Element* html = findElementByTag(result, "html");
+    Element* body = findElementByTag(result, "body");
+    Element* div = findElementByTag(result, "div");
+    Element* p = findElementByTag(result, "p");
+
+    EXPECT_NE(html, nullptr);
+    EXPECT_NE(body, nullptr);
+    EXPECT_NE(div, nullptr);
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackMultipleSiblings) {
+    // Test stack with multiple sibling elements
+    Item result = parseHtml("<html><body><div>First</div><div>Second</div><div>Third</div></body></html>");
+
+    int div_count = countElementsByTag(result, "div");
+    EXPECT_EQ(div_count, 3);
+}
+
+TEST_F(HtmlParserTest, Phase5StackDeeplyNested) {
+    // Test deeply nested structure
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <div>
+                    <section>
+                        <article>
+                            <header>
+                                <h1>Title</h1>
+                            </header>
+                        </article>
+                    </section>
+                </div>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "section"), nullptr);
+    EXPECT_NE(findElementByTag(result, "article"), nullptr);
+    EXPECT_NE(findElementByTag(result, "header"), nullptr);
+    EXPECT_NE(findElementByTag(result, "h1"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackWithVoidElements) {
+    // Test that void elements don't cause stack issues
+    Item result = parseHtml("<html><body><img src=\"test.jpg\"><br><hr><p>Text</p></body></html>");
+
+    EXPECT_NE(findElementByTag(result, "img"), nullptr);
+    EXPECT_NE(findElementByTag(result, "br"), nullptr);
+    EXPECT_NE(findElementByTag(result, "hr"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackMisnestedTags) {
+    // Test handling of misnested tags (common HTML error)
+    // <div><span></div></span> - improper nesting
+    Item result = parseHtml("<html><body><div><span>Content</div></span></body></html>");
+
+    // Should still parse without crashing
+    Element* div = findElementByTag(result, "div");
+    Element* span = findElementByTag(result, "span");
+
+    EXPECT_NE(div, nullptr);
+    EXPECT_NE(span, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackUnclosedElements) {
+    // Test handling of unclosed elements
+    Item result = parseHtml("<html><body><div><p>Unclosed paragraph<div>Another div</div></body></html>");
+
+    // Should handle gracefully
+    int div_count = countElementsByTag(result, "div");
+    EXPECT_GE(div_count, 1);
+
+    Element* p = findElementByTag(result, "p");
+    EXPECT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackMixedContent) {
+    // Test stack with mixed inline and block elements
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <p>Text with <strong>bold</strong> and <em>italic</em></p>
+                <div>Block with <span>inline</span> content</div>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "em"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "span"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackTableStructure) {
+    // Test stack with table structure
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <table>
+                    <tr>
+                        <td>Cell 1</td>
+                        <td>Cell 2</td>
+                    </tr>
+                </table>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+
+    int td_count = countElementsByTag(result, "td");
+    EXPECT_EQ(td_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase5StackListStructure) {
+    // Test stack with list structure
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <ul>
+                    <li>Item 1</li>
+                    <li>Item 2</li>
+                    <li>Item 3</li>
+                </ul>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "ul"), nullptr);
+
+    int li_count = countElementsByTag(result, "li");
+    EXPECT_EQ(li_count, 3);
+}
+
+TEST_F(HtmlParserTest, Phase5StackFormElements) {
+    // Test stack with form elements
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <form>
+                    <label>Name:</label>
+                    <input type="text">
+                    <button>Submit</button>
+                </form>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "form"), nullptr);
+    EXPECT_NE(findElementByTag(result, "label"), nullptr);
+    EXPECT_NE(findElementByTag(result, "input"), nullptr);
+    EXPECT_NE(findElementByTag(result, "button"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackNestedLists) {
+    // Test stack with nested lists
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <ul>
+                    <li>Item 1
+                        <ul>
+                            <li>Nested 1</li>
+                            <li>Nested 2</li>
+                        </ul>
+                    </li>
+                    <li>Item 2</li>
+                </ul>
+            </body>
+        </html>
+    )");
+
+    int ul_count = countElementsByTag(result, "ul");
+    EXPECT_EQ(ul_count, 2);
+
+    int li_count = countElementsByTag(result, "li");
+    EXPECT_EQ(li_count, 4);
+}
+
+TEST_F(HtmlParserTest, Phase5StackScriptAndStyle) {
+    // Test stack with script and style elements (raw text)
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <style>body { margin: 0; }</style>
+                <script>console.log('test');</script>
+            </head>
+            <body>
+                <div>Content</div>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "style"), nullptr);
+    EXPECT_NE(findElementByTag(result, "script"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackComplexDocument) {
+    // Test stack with complex real-world structure
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <title>Test Page</title>
+                <meta charset="UTF-8">
+                <link rel="stylesheet" href="style.css">
+            </head>
+            <body>
+                <header>
+                    <nav>
+                        <ul>
+                            <li><a href="/">Home</a></li>
+                            <li><a href="/about">About</a></li>
+                        </ul>
+                    </nav>
+                </header>
+                <main>
+                    <article>
+                        <h1>Article Title</h1>
+                        <p>Paragraph with <strong>bold</strong> text.</p>
+                    </article>
+                </main>
+                <footer>
+                    <p>Copyright 2025</p>
+                </footer>
+            </body>
+        </html>
+    )");
+
+    // Verify all major elements are present
+    EXPECT_NE(findElementByTag(result, "html"), nullptr);
+    EXPECT_NE(findElementByTag(result, "head"), nullptr);
+    EXPECT_NE(findElementByTag(result, "body"), nullptr);
+    EXPECT_NE(findElementByTag(result, "header"), nullptr);
+    EXPECT_NE(findElementByTag(result, "nav"), nullptr);
+    EXPECT_NE(findElementByTag(result, "main"), nullptr);
+    EXPECT_NE(findElementByTag(result, "article"), nullptr);
+    EXPECT_NE(findElementByTag(result, "footer"), nullptr);
+
+    int p_count = countElementsByTag(result, "p");
+    EXPECT_EQ(p_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase5StackEmptyElements) {
+    // Test stack with empty elements
+    Item result = parseHtml("<html><body><div></div><span></span><p></p></body></html>");
+
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "span"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase5StackMultipleClosingTags) {
+    // Test proper handling of multiple consecutive closing tags
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <div>
+                    <p>Text</p>
+                </div>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}

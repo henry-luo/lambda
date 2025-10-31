@@ -389,13 +389,29 @@ static Item parse_element(Input *input, const char **html, const char *html_star
 
     // Check for closing tag
     if (**html == '/') {
-        // This is a closing tag, skip it and return null
+        // This is a closing tag - parse the tag name and handle mode transition
+        (*html)++; // Skip /
+
+        const char* tag_start = *html;
+        String* closing_tag_name = parse_tag_name(input, html);
+
+        // Phase 4.2: Transition insertion mode for closing tag
+        if (context && closing_tag_name && closing_tag_name->len > 0) {
+            html_context_transition_mode(context, closing_tag_name->chars, true);
+
+            // Phase 5: Pop element from stack for standalone closing tag
+            if (context->open_elements) {
+                html_stack_pop_until_tag(context->open_elements, closing_tag_name->chars);
+            }
+        }
+
+        // Skip to end of closing tag
         while (**html && **html != '>') {
             (*html)++;
         }
         if (**html) (*html)++; // Skip >
+
         html_exit_element();
-        log_parse_error(html_start, *html, "Unexpected end of input after end tag");
         return {.item = ITEM_NULL};
     }
 
@@ -414,6 +430,11 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         return {.item = ITEM_ERROR};
     }
 
+    // Phase 5: Push element onto open element stack
+    if (context && context->open_elements) {
+        html_stack_push(context->open_elements, element);
+    }
+
     // Phase 4.1: Track explicit html/head/body tags in context
     if (context) {
         if (strcasecmp(tag_name->chars, "html") == 0) {
@@ -423,6 +444,9 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         } else if (strcasecmp(tag_name->chars, "body") == 0) {
             html_context_set_body(context, element);
         }
+
+        // Phase 4.2: Transition insertion mode for opening tag
+        html_context_transition_mode(context, tag_name->chars, false);
     }
 
     // Parse attributes directly into the element
@@ -578,10 +602,29 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         // Skip closing tag
         if (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) == 0) {
             *html += strlen(closing_tag);
+
+            // Phase 4.2: Transition insertion mode for closing tag
+            if (context) {
+                html_context_transition_mode(context, tag_name->chars, true);
+            }
+
+            // Phase 5: Pop element from stack when it's closed
+            if (context && context->open_elements) {
+                html_stack_pop_until(context->open_elements, element);
+            }
         }
 
         // Set content length based on element's list length
         html_set_content_length(element);
+    } else {
+        // Phase 5: For void elements, pop immediately since they have no closing tag
+        if (context && context->open_elements) {
+            Element* popped = html_stack_pop(context->open_elements);
+            if (popped != element) {
+                log_warn("Stack mismatch: expected %p but got %p for void element <%s>",
+                         element, popped, tag_name->chars);
+            }
+        }
     }
 
     html_exit_element();
