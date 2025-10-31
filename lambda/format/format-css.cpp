@@ -134,39 +134,19 @@ static void format_css_value(StringBuf* sb, Item value, const char* property_nam
         case LMD_TYPE_STRING: {
             String* str = (String*)value.pointer;
             if (str && str->len > 0 && str->chars) {
-                // Try to extract a clean string, handling potential corruption
+                // Preserve the full string content, including Unicode characters
                 const char* content = str->chars;
                 size_t len = str->len;
 
-                // Skip any obvious binary prefixes (length bytes, null bytes, etc.)
-                while (len > 0 && (*content < 32 || *content > 126)) {
-                    content++;
-                    len--;
-                }
+                // Check if this string value needs quotes based on the property
+                bool needs_quotes = property_value_needs_quotes(property_name, content, len);
 
-                // Find the end of printable content
-                size_t clean_len = 0;
-                for (size_t i = 0; i < len; i++) {
-                    if (content[i] >= 32 && content[i] <= 126) {
-                        clean_len = i + 1;
-                    } else if (content[i] == 0) {
-                        break; // Stop at null terminator
-                    }
-                }
-
-                if (clean_len > 0) {
-                    // Check if this string value needs quotes based on the property
-                    bool needs_quotes = property_value_needs_quotes(property_name, content, clean_len);
-
-                    if (needs_quotes) {
-                        stringbuf_append_str(sb, "\"");
-                        stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
-                        stringbuf_append_str(sb, "\"");
-                    } else {
-                        stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
-                    }
+                if (needs_quotes) {
+                    stringbuf_append_str(sb, "\"");
+                    stringbuf_append_format(sb, "%.*s", (int)len, content);
+                    stringbuf_append_str(sb, "\"");
                 } else {
-                    stringbuf_append_str(sb, "\"corrupted-string\"");
+                    stringbuf_append_format(sb, "%.*s", (int)len, content);
                 }
             }
             break;
@@ -350,6 +330,17 @@ static bool is_calc_function(const char* name, size_t len) {
            (len == 5 && strncmp(name, "clamp", 5) == 0);
 }
 
+// Helper to check if a function should quote its string parameters
+static bool function_needs_quoted_strings(const char* name, size_t len) {
+    if (!name || len == 0) return false;
+    // Functions that need string parameters quoted: url, theme, format, content, attr
+    return (len == 3 && strncmp(name, "url", 3) == 0) ||
+           (len == 5 && strncmp(name, "theme", 5) == 0) ||
+           (len == 6 && strncmp(name, "format", 6) == 0) ||
+           (len == 7 && strncmp(name, "content", 7) == 0) ||
+           (len == 4 && strncmp(name, "attr", 4) == 0);
+}
+
 // Format CSS function (rgba, linear-gradient, etc.)
 static void format_css_function(StringBuf* sb, Element* function) {
     if (!function || !function->type) {
@@ -365,7 +356,7 @@ static void format_css_function(StringBuf* sb, Element* function) {
         List* param_list = (List*)function;
 
         bool is_calc = is_calc_function(elmt_type->name.str, elmt_type->name.length);
-        bool is_url = (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "url", 3) == 0);
+        bool needs_quoted_strings = function_needs_quoted_strings(elmt_type->name.str, elmt_type->name.length);
         bool in_gradient_direction = false;
 
         for (long i = 0; i < param_list->length; i++) {
@@ -446,12 +437,12 @@ static void format_css_function(StringBuf* sb, Element* function) {
                 }
             }
 
-            // Special handling for URL function: wrap string values in quotes
-            if (is_url && param_type == LMD_TYPE_STRING) {
+            // Special handling for functions that need quoted string parameters
+            if (needs_quoted_strings && param_type == LMD_TYPE_STRING) {
                 String* str = (String*)param_value.pointer;
                 if (str && str->chars) {
                     stringbuf_append_char(sb, '"');
-                    // Escape any quotes in the URL
+                    // Escape any quotes in the string
                     for (size_t j = 0; j < str->len; j++) {
                         if (str->chars[j] == '"') {
                             stringbuf_append_char(sb, '\\');
@@ -478,31 +469,11 @@ static void format_css_selectors(StringBuf* sb, Item selectors_item) {
     if (type == LMD_TYPE_STRING) {
         String* str = (String*)selectors_item.pointer;
         if (str && str->len > 0) {
-            // Clean selector string - aggressive cleaning for corrupted strings
+            // Preserve the full selector string, including Unicode characters
             const char* selector_str = str->chars;
             size_t len = str->len;
 
-            // Find the first printable ASCII character
-            while (len > 0 && (*selector_str < 32 || *selector_str > 126)) {
-                selector_str++;
-                len--;
-            }
-
-            // Find the length of valid content
-            size_t clean_len = 0;
-            for (size_t i = 0; i < len; i++) {
-                if (selector_str[i] >= 32 && selector_str[i] <= 126) {
-                    clean_len = i + 1;
-                } else {
-                    break; // Stop at first non-printable
-                }
-            }
-
-            if (clean_len > 0) {
-                stringbuf_append_format(sb, "%.*s", (int)clean_len, selector_str);
-            } else {
-                stringbuf_append_str(sb, "corrupted-selector");
-            }
+            stringbuf_append_format(sb, "%.*s", (int)len, selector_str);
         }
     } else if (type == LMD_TYPE_ARRAY) {
         Array* selectors = (Array*)selectors_item.pointer;
@@ -565,50 +536,30 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
 
         add_css_indent(sb, indent + 1);
 
-        // Clean property name - aggressive cleaning for corrupted strings
+        // Preserve full property name (including CSS custom properties like --var-name)
         const char* prop_name = field->name->str;
         size_t prop_len = field->name->length;
 
-        // Find the first printable ASCII character
-        while (prop_len > 0 && (*prop_name < 32 || *prop_name > 126)) {
-            prop_name++;
-            prop_len--;
-        }
-
-        // Find the length of valid content
-        size_t clean_len = 0;
-        for (size_t i = 0; i < prop_len; i++) {
-            if (prop_name[i] >= 32 && prop_name[i] <= 126) {
-                clean_len = i + 1;
-            } else {
-                break; // Stop at first non-printable
-            }
-        }
-
-        if (clean_len > 0) {
-            stringbuf_append_format(sb, "%.*s: ", (int)clean_len, prop_name);
-        } else {
-            stringbuf_append_str(sb, "corrupted-property: ");
-        }
+        stringbuf_append_format(sb, "%.*s: ", (int)prop_len, prop_name);
 
         // Get the property value
         void* field_data = (char*)rule->data + field->byte_offset;
         Item property_value = create_item_from_field_data(field_data, field->type->type_id);
 
         // Pass property name to formatter for proper separator detection
-        format_css_value(sb, property_value, clean_len > 0 ? prop_name : NULL);
+        format_css_value(sb, property_value, prop_name);
 
         // Check if this property has an !important flag
         // Look for a field named "propertyname-important"
         bool is_important = false;
-        if (clean_len > 0) {
+        if (prop_len > 0) {
             ShapeEntry* check_field = type_map->shape;
             int check_count = 0;
             while (check_field && check_count < type_map->length) {
                 if (check_field->name &&
-                    check_field->name->length == clean_len + 10 &&
-                    strncmp(check_field->name->str, prop_name, clean_len) == 0 &&
-                    strncmp(check_field->name->str + clean_len, "-important", 10) == 0) {
+                    check_field->name->length == prop_len + 10 &&
+                    strncmp(check_field->name->str, prop_name, prop_len) == 0 &&
+                    strncmp(check_field->name->str + prop_len, "-important", 10) == 0) {
                     is_important = true;
                     break;
                 }

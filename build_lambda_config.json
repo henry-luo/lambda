@@ -1691,8 +1691,8 @@
                         "binary": "test_css_frameworks_gtest.exe"
                     },
                     {
-                        "source": "test/css/test_css_to_lambda_roundtrip_gtest.cpp",
-                        "name": "🎨 CSS to Lambda Round-trip Tests (GTest)",
+                        "source": "test/css/test_css_to_mark_gtest.cpp",
+                        "name": "🎨 CSS to Mark Round-trip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1701,7 +1701,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_css_to_lambda_roundtrip_gtest.exe"
+                        "binary": "test_css_to_mark_gtest.exe"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_gtest.cpp",
