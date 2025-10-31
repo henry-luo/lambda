@@ -721,6 +721,13 @@ static Item parse_css_string(Input *input, const char **css) {
 
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing string
+
+    // Ensure the StringBuf has a valid String allocated for empty strings
+    if (!sb->str || sb->capacity == 0) {
+        // Initialize buffer with minimal capacity for empty strings
+        stringbuf_ensure_cap(sb, 16);
+    }
+
     (*css)++; // Skip opening quote
 
     while (**css && **css != quote) {
@@ -773,7 +780,16 @@ static Item parse_css_string(Input *input, const char **css) {
     }
 
     String* str = stringbuf_to_string(sb);
-    printf("Parsed CSS string: %s\n", str ? str->chars : "NULL");
+    // Handle empty strings - create an empty String object if stringbuf returns NULL
+    if (!str) {
+        // Allocate a new empty string
+        str = (String*)pool_alloc(input->pool, sizeof(String) + 1);
+        if (str) {
+            str->len = 0;
+            str->ref_cnt = 1;
+            str->chars[0] = '\0';
+        }
+    }
     return str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
 }
 
