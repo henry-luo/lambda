@@ -5107,16 +5107,16 @@ project "test_css_frameworks_gtest"
     filter {}
     
 
-project "test_css_to_lambda_roundtrip_gtest"
+project "test_css_to_mark_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
-    targetname "test_css_to_lambda_roundtrip_gtest"
+    targetname "test_css_to_mark_gtest"
     targetextension ".exe"
     
     files {
-        "test/css/test_css_to_lambda_roundtrip_gtest.cpp",
+        "test/css/test_css_to_mark_gtest.cpp",
     }
     
     includedirs {
