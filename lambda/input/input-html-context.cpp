@@ -52,6 +52,13 @@ HtmlParserContext* html_context_create(Input* input) {
         return NULL;
     }
 
+    // Phase 6: Initialize active formatting elements
+    ctx->active_formatting = html_formatting_create(input->pool);
+    if (!ctx->active_formatting) {
+        free(ctx);
+        return NULL;
+    }
+
     ctx->has_explicit_html = false;
     ctx->has_explicit_head = false;
     ctx->has_explicit_body = false;
@@ -67,6 +74,10 @@ void html_context_destroy(HtmlParserContext* ctx) {
         // Phase 5: Stack is pool-allocated, will be cleaned up with pool
         if (ctx->open_elements) {
             html_stack_destroy(ctx->open_elements);
+        }
+        // Phase 6: Formatting list is pool-allocated, will be cleaned up with pool
+        if (ctx->active_formatting) {
+            html_formatting_destroy(ctx->active_formatting);
         }
         free(ctx);
     }
@@ -497,4 +508,133 @@ void html_stack_clear(HtmlElementStack* stack) {
 
 Element* html_stack_current_node(HtmlElementStack* stack) {
     return html_stack_peek(stack);
+}
+
+// ============================================================================
+// Phase 6: Active Formatting Elements Implementation
+// ============================================================================
+
+// List of HTML5 formatting elements that need to be tracked
+static const char* HTML5_FORMATTING_ELEMENTS[] = {
+    "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small",
+    "strike", "strong", "tt", "u", NULL
+};
+
+bool html_is_formatting_element(const char* tag_name) {
+    if (!tag_name) return false;
+
+    for (int i = 0; HTML5_FORMATTING_ELEMENTS[i]; i++) {
+        if (strcmp(tag_name, HTML5_FORMATTING_ELEMENTS[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+HtmlFormattingList* html_formatting_create(Pool* pool) {
+    if (!pool) return NULL;
+
+    HtmlFormattingList* list = (HtmlFormattingList*)pool_alloc(pool, sizeof(HtmlFormattingList));
+    if (!list) return NULL;
+
+    list->capacity = 8;  // initial capacity
+    list->elements = (HtmlFormattingElement*)pool_alloc(pool,
+                                                        sizeof(HtmlFormattingElement) * list->capacity);
+    if (!list->elements) return NULL;
+
+    list->length = 0;
+    list->pool = pool;
+
+    return list;
+}
+
+void html_formatting_destroy(HtmlFormattingList* list) {
+    // nothing to do - pool-allocated memory will be cleaned up with pool
+    (void)list;
+}
+
+void html_formatting_push(HtmlFormattingList* list, Element* element, size_t stack_depth) {
+    if (!list || !element) return;
+
+    // grow array if needed
+    if (list->length >= list->capacity) {
+        size_t new_capacity = list->capacity * 2;
+        HtmlFormattingElement* new_elements = (HtmlFormattingElement*)pool_alloc(
+            list->pool, sizeof(HtmlFormattingElement) * new_capacity);
+        if (!new_elements) return;
+
+        // copy existing elements
+        memcpy(new_elements, list->elements, sizeof(HtmlFormattingElement) * list->length);
+        list->elements = new_elements;
+        list->capacity = new_capacity;
+    }
+
+    // add new element
+    list->elements[list->length].element = element;
+    list->elements[list->length].stack_depth = stack_depth;
+    list->length++;
+}
+
+bool html_formatting_remove(HtmlFormattingList* list, Element* element) {
+    if (!list || !element) return false;
+
+    // search from end to beginning (most recent first)
+    for (int i = (int)list->length - 1; i >= 0; i--) {
+        if (list->elements[i].element == element) {
+            // shift remaining elements down
+            memmove(&list->elements[i], &list->elements[i + 1],
+                    sizeof(HtmlFormattingElement) * (list->length - i - 1));
+            list->length--;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool html_formatting_remove_tag(HtmlFormattingList* list, const char* tag_name) {
+    if (!list || !tag_name) return false;
+
+    // search from end to beginning (most recent first)
+    for (int i = (int)list->length - 1; i >= 0; i--) {
+        Element* elem = list->elements[i].element;
+        if (elem && elem->type) {
+            TypeElmt* type = (TypeElmt*)elem->type;
+            if (strview_equal(&type->name, tag_name)) {
+                // shift remaining elements down
+                memmove(&list->elements[i], &list->elements[i + 1],
+                        sizeof(HtmlFormattingElement) * (list->length - i - 1));
+                list->length--;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool html_formatting_contains(HtmlFormattingList* list, const char* tag_name) {
+    if (!list || !tag_name) return false;
+
+    for (size_t i = 0; i < list->length; i++) {
+        Element* elem = list->elements[i].element;
+        if (elem && elem->type) {
+            TypeElmt* type = (TypeElmt*)elem->type;
+            if (strview_equal(&type->name, tag_name)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void html_formatting_clear(HtmlFormattingList* list) {
+    if (list) {
+        list->length = 0;
+    }
+}
+
+size_t html_formatting_length(HtmlFormattingList* list) {
+    return list ? list->length : 0;
 }

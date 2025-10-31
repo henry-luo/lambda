@@ -102,6 +102,21 @@ protected:
         return nullptr;
     }
 
+    // Helper: Get tag name from element
+    const char* getElementTagName(Element* elem) {
+        if (!elem || !elem->type) return "";
+
+        TypeElmt* type = (TypeElmt*)elem->type;
+        // Return a null-terminated string for the tag name
+        static char tag_buffer[256];
+        if (type->name.length >= sizeof(tag_buffer)) {
+            return "";
+        }
+        memcpy(tag_buffer, type->name.str, type->name.length);
+        tag_buffer[type->name.length] = '\0';
+        return tag_buffer;
+    }
+
     // Helper: Get text content from element (concatenate all text nodes)
     std::string getTextContent(Item item) {
         std::string result;
@@ -2608,4 +2623,294 @@ TEST_F(HtmlParserTest, Phase5StackMultipleClosingTags) {
 
     EXPECT_NE(findElementByTag(result, "div"), nullptr);
     EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+// ============================================================================
+// Phase 6 Tests: Special Element Handling (Formatting Elements)
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase6FormattingBasicBold) {
+    // Test basic bold formatting element
+    Item result = parseHtml("<p>Text with <b>bold</b> content</p>");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    Element* b = findElementByTag(result, "b");
+    ASSERT_NE(b, nullptr);
+    EXPECT_STREQ(getElementTagName(b), "b");
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingMultipleTypes) {
+    // Test multiple different formatting elements
+    Item result = parseHtml(R"(
+        <p>Text with <b>bold</b>, <i>italic</i>, <strong>strong</strong>,
+        <em>emphasis</em>, <code>code</code>, and <u>underlined</u> text.</p>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "em"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+    EXPECT_NE(findElementByTag(result, "u"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingNested) {
+    // Test nested formatting elements
+    Item result = parseHtml("<p><b>Bold with <i>italic</i> inside</b></p>");
+
+    Element* b = findElementByTag(result, "b");
+    ASSERT_NE(b, nullptr);
+
+    Element* i = findElementByTag(result, "i");
+    ASSERT_NE(i, nullptr);
+
+    // Verify italic is found within the document (proper nesting handled by parser)
+    EXPECT_STREQ(getElementTagName(b), "b");
+    EXPECT_STREQ(getElementTagName(i), "i");
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingDeeplyNested) {
+    // Test deeply nested formatting elements
+    Item result = parseHtml(
+        "<p><b>Level 1 <i>Level 2 <u>Level 3 <code>Level 4</code></u></i></b></p>"
+    );
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "u"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingMultipleSiblings) {
+    // Test multiple formatting elements as siblings
+    Item result = parseHtml(
+        "<p><b>Bold 1</b> <i>Italic 1</i> <b>Bold 2</b> <i>Italic 2</i></p>"
+    );
+
+    // Count multiple instances
+    int bold_count = 0;
+    int italic_count = 0;
+
+    Element* p = findElementByTag(result, "p");
+    if (p) {
+        List* p_list = (List*)p;
+        TypeElmt* p_type = (TypeElmt*)p->type;
+        int64_t attr_count = p_list->length - p_type->content_length;
+
+        for (int64_t i = attr_count; i < p_list->length; i++) {
+            Item child = p_list->items[i];
+            if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                Element* elem = (Element*)child.pointer;
+                const char* tag = getElementTagName(elem);
+                if (strcmp(tag, "b") == 0) bold_count++;
+                if (strcmp(tag, "i") == 0) italic_count++;
+            }
+        }
+    }
+
+    EXPECT_EQ(bold_count, 2);
+    EXPECT_EQ(italic_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingAcrossParagraphs) {
+    // Test formatting elements properly scoped to paragraphs
+    Item result = parseHtml(R"(
+        <div>
+            <p>First paragraph with <b>bold</b> text.</p>
+            <p>Second paragraph with <i>italic</i> text.</p>
+        </div>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+
+    int p_count = countElementsByTag(result, "p");
+    EXPECT_EQ(p_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingEmpty) {
+    // Test empty formatting elements
+    Item result = parseHtml("<p>Text with <b></b> empty bold</p>");
+
+    Element* b = findElementByTag(result, "b");
+    ASSERT_NE(b, nullptr);
+
+    List* b_list = (List*)b;
+    TypeElmt* b_type = (TypeElmt*)b->type;
+    EXPECT_EQ(b_type->content_length, 0);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingWithAttributes) {
+    // Test formatting elements with attributes
+    Item result = parseHtml(
+        "<p><span class='highlight'><b>Bold</b> and <i>italic</i></span></p>"
+    );
+
+    Element* span = findElementByTag(result, "span");
+    ASSERT_NE(span, nullptr);
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase6RawTextScript) {
+    // Test script as raw text element
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <script>
+                    function test() {
+                        return "<div>not parsed</div>";
+                    }
+                </script>
+            </head>
+        </html>
+    )");
+
+    Element* script = findElementByTag(result, "script");
+    ASSERT_NE(script, nullptr);
+
+    // Content should be text, not parsed as HTML
+    TypeElmt* script_type = (TypeElmt*)script->type;
+    EXPECT_GT(script_type->content_length, 0);
+
+    if (script_type->content_length > 0) {
+        List* script_list = (List*)script;
+        int64_t attr_count = script_list->length - script_type->content_length;
+        Item firstChild = script_list->items[attr_count];
+        EXPECT_EQ(get_type_id(firstChild), LMD_TYPE_STRING);
+    }
+}
+
+TEST_F(HtmlParserTest, Phase6RawTextStyle) {
+    // Test style as raw text element
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <style>
+                    body { color: red; }
+                    .class > span { font-weight: bold; }
+                </style>
+            </head>
+        </html>
+    )");
+
+    Element* style = findElementByTag(result, "style");
+    ASSERT_NE(style, nullptr);
+
+    // Content should be text, not parsed as HTML
+    TypeElmt* style_type = (TypeElmt*)style->type;
+    EXPECT_GT(style_type->content_length, 0);
+}
+
+TEST_F(HtmlParserTest, Phase6RawTextTextarea) {
+    // Test textarea as RCDATA element
+    Item result = parseHtml(R"(
+        <form>
+            <textarea>
+                Some text with <b>tags</b> that should not be parsed
+            </textarea>
+        </form>
+    )");
+
+    Element* textarea = findElementByTag(result, "textarea");
+    ASSERT_NE(textarea, nullptr);
+
+    // Content should be text
+    TypeElmt* textarea_type = (TypeElmt*)textarea->type;
+    EXPECT_GT(textarea_type->content_length, 0);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingComplexNesting) {
+    // Test complex real-world formatting scenario
+    Item result = parseHtml(R"(
+        <article>
+            <h1>Article Title</h1>
+            <p>
+                This is a paragraph with <strong>strong text</strong> and
+                <em>emphasized text</em>. It also has <code>inline code</code>
+                and <a href="#">a link with <strong>bold</strong> text</a>.
+            </p>
+            <p>
+                Another paragraph with <b>bold</b>, <i>italic</i>,
+                <u>underlined</u>, and <s>strikethrough</s> text.
+            </p>
+        </article>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "article"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "em"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+    EXPECT_NE(findElementByTag(result, "a"), nullptr);
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "u"), nullptr);
+    EXPECT_NE(findElementByTag(result, "s"), nullptr);
+
+    int p_count = countElementsByTag(result, "p");
+    EXPECT_EQ(p_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingList) {
+    // Test formatting inside list items
+    Item result = parseHtml(R"(
+        <ul>
+            <li><b>Bold item 1</b></li>
+            <li><i>Italic item 2</i></li>
+            <li><strong>Strong item 3</strong></li>
+        </ul>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "ul"), nullptr);
+
+    int li_count = countElementsByTag(result, "li");
+    EXPECT_EQ(li_count, 3);
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase6FormattingTable) {
+    // Test formatting inside table cells
+    Item result = parseHtml(R"(
+        <table>
+            <tr>
+                <td><b>Bold cell</b></td>
+                <td><i>Italic cell</i></td>
+            </tr>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+
+    int td_count = countElementsByTag(result, "td");
+    EXPECT_EQ(td_count, 2);
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase6MixedFormattingAndRawText) {
+    // Test document with both formatting elements and raw text elements
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <style>body { color: blue; }</style>
+                <script>var x = 10;</script>
+            </head>
+            <body>
+                <p>Text with <b>bold</b> and <i>italic</i>.</p>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "style"), nullptr);
+    EXPECT_NE(findElementByTag(result, "script"), nullptr);
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
 }
