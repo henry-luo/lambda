@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <string.h>
 #include <stdio.h>
-#include "../lambda/input/css/css_tokenizer.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_tokenizer.h"
+#include "../../lib/mempool.h"
 
 // Test fixture class for CSS files safe tests
 class CssFilesSafeTest : public ::testing::Test {

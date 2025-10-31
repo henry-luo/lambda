@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/css/css_tokenizer.h"
-#include "../lambda/input/css/css_property_value_parser.h"
-#include "../lambda/input/css/css_parser.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/css_tokenizer.h"
+#include "../../lambda/input/css/css_property_value_parser.h"
+#include "../../lambda/input/css/css_parser.h"
+#include "../../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
 protected:

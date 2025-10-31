@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 extern "C" {
-#include "../lambda/input/css/dom_element.h"
-#include "../lambda/input/css/selector_matcher.h"
-#include "../lambda/input/css/css_style.h"
-#include "../lambda/input/css/css_style_node.h"
-#include "../lib/mempool.h"
+#include "../../lambda/input/css/dom_element.h"
+#include "../../lambda/input/css/selector_matcher.h"
+#include "../../lambda/input/css/css_style.h"
+#include "../../lambda/input/css/css_style_node.h"
+#include "../../lib/mempool.h"
 }
 
 /**

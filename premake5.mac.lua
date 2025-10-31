@@ -3268,7 +3268,7 @@ project "test_css_style_node"
     targetextension ".exe"
     
     files {
-        "test/test_css_style_node.cpp",
+        "test/css/test_css_style_node.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3337,7 +3337,7 @@ project "test_css_system"
     targetextension ".exe"
     
     files {
-        "test/test_css_system.cpp",
+        "test/css/test_css_system.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3408,7 +3408,7 @@ project "test_css_dom_integration"
     targetextension ".exe"
     
     files {
-        "test/test_css_dom_integration.cpp",
+        "test/css/test_css_dom_integration.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3486,7 +3486,7 @@ project "test_css_style_application_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_style_application_gtest.cpp",
+        "test/css/test_css_style_application_gtest.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3672,7 +3672,7 @@ project "test_css_tokenizer_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_tokenizer_gtest.cpp",
+        "test/css/test_css_tokenizer_gtest.cpp",
     }
     
     includedirs {
@@ -4696,7 +4696,7 @@ project "test_css_parser_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_parser_gtest.cpp",
+        "test/css/test_css_parser_gtest.cpp",
     }
     
     includedirs {
@@ -4801,7 +4801,7 @@ project "test_css_integration_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_integration_gtest.cpp",
+        "test/css/test_css_integration_gtest.cpp",
     }
     
     includedirs {
@@ -4906,7 +4906,7 @@ project "test_css_files_safe_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_files_safe_gtest.cpp",
+        "test/css/test_css_files_safe_gtest.cpp",
     }
     
     includedirs {
@@ -5011,7 +5011,7 @@ project "test_css_frameworks_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_frameworks_gtest.cpp",
+        "test/css/test_css_frameworks_gtest.cpp",
     }
     
     includedirs {
@@ -5116,7 +5116,7 @@ project "test_css_to_lambda_roundtrip_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_to_lambda_roundtrip_gtest.cpp",
+        "test/css/test_css_to_lambda_roundtrip_gtest.cpp",
     }
     
     includedirs {
