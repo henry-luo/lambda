@@ -1187,7 +1187,7 @@ analyze-direct:
 	@# Analyze files that don't have complex dependencies
 	@for file in lambda/print.cpp lambda/pack.cpp lambda/utf_string.cpp \
 	             lambda/format/format-*.cpp lambda/input/input-common.cpp \
-	             lambda/input/mime-*.c lambda/validator/error_reporting.c; do \
+	             lib/mime-*.c lambda/validator/error_reporting.c; do \
 		if [ -f "$$file" ]; then \
 			echo "Analyzing $$file..."; \
 			clang --analyze -Xanalyzer -analyzer-output=html \

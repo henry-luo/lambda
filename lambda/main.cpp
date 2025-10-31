@@ -1,7 +1,7 @@
 #include "input/input.h"
 #include "format/format.h"
 #include "format/format-latex-html.h"
-#include "input/mime-detect.h"
+#include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
@@ -119,6 +119,13 @@ uint16_t be16toh(uint16_t big_endian_16bits) {
 // Typeset function stub for Linux builds
 extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* output_file) {
     printf("Typeset functionality not available in Linux build\n");
+    (void)input_file; (void)output_file; // Suppress unused parameter warnings
+    return false;
+}
+#else
+// Typeset function stub for macOS/Windows builds
+extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* output_file) {
+    printf("Typeset functionality not yet implemented\n");
     (void)input_file; (void)output_file; // Suppress unused parameter warnings
     return false;
 }

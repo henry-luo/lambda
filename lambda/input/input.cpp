@@ -1,7 +1,7 @@
 #include "input.h"
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
-#include "mime-detect.h"
+#include "../../lib/mime-detect.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/stat.h>

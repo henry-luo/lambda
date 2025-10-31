@@ -28,6 +28,8 @@
         "lib/string.c",
         "lib/datetime.c",
         "lib/image.c",
+        "lib/mime-detect.c",
+        "lib/mime-types.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
@@ -95,14 +97,6 @@
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
-        "typeset/typeset.c",
-        "typeset/view/view_tree.c",
-        "typeset/integration/latex_bridge.cpp",
-        "typeset/integration/latex_bridge_enhanced.cpp",
-        "typeset/typeset_latex.cpp",
-        "typeset/latex_typeset_enhanced.cpp",
-        "typeset/output/pdf_renderer.c",
-        "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp"
     ],
@@ -112,7 +106,7 @@
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include"
+        "mac-deps/rpmalloc-install/include"
     ],
     "libraries": [
         {
@@ -195,7 +189,6 @@
         },
         {
             "name": "zlib",
-            "include": null,
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
         },
@@ -221,13 +214,11 @@
         },
         {
             "name": "png",
-            "include": null,
             "lib": "/opt/homebrew/lib/libpng.a",
             "link": "static"
         },
         {
             "name": "bzip2",
-            "include": null,
             "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
             "link": "static"
         },
@@ -240,7 +231,7 @@
         },
         {
             "name": "expat",
-            "include": null,
+            "description": "Needed by FontConfig",
             "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
             "link": "static"
         },
@@ -259,7 +250,6 @@
         },
         {
             "name": "turbojpeg",
-            "include": null,
             "lib": "/opt/homebrew/lib/libturbojpeg.a",
             "link": "static"
         }
@@ -300,8 +290,8 @@
                 "lib/log.c",
                 "lib/cmdedit.c",
                 "lib/cmdedit_utf8.c",
-                "lambda/input/mime-detect.c",
-                "lambda/input/mime-types.c"
+                "lib/mime-detect.c",
+                "lib/mime-types.c"
             ],
             "libraries": [
                 "utf8proc",
