@@ -435,6 +435,22 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         html_stack_push(context->open_elements, element);
     }
 
+    // Phase 6: Track formatting elements in active formatting list
+    if (context && context->active_formatting && html_is_formatting_element(tag_name->chars)) {
+        size_t stack_depth = context->open_elements ? context->open_elements->length : 0;
+        html_formatting_push(context->active_formatting, element, stack_depth);
+        log_debug("Added formatting element <%s> to active list (depth=%zu)", tag_name->chars, stack_depth);
+    }
+
+    // Phase 8: Reconstruct formatting elements when opening a block element
+    if (context && context->active_formatting && html_is_block_element(tag_name->chars)) {
+        if (html_formatting_length(context->active_formatting) > 0) {
+            log_debug("Block element <%s> opened with %zu active formatting elements - reconstructing",
+                      tag_name->chars, html_formatting_length(context->active_formatting));
+            html_reconstruct_formatting(context, element);
+        }
+    }
+
     // Phase 4.1: Track explicit html/head/body tags in context
     if (context) {
         if (strcasecmp(tag_name->chars, "html") == 0) {
@@ -611,6 +627,13 @@ static Item parse_element(Input *input, const char **html, const char *html_star
             // Phase 5: Pop element from stack when it's closed
             if (context && context->open_elements) {
                 html_stack_pop_until(context->open_elements, element);
+            }
+
+            // Phase 6: Remove formatting element from active list when closed
+            if (context && context->active_formatting && html_is_formatting_element(tag_name->chars)) {
+                if (html_formatting_remove(context->active_formatting, element)) {
+                    log_debug("Removed formatting element <%s> from active list", tag_name->chars);
+                }
             }
         }
 

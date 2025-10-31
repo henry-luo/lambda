@@ -339,10 +339,20 @@ void html_context_transition_mode(HtmlParserContext* ctx, const char* tag_name, 
         if (strcasecmp(tag_name, "head") == 0) {
             if (current_mode == HTML_MODE_IN_HEAD) {
                 html_context_set_mode(ctx, HTML_MODE_AFTER_HEAD);
+                // Phase 6: Clear formatting elements when exiting head
+                if (ctx->active_formatting) {
+                    html_formatting_clear(ctx->active_formatting);
+                    log_debug("Cleared active formatting elements on </head>");
+                }
             }
         } else if (strcasecmp(tag_name, "body") == 0) {
             if (current_mode == HTML_MODE_IN_BODY) {
                 html_context_set_mode(ctx, HTML_MODE_AFTER_BODY);
+                // Phase 6: Clear formatting elements when exiting body
+                if (ctx->active_formatting) {
+                    html_formatting_clear(ctx->active_formatting);
+                    log_debug("Cleared active formatting elements on </body>");
+                }
             }
         } else if (strcasecmp(tag_name, "html") == 0) {
             if (current_mode == HTML_MODE_AFTER_BODY) {
@@ -637,4 +647,115 @@ void html_formatting_clear(HtmlFormattingList* list) {
 
 size_t html_formatting_length(HtmlFormattingList* list) {
     return list ? list->length : 0;
+}
+
+// ============================================================================
+// Phase 8: Simple Reconstruction for Misnested Formatting
+// ============================================================================
+
+void html_reconstruct_formatting(HtmlParserContext* ctx, Element* parent) {
+    if (!ctx || !parent || !ctx->active_formatting) return;
+
+    HtmlFormattingList* list = ctx->active_formatting;
+    if (list->length == 0) return;
+
+    log_debug("Reconstructing %zu formatting elements", list->length);
+
+    // For simple reconstruction, we reopen formatting elements after a block element
+    // This handles patterns like: <b><p>text</b></p> -> <b></b><p><b>text</b></p>
+    // We'll clone the formatting elements and add them as children of the parent
+
+    Pool* pool = ctx->input->pool;
+    if (!pool) return;
+
+    for (size_t i = 0; i < list->length; i++) {
+        Element* fmt_elem = list->elements[i].element;
+        if (!fmt_elem || !fmt_elem->type) continue;
+
+        TypeElmt* fmt_type = (TypeElmt*)fmt_elem->type;
+
+        // Create a new clone of the formatting element
+        Element* cloned = input_create_element(ctx->input, fmt_type->name.str);
+        if (!cloned) continue;
+
+        // Add the cloned formatting element to the parent
+        List* parent_list = (List*)parent;
+        list_push(parent_list, (Item){.element = cloned});
+
+        log_debug("  Reconstructed <%.*s> into parent",
+                  (int)fmt_type->name.length, fmt_type->name.str);
+
+        // Update the formatting list to point to the new clone
+        list->elements[i].element = cloned;
+        list->elements[i].stack_depth = ctx->open_elements ? ctx->open_elements->length : 0;
+
+        // Push the cloned element onto the open elements stack
+        if (ctx->open_elements) {
+            html_stack_push(ctx->open_elements, cloned);
+        }
+    }
+}
+
+// ============================================================================
+// Phase 9: Foster Parenting for Table Misnesting
+// ============================================================================
+
+// Table-related elements that define table context
+static const char* HTML5_TABLE_ELEMENTS[] = {
+    "table", "tbody", "thead", "tfoot", "tr", "td", "th", "caption",
+    "col", "colgroup", NULL
+};
+
+bool html_is_table_element(const char* tag_name) {
+    if (!tag_name) return false;
+
+    for (int i = 0; HTML5_TABLE_ELEMENTS[i]; i++) {
+        if (strcasecmp(tag_name, HTML5_TABLE_ELEMENTS[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool html_is_in_table_context(HtmlParserContext* ctx) {
+    if (!ctx || !ctx->open_elements) return false;
+
+    // Check if any element in the stack is a table
+    HtmlElementStack* stack = ctx->open_elements;
+    for (size_t i = 0; i < stack->length; i++) {
+        Element* elem = stack->elements[i];
+        if (elem && elem->type) {
+            TypeElmt* type = (TypeElmt*)elem->type;
+            if (strview_equal(&type->name, "table")) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+Element* html_find_foster_parent(HtmlParserContext* ctx) {
+    if (!ctx || !ctx->open_elements) return NULL;
+
+    HtmlElementStack* stack = ctx->open_elements;
+
+    // Find the last (most recent) table element in the stack
+    for (int i = (int)stack->length - 1; i >= 0; i--) {
+        Element* elem = stack->elements[i];
+        if (elem && elem->type) {
+            TypeElmt* type = (TypeElmt*)elem->type;
+            if (strview_equal(&type->name, "table")) {
+                // Foster parent is the element before the table
+                // (or the table's parent if we can't go before)
+                if (i > 0) {
+                    return stack->elements[i - 1];
+                }
+                return elem; // Fallback to table itself
+            }
+        }
+    }
+
+    // No table found, return current node
+    return html_stack_current_node(stack);
 }
