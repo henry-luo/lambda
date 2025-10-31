@@ -1662,7 +1662,7 @@ class PremakeGenerator:
         for suite in test_suites:
             suite_name = suite.get('suite', '')
             suite_type = suite.get('type', '')
-            
+
             # Skip disabled test suites
             if suite.get('disabled', False):
                 print(f"Skipping disabled test suite: {suite_name}")
@@ -1941,14 +1941,14 @@ class PremakeGenerator:
             '    targetdir "test"',
             '    objdir "build/obj/%{prj.name}"',
         ])
-        
+
         # Use custom target name if provided, otherwise use the project name
         if target_name:
             # Remove .exe extension and extract just the filename for targetname
             import os
             clean_target_name = os.path.basename(target_name).replace('.exe', '')
             self.premake_content.append(f'    targetname "{clean_target_name}"')
-        
+
         self.premake_content.extend([
             '    targetextension ".exe"',
             '    ',

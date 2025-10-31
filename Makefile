@@ -123,8 +123,7 @@ PARSER_C = lambda/tree-sitter-lambda/src/parser.c
 GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
 TS_ENUM_H = lambda/ts-enum.h
-GENERATE_PARSER_SCRIPT = ./generate-parser.sh
-UPDATE_TS_ENUM_SCRIPT = ./update_ts_enum.sh
+UPDATE_TS_ENUM_SCRIPT = ./utils/update_ts_enum.sh
 
 # Auto-generate parser and ts-enum.h when grammar.js changes
 $(TS_ENUM_H): $(GRAMMAR_JS)
