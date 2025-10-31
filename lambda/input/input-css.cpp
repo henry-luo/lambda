@@ -1056,19 +1056,15 @@ static Array* parse_css_function_params(Input *input, const char **css) {
         if (**css == ',') {
             (*css)++; // skip comma
             skip_css_comments(css);
-        } else if (**css == '/') {
-            // Handle slash separator (e.g., rgba(255 0 0 / 0.5))
-            (*css)++; // skip slash
-            skip_css_comments(css);
         } else if (**css == ')') {
             // end of parameters
             break;
         } else if (**css != ')') {
-            // Check for calc operators (+, -, *, /) before treating as space-separated
+            // Check for calc operators (+, -, *, /) before treating as space-separated or slash-separated
             skip_css_whitespace(css);
 
             // Check if we have a calc operator
-            if (**css == '+' || **css == '-' || **css == '*') {
+            if (**css == '+' || **css == '-' || **css == '*' || **css == '/') {
                 // Special case: don't treat -- as two operators (it's a CSS custom property prefix)
                 if (**css == '-' && *(*css + 1) == '-') {
                     // This is --, not an operator - continue as space-separated
@@ -1080,6 +1076,12 @@ static Array* parse_css_function_params(Input *input, const char **css) {
                     // This is a negative number, not an operator - it will be parsed in next iteration
                     continue;
                 }
+
+                // Special handling for slash:
+                // - In calc() functions, / is a division operator
+                // - In rgba/hsla functions, / is a separator for alpha channel
+                // We can't always tell from context, but we treat it as operator
+                // The formatter will output it correctly with spaces
 
                 // Capture the operator as a separate parameter (symbol)
                 char op_char = **css;
@@ -1096,26 +1098,9 @@ static Array* parse_css_function_params(Input *input, const char **css) {
 
                 skip_css_whitespace(css);
                 continue; // Continue parsing next parameter
-            } else if (**css == '/' && *(*css + 1) != '*') {
-                // Division operator (but not a comment starter)
-                // Only treat as operator if not followed by * (which would start a comment)
-                char op_char = '/';
-                (*css)++; // advance past operator
-
-                // Create a string for the operator using stringbuf
-                StringBuf* op_sb = stringbuf_new(input->pool);
-                stringbuf_append_char(op_sb, op_char);
-                String* op_str = stringbuf_to_string(op_sb);
-                if (op_str) {
-                    Item op_item = {.item = y2it(op_str)};  // Store as symbol
-                    array_append(params, op_item, input->pool);
-                }
-
-                skip_css_whitespace(css);
-                continue; // Continue parsing next parameter
             }
 
-            if (**css && **css != ',' && **css != ')' && **css != '/') {
+            if (**css && **css != ',' && **css != ')') {
                 // Only continue parsing for rgba() style space separation, not calc() expressions
                 // For now, treat any remaining content as end of this parameter
                 continue;
