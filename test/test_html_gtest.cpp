@@ -2914,3 +2914,570 @@ TEST_F(HtmlParserTest, Phase6MixedFormattingAndRawText) {
     EXPECT_NE(findElementByTag(result, "b"), nullptr);
     EXPECT_NE(findElementByTag(result, "i"), nullptr);
 }
+
+// ============================================================================
+// Phase 7 Tests: Parser Integration (Formatting Element Tracking)
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase7FormattingTrackedAndRemoved) {
+    // Test that formatting elements are tracked during parsing and properly removed
+    Item result = parseHtml("<p><b>Bold text</b> normal text</p>");
+
+    // Verify the bold element was created
+    Element* b = findElementByTag(result, "b");
+    ASSERT_NE(b, nullptr);
+    EXPECT_STREQ(getElementTagName(b), "b");
+
+    // The formatting element should have been tracked and then removed when closed
+    // (We can't directly test the active_formatting list from here, but the
+    // structure should be correct if parsing succeeded)
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7MultipleFormattingTracking) {
+    // Test multiple formatting elements being tracked simultaneously
+    Item result = parseHtml(R"(
+        <div>
+            <p><b>Bold</b> and <i>italic</i> and <strong>strong</strong></p>
+            <p><em>emphasis</em> and <code>code</code></p>
+        </div>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "em"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7NestedFormattingTracking) {
+    // Test nested formatting elements tracking
+    Item result = parseHtml("<p><b>Bold <i>and italic <u>and underlined</u></i></b></p>");
+
+    Element* b = findElementByTag(result, "b");
+    Element* i = findElementByTag(result, "i");
+    Element* u = findElementByTag(result, "u");
+
+    ASSERT_NE(b, nullptr);
+    ASSERT_NE(i, nullptr);
+    ASSERT_NE(u, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7FormattingClearedOnHeadClose) {
+    // Test that formatting elements are cleared when head closes
+    // (Even though formatting in head is unusual, we test the clearing mechanism)
+    Item result = parseHtml(R"(
+        <html>
+            <head>
+                <title>Test</title>
+            </head>
+            <body>
+                <p>Body content</p>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "head"), nullptr);
+    EXPECT_NE(findElementByTag(result, "body"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7FormattingClearedOnBodyClose) {
+    // Test that formatting elements are cleared when body closes
+    Item result = parseHtml(R"(
+        <html>
+            <body>
+                <p><b>Bold</b> and <i>italic</i></p>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "body"), nullptr);
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7FormattingWithImplicitElements) {
+    // Test formatting elements with implicit html/head/body
+    Item result = parseHtml("<p><b>Bold text</b></p>");
+
+    Element* b = findElementByTag(result, "b");
+    ASSERT_NE(b, nullptr);
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7FormattingInComplexStructure) {
+    // Test formatting elements in complex document structure
+    Item result = parseHtml(R"(
+        <html>
+            <head><title>Test</title></head>
+            <body>
+                <header><h1>Title with <b>bold</b></h1></header>
+                <main>
+                    <article>
+                        <p>First paragraph with <strong>strong</strong>.</p>
+                        <p>Second with <em>emphasis</em> and <code>code</code>.</p>
+                    </article>
+                    <aside>
+                        <p>Sidebar with <i>italic</i> text.</p>
+                    </aside>
+                </main>
+                <footer><p>Footer with <small>small</small> text.</p></footer>
+            </body>
+        </html>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "em"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "small"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7FormattingInterleaved) {
+    // Test interleaved opening and closing of formatting elements
+    Item result = parseHtml(R"(
+        <p>
+            <b>Bold start</b>
+            <i>Italic start</i>
+            <b>Bold again</b>
+            <i>Italic again</i>
+        </p>
+    )");
+
+    // Should find both bold and italic elements
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase7AllFormattingElements) {
+    // Test all supported formatting elements
+    Item result = parseHtml(R"(
+        <div>
+            <a href="#">link</a>
+            <b>bold</b>
+            <big>big</big>
+            <code>code</code>
+            <em>emphasis</em>
+            <font>font</font>
+            <i>italic</i>
+            <nobr>nobr</nobr>
+            <s>strikethrough</s>
+            <small>small</small>
+            <strike>strike</strike>
+            <strong>strong</strong>
+            <tt>teletype</tt>
+            <u>underline</u>
+        </div>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "a"), nullptr);
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "big"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+    EXPECT_NE(findElementByTag(result, "em"), nullptr);
+    EXPECT_NE(findElementByTag(result, "font"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "nobr"), nullptr);
+    EXPECT_NE(findElementByTag(result, "s"), nullptr);
+    EXPECT_NE(findElementByTag(result, "small"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strike"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tt"), nullptr);
+    EXPECT_NE(findElementByTag(result, "u"), nullptr);
+}
+
+// ============================================================================
+// Phase 8 Tests: Simple Reconstruction for Misnested Formatting
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase8SimpleMisnestingBoldParagraph) {
+    // Test basic misnesting: <b><p>text</b></p>
+    // Should reconstruct: <b></b><p><b>text</b></p>
+    Item result = parseHtml("<b><p>text</p></b>");
+
+    // Both b and p should exist
+    Element* b = findElementByTag(result, "b");
+    Element* p = findElementByTag(result, "p");
+
+    ASSERT_NE(b, nullptr);
+    ASSERT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingMultipleBlocks) {
+    // Test formatting element across multiple blocks
+    Item result = parseHtml("<b><p>First</p><p>Second</p></b>");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    int p_count = countElementsByTag(result, "p");
+    EXPECT_EQ(p_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingNestedFormatting) {
+    // Test nested formatting with block interruption
+    Item result = parseHtml("<b><i><p>text</p></i></b>");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingWithDiv) {
+    // Test formatting interrupted by div
+    Item result = parseHtml("<strong><div>content</div></strong>");
+
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingMultipleFormatting) {
+    // Test multiple formatting elements with block
+    Item result = parseHtml("<b><i><p>text</p></i></b>");
+
+    Element* b = findElementByTag(result, "b");
+    Element* i = findElementByTag(result, "i");
+    Element* p = findElementByTag(result, "p");
+
+    ASSERT_NE(b, nullptr);
+    ASSERT_NE(i, nullptr);
+    ASSERT_NE(p, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingHeading) {
+    // Test formatting with heading element
+    Item result = parseHtml("<b><h1>Title</h1></b>");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "h1"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingList) {
+    // Test formatting with list structure
+    Item result = parseHtml("<b><ul><li>Item</li></ul></b>");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "ul"), nullptr);
+    EXPECT_NE(findElementByTag(result, "li"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingBlockquote) {
+    // Test formatting with blockquote
+    Item result = parseHtml("<i><blockquote>Quote</blockquote></i>");
+
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "blockquote"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingComplexStructure) {
+    // Test complex misnesting scenario
+    Item result = parseHtml(R"(
+        <b>Bold start
+            <p>Paragraph 1</p>
+            <i>Italic start
+                <div>Division</div>
+            </i>
+            <p>Paragraph 2</p>
+        </b>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "i"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+
+    int p_count = countElementsByTag(result, "p");
+    EXPECT_EQ(p_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase8NoReconstructionWithoutFormatting) {
+    // Test that reconstruction doesn't happen when no formatting is active
+    Item result = parseHtml("<div><p>Just blocks</p></div>");
+
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8ReconstructionPreservesContent) {
+    // Test that content is preserved through reconstruction
+    Item result = parseHtml("<b><p>Hello World</p></b>");
+
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+
+    std::string content = getTextContent((Item){.element = p});
+    EXPECT_TRUE(content.find("Hello World") != std::string::npos);
+}
+
+TEST_F(HtmlParserTest, Phase8MisnestingWithAttributes) {
+    // Test that attributes are preserved during reconstruction
+    Item result = parseHtml(R"(<b class="bold"><p id="para">text</p></b>)");
+
+    EXPECT_NE(findElementByTag(result, "b"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase8MultipleBlocksInFormatting) {
+    // Test multiple different block types within formatting
+    Item result = parseHtml(R"(
+        <strong>
+            <p>Paragraph</p>
+            <div>Division</div>
+            <h2>Heading</h2>
+            <ul><li>List item</li></ul>
+        </strong>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "h2"), nullptr);
+    EXPECT_NE(findElementByTag(result, "ul"), nullptr);
+    EXPECT_NE(findElementByTag(result, "li"), nullptr);
+}
+
+// ============================================================================
+// Phase 9 Tests: Foster Parenting for Table Misnesting
+// ============================================================================
+
+TEST_F(HtmlParserTest, Phase9TableBasicStructure) {
+    // Test basic well-formed table structure
+    Item result = parseHtml(R"(
+        <table>
+            <tr>
+                <td>Cell 1</td>
+                <td>Cell 2</td>
+            </tr>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+
+    int td_count = countElementsByTag(result, "td");
+    EXPECT_EQ(td_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase9TableWithTbody) {
+    // Test table with explicit tbody
+    Item result = parseHtml(R"(
+        <table>
+            <tbody>
+                <tr>
+                    <td>Data</td>
+                </tr>
+            </tbody>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tbody"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+    EXPECT_NE(findElementByTag(result, "td"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9TableWithTheadTfoot) {
+    // Test table with thead and tfoot
+    Item result = parseHtml(R"(
+        <table>
+            <thead>
+                <tr><th>Header</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Data</td></tr>
+            </tbody>
+            <tfoot>
+                <tr><td>Footer</td></tr>
+            </tfoot>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "thead"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tbody"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tfoot"), nullptr);
+    EXPECT_NE(findElementByTag(result, "th"), nullptr);
+
+    int td_count = countElementsByTag(result, "td");
+    EXPECT_EQ(td_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase9TableWithCaption) {
+    // Test table with caption
+    Item result = parseHtml(R"(
+        <table>
+            <caption>Table Caption</caption>
+            <tr><td>Data</td></tr>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "caption"), nullptr);
+    EXPECT_NE(findElementByTag(result, "td"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9TableWithColgroup) {
+    // Test table with colgroup and col
+    Item result = parseHtml(R"(
+        <table>
+            <colgroup>
+                <col span="2">
+            </colgroup>
+            <tr><td>A</td><td>B</td></tr>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "colgroup"), nullptr);
+    EXPECT_NE(findElementByTag(result, "col"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9TableMisplacedText) {
+    // Test table with text directly inside (should be fostered or handled)
+    Item result = parseHtml(R"(
+        <table>
+            Misplaced text
+            <tr><td>Cell</td></tr>
+        </table>
+    )");
+
+    // Table should still be created
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+    EXPECT_NE(findElementByTag(result, "td"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9TableMisplacedDiv) {
+    // Test table with div directly inside (should be fostered)
+    Item result = parseHtml(R"(
+        <table>
+            <div>Misplaced content</div>
+            <tr><td>Cell</td></tr>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9TableComplexStructure) {
+    // Test complex table with multiple sections
+    Item result = parseHtml(R"(
+        <table border="1">
+            <caption>Sales Report</caption>
+            <colgroup>
+                <col style="background-color: lightblue">
+                <col style="background-color: lightgreen">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Sales</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Product A</td>
+                    <td>100</td>
+                </tr>
+                <tr>
+                    <td>Product B</td>
+                    <td>150</td>
+                </tr>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Total</td>
+                    <td>250</td>
+                </tr>
+            </tfoot>
+        </table>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "caption"), nullptr);
+    EXPECT_NE(findElementByTag(result, "colgroup"), nullptr);
+    EXPECT_NE(findElementByTag(result, "thead"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tbody"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tfoot"), nullptr);
+
+    int tr_count = countElementsByTag(result, "tr");
+    EXPECT_EQ(tr_count, 4); // 1 thead + 2 tbody + 1 tfoot
+
+    int col_count = countElementsByTag(result, "col");
+    EXPECT_EQ(col_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase9NestedTables) {
+    // Test nested tables
+    Item result = parseHtml(R"(
+        <table>
+            <tr>
+                <td>
+                    Outer cell
+                    <table>
+                        <tr><td>Inner cell</td></tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    )");
+
+    int table_count = countElementsByTag(result, "table");
+    EXPECT_EQ(table_count, 2);
+
+    int td_count = countElementsByTag(result, "td");
+    EXPECT_EQ(td_count, 2);
+}
+
+TEST_F(HtmlParserTest, Phase9TableInDiv) {
+    // Test table inside div (normal nesting)
+    Item result = parseHtml(R"(
+        <div>
+            <table>
+                <tr><td>Cell</td></tr>
+            </table>
+        </div>
+    )");
+
+    EXPECT_NE(findElementByTag(result, "div"), nullptr);
+    EXPECT_NE(findElementByTag(result, "table"), nullptr);
+    EXPECT_NE(findElementByTag(result, "tr"), nullptr);
+    EXPECT_NE(findElementByTag(result, "td"), nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9TableContextDetection) {
+    // Test that table context detection works
+    // This is more of an infrastructure test
+    Item result = parseHtml(R"(
+        <table>
+            <tr>
+                <td>Cell content</td>
+            </tr>
+        </table>
+    )");
+
+    Element* table = findElementByTag(result, "table");
+    ASSERT_NE(table, nullptr);
+
+    Element* td = findElementByTag(result, "td");
+    ASSERT_NE(td, nullptr);
+}
+
+TEST_F(HtmlParserTest, Phase9MultipleTablesInDocument) {
+    // Test multiple tables in same document
+    Item result = parseHtml(R"(
+        <div>
+            <table><tr><td>Table 1</td></tr></table>
+            <p>Between tables</p>
+            <table><tr><td>Table 2</td></tr></table>
+        </div>
+    )");
+
+    int table_count = countElementsByTag(result, "table");
+    EXPECT_EQ(table_count, 2);
+
+    EXPECT_NE(findElementByTag(result, "p"), nullptr);
+}

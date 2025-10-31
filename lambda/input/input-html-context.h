@@ -369,6 +369,43 @@ size_t html_formatting_length(HtmlFormattingList* list);
  */
 bool html_is_formatting_element(const char* tag_name);
 
+// ============================================================================
+// Phase 8: Simple Reconstruction for Misnested Formatting
+// ============================================================================
+
+/**
+ * Reconstruct active formatting elements after a block element opens
+ * This handles simple misnesting like <b><p>text</b></p>
+ * @param ctx Parser context
+ * @param parent Parent element to reconstruct into
+ */
+void html_reconstruct_formatting(HtmlParserContext* ctx, Element* parent);
+
+// ============================================================================
+// Phase 9: Foster Parenting for Table Misnesting
+// ============================================================================
+
+/**
+ * Check if we're currently in a table context (parsing table structure)
+ * @param ctx Parser context
+ * @return True if inside a table element
+ */
+bool html_is_in_table_context(HtmlParserContext* ctx);
+
+/**
+ * Find the appropriate foster parent for content that appears in wrong table location
+ * @param ctx Parser context
+ * @return The element to use as foster parent (usually before the table)
+ */
+Element* html_find_foster_parent(HtmlParserContext* ctx);
+
+/**
+ * Check if an element is a table-related element
+ * @param tag_name Tag name to check
+ * @return True if it's a table element (table, tbody, thead, tfoot, tr, td, th, etc.)
+ */
+bool html_is_table_element(const char* tag_name);
+
 #ifdef __cplusplus
 }
 #endif
