@@ -51,8 +51,8 @@ project "lambda-lib"
         "lib/log.c",
         "lib/cmdedit.c",
         "lib/cmdedit_utf8.c",
-        "lambda/input/mime-detect.c",
-        "lambda/input/mime-types.c",
+        "lib/mime-detect.c",
+        "lib/mime-types.c",
     }
     
     includedirs {
@@ -61,12 +61,13 @@ project "lambda-lib"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -121,12 +122,13 @@ project "lambda-input-full-c"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "mac-deps/curl-8.10.1/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     buildoptions {
@@ -230,12 +232,13 @@ project "lambda-input-full-cpp"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "mac-deps/curl-8.10.1/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     filter "files:**.c"
@@ -404,13 +407,14 @@ project "radiant"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "lib",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -514,6 +518,8 @@ project "lambda"
         "lib/string.c",
         "lib/datetime.c",
         "lib/image.c",
+        "lib/mime-detect.c",
+        "lib/mime-types.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
@@ -581,18 +587,8 @@ project "lambda"
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
-        "typeset/typeset.c",
-        "typeset/view/view_tree.c",
-        "typeset/integration/latex_bridge.cpp",
-        "typeset/integration/latex_bridge_enhanced.cpp",
-        "typeset/typeset_latex.cpp",
-        "typeset/latex_typeset_enhanced.cpp",
-        "typeset/output/pdf_renderer.c",
-        "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
-        "lambda/input/mime-types.c",
-        "lambda/input/mime-detect.c",
         "lambda/input/css/css_formatter.c",
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_engine.c",
@@ -680,7 +676,7 @@ project "lambda"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -688,6 +684,7 @@ project "lambda"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -790,7 +787,7 @@ project "test_strbuf_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -798,6 +795,7 @@ project "test_strbuf_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -852,7 +850,7 @@ project "test_stringbuf_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -860,6 +858,7 @@ project "test_stringbuf_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -915,7 +914,7 @@ project "test_strview_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -923,6 +922,7 @@ project "test_strview_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -977,7 +977,7 @@ project "test_num_stack_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -985,6 +985,7 @@ project "test_num_stack_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1039,7 +1040,7 @@ project "test_datetime_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1047,6 +1048,7 @@ project "test_datetime_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1102,7 +1104,7 @@ project "test_url_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1110,6 +1112,7 @@ project "test_url_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1164,7 +1167,7 @@ project "test_url_extra_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1172,6 +1175,7 @@ project "test_url_extra_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1226,7 +1230,7 @@ project "test_cmdedit_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1234,6 +1238,7 @@ project "test_cmdedit_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1293,7 +1298,7 @@ project "test_mempool_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1301,6 +1306,7 @@ project "test_mempool_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1357,7 +1363,7 @@ project "test_avl_tree"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1365,6 +1371,7 @@ project "test_avl_tree"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1421,7 +1428,7 @@ project "test_avl_tree_perf"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1429,6 +1436,7 @@ project "test_avl_tree_perf"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1485,7 +1493,7 @@ project "test_element_reader_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1493,6 +1501,7 @@ project "test_element_reader_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1587,7 +1596,7 @@ project "test_mime_detect_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1595,6 +1604,7 @@ project "test_mime_detect_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1690,7 +1700,7 @@ project "test_math_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1698,6 +1708,7 @@ project "test_math_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1794,7 +1805,7 @@ project "test_math_ascii_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1802,6 +1813,7 @@ project "test_math_ascii_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1898,7 +1910,7 @@ project "test_markup_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1906,6 +1918,7 @@ project "test_markup_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2002,7 +2015,7 @@ project "test_input_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2010,6 +2023,7 @@ project "test_input_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2106,7 +2120,7 @@ project "test_html_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2114,6 +2128,7 @@ project "test_html_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2210,7 +2225,7 @@ project "test_html_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2218,6 +2233,7 @@ project "test_html_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2314,7 +2330,7 @@ project "test_html_negative_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2322,6 +2338,7 @@ project "test_html_negative_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2422,7 +2439,7 @@ project "test_lambda_domnode_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2430,6 +2447,7 @@ project "test_lambda_domnode_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2527,7 +2545,7 @@ project "test_dir_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2535,6 +2553,7 @@ project "test_dir_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2630,7 +2649,7 @@ project "test_graph_parser_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2638,6 +2657,7 @@ project "test_graph_parser_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2734,7 +2754,7 @@ project "test_graph_formatter_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2742,6 +2762,7 @@ project "test_graph_formatter_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2838,7 +2859,7 @@ project "test_http_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2846,6 +2867,7 @@ project "test_http_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2941,7 +2963,7 @@ project "test_sysinfo_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2949,6 +2971,7 @@ project "test_sysinfo_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3045,7 +3068,7 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3053,6 +3076,7 @@ project "test_jsx_roundtrip_new_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3149,7 +3173,7 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3157,6 +3181,7 @@ project "test_mdx_roundtrip_new_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3257,7 +3282,7 @@ project "test_css_style_node"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3265,6 +3290,7 @@ project "test_css_style_node"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3327,7 +3353,7 @@ project "test_css_system"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3335,6 +3361,7 @@ project "test_css_system"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3404,7 +3431,7 @@ project "test_css_dom_integration"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3412,6 +3439,7 @@ project "test_css_dom_integration"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3481,7 +3509,7 @@ project "test_css_style_application_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3489,6 +3517,7 @@ project "test_css_style_application_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3547,7 +3576,7 @@ project "test_html_css_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3555,6 +3584,7 @@ project "test_html_css_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3651,7 +3681,7 @@ project "test_css_tokenizer_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3659,6 +3689,7 @@ project "test_css_tokenizer_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3755,7 +3786,7 @@ project "test_css_tokenizer_unit"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3763,6 +3794,7 @@ project "test_css_tokenizer_unit"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3859,7 +3891,7 @@ project "test_css_parser_unit"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3867,6 +3899,7 @@ project "test_css_parser_unit"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3963,7 +3996,7 @@ project "test_css_engine_unit"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3971,6 +4004,7 @@ project "test_css_engine_unit"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4067,7 +4101,7 @@ project "test_css_engine_negative"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4075,6 +4109,7 @@ project "test_css_engine_negative"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4186,7 +4221,7 @@ project "test_dom_element_print"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4194,6 +4229,7 @@ project "test_dom_element_print"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4249,7 +4285,7 @@ project "test_css_formatter_unit"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4257,6 +4293,7 @@ project "test_css_formatter_unit"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4353,7 +4390,7 @@ project "test_css_roundtrip_unit"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4361,6 +4398,7 @@ project "test_css_roundtrip_unit"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4457,7 +4495,7 @@ project "test_compound_descendant_selectors"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4465,6 +4503,7 @@ project "test_compound_descendant_selectors"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4561,7 +4600,7 @@ project "test_selector_groups"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4569,6 +4608,7 @@ project "test_selector_groups"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4665,7 +4705,7 @@ project "test_css_parser_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4673,6 +4713,7 @@ project "test_css_parser_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4769,7 +4810,7 @@ project "test_css_integration_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4777,6 +4818,7 @@ project "test_css_integration_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4873,7 +4915,7 @@ project "test_css_files_safe_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4881,6 +4923,7 @@ project "test_css_files_safe_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4977,7 +5020,7 @@ project "test_css_frameworks_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -4985,6 +5028,7 @@ project "test_css_frameworks_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5081,7 +5125,7 @@ project "test_css_to_lambda_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5089,6 +5133,7 @@ project "test_css_to_lambda_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5185,7 +5230,7 @@ project "test_mdx_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5193,6 +5238,7 @@ project "test_mdx_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5288,7 +5334,7 @@ project "test_jsx_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5296,6 +5342,7 @@ project "test_jsx_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5394,7 +5441,7 @@ project "test_latex_html_fixtures"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5402,6 +5449,7 @@ project "test_latex_html_fixtures"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5499,7 +5547,7 @@ project "test_validator_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5507,6 +5555,7 @@ project "test_validator_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5601,7 +5650,7 @@ project "test_ast_validator_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5609,6 +5658,7 @@ project "test_ast_validator_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5704,7 +5754,7 @@ project "test_lambda_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5712,6 +5762,7 @@ project "test_lambda_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5765,7 +5816,7 @@ project "test_lambda_repl_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5773,6 +5824,7 @@ project "test_lambda_repl_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5826,7 +5878,7 @@ project "test_lambda_proc_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5834,6 +5886,7 @@ project "test_lambda_proc_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5887,7 +5940,7 @@ project "test_js_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -5895,6 +5948,7 @@ project "test_js_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {

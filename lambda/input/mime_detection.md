@@ -183,7 +183,7 @@ brew install criterion
 # Compile and run tests
 gcc -std=c99 -g -I. -I/opt/homebrew/opt/criterion/include \
     -L/opt/homebrew/opt/criterion/lib -lcriterion \
-    test/test_mime_detect.c lambda/input/mime-detect.c lambda/input/mime-types.c \
+    test/test_mime_detect.c lib/mime-detect.c lib/mime-types.c \
     -o test_mime_detect
 
 # Run tests with detailed output

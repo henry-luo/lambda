@@ -9,28 +9,26 @@ workspace "Lambda"
     location "build/premake"
     startproject "lambda"
     toolset "gcc"
-
+    
     -- Global settings
     cppdialect "C++17"
     cdialect "C99"
     warnings "Extra"
-
+    
     filter "configurations:Debug"
         defines { "DEBUG" }
         symbols "On"
         optimize "Off"
-
-    -- AddressSanitizer disabled for Linux platform
-
+    
     filter "configurations:Release"
         defines { "NDEBUG" }
         optimize "On"
-
+    
     -- Native Linux build settings
     toolset "gcc"
     defines { "LINUX", "_GNU_SOURCE", "NATIVE_LINUX_BUILD" }
-
-
+    
+    
     filter {}
 
 project "lambda-lib"
@@ -38,12 +36,10 @@ project "lambda-lib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-
+    
     -- Meta-library: combines source files from dependencies
     files {
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
+        "lib/mempool.c",
         "lib/strbuf.c",
         "lib/stringbuf.c",
         "lib/strview.c",
@@ -55,102 +51,126 @@ project "lambda-lib"
         "lib/log.c",
         "lib/cmdedit.c",
         "lib/cmdedit_utf8.c",
-        "lambda/input/mime-detect.c",
-        "lambda/input/mime-types.c",
+        "lib/mime-detect.c",
+        "lib/mime-types.c",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
     }
-
+    
     links {
         "utf8proc",
+        "rpmalloc",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
     defines {
         "UTF8PROC_STATIC",
     }
-
+    
 
 project "lambda-input-full-c"
     kind "SharedLib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-
+    
     files {
         "lambda/parse.c",
-        "lambda/input/css_tokenizer.c",
-        "lambda/input/css_selector_parser.c",
-        "lambda/input/css_property_value_parser.c",
-        "lambda/input/css_enhanced_integration.c",
+        "lambda/input/css/css_tokenizer.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/css_engine.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/css_style_node.c",
         "lib/arraylist.c",
+        "lib/avl_tree.c",
         "lib/hashmap.c",
         "lib/file.c",
         "lib/log.c",
         "lib/utf.c",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
         "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
-
+    
     buildoptions {
         "-pedantic",
-        "-fdiagnostics-color=auto"
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-std=c17"
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     links {
         "mpdec",
         "curl",
-        "z",
         "lambda-lib",
     }
-
+    
 
 project "lambda-input-full-cpp"
     kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-
+    
     files {
         "lambda/print.cpp",
         "lambda/utf_string.cpp",
@@ -164,115 +184,133 @@ project "lambda-input-full-cpp"
         "lambda/format/format.cpp",
         "test/test_stubs.cpp",
         "lambda/parse.c",
-        "lambda/input/css_tokenizer.c",
-        "lambda/input/css_selector_parser.c",
-        "lambda/input/css_property_value_parser.c",
-        "lambda/input/css_enhanced_integration.c",
+        "lambda/input/css/css_tokenizer.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/css_engine.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/css_style_node.c",
         "lib/arraylist.c",
+        "lib/avl_tree.c",
         "lib/hashmap.c",
         "lib/file.c",
         "lib/log.c",
         "lib/utf.c",
     }
-
+    
     files {
         "lambda/input/input*.cpp",
     }
-
+    
     files {
         "lambda/format/format*.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
         "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
-
+    
     filter "files:**.c"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
+            "-fno-omit-frame-pointer",
+            "-g",
+            "-O2",
+            "-std=c17",
         }
-
+    
     filter "files:**.cpp"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
+            "-fno-omit-frame-pointer",
+            "-g",
+            "-O2",
             "-std=c++17",
         }
-
+    
     filter {}
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     links {
         "mpdec",
         "curl",
-        "z",
         "lambda-lib",
     }
-
+    
+    -- Automatically added C++ standard library
+    links {
+        "stdc++",
+    }
+    
 
 project "lambda-input-full"
     kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-
+    
     -- Wrapper library with empty source file
     files {
         "utils/empty.cpp",
     }
-
+    
     links {
         "lambda-input-full-c",
         "lambda-input-full-cpp",
     }
-
+    
 
 project "radiant"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetname "radiant.exe"
     targetdir "."
     objdir "build/obj/%{prj.name}"
     -- Native HTML/CSS/SVG rendering engine
-
-    language "C++"
+    
     files {
         "radiant/window.cpp",
         "radiant/ui_context.cpp",
         "radiant/parse_html.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
+        "radiant/layout_inline.cpp",
         "radiant/layout_text.cpp",
         "radiant/layout_positioned.cpp",
         "radiant/layout_flex.cpp",
-        "radiant/layout_flex_content.cpp",
-        "radiant/layout_nested.cpp",
+        "radiant/layout_flex_measurement.cpp",
+        "radiant/layout_flex_multipass.cpp",
         "radiant/layout_table.cpp",
         "radiant/layout_grid.cpp",
         "radiant/grid_utils.cpp",
@@ -280,71 +318,114 @@ project "radiant"
         "radiant/grid_positioning.cpp",
         "radiant/layout_grid_content.cpp",
         "radiant/grid_advanced.cpp",
-        "radiant/view_pool_new.cpp",
         "radiant/resolve_style.cpp",
+        "radiant/lambda_css_resolve.cpp",
         "radiant/scroller.cpp",
         "radiant/view_pool.cpp",
+        "radiant/dom.cpp",
         "radiant/font.cpp",
+        "radiant/font_precision.cpp",
         "radiant/font_face.cpp",
         "radiant/surface.cpp",
         "radiant/render.cpp",
+        "radiant/render_svg.cpp",
+        "radiant/render_pdf.cpp",
+        "radiant/render_img.cpp",
         "radiant/event.cpp",
+        "radiant/radiant.cpp",
+        "lambda/print.cpp",
+        "lambda/utf_string.cpp",
+        "lambda/name_pool.cpp",
+        "lambda/lambda-data.cpp",
+        "lambda/input/css/css_tokenizer.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/css_engine.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
         "lib/strview.c",
         "lib/strbuf.c",
+        "lib/stringbuf.c",
         "lib/hashmap.c",
         "lib/arraylist.c",
+        "lib/avl_tree.c",
         "lib/log.c",
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
+        "lib/datetime.c",
+        "lib/string.c",
+        "lib/mempool.c",
         "lib/file.c",
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
+        "lib/image.c",
     }
-
+    
     includedirs {
         ".",
-        "lib",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
-        "/usr/local/include",
         "/opt/homebrew/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
-        "iconv",
+        "GL",
+        "CoreFoundation",
+        "CoreVideo",
+        "IOKit",
+        "Foundation",
+        "CoreGraphics",
+        "AppKit",
+        "Carbon",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/liblexbor_static.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
+        "/opt/homebrew/lib/libfontconfig_minimal.a",
+        "/opt/homebrew/lib/libglfw3.a",
+        "/usr/local/lib/libthorvg.a",
+        "/opt/homebrew/lib/libturbojpeg.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+        "/opt/homebrew/lib/libpng.a",
+        "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    links {
+        "hpdf",
+        "mpdec",
+    }
+    
+    -- Automatically added C++ standard library
+    links {
         "stdc++",
     }
-
-    linkoptions {
-        "../../lexbor/liblexbor_static.a",
-        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
-        "/opt/homebrew/lib/libpng.a",
-        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
-        "/opt/homebrew/lib/libfontconfig.a",
-        "/opt/homebrew/opt/expat/lib/libexpat.a",
-        "/usr/local/lib/libthorvg.a",
-        "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/opt/homebrew/lib/libintl.a",
-        "/opt/homebrew/lib/libglfw3.a",
-        "/opt/homebrew/lib/libturbojpeg.a",
-    }
-
-    linkoptions {
-        "-framework OpenGL",
-        "-framework Cocoa",
-        "-framework IOKit",
-        "-framework CoreVideo",
-    }
-
+    
     disablewarnings {
         "incompatible-pointer-types",
         "undef",
@@ -364,19 +445,19 @@ project "radiant"
         "pointer-to-int-cast",
         "microsoft-anon-tag",
     }
-
+    
     buildoptions {
         "-fwrapv",
         "-fms-extensions",
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-
+    
     defines {
         "_POSIX_C_SOURCE=200809L",
         "_GNU_SOURCE",
     }
-
+    
 
 project "lambda"
     kind "ConsoleApp"
@@ -385,9 +466,8 @@ project "lambda"
     objdir "build/obj/%{prj.name}"
     targetname "lambda"
     targetextension ".exe"
-
+    
     files {
-        "lambda/parse.c",
         "lib/strbuf.c",
         "lib/stringbuf.c",
         "lib/strview.c",
@@ -397,15 +477,16 @@ project "lambda"
         "lib/log.c",
         "lib/cmdedit.c",
         "lib/cmdedit_utf8.c",
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
+        "lib/mempool.c",
+        "lib/avl_tree.c",
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
         "lib/num_stack.c",
         "lib/string.c",
         "lib/datetime.c",
+        "lib/image.c",
+        "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
         "lambda/runner.cpp",
@@ -425,32 +506,71 @@ project "lambda"
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
-        "lambda/input/css_tokenizer.c",
-        "lambda/input/css_selector_parser.c",
-        "lambda/input/css_property_value_parser.c",
-        "lambda/input/css_enhanced_integration.c",
-        "typeset/typeset.c",
-        "typeset/view/view_tree.c",
-        "typeset/integration/latex_bridge.cpp",
-        "typeset/integration/latex_bridge_enhanced.cpp",
-        "typeset/typeset_latex.cpp",
-        "typeset/latex_typeset_enhanced.cpp",
-        "typeset/output/pdf_renderer.c",
-        "typeset/output/pdf_renderer_enhanced.c",
+        "lambda/js/js_scope.cpp",
+        "lambda/js/build_js_ast.cpp",
+        "lambda/js/transpile_js.cpp",
+        "lambda/js/js_runtime.cpp",
+        "lambda/js/js_print.cpp",
+        "lambda/input/css/css_tokenizer.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/css_engine.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "radiant/dom.cpp",
+        "radiant/ui_context.cpp",
+        "radiant/parse_html.cpp",
+        "radiant/layout.cpp",
+        "radiant/layout_block.cpp",
+        "radiant/layout_inline.cpp",
+        "radiant/layout_text.cpp",
+        "radiant/layout_positioned.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_flex_measurement.cpp",
+        "radiant/layout_flex_multipass.cpp",
+        "radiant/layout_table.cpp",
+        "radiant/layout_grid.cpp",
+        "radiant/grid_utils.cpp",
+        "radiant/grid_sizing.cpp",
+        "radiant/grid_positioning.cpp",
+        "radiant/layout_grid_content.cpp",
+        "radiant/grid_advanced.cpp",
+        "radiant/resolve_style.cpp",
+        "radiant/lambda_css_resolve.cpp",
+        "radiant/scroller.cpp",
+        "radiant/view_pool.cpp",
+        "radiant/font.cpp",
+        "radiant/font_precision.cpp",
+        "radiant/font_face.cpp",
+        "radiant/surface.cpp",
+        "radiant/render.cpp",
+        "radiant/render_svg.cpp",
+        "radiant/render_pdf.cpp",
+        "radiant/render_img.cpp",
+        "radiant/event.cpp",
+        "radiant/cmd_layout.cpp",
+        "radiant/window.cpp",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
-        "lambda/input/mime-types.c",
-        "lambda/input/css_tokenizer.c",
-        "lambda/input/css_selector_parser.c",
-        "lambda/input/css_property_value_parser.c",
-        "lambda/input/css_enhanced_integration.c",
-        "lambda/input/mime-detect.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/css_tokenizer.c",
+        "lambda/input/css/css_engine.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/selector_matcher.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_properties.c",
         "lambda/input/input-jsx.cpp",
         "lambda/input/input-latex.cpp",
         "lambda/input/input_file_cache.cpp",
         "lambda/input/input-vcf.cpp",
         "lambda/input/input-man.cpp",
         "lambda/input/input.cpp",
+        "lambda/input/input-graph-mermaid.cpp",
         "lambda/input/input-ics.cpp",
         "lambda/input/input-json.cpp",
         "lambda/input/input-css.cpp",
@@ -459,24 +579,40 @@ project "lambda"
         "lambda/input/input_sysinfo.cpp",
         "lambda/input/input-math-ascii.cpp",
         "lambda/input/input-markup.cpp",
+        "lambda/input/input-graph.cpp",
         "lambda/input/input-csv.cpp",
         "lambda/input/input_pool.cpp",
         "lambda/input/input-adoc.cpp",
         "lambda/input/input_http.cpp",
         "lambda/input/input-org.cpp",
         "lambda/input/input-mark.cpp",
+        "lambda/input/input-html-tokens.cpp",
         "lambda/input/input-toml.cpp",
         "lambda/input/input-mdx.cpp",
         "lambda/input/input_dir.cpp",
+        "lambda/input/input-html-tree.cpp",
         "lambda/input/input-yaml.cpp",
         "lambda/input/input-html.cpp",
+        "lambda/input/input-html-context.cpp",
         "lambda/input/input-eml.cpp",
+        "lambda/input/input-html-scan.cpp",
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-math.cpp",
         "lambda/input/input-prop.cpp",
         "lambda/input/input-ini.cpp",
         "lambda/input/input-xml.cpp",
         "lambda/input/input-common.cpp",
+        "lambda/input/input-graph-d2.cpp",
+        "lambda/input/input-graph-dot.cpp",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/css_tokenizer.c",
+        "lambda/input/css/css_engine.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/selector_matcher.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_properties.c",
         "lambda/format/format-md.cpp",
         "lambda/format/format-toml.cpp",
         "lambda/format/format-jsx.cpp",
@@ -490,6 +626,8 @@ project "lambda"
         "lambda/format/format-html.cpp",
         "lambda/format/format-mdx.cpp",
         "lambda/format/format-rst.cpp",
+        "lambda/format/format-latex-html.cpp",
+        "lambda/format/format-graph.cpp",
         "lambda/format/format-org.cpp",
         "lambda/format/format-ini.cpp",
         "lambda/format/format-xml.cpp",
@@ -497,626 +635,958 @@ project "lambda"
         "lambda/format/format-json.cpp",
         "lambda/format/format-wiki.cpp",
     }
-
+    
     includedirs {
         ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
         "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     linkoptions {
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
         "/usr/local/lib/liblexbor_static.a",
+        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
+        "/opt/homebrew/lib/libpng.a",
+        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+        "/opt/homebrew/lib/libfontconfig_minimal.a",
+        "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/usr/local/lib/libthorvg.a",
+        "/opt/homebrew/lib/libglfw3.a",
+        "/opt/homebrew/lib/libturbojpeg.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
     }
-
+    
     -- Dynamic libraries
     filter "platforms:native"
         links {
             "curl",
             "mpdec",
             "hpdf",
-            "z",
         }
-
+    
     filter {}
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
     -- C++ specific options
     filter "files:**.cpp"
         buildoptions { "-std=c++17" }
-
+    
     -- C specific options
     filter "files:**.c"
         buildoptions { "-std=c99" }
-
+    
     filter {}
-
+    
     defines {
         "_GNU_SOURCE",
     }
-
+    
 
 project "test_strbuf_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_strbuf_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_strbuf_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_stringbuf_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_stringbuf_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_stringbuf_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_strview_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_strview_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_strview_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
-
-project "test_variable_pool_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_variable_pool_gtest.cpp",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-    }
-
-    linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
-    }
-
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-    }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_num_stack_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_num_stack_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_num_stack_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_datetime_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_datetime_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_datetime_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_url_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_url_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_url_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_url_extra_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_url_extra_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_url_extra_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_cmdedit_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_cmdedit_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_cmdedit_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "utf8proc",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
     }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-DCMDEDIT_TESTING",
         "-Wno-implicit-function-declaration",
         "-DUTF8PROC_STATIC",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
+project "test_mempool_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_mempool_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_mempool_gtest.cpp",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_avl_tree"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_avl_tree"
+    targetextension ".exe"
+    
+    files {
+        "test/test_avl_tree.cpp",
+        "lib/avl_tree.c",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_avl_tree_perf"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_avl_tree_perf"
+    targetextension ".exe"
+    
+    files {
+        "test/perf/test_avl_tree_perf.cpp",
+        "lib/avl_tree.c",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_element_reader_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_element_reader_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_element_reader_gtest.cpp",
+        "lambda/element_reader.cpp",
+        "lambda/element_reader_utils.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_mime_detect_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mime_detect_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_mime_detect_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1124,50 +1594,47 @@ project "test_mime_detect_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1175,46 +1642,53 @@ project "test_mime_detect_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_math_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_math_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_math_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1222,50 +1696,48 @@ project "test_math_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1273,46 +1745,53 @@ project "test_math_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_math_ascii_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_math_ascii_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_math_ascii_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1320,50 +1799,48 @@ project "test_math_ascii_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1371,46 +1848,53 @@ project "test_math_ascii_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_markup_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_markup_roundtrip_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_markup_roundtrip_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1418,50 +1902,48 @@ project "test_markup_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1469,46 +1951,53 @@ project "test_markup_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_input_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_input_roundtrip_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_input_roundtrip_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1516,50 +2005,48 @@ project "test_input_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1567,46 +2054,470 @@ project "test_input_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
+project "test_html_roundtrip_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_html_roundtrip_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_html_roundtrip_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_html_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_html_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_html_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_html_negative_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_html_negative_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_html_negative_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_lambda_domnode_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_domnode_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_domnode_gtest.cpp",
+        "radiant/dom.cpp",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/url_parser.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+        "/usr/local/lib/liblexbor_static.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_dir_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_dir_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_dir_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1614,50 +2525,47 @@ project "test_dir_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1665,46 +2573,259 @@ project "test_dir_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
+project "test_graph_parser_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_graph_parser_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_graph_parser_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_graph_formatter_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_graph_formatter_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_graph_formatter_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_http_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_http_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_http_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1712,50 +2833,47 @@ project "test_http_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1763,46 +2881,53 @@ project "test_http_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_sysinfo_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_sysinfo_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_sysinfo_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1810,50 +2935,48 @@ project "test_sysinfo_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1861,46 +2984,53 @@ project "test_sysinfo_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_jsx_roundtrip_new_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_jsx_roundtrip_new_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_jsx_roundtrip_new_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1908,50 +3038,48 @@ project "test_jsx_roundtrip_new_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1959,46 +3087,53 @@ project "test_jsx_roundtrip_new_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_mdx_roundtrip_new_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mdx_roundtrip_new_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_mdx_roundtrip_new_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2006,50 +3141,47 @@ project "test_mdx_roundtrip_new_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2057,46 +3189,463 @@ project "test_mdx_roundtrip_new_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
+project "test_css_style_node"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_style_node"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_style_node.cpp",
+        "lib/avl_tree.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_system"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_system"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_system.cpp",
+        "lib/avl_tree.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lib/mempool.c",
+        "lib/string.c",
+        "lib/hashmap.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_dom_integration"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_dom_integration"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_dom_integration.cpp",
+        "lib/avl_tree.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/mempool.c",
+        "lib/string.c",
+        "lib/strbuf.c",
+        "lib/stringbuf.c",
+        "lib/log.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_style_application_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_style_application_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_style_application_gtest.cpp",
+        "lib/avl_tree.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/mempool.c",
+        "lib/string.c",
+        "lib/strbuf.c",
+        "lib/stringbuf.c",
+        "lib/log.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_html_css_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_html_css_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_html_css_gtest.cpp",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/url_parser.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_tokenizer_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_tokenizer_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_css_tokenizer_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2104,50 +3653,48 @@ project "test_css_tokenizer_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2155,46 +3702,958 @@ project "test_css_tokenizer_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
+project "test_css_tokenizer_unit"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_tokenizer_unit"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_css_tokenizer_unit.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_parser_unit"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_parser_unit"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_css_parser_unit.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_engine_unit"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_engine_unit"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_css_engine_unit.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_engine_negative"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_engine_negative"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_css_engine_negative.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_dom_element_print"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_dom_element_print"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_dom_element_print.cpp",
+        "lib/strbuf.c",
+        "lib/stringbuf.c",
+        "lib/strview.c",
+        "lib/string.c",
+        "lib/log.c",
+        "lib/mempool.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
+        "lib/avl_tree.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_parser.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_formatter.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_formatter_unit"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_formatter_unit"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_css_formatter_unit.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_roundtrip_unit"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_roundtrip_unit"
+    targetextension ".exe"
+    
+    files {
+        "test/css/unit/test_css_roundtrip_unit.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_compound_descendant_selectors"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_compound_descendant_selectors"
+    targetextension ".exe"
+    
+    files {
+        "test/css/test_compound_descendant_selectors.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_selector_groups"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_selector_groups"
+    targetextension ".exe"
+    
+    files {
+        "test/css/test_selector_groups.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_parser_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_parser_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_css_parser_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2202,50 +4661,48 @@ project "test_css_parser_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2253,46 +4710,53 @@ project "test_css_parser_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_integration_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_integration_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_css_integration_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2300,50 +4764,48 @@ project "test_css_integration_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2351,46 +4813,53 @@ project "test_css_integration_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_files_safe_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_files_safe_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_css_files_safe_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2398,50 +4867,48 @@ project "test_css_files_safe_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2449,46 +4916,53 @@ project "test_css_files_safe_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_frameworks_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_css_frameworks_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_css_frameworks_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2496,50 +4970,48 @@ project "test_css_frameworks_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2547,46 +5019,156 @@ project "test_css_frameworks_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
+project "test_css_to_lambda_roundtrip_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_css_to_lambda_roundtrip_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_to_lambda_roundtrip_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
+        "/usr/include",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_mdx_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_mdx_roundtrip_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_mdx_roundtrip_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2594,50 +5176,47 @@ project "test_mdx_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2645,46 +5224,53 @@ project "test_mdx_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_jsx_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_jsx_roundtrip_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_jsx_roundtrip_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2692,50 +5278,47 @@ project "test_jsx_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2743,443 +5326,160 @@ project "test_jsx_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
-
-project "test_radiant_flex_gtest"
+project "test_latex_html_fixtures"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_latex_html_fixtures"
     targetextension ".exe"
-
+    
     files {
-        "test/test_radiant_flex_gtest.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_test_support.cpp",
+        "test/latex/test_latex_html_fixtures.cpp",
+        "test/latex/fixture_loader.cpp",
+        "test/latex/html_comparison.cpp",
+        "lambda/input/input-latex.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
-    defines {
-        "FLEX_TEST_MODE",
-    }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "lexbor_static",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
-    links { "stdc++" }
-
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,--end-group",
     }
-
-
-project "test_radiant_flex_algorithm_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_radiant_flex_algorithm_gtest.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-
-    defines {
-        "FLEX_TEST_MODE",
-    }
-
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-
+    
+    -- Add dynamic libraries
     links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
+        "curl",
+        "mpdec",
+        "hpdf",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
     }
-
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
     }
-
-    links { "stdc++" }
-
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-std=c++17",
-        "-std=c++17",
+        "-I/opt/homebrew/include",
     }
-
-
-project "test_radiant_flex_integration_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_radiant_flex_integration_gtest.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-
-    defines {
-        "FLEX_TEST_MODE",
-    }
-
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-
+    
+    filter {}
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
     }
-
-    links { "stdc++" }
-
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-
-
-project "test_radiant_text_flow_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_radiant_text_flow_gtest.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-
-    defines {
-        "FLEX_TEST_MODE",
-    }
-
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-
-    linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
-    }
-
-    links { "stdc++" }
-
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-
-
-project "test_radiant_font_face_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_radiant_font_face_gtest.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-
-    defines {
-        "FLEX_TEST_MODE",
-    }
-
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-
-    linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
-    }
-
-    links { "stdc++" }
-
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-
-
-project "test_radiant_layout_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_radiant_layout_gtest.cpp",
-        "radiant/layout.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_text.cpp",
-        "radiant/font_face.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-
-    defines {
-        "FLEX_TEST_MODE",
-    }
-
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-
-    linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
-    }
-
-    links { "stdc++" }
-
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_validator_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_validator_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -3187,49 +5487,46 @@ project "test_validator_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -3237,46 +5534,53 @@ project "test_validator_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_ast_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_ast_validator_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_ast_validator_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -3284,49 +5588,47 @@ project "test_ast_validator_gtest"
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
-
+    
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-
+    
     -- Add dynamic libraries
     links {
         "curl",
         "mpdec",
         "hpdf",
-        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
     }
-
+    
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-
+    
     -- Add macOS frameworks
     linkoptions {
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -3334,224 +5636,267 @@ project "test_ast_validator_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_lambda_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_lambda_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_lambda_repl_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_repl_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_lambda_repl_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
-
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_lambda_proc_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_lambda_proc_gtest"
     targetextension ".exe"
-
+    
     files {
         "test/test_lambda_proc_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
         "gtest",
         "gtest_main",
     }
-
+    
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-
-    links { "stdc++" }
-
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
-
-project "test_lambda_runner"
+project "test_js_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
+    targetname "test_js_gtest"
     targetextension ".exe"
-
+    
     files {
-        "test/lambda_test_runner.cpp",
+        "test/test_js_gtest.cpp",
     }
-
+    
     includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "mac-deps/rpmalloc-install/include",
+        "/usr/include/freetype2",
+        "/usr/include/fontconfig",
         "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
+        "/usr/include/libpng16",
+        "lib/mem-pool/include",
         "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
     }
-
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-
+    
     links {
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
     }
-
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
-        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    

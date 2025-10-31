@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="612" height="792" xmlns="http://www.w3.org/2000/svg">
-  <title>Lambda Typesetting Demonstration</title>
-  <text x="72.0" y="105.5" font-family="Arial" font-size="27.0" font-weight="bold" fill="black">Lambda Typesetting System</text>
-  <text x="72.0" y="160.6" font-family="Arial" font-size="12.0" fill="black">This document demonstrates the Lambda typesetting workflow: </text>
-  <text x="72.0" y="175.0" font-family="Times" font-size="12.0" fill="darkblue">input parsing → element tree → view tree → SVG output</text>
-  <text x="72.0" y="219.4" font-family="Arial" font-size="12.0" fill="black">Mathematical expressions: </text>
-  <text x="259.2" y="219.4" font-family="Times" font-size="12.0" font-style="italic" fill="blue">f(x) = x² + 2x + 1</text>
-</svg>
