@@ -486,6 +486,8 @@ project "lambda"
         "lib/string.c",
         "lib/datetime.c",
         "lib/image.c",
+        "lib/mime-detect.c",
+        "lib/mime-types.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
