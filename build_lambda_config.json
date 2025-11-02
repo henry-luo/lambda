@@ -98,6 +98,7 @@
         "radiant/pdf/pdf_to_view.cpp",
         "radiant/pdf/coords.cpp",
         "radiant/pdf/fonts.cpp",
+        "lambda/input/pdf_decompress.cpp",
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
         "radiant/cmd_view_pdf.cpp",
@@ -209,6 +210,12 @@
             "description": "Fast HTML/CSS parser and manipulation library (custom build)",
             "include": "lexbor/source",
             "lib": "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
+            "link": "static"
+        },
+        {
+            "name": "zlib",
+            "description": "Compression library for PDF FlateDecode",
+            "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
         },
         {

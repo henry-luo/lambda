@@ -8,6 +8,11 @@
 #include "../../lambda/input/css/dom_element.h"
 #include <string.h>
 
+// PDF stream decompression
+extern "C" {
+    #include "../../lambda/input/pdf_decompress.h"
+}
+
 // Forward declarations
 static ViewBlock* create_document_view(Pool* pool);
 static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item);
@@ -82,7 +87,7 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
 
     // Process each object looking for content streams
     for (int i = 0; i < objects->length; i++) {
-        Item obj_item = array_get(objects, i);
+        Item obj_item = objects->items[i];
         log_debug("Processing object %d/%d", i+1, objects->length);
         process_pdf_object(input, root_view, obj_item);
     }
@@ -98,6 +103,11 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
         child = child->next;
     }
     log_info("Root view has %d children", child_count);
+
+    // Warn if no content was extracted (likely due to compression)
+    if (child_count == 0) {
+        log_warn("No content extracted from PDF - this may be due to compressed streams (Phase 3 feature)");
+    }
 
     return view_tree;
 }
@@ -211,32 +221,85 @@ static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map)
     }
 
     String* stream_data = (String*)data_item.item;
+    const char* content_data = stream_data->chars;
+    size_t content_len = stream_data->len;
+    char* decompressed_data = nullptr;
 
     // Get stream dictionary (contains Length, Filter, etc.)
     String* dict_key = input_create_string(input, "dictionary");
     Item dict_item = {.item = map_get(stream_map, {.item = s2it(dict_key)}).item};
     Map* stream_dict = (dict_item.item != ITEM_NULL) ? (Map*)dict_item.item : nullptr;
 
-    // Check if stream is compressed
+    // Check if stream is compressed and decompress if needed
     if (stream_dict) {
         String* filter_key = input_create_string(input, "Filter");
         Item filter_item = {.item = map_get(stream_dict, {.item = s2it(filter_key)}).item};
+
         if (filter_item.item != ITEM_NULL) {
-            log_warn("Compressed streams not yet supported (Phase 3)");
-            return;
+            // Get filter(s) - can be a single name or an array
+            TypeId filter_type = get_type_id(filter_item);
+
+            if (filter_type == LMD_TYPE_ARRAY) {
+                // Multiple filters
+                Array* filter_array = (Array*)filter_item.item;
+                const char** filters = (const char**)malloc(sizeof(char*) * filter_array->length);
+                if (filters) {
+                    for (int i = 0; i < filter_array->length; i++) {
+                        Item filter_name_item = array_get(filter_array, i);
+                        String* filter_name = (String*)filter_name_item.item;
+                        filters[i] = filter_name->chars;
+                    }
+
+                    size_t decompressed_len = 0;
+                    decompressed_data = pdf_decompress_stream(content_data, content_len,
+                                                              filters, filter_array->length,
+                                                              &decompressed_len);
+                    free(filters);
+
+                    if (decompressed_data) {
+                        content_data = decompressed_data;
+                        content_len = decompressed_len;
+                        log_info("Decompressed stream: %zu -> %zu bytes", stream_data->len, decompressed_len);
+                    } else {
+                        log_error("Failed to decompress stream with multiple filters");
+                        return;
+                    }
+                }
+            } else if (filter_type == LMD_TYPE_STRING) {
+                // Single filter
+                String* filter_name = (String*)filter_item.item;
+                const char* filters[1] = { filter_name->chars };
+
+                size_t decompressed_len = 0;
+                decompressed_data = pdf_decompress_stream(content_data, content_len,
+                                                          filters, 1,
+                                                          &decompressed_len);
+
+                if (decompressed_data) {
+                    content_data = decompressed_data;
+                    content_len = decompressed_len;
+                    log_info("Decompressed stream: %zu -> %zu bytes", stream_data->len, decompressed_len);
+                } else {
+                    log_error("Failed to decompress stream with filter: %s", filter_name->chars);
+                    return;
+                }
+            }
         }
     }
 
     // Parse the content stream
     PDFStreamParser* parser = pdf_stream_parser_create(
-        stream_data->chars,
-        stream_data->len,
+        content_data,
+        content_len,
         input->pool,
         input
     );
 
     if (!parser) {
         log_error("Failed to create stream parser");
+        if (decompressed_data) {
+            free(decompressed_data);
+        }
         return;
     }
 
@@ -247,6 +310,11 @@ static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map)
     }
 
     pdf_stream_parser_destroy(parser);
+
+    // Free decompressed data if allocated
+    if (decompressed_data) {
+        free(decompressed_data);
+    }
 }
 
 /**
@@ -354,25 +422,57 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
 
         // Path construction operators
         case PDF_OP_m:
-            // Move to
+            // Move to - start new subpath
             log_debug("Move to: %.2f, %.2f",
                      op->operands.text_position.tx,
                      op->operands.text_position.ty);
+            // Initialize or reset path tracking
+            parser->state.path_start_x = op->operands.text_position.tx;
+            parser->state.path_start_y = op->operands.text_position.ty;
+            parser->state.path_min_x = op->operands.text_position.tx;
+            parser->state.path_min_y = op->operands.text_position.ty;
+            parser->state.path_max_x = op->operands.text_position.tx;
+            parser->state.path_max_y = op->operands.text_position.ty;
+            parser->state.current_x = op->operands.text_position.tx;
+            parser->state.current_y = op->operands.text_position.ty;
+            parser->state.has_current_path = 1;
             break;
 
         case PDF_OP_l:
-            // Line to
+            // Line to - extend current path
             log_debug("Line to: %.2f, %.2f",
                      op->operands.text_position.tx,
                      op->operands.text_position.ty);
+            if (parser->state.has_current_path) {
+                // Update bounding box
+                double x = op->operands.text_position.tx;
+                double y = op->operands.text_position.ty;
+                if (x < parser->state.path_min_x) parser->state.path_min_x = x;
+                if (y < parser->state.path_min_y) parser->state.path_min_y = y;
+                if (x > parser->state.path_max_x) parser->state.path_max_x = x;
+                if (y > parser->state.path_max_y) parser->state.path_max_y = y;
+                parser->state.current_x = x;
+                parser->state.current_y = y;
+            }
             break;
 
         case PDF_OP_c:
-            // Cubic Bezier curve
+            // Cubic Bezier curve - extend current path
             log_debug("Curve to: %.2f, %.2f, %.2f, %.2f, %.2f, %.2f",
                      op->operands.text_matrix.a, op->operands.text_matrix.b,
                      op->operands.text_matrix.c, op->operands.text_matrix.d,
                      op->operands.text_matrix.e, op->operands.text_matrix.f);
+            if (parser->state.has_current_path) {
+                // Update bounding box with end point (simplified - should include control points)
+                double x = op->operands.text_matrix.e;
+                double y = op->operands.text_matrix.f;
+                if (x < parser->state.path_min_x) parser->state.path_min_x = x;
+                if (y < parser->state.path_min_y) parser->state.path_min_y = y;
+                if (x > parser->state.path_max_x) parser->state.path_max_x = x;
+                if (y > parser->state.path_max_y) parser->state.path_max_y = y;
+                parser->state.current_x = x;
+                parser->state.current_y = y;
+            }
             break;
 
         case PDF_OP_re:
@@ -386,6 +486,12 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             parser->state.current_rect_width = op->operands.rect.width;
             parser->state.current_rect_height = op->operands.rect.height;
             parser->state.has_current_rect = 1;
+            // Also set general path tracking
+            parser->state.path_min_x = op->operands.rect.x;
+            parser->state.path_min_y = op->operands.rect.y;
+            parser->state.path_max_x = op->operands.rect.x + op->operands.rect.width;
+            parser->state.path_max_y = op->operands.rect.y + op->operands.rect.height;
+            parser->state.has_current_path = 1;
             break;
 
         case PDF_OP_h:
@@ -434,8 +540,10 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             break;
 
         case PDF_OP_n:
-            // End path without painting
+            // End path without painting - clear path state
             log_debug("End path (no paint)");
+            parser->state.has_current_rect = 0;
+            parser->state.has_current_path = 0;
             break;
 
         default:
@@ -452,16 +560,37 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
  */
 static void create_rect_view(Input* input, ViewBlock* parent,
                              PDFStreamParser* parser, PaintOperation paint_op) {
-    // Check if we have a stored rectangle from 're' operator
-    if (!parser->state.has_current_rect) {
-        log_debug("No rectangle path stored, skipping rect view creation");
+    // Check if we have a stored rectangle from 're' operator, or a general path
+    if (!parser->state.has_current_rect && !parser->state.has_current_path) {
+        log_debug("No rectangle or path stored, skipping view creation");
         return;
     }
 
-    double x = parser->state.current_rect_x;
-    double y = parser->state.current_rect_y;
-    double width = parser->state.current_rect_width;
-    double height = parser->state.current_rect_height;
+    double x, y, width, height;
+
+    // Use rectangle if available, otherwise use path bounding box
+    if (parser->state.has_current_rect) {
+        x = parser->state.current_rect_x;
+        y = parser->state.current_rect_y;
+        width = parser->state.current_rect_width;
+        height = parser->state.current_rect_height;
+    } else {
+        // Use path bounding box
+        x = parser->state.path_min_x;
+        y = parser->state.path_min_y;
+        width = parser->state.path_max_x - parser->state.path_min_x;
+        height = parser->state.path_max_y - parser->state.path_min_y;
+
+        // For stroke-only operations, give lines minimum thickness based on line_width
+        if (paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE) {
+            double line_width = parser->state.line_width > 0 ? parser->state.line_width : 1.0;
+            // If width or height is 0, it's a line - give it thickness
+            if (width < line_width) width = line_width;
+            if (height < line_width) height = line_width;
+        }
+
+        log_debug("Using path bounding box: (%.2f, %.2f) %.2f x %.2f", x, y, width, height);
+    }
 
     // Create ViewBlock for the rectangle
     ViewBlock* rect_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
@@ -584,8 +713,9 @@ static void create_rect_view(Input* input, ViewBlock* parent,
 
     log_debug("Created rect view at (%.2f, %.2f)", x, y);
 
-    // Clear the rectangle path state after using it
+    // Clear both rectangle and general path state after using it
     parser->state.has_current_rect = 0;
+    parser->state.has_current_path = 0;
 }
 
 /**
