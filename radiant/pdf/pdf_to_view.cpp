@@ -75,10 +75,22 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
     // Process each object looking for content streams
     for (int i = 0; i < objects->length; i++) {
         Item obj_item = array_get(objects, i);
+        log_debug("Processing object %d/%d", i+1, objects->length);
         process_pdf_object(input, root_view, obj_item);
     }
 
     log_info("PDF to View Tree conversion complete");
+
+    // Count children to verify
+    int child_count = 0;
+    ViewGroup* group = (ViewGroup*)root_view;
+    View* child = group->child;
+    while (child) {
+        child_count++;
+        child = child->next;
+    }
+    log_info("Root view has %d children", child_count);
+
     return view_tree;
 }
 
@@ -127,10 +139,25 @@ static ViewBlock* create_document_view(Pool* pool) {
  * Process a single PDF object
  */
 static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item) {
-    if (obj_item.item == ITEM_NULL) return;
+    if (obj_item.item == ITEM_NULL) {
+        log_debug("Skipping null object");
+        return;
+    }
 
-    // Check if this is a map (could be a stream or indirect object)
-    if (obj_item.type_id != LMD_TYPE_MAP) return;
+    // For maps, type_id is 0 (raw pointer), so check if item is not null
+    // Maps and other complex types have type_id = 0
+    TypeId actual_type = get_type_id(obj_item);
+
+    if (actual_type == LMD_TYPE_NULL) {
+        log_debug("Skipping null type object");
+        return;
+    }
+
+    // Only process maps (type_id 0 means raw pointer to Map or other complex type)
+    if (obj_item.type_id != 0 && actual_type != LMD_TYPE_MAP) {
+        log_debug("Skipping non-map object (type_id=%d, actual_type=%d)", obj_item.type_id, actual_type);
+        return;
+    }
 
     Map* obj_map = (Map*)obj_item.item;
 
@@ -138,9 +165,13 @@ static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item) {
     String* type_key = input_create_string(input, "type");
     Item type_item = {.item = map_get(obj_map, {.item = s2it(type_key)}).item};
 
-    if (type_item.item == ITEM_NULL) return;
+    if (type_item.item == ITEM_NULL) {
+        log_debug("Object has no type field");
+        return;
+    }
 
     String* type_str = (String*)type_item.item;
+    log_debug("Processing object of type: %s", type_str->chars);
 
     // Process stream objects
     if (strcmp(type_str->chars, "stream") == 0) {
@@ -217,8 +248,15 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
                                  PDFStreamParser* parser, PDFOperator* op) {
     switch (op->type) {
         case PDF_OP_BT:
-            // Begin text - reset text matrix
+            // Begin text - reset text matrix to identity
             log_debug("Begin text");
+            // Reset text matrix to identity [1 0 0 1 0 0]
+            parser->state.tm[0] = 1.0;
+            parser->state.tm[1] = 0.0;
+            parser->state.tm[2] = 0.0;
+            parser->state.tm[3] = 1.0;
+            parser->state.tm[4] = 0.0;  // x position
+            parser->state.tm[5] = 0.0;  // y position
             break;
 
         case PDF_OP_ET:
@@ -246,13 +284,12 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             break;
 
         case PDF_OP_Td:
-            // Move text position
-            log_debug("Move text position: %.2f, %.2f",
+            // Move text position - parser already updated tm, no need to call pdf_update_text_position
+            log_debug("Move text position: %.2f, %.2f (tm already updated)",
                      op->operands.text_position.tx,
                      op->operands.text_position.ty);
-            pdf_update_text_position(&parser->state,
-                                    op->operands.text_position.tx,
-                                    op->operands.text_position.ty);
+            // The parser has already applied the Td operation to parser->state.tm[4] and tm[5]
+            // So we don't need to call pdf_update_text_position() - that would double the values
             break;
 
         case PDF_OP_Tj:
@@ -407,7 +444,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
 
     rect_view->type = RDT_VIEW_BLOCK;
     rect_view->x = (float)x;
-    rect_view->y = (float)(parent->height - y);  // Convert to top-left origin
+    rect_view->y = (float)y;  // Store PDF Y as-is
     rect_view->width = 100;   // TODO: Track from 're' operator
     rect_view->height = 100;  // TODO: Track from 're' operator
 
@@ -515,7 +552,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     // Add to parent
     append_child_view((View*)parent, (View*)rect_view);
 
-    log_debug("Created rect view at (%.2f, %.2f)", x, parent->height - y);
+    log_debug("Created rect view at (%.2f, %.2f)", x, y);
 }
 
 /**
@@ -529,9 +566,8 @@ static void create_text_view(Input* input, ViewBlock* parent,
     double x = parser->state.tm[4];  // e component (x translation)
     double y = parser->state.tm[5];  // f component (y translation)
 
-    // Convert PDF coordinates (bottom-left origin) to Radiant coordinates (top-left origin)
-    // PDF y increases upward, Radiant y increases downward
-    double radiant_y = parent->height - y;
+    // Store PDF coordinates as-is (bottom-left origin)
+    // Conversion to screen coordinates will be done during rendering
 
     // Create ViewText
     ViewText* text_view = (ViewText*)pool_calloc(input->pool, sizeof(ViewText));
@@ -542,9 +578,11 @@ static void create_text_view(Input* input, ViewBlock* parent,
 
     text_view->type = RDT_VIEW_TEXT;
     text_view->x = (float)x;
-    text_view->y = (float)radiant_y;
+    text_view->y = (float)y;  // Store PDF Y as-is
     text_view->width = 0;  // Will be calculated during layout
     text_view->height = (float)parser->state.font_size;
+
+    log_debug("Created text view at (%.2f, %.2f): '%s'", x, y, text->chars);
 
     // Create DomText for the text content
     DomText* dom_text = (DomText*)pool_calloc(input->pool, sizeof(DomText));
@@ -590,8 +628,6 @@ static void create_text_view(Input* input, ViewBlock* parent,
 
     // Add to parent
     append_child_view((View*)parent, (View*)text_view);
-
-    log_debug("Created text view at (%.2f, %.2f): '%s'", x, radiant_y, text->chars);
 }
 
 /**
