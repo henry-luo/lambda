@@ -19,6 +19,9 @@ static void create_rect_view(Input* input, ViewBlock* parent, PDFStreamParser* p
 static void update_text_position(PDFStreamParser* parser, double tx, double ty);
 static void append_child_view(View* parent, View* child);
 
+// External declarations from fonts.cpp
+extern FontProp* create_font_from_pdf(Pool* pool, const char* font_name, double font_size);
+
 /**
  * Convert PDF data to Radiant View Tree
  *
@@ -431,8 +434,83 @@ static void create_rect_view(Input* input, ViewBlock* parent,
 
     rect_view->node = elem_node;
 
-    // TODO: Apply fill/stroke colors from parser->state.fill_color and stroke_color
-    // This will be implemented when we add color property support
+    // Apply fill color and/or stroke color from graphics state
+    BoundaryProp* bound = nullptr;
+
+    // Apply fill color if set
+    if (parser->state.fill_color[0] >= 0.0) {
+        if (!bound) {
+            bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
+        }
+
+        if (bound) {
+            // Create background property
+            BackgroundProp* bg = (BackgroundProp*)pool_calloc(input->pool, sizeof(BackgroundProp));
+            if (bg) {
+                // Convert PDF RGB (0.0-1.0) to Color (0-255)
+                bg->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
+                bg->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
+                bg->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
+                bg->color.a = 255; // Fully opaque
+                bg->color.c = 1;   // Color is set
+
+                bound->background = bg;
+
+                log_debug("Applied fill color: RGB(%d, %d, %d)",
+                         bg->color.r, bg->color.g, bg->color.b);
+            }
+        }
+    }
+
+    // Apply stroke color if set
+    if (parser->state.stroke_color[0] >= 0.0) {
+        if (!bound) {
+            bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
+        }
+
+        if (bound) {
+            // Create border property
+            BorderProp* border = (BorderProp*)pool_calloc(input->pool, sizeof(BorderProp));
+            if (border) {
+                // Convert PDF RGB (0.0-1.0) to Color (0-255)
+                Color stroke_color;
+                stroke_color.r = (uint8_t)(parser->state.stroke_color[0] * 255.0);
+                stroke_color.g = (uint8_t)(parser->state.stroke_color[1] * 255.0);
+                stroke_color.b = (uint8_t)(parser->state.stroke_color[2] * 255.0);
+                stroke_color.a = 255; // Fully opaque
+                stroke_color.c = 1;   // Color is set
+
+                // Apply stroke color to all four sides
+                border->top_color = stroke_color;
+                border->right_color = stroke_color;
+                border->bottom_color = stroke_color;
+                border->left_color = stroke_color;
+
+                // Set border width (use line width from graphics state, default to 1.0)
+                float line_width = parser->state.line_width > 0 ? parser->state.line_width : 1.0f;
+                border->width.top = line_width;
+                border->width.right = line_width;
+                border->width.bottom = line_width;
+                border->width.left = line_width;
+
+                // Set border style to solid
+                border->top_style = LXB_CSS_VALUE_SOLID;
+                border->right_style = LXB_CSS_VALUE_SOLID;
+                border->bottom_style = LXB_CSS_VALUE_SOLID;
+                border->left_style = LXB_CSS_VALUE_SOLID;
+
+                bound->border = border;
+
+                log_debug("Applied stroke color: RGB(%d, %d, %d), width: %.2f",
+                         stroke_color.r, stroke_color.g, stroke_color.b, line_width);
+            }
+        }
+    }
+
+    // Attach boundary if created
+    if (bound) {
+        rect_view->bound = bound;
+    }
 
     // Add to parent
     append_child_view((View*)parent, (View*)rect_view);
@@ -491,33 +569,24 @@ static void create_text_view(Input* input, ViewBlock* parent,
 
     text_view->node = text_node;
 
-    // Create font property
+    // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
-        FontProp* font = (FontProp*)pool_calloc(input->pool, sizeof(FontProp));
+        FontProp* font = create_font_from_pdf(input->pool,
+                                              parser->state.font_name->chars,
+                                              parser->state.font_size);
         if (font) {
-            // Map PDF font to system font (simplified for Phase 1)
-            const char* family_name;
-            if (strstr(parser->state.font_name->chars, "Helvetica")) {
-                family_name = "Arial";
-            } else if (strstr(parser->state.font_name->chars, "Times")) {
-                family_name = "Times New Roman";
-            } else if (strstr(parser->state.font_name->chars, "Courier")) {
-                family_name = "Courier New";
-            } else {
-                family_name = "Arial"; // Default fallback
-            }
-
-            // Allocate and copy the font family name
-            font->family = (char*)pool_alloc(input->pool, strlen(family_name) + 1);
-            strcpy(font->family, family_name);
-
-            font->font_size = (float)parser->state.font_size;
-            font->font_style = LXB_CSS_VALUE_NORMAL;
-            font->font_weight = LXB_CSS_VALUE_NORMAL;
-
             text_view->font = font;
         }
     }
+
+    // Apply text color from graphics state (fill color)
+    // Note: ViewText doesn't have InlineProp, so we store color in a custom way
+    // For full color support, we'd wrap this in a ViewSpan
+    // For now, log the color for Phase 2.4 completion tracking
+    log_debug("Text fill color: RGB(%.2f, %.2f, %.2f)",
+             parser->state.fill_color[0],
+             parser->state.fill_color[1],
+             parser->state.fill_color[2]);
 
     // Add to parent
     append_child_view((View*)parent, (View*)text_view);

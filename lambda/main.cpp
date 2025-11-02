@@ -57,6 +57,10 @@ int render_html_to_png(const char* html_file, const char* png_file);
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality);
 
+// PDF viewer functions from radiant (cmd_view_pdf.cpp)
+int view_pdf_in_window(const char* pdf_file);
+int view_html_in_window(const char* html_file);
+
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
@@ -925,6 +929,71 @@ int main(int argc, char *argv[]) {
 
         log_debug("render completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
+        return exit_code;
+    }
+
+    // Handle view command (open PDF or HTML in window)
+    log_debug("Checking for view command");
+    if (argc >= 2 && strcmp(argv[1], "view") == 0) {
+        log_debug("Entering view command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Document Viewer v1.0\n\n");
+            printf("Usage: %s view <file.pdf|file.html>\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'view' command opens a document in an interactive window.\n");
+            printf("  Supports PDF and HTML documents with full rendering.\n");
+            printf("\nSupported Formats:\n");
+            printf("  .pdf       Portable Document Format\n");
+            printf("  .html      HyperText Markup Language (future)\n");
+            printf("\nExamples:\n");
+            printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
+            printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
+            printf("\nKeyboard Controls:\n");
+            printf("  ESC        Close window\n");
+            printf("  Q          Quit viewer\n");
+            log_finish();
+            return 0;
+        }
+
+        // Check for file argument
+        if (argc < 3) {
+            printf("Error: view command requires a file argument\n");
+            printf("Usage: %s view <file.pdf|file.html>\n", argv[0]);
+            printf("Use '%s view --help' for more information\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        const char* filename = argv[2];
+
+        // Check if file exists
+        if (access(filename, F_OK) != 0) {
+            printf("Error: File '%s' does not exist\n", filename);
+            log_finish();
+            return 1;
+        }
+
+        // Detect file type by extension
+        const char* ext = strrchr(filename, '.');
+        int exit_code;
+
+        if (ext && strcmp(ext, ".pdf") == 0) {
+            log_info("Opening PDF file: %s", filename);
+            exit_code = view_pdf_in_window(filename);
+        } else if (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0)) {
+            log_info("Opening HTML file: %s", filename);
+            exit_code = view_html_in_window(filename);
+        } else {
+            printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
+            printf("Supported formats: .pdf, .html\n");
+            log_finish();
+            return 1;
+        }
+
+        log_debug("view command completed with result: %d", exit_code);
+        log_finish();
         return exit_code;
     }
 

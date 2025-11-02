@@ -100,6 +100,7 @@
         "radiant/pdf/fonts.cpp",
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
+        "radiant/cmd_view_pdf.cpp",
         "radiant/window.cpp",
         "lambda/main-repl.cpp",
         "lambda/main.cpp"
@@ -399,10 +400,6 @@
                 "radiant/render_svg.cpp",
                 "radiant/render_pdf.cpp",
                 "radiant/render_img.cpp",
-                "radiant/pdf/operators.cpp",
-                "radiant/pdf/pdf_to_view.cpp",
-                "radiant/pdf/coords.cpp",
-                "radiant/pdf/fonts.cpp",
                 "radiant/event.cpp",
                 "radiant/radiant.cpp",
                 "lambda/print.cpp",
