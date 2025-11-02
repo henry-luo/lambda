@@ -188,6 +188,13 @@ typedef struct {
     double current_x;
     double current_y;
 
+    // Current path (simplified - just track last rectangle for now)
+    double current_rect_x;
+    double current_rect_y;
+    double current_rect_width;
+    double current_rect_height;
+    int has_current_rect;      // Flag indicating if rect data is valid
+
     // State stack (for q/Q operators)
     PDFSavedState* saved_states; // Stack of saved states
     Pool* pool;                // Pool for allocations
