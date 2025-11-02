@@ -222,7 +222,7 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
         if (contents_item.item != ITEM_NULL || mediabox_item.item != ITEM_NULL) {
             // This looks like a leaf Page node - add to array
             fprintf(stderr, "Found Page node (no Type field but has Contents/MediaBox), adding to collection\n");
-            
+
             // Use array_append to add the item
             array_append(pages_array, node_item, pool);
             return;
