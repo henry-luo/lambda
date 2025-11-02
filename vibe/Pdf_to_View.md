@@ -759,12 +759,13 @@ Add support for graphics operators, colors, and coordinate transformations.
  * Called after path painting operators (f, F, S, B, etc.)
  */
 static void create_rect_view(Input* input, ViewBlock* parent,
-                             PDFStreamParser* parser) {
+                             PDFStreamParser* parser, PaintOperation paint_op) {
     // Creates ViewBlock for rectangles and paths
     // - Handles coordinate transformation (PDF bottom-left → Radiant top-left)
     // - Creates DomElement structure for styling
     // - Integrates with path painting operators
-    // - Ready for color property application (Phase 2.4)
+    // - Uses rectangle data (re operator) or path bounding box (m/l/c operators)
+    // - Applies minimum thickness for stroked lines
 }
 ```
 
@@ -773,6 +774,34 @@ static void create_rect_view(Input* input, ViewBlock* parent,
 - ✅ Coordinate transformation from PDF to Radiant coordinate system
 - ✅ DomElement structure for CSS styling compatibility
 - ✅ Integration with path painting operators (f, F, S, s, B, b, n)
+- ✅ **General path tracking** - Supports m, l, c operators via bounding box
+- ✅ **Line thickness** - Automatic minimum width/height for stroked lines
+- ✅ **Path bounding box** - Tracks min/max x/y for arbitrary paths
+
+**Path Tracking System** (Added November 2, 2025):
+```cpp
+// In PDFGraphicsState (operators.h):
+double path_start_x, path_start_y;  // First point of path (m operator)
+double path_min_x, path_min_y;      // Bounding box minimum
+double path_max_x, path_max_y;      // Bounding box maximum
+int has_current_path;                // Flag for path data validity
+
+// Path construction operators update bounding box:
+// - m (moveto): Initialize bounding box
+// - l (lineto): Extend bounding box with endpoint
+// - c (curveto): Extend bounding box with curve endpoint
+// - re (rectangle): Set both rectangle data and path bounding box
+
+// Shape creation uses:
+// 1. Rectangle data if available (re operator)
+// 2. Path bounding box otherwise (m/l/c operators)
+// 3. Applies line_width as minimum thickness for stroked paths
+```
+
+**Rendering Results**:
+- Before fix: Only 1 shape rendered (yellow rectangle from `re` operator)
+- After fix: 80+ shapes rendered (circles, lines, polygons, grid lines)
+- Test file: `test/input/advanced_test.pdf` with complex vector graphics
 
 #### 2.3 Font Mapping ✅ COMPLETED
 
@@ -1390,29 +1419,141 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index);
 7. **Color Property Application** - Fill colors via BackgroundProp, stroke colors via BorderProp
 8. **Line Width Operator** - w operator for border width control
 9. **End-to-End Testing** - Validated with real PDF files using existing test suite
+10. **General Path Tracking** - Added bounding box tracking for m/l/c paths (Nov 2, 2025)
+11. **Line Rendering** - Added minimum thickness for stroked lines (Nov 2, 2025)
 
 **📝 Implementation Summary**:
 - Files created: 8 core files + test infrastructure
-- Lines of code: ~2,200+ lines
-- Build status: ✅ Compiles successfully
+- Lines of code: ~2,400+ lines (including path tracking enhancements)
+- Build status: ✅ Compiles successfully (0 errors, 103 warnings)
 - Test status: ✅ PDF parsing validated with test/input/*.pdf files
+- Vector Graphics: ✅ 80+ shapes rendering (circles, lines, rectangles, stars, grids)
 - Executable size: 10MB
+
+**Known Issues**:
+- ⚠️ **Page separation**: Multi-page PDFs render all pages together without separation
+  - Page 2 content appears mixed with Page 1 content
+  - Root cause: All objects processed sequentially without page structure parsing
+  - Requires implementing proper Pages dictionary tree navigation (Phase 3 feature)
 
 **Optional Enhancements (not required for Phase 2)**:
 - GUI Integration (loader.cpp, window.cpp modifications) - Designed, ready for Phase 4
 - Additional C unit tests - Can be added incrementally
 - Interactive PDF navigation - Multi-page support designed for Phase 3
+- Page structure parsing - Extract per-page content streams
 
-**Next Steps**: Ready to proceed to Phase 3 (Advanced Features) or Phase 4 (Integration)
+**Next Steps**:
+- Option 1: Proceed to Phase 3 (Stream decompression, images, multi-page support)
+- Option 2: Proceed to Phase 4 (GUI integration, optimization, documentation)
+- Current focus: Vector graphics rendering issue resolved, ready for next phase
 
 ## Phase 3: Advanced Features (Week 5-6)
 
 ### Goal
 Handle compressed streams, images, and complex layouts.
 
-### Deliverables
+### Status: **🚧 IN PROGRESS** (November 2, 2025)
 
-#### 3.1 Stream Decompression
+**✅ Completed**:
+- Multi-page support infrastructure (pages.cpp, pages.hpp - 523 lines)
+- PDF Pages tree navigation (`collect_pages`)
+- Indirect reference resolution (`pdf_resolve_reference`)
+- Page information extraction (`pdf_get_page_info`)
+- Page counting (`pdf_get_page_count_from_data`)
+- MediaBox extraction with parent inheritance
+- Content stream extraction per page
+- Integration with pdf_to_view.cpp (`pdf_page_to_view_tree`)
+
+**Implementation Details**:
+
+#### 3.1 Multi-Page Support ✅ COMPLETED
+
+**New Files Created**:
+- `radiant/pdf/pages.hpp` - Page tree navigation API (72 lines)
+- `radiant/pdf/pages.cpp` - Implementation (451 lines)
+
+**Key Functions**:
+
+```cpp
+// Get total page count by parsing Pages dictionary tree
+int pdf_get_page_count_from_data(Map* pdf_data);
+
+// Extract all information for a specific page
+PDFPageInfo* pdf_get_page_info(Map* pdf_data, int page_index, Pool* pool);
+
+// Resolve indirect references (e.g., "5 0 R") to actual objects
+Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool);
+
+// Extract MediaBox with parent inheritance support
+bool pdf_extract_media_box(Map* page_dict, Map* pdf_data, double* media_box);
+```
+
+**PDFPageInfo Structure**:
+```cpp
+typedef struct {
+    Array* content_streams;     // Array of content stream objects
+    Map* resources;             // Resources dictionary (fonts, images, etc.)
+    double media_box[4];        // [x, y, width, height] - page dimensions
+    double crop_box[4];         // Optional crop box
+    int page_number;            // 1-based page number
+    bool has_crop_box;          // Whether crop_box is valid
+} PDFPageInfo;
+```
+
+**Page Tree Traversal**:
+- Recursively navigates PDF Pages dictionary tree
+- Handles both intermediate "Pages" nodes and leaf "Page" nodes
+- Collects all pages into a flat array for indexed access
+- Supports Count field for quick page counting
+- Falls back to tree traversal if Count is missing
+
+**Updated pdf_to_view.cpp Functions**:
+```cpp
+// Convert a specific page to view tree (was stub, now fully implemented)
+ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
+    // Get page info from Pages tree
+    PDFPageInfo* page_info = pdf_get_page_info(pdf_data, page_index, pool);
+
+    // Create view with page-specific dimensions from MediaBox
+    root_view->width = media_box[2] - media_box[0];
+    root_view->height = media_box[3] - media_box[1];
+
+    // Process only this page's content streams
+    for each stream in page_info->content_streams {
+        process_pdf_stream(input, root_view, stream_map);
+    }
+}
+
+// Get actual page count (was hardcoded to 1, now reads from PDF)
+int pdf_get_page_count(Item pdf_root) {
+    return pdf_get_page_count_from_data((Map*)pdf_root.item);
+}
+```
+
+**Features**:
+- ✅ PDF trailer → Root (Catalog) → Pages tree navigation
+- ✅ Indirect reference resolution for all PDF objects
+- ✅ MediaBox extraction with parent inheritance
+- ✅ CropBox support (optional)
+- ✅ Per-page content stream extraction
+- ✅ Per-page resource dictionaries
+- ✅ Page-specific dimensions from MediaBox
+- ✅ Multiple content streams per page
+
+**Build Integration**:
+- Added `radiant/pdf/pages.cpp` to `build_lambda_config.json`
+- Successfully compiles with 0 errors, 101 warnings
+- All Phase 3 page navigation code integrated
+
+**Known Limitations**:
+- GUI integration not yet implemented (viewer still renders all pages together)
+- No page navigation UI in cmd_view_pdf.cpp yet
+- Compressed streams still unsupported (requires 3.2)
+- Images still unsupported (requires 3.3)
+
+**Next Steps for Full Phase 3 Completion**:
+
+#### 3.2 Stream Decompression ⏳ PENDING
 
 ```cpp
 // radiant/pdf/decompress.cpp

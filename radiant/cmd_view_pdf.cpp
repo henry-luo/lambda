@@ -34,7 +34,10 @@ static float g_pdf_page_height = 0.0f;
 typedef struct {
     UiContext* uicon;
     ViewTree* view_tree;
-    Input* input; // Keep input alive for memory pool
+    Input* input;           // Keep input alive for memory pool
+    Item pdf_root;          // Parsed PDF data for page navigation
+    int current_page;       // 0-based current page index
+    int total_pages;        // Total number of pages in PDF
 } PdfViewerContext;
 
 // Helper function: render text string using FreeType
@@ -321,11 +324,53 @@ static void render_view_recursive(UiContext* uicon, View* view, float offset_x, 
             // Unknown type, skip
             break;
     }
-}// Callback implementations for PDF viewer
+}// Forward declaration of page loading function
+static void load_pdf_page(PdfViewerContext* pdf_ctx, int page_index);
+
+// Callback implementations for PDF viewer
 static void key_callback_pdf(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    // Handle ESC key to close window
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
+    if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
+
+    PdfViewerContext* pdf_ctx = (PdfViewerContext*)glfwGetWindowUserPointer(window);
+    if (!pdf_ctx) return;
+
+    switch (key) {
+        case GLFW_KEY_ESCAPE:
+            // Close window
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+            break;
+
+        case GLFW_KEY_PAGE_DOWN:
+        case GLFW_KEY_RIGHT:
+        case GLFW_KEY_DOWN:
+            // Next page
+            if (pdf_ctx->current_page < pdf_ctx->total_pages - 1) {
+                load_pdf_page(pdf_ctx, pdf_ctx->current_page + 1);
+            }
+            break;
+
+        case GLFW_KEY_PAGE_UP:
+        case GLFW_KEY_LEFT:
+        case GLFW_KEY_UP:
+            // Previous page
+            if (pdf_ctx->current_page > 0) {
+                load_pdf_page(pdf_ctx, pdf_ctx->current_page - 1);
+            }
+            break;
+
+        case GLFW_KEY_HOME:
+            // First page
+            if (pdf_ctx->current_page != 0) {
+                load_pdf_page(pdf_ctx, 0);
+            }
+            break;
+
+        case GLFW_KEY_END:
+            // Last page
+            if (pdf_ctx->current_page != pdf_ctx->total_pages - 1) {
+                load_pdf_page(pdf_ctx, pdf_ctx->total_pages - 1);
+            }
+            break;
     }
 }
 
@@ -353,6 +398,54 @@ static void framebuffer_size_callback_pdf(GLFWwindow* window, int width, int hei
     // Update viewport when window is resized
     glViewport(0, 0, width, height);
     do_redraw = true;
+}
+
+/**
+ * Load a specific page and regenerate the view tree
+ */
+static void load_pdf_page(PdfViewerContext* pdf_ctx, int page_index) {
+    if (!pdf_ctx || !pdf_ctx->input) {
+        log_error("Invalid context for page loading");
+        return;
+    }
+
+    if (page_index < 0 || page_index >= pdf_ctx->total_pages) {
+        log_warn("Page index %d out of range (0-%d)", page_index, pdf_ctx->total_pages - 1);
+        return;
+    }
+
+    log_info("Loading page %d/%d", page_index + 1, pdf_ctx->total_pages);
+
+    // Generate view tree for the specific page
+    ViewTree* new_view_tree = pdf_page_to_view_tree(pdf_ctx->input, pdf_ctx->pdf_root, page_index);
+
+    if (!new_view_tree || !new_view_tree->root) {
+        log_error("Failed to generate view tree for page %d", page_index + 1);
+        return;
+    }
+
+    // Note: Don't free old view_tree - it's in the same pool as Input
+    // The pool will be cleaned up when the viewer closes
+
+    // Update context with new view tree
+    pdf_ctx->view_tree = new_view_tree;
+    pdf_ctx->current_page = page_index;
+
+    // Update page height for coordinate conversion
+    g_pdf_page_height = new_view_tree->root->height;
+
+    // Update window title
+    if (pdf_ctx->uicon && pdf_ctx->uicon->window) {
+        char title[512];
+        snprintf(title, sizeof(title), "Lambda PDF Viewer - Page %d/%d",
+                 page_index + 1, pdf_ctx->total_pages);
+        glfwSetWindowTitle(pdf_ctx->uicon->window, title);
+    }
+
+    // Trigger redraw
+    do_redraw = true;
+
+    log_info("Successfully loaded page %d/%d", page_index + 1, pdf_ctx->total_pages);
 }
 
 static void window_refresh_callback_pdf(GLFWwindow* window) {
@@ -552,16 +645,27 @@ int view_pdf_in_window(const char* pdf_file) {
 
     log_info("PDF parsed successfully");
 
-    // Convert PDF to view tree
-    ViewTree* view_tree = pdf_to_view_tree(input, input->root);
-    if (!view_tree || !view_tree->root) {
-        log_error("Failed to convert PDF to view tree");
+    // Get total page count
+    int total_pages = pdf_get_page_count(input->root);
+    if (total_pages <= 0) {
+        log_error("PDF has no pages or page count failed");
         pool_destroy(input->pool);
         free(input);
         return 1;
     }
 
-    log_info("View tree created successfully");
+    log_info("PDF has %d page(s)", total_pages);
+
+    // Convert first page to view tree (page 0)
+    ViewTree* view_tree = pdf_page_to_view_tree(input, input->root, 0);
+    if (!view_tree || !view_tree->root) {
+        log_error("Failed to convert first page to view tree");
+        pool_destroy(input->pool);
+        free(input);
+        return 1;
+    }
+
+    log_info("View tree created successfully for page 1/%d", total_pages);
 
     // Initialize UI context
     UiContext uicon;
@@ -592,6 +696,9 @@ int view_pdf_in_window(const char* pdf_file) {
     pdf_ctx.uicon = &uicon;
     pdf_ctx.view_tree = view_tree;
     pdf_ctx.input = input;
+    pdf_ctx.pdf_root = input->root;
+    pdf_ctx.current_page = 0;
+    pdf_ctx.total_pages = total_pages;
 
     // Set window user pointer so callbacks can access context
     glfwSetWindowUserPointer(window, &pdf_ctx);
@@ -616,12 +723,13 @@ int view_pdf_in_window(const char* pdf_file) {
 
     log_info("OpenGL context initialized");
 
-    // Set window title
+    // Set window title with page information
     char title[512];
-    snprintf(title, sizeof(title), "Lambda PDF Viewer - %s (Demo)", pdf_file);
+    snprintf(title, sizeof(title), "Lambda PDF Viewer - Page 1/%d - %s",
+             total_pages, pdf_file);
     glfwSetWindowTitle(window, title);
 
-    log_info("PDF viewer ready. Close window or press ESC to exit.");
+    log_info("PDF viewer ready. Use PgUp/PgDn or Arrow keys to navigate. Press ESC to exit.");
 
     // Trigger initial draw
     do_redraw = true;    // Trigger initial draw

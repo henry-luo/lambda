@@ -3,6 +3,7 @@
 
 #include "pdf_to_view.hpp"
 #include "operators.h"
+#include "pages.hpp"
 #include "../../lib/log.h"
 #include "../../lambda/input/input.h"
 #include "../../lambda/input/css/dom_element.h"
@@ -116,20 +117,89 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
  * Convert a specific PDF page to view tree
  */
 ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
-    log_info("Converting PDF page %d to view tree", page_index);
+    log_info("Converting PDF page %d to view tree", page_index + 1);
 
-    // For Phase 1, just return the full document
-    // TODO: Implement page selection in Phase 3
-    return pdf_to_view_tree(input, pdf_root);
+    if (pdf_root.item == ITEM_NULL || pdf_root.item == ITEM_ERROR) {
+        log_error("Invalid PDF data");
+        return nullptr;
+    }
+
+    Map* pdf_data = (Map*)pdf_root.item;
+
+    // Get page information
+    PDFPageInfo* page_info = pdf_get_page_info(pdf_data, page_index, input->pool);
+    if (!page_info) {
+        log_error("Could not extract page info for page %d", page_index + 1);
+        return nullptr;
+    }
+
+    // Create view tree
+    ViewTree* view_tree = (ViewTree*)pool_calloc(input->pool, sizeof(ViewTree));
+    if (!view_tree) {
+        log_error("Failed to allocate view tree");
+        return nullptr;
+    }
+
+    view_tree->pool = input->pool;
+    view_tree->html_version = HTML5;
+
+    // Create root view with page dimensions
+    ViewBlock* root_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
+    if (!root_view) {
+        log_error("Failed to allocate root view");
+        return nullptr;
+    }
+
+    root_view->type = RDT_VIEW_BLOCK;
+    root_view->x = page_info->media_box[0];
+    root_view->y = page_info->media_box[1];
+    root_view->width = page_info->media_box[2] - page_info->media_box[0];
+    root_view->height = page_info->media_box[3] - page_info->media_box[1];
+
+    log_debug("Created page view: %.0fx%.0f at (%.0f, %.0f)",
+             root_view->width, root_view->height, root_view->x, root_view->y);
+
+    view_tree->root = (View*)root_view;
+
+    // Process all content streams for this page
+    if (page_info->content_streams) {
+        for (int i = 0; i < page_info->content_streams->length; i++) {
+            Item stream_item = page_info->content_streams->items[i];
+            if (stream_item.item == ITEM_NULL) continue;
+
+            Map* stream_map = (Map*)stream_item.item;
+            log_debug("Processing content stream %d/%d for page %d",
+                     i + 1, page_info->content_streams->length, page_index + 1);
+            process_pdf_stream(input, root_view, stream_map);
+        }
+    }
+
+    log_info("Page %d conversion complete", page_index + 1);
+
+    // Count children to verify
+    int child_count = 0;
+    ViewGroup* group = (ViewGroup*)root_view;
+    View* child = group->child;
+    while (child) {
+        child_count++;
+        child = child->next;
+    }
+    log_info("Page %d has %d view elements", page_index + 1, child_count);
+
+    return view_tree;
 }
 
 /**
  * Get number of pages in PDF
  */
 int pdf_get_page_count(Item pdf_root) {
-    // For Phase 1, return 1
-    // TODO: Implement page counting in Phase 3
-    return 1;
+    if (pdf_root.item == ITEM_NULL || pdf_root.item == ITEM_ERROR) {
+        log_error("Invalid PDF data");
+        return 0;
+    }
+
+    Map* pdf_data = (Map*)pdf_root.item;
+    return pdf_get_page_count_from_data(pdf_data);
 }
 
 /**
