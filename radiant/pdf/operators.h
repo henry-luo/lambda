@@ -195,6 +195,15 @@ typedef struct {
     double current_rect_height;
     int has_current_rect;      // Flag indicating if rect data is valid
 
+    // General path tracking (for m, l, c operators)
+    double path_start_x;       // First point of current path (for m operator)
+    double path_start_y;
+    double path_min_x;         // Bounding box of current path
+    double path_min_y;
+    double path_max_x;
+    double path_max_y;
+    int has_current_path;      // Flag indicating if path data is valid
+
     // State stack (for q/Q operators)
     PDFSavedState* saved_states; // Stack of saved states
     Pool* pool;                // Pool for allocations

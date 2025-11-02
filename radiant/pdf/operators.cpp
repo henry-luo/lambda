@@ -287,6 +287,15 @@ void pdf_graphics_state_init(PDFGraphicsState* state, Pool* pool) {
     state->current_rect_height = 0.0;
     state->has_current_rect = 0;
 
+    // Initialize general path tracking
+    state->path_start_x = 0.0;
+    state->path_start_y = 0.0;
+    state->path_min_x = 0.0;
+    state->path_min_y = 0.0;
+    state->path_max_x = 0.0;
+    state->path_max_y = 0.0;
+    state->has_current_path = 0;
+
     state->saved_states = nullptr;
 }
 
