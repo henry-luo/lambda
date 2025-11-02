@@ -265,6 +265,7 @@ typedef struct TextRect {
 typedef struct ViewText : View {
     TextRect *rect;  // first text rect
     FontProp *font;  // font for this text
+    Color color;     // text color (for PDF text fill color)
 } ViewText;
 
 struct ViewGroup : View {

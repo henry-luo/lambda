@@ -15,7 +15,15 @@ static void process_pdf_stream(Input* input, ViewBlock* parent, Map* stream_map)
 static void process_pdf_operator(Input* input, ViewBlock* parent, PDFStreamParser* parser, PDFOperator* op);
 static void create_text_view(Input* input, ViewBlock* parent, PDFStreamParser* parser, String* text);
 static void create_text_array_views(Input* input, ViewBlock* parent, PDFStreamParser* parser, Array* text_array);
-static void create_rect_view(Input* input, ViewBlock* parent, PDFStreamParser* parser);
+
+// Path paint operation types
+typedef enum {
+    PAINT_FILL_ONLY,      // f, F, f* operators
+    PAINT_STROKE_ONLY,    // S, s operators
+    PAINT_FILL_AND_STROKE // B, B*, b, b* operators
+} PaintOperation;
+
+static void create_rect_view(Input* input, ViewBlock* parent, PDFStreamParser* parser, PaintOperation paint_op);
 static void update_text_position(PDFStreamParser* parser, double tx, double ty);
 static void append_child_view(View* parent, View* child);
 
@@ -324,6 +332,13 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
                      op->operands.rgb_color.r,
                      op->operands.rgb_color.g,
                      op->operands.rgb_color.b);
+            parser->state.fill_color[0] = op->operands.rgb_color.r;
+            parser->state.fill_color[1] = op->operands.rgb_color.g;
+            parser->state.fill_color[2] = op->operands.rgb_color.b;
+            log_debug("State now: fill_color = [%.2f, %.2f, %.2f]",
+                     parser->state.fill_color[0],
+                     parser->state.fill_color[1],
+                     parser->state.fill_color[2]);
             break;
 
         case PDF_OP_RG:
@@ -332,6 +347,9 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
                      op->operands.rgb_color.r,
                      op->operands.rgb_color.g,
                      op->operands.rgb_color.b);
+            parser->state.stroke_color[0] = op->operands.rgb_color.r;
+            parser->state.stroke_color[1] = op->operands.rgb_color.g;
+            parser->state.stroke_color[2] = op->operands.rgb_color.b;
             break;
 
         // Path construction operators
@@ -358,11 +376,16 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
             break;
 
         case PDF_OP_re:
-            // Rectangle
+            // Rectangle - store coordinates for later painting
             log_debug("Rectangle: %.2f, %.2f, %.2f x %.2f",
                      op->operands.rect.x, op->operands.rect.y,
                      op->operands.rect.width, op->operands.rect.height);
-            // Store for rendering when path is painted
+            // Store rectangle in parser state
+            parser->state.current_rect_x = op->operands.rect.x;
+            parser->state.current_rect_y = op->operands.rect.y;
+            parser->state.current_rect_width = op->operands.rect.width;
+            parser->state.current_rect_height = op->operands.rect.height;
+            parser->state.has_current_rect = 1;
             break;
 
         case PDF_OP_h:
@@ -372,40 +395,42 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
 
         // Path painting operators
         case PDF_OP_S:
-            // Stroke path
+            // Stroke path - creates rectangle with border only
             log_debug("Stroke path");
+            create_rect_view(input, parent, parser, PAINT_STROKE_ONLY);
             break;
 
         case PDF_OP_s:
             // Close and stroke path
             log_debug("Close and stroke path");
+            create_rect_view(input, parent, parser, PAINT_STROKE_ONLY);
             break;
 
         case PDF_OP_f:
         case PDF_OP_F:
             // Fill path
             log_debug("Fill path");
-            create_rect_view(input, parent, parser);
+            create_rect_view(input, parent, parser, PAINT_FILL_ONLY);
             break;
 
         case PDF_OP_f_star:
             // Fill path (even-odd)
             log_debug("Fill path (even-odd)");
-            create_rect_view(input, parent, parser);
+            create_rect_view(input, parent, parser, PAINT_FILL_ONLY);
             break;
 
         case PDF_OP_B:
         case PDF_OP_B_star:
             // Fill and stroke
             log_debug("Fill and stroke path");
-            create_rect_view(input, parent, parser);
+            create_rect_view(input, parent, parser, PAINT_FILL_AND_STROKE);
             break;
 
         case PDF_OP_b:
         case PDF_OP_b_star:
             // Close, fill and stroke
             log_debug("Close, fill and stroke path");
-            create_rect_view(input, parent, parser);
+            create_rect_view(input, parent, parser, PAINT_FILL_AND_STROKE);
             break;
 
         case PDF_OP_n:
@@ -426,14 +451,17 @@ static void process_pdf_operator(Input* input, ViewBlock* parent,
  * This is called after path painting operators (f, F, S, B, etc.)
  */
 static void create_rect_view(Input* input, ViewBlock* parent,
-                             PDFStreamParser* parser) {
-    // For now, we only handle the last rectangle operator
-    // In a full implementation, we'd track path construction
+                             PDFStreamParser* parser, PaintOperation paint_op) {
+    // Check if we have a stored rectangle from 're' operator
+    if (!parser->state.has_current_rect) {
+        log_debug("No rectangle path stored, skipping rect view creation");
+        return;
+    }
 
-    // Get the rectangle from current position (simplified)
-    // In full implementation, we'd track the path state
-    double x = parser->state.current_x;
-    double y = parser->state.current_y;
+    double x = parser->state.current_rect_x;
+    double y = parser->state.current_rect_y;
+    double width = parser->state.current_rect_width;
+    double height = parser->state.current_rect_height;
 
     // Create ViewBlock for the rectangle
     ViewBlock* rect_view = (ViewBlock*)pool_calloc(input->pool, sizeof(ViewBlock));
@@ -445,8 +473,8 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     rect_view->type = RDT_VIEW_BLOCK;
     rect_view->x = (float)x;
     rect_view->y = (float)y;  // Store PDF Y as-is
-    rect_view->width = 100;   // TODO: Track from 're' operator
-    rect_view->height = 100;  // TODO: Track from 're' operator
+    rect_view->width = (float)width;
+    rect_view->height = (float)height;
 
     // Create empty DomElement for styling
     DomElement* dom_elem = (DomElement*)pool_calloc(input->pool, sizeof(DomElement));
@@ -471,11 +499,12 @@ static void create_rect_view(Input* input, ViewBlock* parent,
 
     rect_view->node = elem_node;
 
-    // Apply fill color and/or stroke color from graphics state
+    // Apply fill color and/or stroke color from graphics state based on paint operation
     BoundaryProp* bound = nullptr;
 
-    // Apply fill color if set
-    if (parser->state.fill_color[0] >= 0.0) {
+    // Apply fill color only for fill or fill+stroke operations
+    if ((paint_op == PAINT_FILL_ONLY || paint_op == PAINT_FILL_AND_STROKE) &&
+        parser->state.fill_color[0] >= 0.0) {
         if (!bound) {
             bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
         }
@@ -489,7 +518,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
                 bg->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
                 bg->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
                 bg->color.a = 255; // Fully opaque
-                bg->color.c = 1;   // Color is set
+                // NOTE: Don't set bg->color.c - it's a union with r,g,b,a
 
                 bound->background = bg;
 
@@ -499,8 +528,9 @@ static void create_rect_view(Input* input, ViewBlock* parent,
         }
     }
 
-    // Apply stroke color if set
-    if (parser->state.stroke_color[0] >= 0.0) {
+    // Apply stroke color only for stroke or fill+stroke operations
+    if ((paint_op == PAINT_STROKE_ONLY || paint_op == PAINT_FILL_AND_STROKE) &&
+        parser->state.stroke_color[0] >= 0.0) {
         if (!bound) {
             bound = (BoundaryProp*)pool_calloc(input->pool, sizeof(BoundaryProp));
         }
@@ -515,7 +545,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
                 stroke_color.g = (uint8_t)(parser->state.stroke_color[1] * 255.0);
                 stroke_color.b = (uint8_t)(parser->state.stroke_color[2] * 255.0);
                 stroke_color.a = 255; // Fully opaque
-                stroke_color.c = 1;   // Color is set
+                // NOTE: Don't set stroke_color.c - it's a union with r,g,b,a
 
                 // Apply stroke color to all four sides
                 border->top_color = stroke_color;
@@ -553,6 +583,9 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     append_child_view((View*)parent, (View*)rect_view);
 
     log_debug("Created rect view at (%.2f, %.2f)", x, y);
+
+    // Clear the rectangle path state after using it
+    parser->state.has_current_rect = 0;
 }
 
 /**
@@ -617,14 +650,22 @@ static void create_text_view(Input* input, ViewBlock* parent,
         }
     }
 
-    // Apply text color from graphics state (fill color)
-    // Note: ViewText doesn't have InlineProp, so we store color in a custom way
-    // For full color support, we'd wrap this in a ViewSpan
-    // For now, log the color for Phase 2.4 completion tracking
-    log_debug("Text fill color: RGB(%.2f, %.2f, %.2f)",
+    // Apply text color from graphics state fill color
+    log_debug("Before color conversion: state fill_color = [%.2f, %.2f, %.2f]",
              parser->state.fill_color[0],
              parser->state.fill_color[1],
              parser->state.fill_color[2]);
+
+    text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
+    text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
+    text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
+    text_view->color.a = 255; // Fully opaque
+    // NOTE: Don't set text_view->color.c - it's a union with r,g,b,a and would overwrite them!
+
+    log_debug("Applied text color: r=%u, g=%u, b=%u (RGB)",
+             (unsigned)text_view->color.r,
+             (unsigned)text_view->color.g,
+             (unsigned)text_view->color.b);
 
     // Add to parent
     append_child_view((View*)parent, (View*)text_view);
