@@ -38,12 +38,14 @@ typedef struct {
 } PdfViewerContext;
 
 // Helper function: render text string using FreeType
-static void render_text_gl(UiContext* uicon, const char* text, float x, float y, float size, float r, float g, float b) {
-    // Get or load a font face
-    FontProp font_style = uicon->default_font;
-    font_style.font_size = size;
+static void render_text_gl(UiContext* uicon, const char* text, float x, float y, FontProp* font_prop, float r, float g, float b) {
+    // Use provided font properties
+    if (!font_prop) {
+        font_prop = &uicon->default_font;
+    }
 
-    FT_Face face = load_styled_font(uicon, "Arial", &font_style);
+    const char* font_family = font_prop->family ? font_prop->family : "Arial";
+    FT_Face face = load_styled_font(uicon, font_family, font_prop);
     if (!face) {
         log_warn("No font face available for text rendering");
         return;
@@ -157,9 +159,12 @@ static void render_view_text(UiContext* uicon, ViewText* text_view, float offset
     // Convert: screen_y = offset_y + (page_height - pdf_y) * scale
     float x = offset_x + text_view->x * scale;
     float y = offset_y + (g_pdf_page_height - text_view->y) * scale;
-    float font_size = font->font_size * scale;
 
-    log_debug("Text position: x=%.1f, y=%.1f, font_size=%.1f", x, y, font_size);
+    // Scale font size for rendering
+    FontProp scaled_font = *font;
+    scaled_font.font_size = font->font_size * scale;
+
+    log_debug("Text position: x=%.1f, y=%.1f, font_size=%.1f", x, y, scaled_font.font_size);
 
     // Get text color from ViewText (default to black if not set)
     float r = 0.0f, g = 0.0f, b = 0.0f;
@@ -167,19 +172,20 @@ static void render_view_text(UiContext* uicon, ViewText* text_view, float offset
         color_to_rgb(text_view->color, &r, &g, &b);
     }
 
-    // Render the text
+    // Render the text with proper font properties
     char text_buffer[256];
     snprintf(text_buffer, sizeof(text_buffer), "%s", text_data);
-    render_text_gl(uicon, text_buffer, x, y, font_size, r, g, b);
+    render_text_gl(uicon, text_buffer, x, y, &scaled_font, r, g, b);
 }// Render a ViewBlock node
 static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x, float offset_y, float scale) {
     if (!block) return;
 
-    // PDF coordinates: Y increases upward from bottom
+    // PDF coordinates: Y increases upward from bottom, (x,y) is bottom-left corner
     // Screen coordinates: Y increases downward from top
-    // Convert: screen_y = offset_y + (page_height - pdf_y) * scale
+    // For rectangles: PDF y is the bottom edge, so the top edge is at y + height
+    // Convert top edge: screen_y = offset_y + (page_height - (pdf_y + pdf_height)) * scale
     float x = offset_x + block->x * scale;
-    float y = offset_y + (g_pdf_page_height - block->y) * scale;
+    float y = offset_y + (g_pdf_page_height - (block->y + block->height)) * scale;
     float w = block->width * scale;
     float h = block->height * scale;
 
@@ -416,7 +422,10 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
         glVertex2f(x, y + 60);
     glEnd();
 
-    render_text_gl(uicon, "Lambda PDF Viewer - Parsed Content", x + 20, y + 40, 20, 1.0f, 1.0f, 1.0f);
+        // Draw title
+    FontProp title_font = uicon->default_font;
+    title_font.font_size = 20;
+    render_text_gl(uicon, "Lambda PDF Viewer - Parsed Content", x + 20, y + 40, &title_font, 1.0f, 1.0f, 1.0f);
 
     // Render actual PDF content from view tree
     if (view_tree && view_tree->root) {
@@ -457,7 +466,9 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
                             scale);
     } else {
         log_warn("No view tree available for rendering");
-        render_text_gl(uicon, "No view tree available", x + 50, y + 100, 16, 0.8f, 0.2f, 0.2f);
+        FontProp error_font = uicon->default_font;
+        error_font.font_size = 16;
+        render_text_gl(uicon, "No view tree available", x + 50, y + 100, &error_font, 0.8f, 0.2f, 0.2f);
     }
 
     // Bottom status bar (light gray)
@@ -469,7 +480,9 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
         glVertex2f(x, y + page_height);
     glEnd();
 
-    render_text_gl(uicon, "PDF Parsed - Press ESC to exit", x + 20, y + page_height - 15, 14, 0.3f, 0.3f, 0.3f);
+    FontProp status_font = uicon->default_font;
+    status_font.font_size = 14;
+    render_text_gl(uicon, "PDF Parsed - Press ESC to exit", x + 20, y + page_height - 15, &status_font, 0.3f, 0.3f, 0.3f);
 
     // Swap buffers
     glfwSwapBuffers(window);
