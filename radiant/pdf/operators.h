@@ -55,6 +55,9 @@ typedef enum {
     PDF_OP_RG,          // Set RGB color (stroking)
     PDF_OP_rg,          // Set RGB color (non-stroking)
 
+    // Line state operators
+    PDF_OP_w,           // Set line width
+
     // Path construction operators
     PDF_OP_m,           // Move to
     PDF_OP_l,           // Line to
@@ -149,6 +152,7 @@ typedef struct PDFSavedState {
     double text_rise;
     double stroke_color[3];
     double fill_color[3];
+    double line_width;
     double current_x;
     double current_y;
     struct PDFSavedState* next; // Stack link
@@ -176,6 +180,9 @@ typedef struct {
     // Color state
     double stroke_color[3];    // RGB
     double fill_color[3];      // RGB
+
+    // Line state
+    double line_width;         // w operator (default 1.0)
 
     // Position tracking
     double current_x;

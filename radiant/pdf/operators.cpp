@@ -274,6 +274,9 @@ void pdf_graphics_state_init(PDFGraphicsState* state, Pool* pool) {
     state->fill_color[1] = 0.0;
     state->fill_color[2] = 0.0;
 
+    // Default line width
+    state->line_width = 1.0;
+
     state->current_x = 0.0;
     state->current_y = 0.0;
 
@@ -299,6 +302,8 @@ void pdf_graphics_state_save(PDFGraphicsState* state) {
 
     memcpy(saved->stroke_color, state->stroke_color, sizeof(state->stroke_color));
     memcpy(saved->fill_color, state->fill_color, sizeof(state->fill_color));
+
+    saved->line_width = state->line_width;
 
     saved->current_x = state->current_x;
     saved->current_y = state->current_y;
@@ -332,6 +337,8 @@ void pdf_graphics_state_restore(PDFGraphicsState* state) {
 
     memcpy(state->stroke_color, saved->stroke_color, sizeof(state->stroke_color));
     memcpy(state->fill_color, saved->fill_color, sizeof(state->fill_color));
+
+    state->line_width = saved->line_width;
 
     state->current_x = saved->current_x;
     state->current_y = saved->current_y;
@@ -500,6 +507,14 @@ PDFOperator* pdf_parse_next_operator(PDFStreamParser* parser) {
             parser->state.stroke_color[0] = numbers[0];
             parser->state.stroke_color[1] = numbers[1];
             parser->state.stroke_color[2] = numbers[2];
+        }
+    }
+    // Line state operators
+    else if (strcmp(op_name, "w") == 0) {
+        op->type = PDF_OP_w;
+        if (num_count >= 1) {
+            op->operands.number = numbers[0];
+            parser->state.line_width = numbers[0];
         }
     }
     // Path construction operators
