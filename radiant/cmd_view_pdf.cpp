@@ -27,6 +27,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
 // External declarations
 extern bool do_redraw;
 
+// Global variable for PDF page height (needed for coordinate conversion)
+static float g_pdf_page_height = 0.0f;
+
 // PDF Viewer context - holds both UI and view tree
 typedef struct {
     UiContext* uicon;
@@ -127,20 +130,36 @@ static void render_view_recursive(UiContext* uicon, View* view, float offset_x, 
 
 // Render a ViewText node
 static void render_view_text(UiContext* uicon, ViewText* text_view, float offset_x, float offset_y, float scale) {
-    if (!text_view || !text_view->node) return;
+    if (!text_view || !text_view->node) {
+        log_debug("render_view_text: null text_view or node");
+        return;
+    }
 
     // Get text content from the node
     unsigned char* text_data = text_view->node->text_data();
-    if (!text_data || !*text_data) return;
+    if (!text_data || !*text_data) {
+        log_debug("render_view_text: no text data");
+        return;
+    }
+
+    log_info("Rendering text: '%s' at (%.1f, %.1f) scale=%.2f", text_data, offset_x, offset_y, scale);
 
     // Get font properties
     FontProp* font = text_view->font;
-    if (!font) return;
+    if (!font) {
+        log_warn("render_view_text: no font property");
+        return;
+    }
 
     // Calculate position with offset and scale
+    // PDF coordinates: Y increases upward from bottom (0 at bottom, height at top)
+    // Screen coordinates: Y increases downward from top (0 at top, height at bottom)
+    // Convert: screen_y = offset_y + (page_height - pdf_y) * scale
     float x = offset_x + text_view->x * scale;
-    float y = offset_y + text_view->y * scale;
+    float y = offset_y + (g_pdf_page_height - text_view->y) * scale;
     float font_size = font->font_size * scale;
+
+    log_debug("Text position: x=%.1f, y=%.1f, font_size=%.1f", x, y, font_size);
 
     // Get text color (default to black)
     float r = 0.0f, g = 0.0f, b = 0.0f;
@@ -149,21 +168,26 @@ static void render_view_text(UiContext* uicon, ViewText* text_view, float offset
     char text_buffer[256];
     snprintf(text_buffer, sizeof(text_buffer), "%s", text_data);
     render_text_gl(uicon, text_buffer, x, y, font_size, r, g, b);
-}
-
-// Render a ViewBlock node
+}// Render a ViewBlock node
 static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x, float offset_y, float scale) {
     if (!block) return;
 
+    // PDF coordinates: Y increases upward from bottom
+    // Screen coordinates: Y increases downward from top
+    // Convert: screen_y = offset_y + (page_height - pdf_y) * scale
     float x = offset_x + block->x * scale;
-    float y = offset_y + block->y * scale;
+    float y = offset_y + (g_pdf_page_height - block->y) * scale;
     float w = block->width * scale;
     float h = block->height * scale;
+
+    log_debug("Rendering block at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 
     // Render background if set
     if (block->bound && block->bound->background && block->bound->background->color.c) {
         float r, g, b;
         color_to_rgb(block->bound->background->color, &r, &g, &b);
+
+        log_info("Block background color: (%.2f, %.2f, %.2f)", r, g, b);
 
         glColor3f(r, g, b);
         glBegin(GL_QUADS);
@@ -232,9 +256,22 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
     }
 
     // Render children recursively
-    View* child = block->first_child;
+    // Note: ViewBlock inherits from ViewSpan which inherits from ViewGroup
+    // The children are in the 'child' field from ViewGroup, not 'first_child'
+    ViewGroup* group = (ViewGroup*)block;
+    View* child = group->child;
+    int child_count = 0;
     while (child) {
-        render_view_recursive(uicon, child, x, y, scale);
+        child_count++;
+        child = child->next;
+    }
+
+    log_debug("Block has %d children", child_count);
+
+    // Render children with original offset (children have absolute coordinates)
+    child = group->child;
+    while (child) {
+        render_view_recursive(uicon, child, offset_x, offset_y, scale);
         child = child->next;
     }
 }
@@ -242,6 +279,8 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
 // Recursively render any view type
 static void render_view_recursive(UiContext* uicon, View* view, float offset_x, float offset_y, float scale) {
     if (!view) return;
+
+    log_debug("render_view_recursive: type=%d at (%.1f, %.1f)", view->type, offset_x, offset_y);
 
     switch (view->type) {
         case RDT_VIEW_TEXT:
@@ -378,6 +417,10 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
 
     // Render actual PDF content from view tree
     if (view_tree && view_tree->root) {
+        // Debug: log view tree info
+        log_info("View tree root: type=%d, size=%.0fx%.0f",
+                 view_tree->root->type, view_tree->root->width, view_tree->root->height);
+
         // Calculate scale to fit PDF into page area
         float content_x = x + 20;  // Add some margin
         float content_y = y + 80;  // Below title bar
@@ -392,6 +435,11 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
         if (scale > 2.0f) scale = 2.0f;  // Don't upscale too much
         if (scale < 0.1f) scale = 0.1f;  // Don't downscale too much
 
+        log_info("Rendering with scale=%.2f at offset=(%.1f, %.1f)", scale, content_x, content_y);
+
+        // Set global page height for coordinate conversion
+        g_pdf_page_height = view_tree->root->height;
+
         // Center the content if it's smaller than the available area
         float scaled_width = view_tree->root->width * scale;
         float scaled_height = view_tree->root->height * scale;
@@ -399,11 +447,13 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
         float center_offset_y = (content_area_height - scaled_height) / 2;
 
         // Render the entire view tree
+        // Pass the TOP of the content area as offset_y
         render_view_recursive(uicon, view_tree->root,
                             content_x + center_offset_x,
                             content_y + center_offset_y,
                             scale);
     } else {
+        log_warn("No view tree available for rendering");
         render_text_gl(uicon, "No view tree available", x + 50, y + 100, 16, 0.8f, 0.2f, 0.2f);
     }
 
