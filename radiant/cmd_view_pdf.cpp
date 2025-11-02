@@ -16,6 +16,7 @@
 
 // External functions
 void parse_pdf(Input* input, const char* pdf_data); // From input-pdf.cpp
+Input* input_new(Url* abs_url); // From input.cpp
 int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
 void ui_context_cleanup(UiContext* uicon); // From window.cpp
 void ui_context_create_surface(UiContext* uicon, int width, int height); // From window.cpp
@@ -25,6 +26,13 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
 
 // External declarations
 extern bool do_redraw;
+
+// PDF Viewer context - holds both UI and view tree
+typedef struct {
+    UiContext* uicon;
+    ViewTree* view_tree;
+    Input* input; // Keep input alive for memory pool
+} PdfViewerContext;
 
 // Helper function: render text string using FreeType
 static void render_text_gl(UiContext* uicon, const char* text, float x, float y, float size, float r, float g, float b) {
@@ -98,6 +106,173 @@ static void render_text_gl(UiContext* uicon, const char* text, float x, float y,
     }
 
     glDisable(GL_BLEND);
+}
+
+// Helper function: Convert Color struct to RGB floats
+static void color_to_rgb(Color color, float* r, float* g, float* b) {
+    if (color.c) {  // Color is set
+        *r = color.r / 255.0f;
+        *g = color.g / 255.0f;
+        *b = color.b / 255.0f;
+    } else {
+        // Default to black if color not set
+        *r = 0.0f;
+        *g = 0.0f;
+        *b = 0.0f;
+    }
+}
+
+// Forward declaration
+static void render_view_recursive(UiContext* uicon, View* view, float offset_x, float offset_y, float scale);
+
+// Render a ViewText node
+static void render_view_text(UiContext* uicon, ViewText* text_view, float offset_x, float offset_y, float scale) {
+    if (!text_view || !text_view->node) return;
+
+    // Get text content from the node
+    unsigned char* text_data = text_view->node->text_data();
+    if (!text_data || !*text_data) return;
+
+    // Get font properties
+    FontProp* font = text_view->font;
+    if (!font) return;
+
+    // Calculate position with offset and scale
+    float x = offset_x + text_view->x * scale;
+    float y = offset_y + text_view->y * scale;
+    float font_size = font->font_size * scale;
+
+    // Get text color (default to black)
+    float r = 0.0f, g = 0.0f, b = 0.0f;
+
+    // Render the text
+    char text_buffer[256];
+    snprintf(text_buffer, sizeof(text_buffer), "%s", text_data);
+    render_text_gl(uicon, text_buffer, x, y, font_size, r, g, b);
+}
+
+// Render a ViewBlock node
+static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x, float offset_y, float scale) {
+    if (!block) return;
+
+    float x = offset_x + block->x * scale;
+    float y = offset_y + block->y * scale;
+    float w = block->width * scale;
+    float h = block->height * scale;
+
+    // Render background if set
+    if (block->bound && block->bound->background && block->bound->background->color.c) {
+        float r, g, b;
+        color_to_rgb(block->bound->background->color, &r, &g, &b);
+
+        glColor3f(r, g, b);
+        glBegin(GL_QUADS);
+            glVertex2f(x, y);
+            glVertex2f(x + w, y);
+            glVertex2f(x + w, y + h);
+            glVertex2f(x, y + h);
+        glEnd();
+    }
+
+    // Render border if set
+    if (block->bound && block->bound->border) {
+        BorderProp* border = block->bound->border;
+
+        // Check if any border is visible
+        bool has_border = border->width.top > 0 || border->width.right > 0 ||
+                         border->width.bottom > 0 || border->width.left > 0;
+
+        if (has_border) {
+            float r, g, b;
+
+            // Top border
+            if (border->width.top > 0 && border->top_color.c) {
+                color_to_rgb(border->top_color, &r, &g, &b);
+                glColor3f(r, g, b);
+                glLineWidth(border->width.top * scale);
+                glBegin(GL_LINES);
+                    glVertex2f(x, y);
+                    glVertex2f(x + w, y);
+                glEnd();
+            }
+
+            // Right border
+            if (border->width.right > 0 && border->right_color.c) {
+                color_to_rgb(border->right_color, &r, &g, &b);
+                glColor3f(r, g, b);
+                glLineWidth(border->width.right * scale);
+                glBegin(GL_LINES);
+                    glVertex2f(x + w, y);
+                    glVertex2f(x + w, y + h);
+                glEnd();
+            }
+
+            // Bottom border
+            if (border->width.bottom > 0 && border->bottom_color.c) {
+                color_to_rgb(border->bottom_color, &r, &g, &b);
+                glColor3f(r, g, b);
+                glLineWidth(border->width.bottom * scale);
+                glBegin(GL_LINES);
+                    glVertex2f(x + w, y + h);
+                    glVertex2f(x, y + h);
+                glEnd();
+            }
+
+            // Left border
+            if (border->width.left > 0 && border->left_color.c) {
+                color_to_rgb(border->left_color, &r, &g, &b);
+                glColor3f(r, g, b);
+                glLineWidth(border->width.left * scale);
+                glBegin(GL_LINES);
+                    glVertex2f(x, y + h);
+                    glVertex2f(x, y);
+                glEnd();
+            }
+        }
+    }
+
+    // Render children recursively
+    View* child = block->first_child;
+    while (child) {
+        render_view_recursive(uicon, child, x, y, scale);
+        child = child->next;
+    }
+}
+
+// Recursively render any view type
+static void render_view_recursive(UiContext* uicon, View* view, float offset_x, float offset_y, float scale) {
+    if (!view) return;
+
+    switch (view->type) {
+        case RDT_VIEW_TEXT:
+            render_view_text(uicon, (ViewText*)view, offset_x, offset_y, scale);
+            break;
+
+        case RDT_VIEW_BLOCK:
+        case RDT_VIEW_INLINE_BLOCK:
+        case RDT_VIEW_LIST_ITEM:
+        case RDT_VIEW_TABLE:
+        case RDT_VIEW_TABLE_ROW_GROUP:
+        case RDT_VIEW_TABLE_ROW:
+        case RDT_VIEW_TABLE_CELL:
+            render_view_block(uicon, (ViewBlock*)view, offset_x, offset_y, scale);
+            break;
+
+        case RDT_VIEW_INLINE: {
+            // Render inline spans - they may contain text or other inline elements
+            ViewSpan* span = (ViewSpan*)view;
+            View* child = span->child;
+            while (child) {
+                render_view_recursive(uicon, child, offset_x, offset_y, scale);
+                child = child->next;
+            }
+            break;
+        }
+
+        default:
+            // Unknown type, skip
+            break;
+    }
 }// Callback implementations for PDF viewer
 static void key_callback_pdf(GLFWwindow* window, int key, int scancode, int action, int mods) {
     // Handle ESC key to close window
@@ -133,12 +308,15 @@ static void framebuffer_size_callback_pdf(GLFWwindow* window, int width, int hei
 }
 
 static void window_refresh_callback_pdf(GLFWwindow* window) {
-    // Get UI context from window user pointer
-    UiContext* uicon = (UiContext*)glfwGetWindowUserPointer(window);
-    if (!uicon) {
+    // Get PDF viewer context from window user pointer
+    PdfViewerContext* pdf_ctx = (PdfViewerContext*)glfwGetWindowUserPointer(window);
+    if (!pdf_ctx || !pdf_ctx->uicon) {
         log_warn("window_refresh_callback_pdf: missing context");
         return;
     }
+
+    UiContext* uicon = pdf_ctx->uicon;
+    ViewTree* view_tree = pdf_ctx->view_tree;
 
     log_debug("Rendering frame...");
 
@@ -196,43 +374,37 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
         glVertex2f(x, y + 60);
     glEnd();
 
-    // Render title text in white
-    render_text_gl(uicon, "Lambda PDF Viewer", x + 20, y + 40, 24, 1.0f, 1.0f, 1.0f);
+    render_text_gl(uicon, "Lambda PDF Viewer - Parsed Content", x + 20, y + 40, 20, 1.0f, 1.0f, 1.0f);
 
-    // Red rectangle (simulating an image or shape)
-    glColor3f(0.9f, 0.2f, 0.2f);
-    glBegin(GL_QUADS);
-        glVertex2f(x + 50, y + 100);
-        glVertex2f(x + 250, y + 100);
-        glVertex2f(x + 250, y + 250);
-        glVertex2f(x + 50, y + 250);
-    glEnd();
+    // Render actual PDF content from view tree
+    if (view_tree && view_tree->root) {
+        // Calculate scale to fit PDF into page area
+        float content_x = x + 20;  // Add some margin
+        float content_y = y + 80;  // Below title bar
+        float content_area_width = page_width - 40;  // Margins on both sides
+        float content_area_height = page_height - 120;  // Title bar + margins
 
-    // Green rectangle
-    glColor3f(0.2f, 0.8f, 0.3f);
-    glBegin(GL_QUADS);
-        glVertex2f(x + 300, y + 100);
-        glVertex2f(x + 550, y + 100);
-        glVertex2f(x + 550, y + 180);
-        glVertex2f(x + 300, y + 180);
-    glEnd();
+        float scale_x = content_area_width / view_tree->root->width;
+        float scale_y = content_area_height / view_tree->root->height;
+        float scale = (scale_x < scale_y) ? scale_x : scale_y;  // Use smaller scale to fit
 
-    // Render actual text content instead of gray bars
-    const char* sample_lines[] = {
-        "This is a demonstration of text rendering.",
-        "Lambda Script is a functional language for",
-        "document processing and data transformation.",
-        "",
-        "Key Features:",
-        "  - Pure functional programming",
-        "  - JIT compilation via MIR",
-        "  - Multi-format document support",
-        "  - Advanced type system"
-    };
+        // Clamp scale to reasonable bounds
+        if (scale > 2.0f) scale = 2.0f;  // Don't upscale too much
+        if (scale < 0.1f) scale = 0.1f;  // Don't downscale too much
 
-    for (int i = 0; i < 9; i++) {
-        float line_y = y + 320 + i * 35;
-        render_text_gl(uicon, sample_lines[i], x + 50, line_y, 16, 0.2f, 0.2f, 0.2f);
+        // Center the content if it's smaller than the available area
+        float scaled_width = view_tree->root->width * scale;
+        float scaled_height = view_tree->root->height * scale;
+        float center_offset_x = (content_area_width - scaled_width) / 2;
+        float center_offset_y = (content_area_height - scaled_height) / 2;
+
+        // Render the entire view tree
+        render_view_recursive(uicon, view_tree->root,
+                            content_x + center_offset_x,
+                            content_y + center_offset_y,
+                            scale);
+    } else {
+        render_text_gl(uicon, "No view tree available", x + 50, y + 100, 16, 0.8f, 0.2f, 0.2f);
     }
 
     // Bottom status bar (light gray)
@@ -244,8 +416,7 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
         glVertex2f(x, y + page_height);
     glEnd();
 
-    // Status bar text
-    render_text_gl(uicon, "Page 1 of 1", x + 20, y + page_height - 15, 14, 0.3f, 0.3f, 0.3f);
+    render_text_gl(uicon, "PDF Parsed - Press ESC to exit", x + 20, y + page_height - 15, 14, 0.3f, 0.3f, 0.3f);
 
     // Swap buffers
     glfwSwapBuffers(window);
@@ -285,9 +456,46 @@ static char* read_pdf_file(const char* filename) {
 int view_pdf_in_window(const char* pdf_file) {
     log_info("Opening PDF file in viewer: %s", pdf_file);
 
-    // TODO: Fix parse_pdf crash and integrate real PDF rendering
-    // For now, just show a simple window with a page mockup
-    log_info("Creating PDF viewer window (PDF parsing temporarily disabled)...");
+    // Read PDF file content
+    char* pdf_content = read_pdf_file(pdf_file);
+    if (!pdf_content) {
+        log_error("Failed to read PDF file: %s", pdf_file);
+        return 1;
+    }
+
+    // Create Input structure properly using input_new
+    Input* input = input_new(nullptr); // URL not needed for direct parsing
+    if (!input) {
+        log_error("Failed to create Input structure");
+        free(pdf_content);
+        return 1;
+    }
+
+    // Parse PDF content
+    log_info("Parsing PDF content...");
+    parse_pdf(input, pdf_content);
+    free(pdf_content); // Done with raw content
+
+    // Check if parsing succeeded
+    if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
+        log_error("Failed to parse PDF file");
+        pool_destroy(input->pool);
+        free(input);
+        return 1;
+    }
+
+    log_info("PDF parsed successfully");
+
+    // Convert PDF to view tree
+    ViewTree* view_tree = pdf_to_view_tree(input, input->root);
+    if (!view_tree || !view_tree->root) {
+        log_error("Failed to convert PDF to view tree");
+        pool_destroy(input->pool);
+        free(input);
+        return 1;
+    }
+
+    log_info("View tree created successfully");
 
     // Initialize UI context
     UiContext uicon;
@@ -295,6 +503,8 @@ int view_pdf_in_window(const char* pdf_file) {
 
     if (ui_context_init(&uicon, false) != 0) {
         log_error("Failed to initialize UI context");
+        pool_destroy(input->pool);
+        free(input);
         return 1;
     }
 
@@ -302,6 +512,8 @@ int view_pdf_in_window(const char* pdf_file) {
     if (!window) {
         log_error("Failed to create window");
         ui_context_cleanup(&uicon);
+        pool_destroy(input->pool);
+        free(input);
         return 1;
     }    // Set up OpenGL context and callbacks (like window_main does)
     log_info("Setting up OpenGL context...");
@@ -309,8 +521,14 @@ int view_pdf_in_window(const char* pdf_file) {
     glfwSwapInterval(1);  // enable vsync
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
 
-    // Set window user pointer so callbacks can access uicon
-    glfwSetWindowUserPointer(window, &uicon);
+    // Create PDF viewer context to pass to callbacks
+    PdfViewerContext pdf_ctx;
+    pdf_ctx.uicon = &uicon;
+    pdf_ctx.view_tree = view_tree;
+    pdf_ctx.input = input;
+
+    // Set window user pointer so callbacks can access context
+    glfwSetWindowUserPointer(window, &pdf_ctx);
 
     // Set up event callbacks
     glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
@@ -358,6 +576,14 @@ int view_pdf_in_window(const char* pdf_file) {
     // Cleanup
     log_info("Closing PDF viewer");
     ui_context_cleanup(&uicon);
+
+    // Clean up Input and its pool (which contains the view tree)
+    if (input) {
+        if (input->pool) {
+            pool_destroy(input->pool);
+        }
+        free(input);
+    }
 
     return 0;
 }
