@@ -274,7 +274,6 @@ void css_engine_clear_errors(CssEngine* engine);
 // Enhanced CSS functions (for backward compatibility)
 CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
 void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule);
-// Removed: CssStyleNode* css_enhanced_selector_to_style_node(CssEngine* engine, CSSComplexSelector* selector);
 bool css_enhanced_nesting_parent_matches(const CssSelector* selector, const CssStyleNode* node);
 bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssStyleNode* node);
 

@@ -9,7 +9,6 @@
 #include <stddef.h>
 
 // Forward declarations
-typedef struct CSSComplexSelector CSSComplexSelector;
 typedef struct CSSSelectorComponent CSSSelectorComponent;
 typedef struct CssCalcNode CssCalcNode;
 
