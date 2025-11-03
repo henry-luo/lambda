@@ -46,7 +46,7 @@ void print_help() {
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
     printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
-    printf("  lambda view <file.pdf|file.html>  - Open PDF or HTML document in viewer window\n");
+    printf("  lambda view [file.pdf|file.html]  - Open PDF or HTML document in viewer (default: test/html/index.html)\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Commands:\n");
     printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
