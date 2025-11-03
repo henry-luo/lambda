@@ -45,7 +45,8 @@ void print_help() {
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
-    printf("  lambda render <input.html> -o <output.svg|pdf>  - Render HTML to SVG/PDF\n");
+    printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
+    printf("  lambda view <file.pdf|file.html>  - Open PDF or HTML document in viewer window\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Commands:\n");
     printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
@@ -63,7 +64,10 @@ void print_help() {
     printf("\nLayout Commands:\n");
     printf("  layout <file.html>             - Analyze HTML/CSS layout and display view tree\n");
     printf("\nRendering Commands:\n");
-    printf("  render <input.html> -o <output.svg|pdf>  - Layout HTML and render to SVG or PDF format\n");
+    printf("  render <input.html> -o <output.svg|pdf|png|jpg>  - Layout HTML and render to SVG/PDF/PNG/JPEG format\n");
+    printf("\nViewer Commands:\n");
+    printf("  view <file.pdf>       - Open PDF document in interactive viewer window\n");
+    printf("  view <file.html>      - Open HTML document in interactive browser window\n");
 }
 
 // Function to determine the best REPL prompt based on system capabilities
