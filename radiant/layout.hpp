@@ -39,6 +39,7 @@ typedef struct Linebox {
     bool has_space;                 // whether last layout character is a space
     FontBox line_start_font;
     FT_UInt prev_glyph_index = 0;   // for kerning
+
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
     }
@@ -49,6 +50,14 @@ typedef enum LineFillStatus {
     RDT_LINE_NOT_FILLED = 1,
     RDT_LINE_FILLED = 2,
 } LineFillStatus;
+
+// Stacking context for absolute/fixed positioned elements
+typedef struct StackingBox : Blockbox {
+    ViewBlock* establishing_element;  // element that creates the context
+    int z_index;                     // z-index of this context
+    struct StackingBox* parent;       // parent stacking context
+    ArrayList* positioned_children; // list of positioned child elements
+} StackingBox;
 
 // Integrated flex container layout state
 typedef struct FlexContainerLayout : FlexProp {
@@ -79,6 +88,7 @@ typedef struct LayoutContext {
     Linebox line;  // current linebox
     FontBox font;  // current font style
     float root_font_size;
+    StackingBox* stacking;  // current stacking context for positioned elements
     struct FloatContext* current_float_context;  // Current float context for this layout
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
