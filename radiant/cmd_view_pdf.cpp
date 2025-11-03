@@ -766,7 +766,13 @@ int view_pdf_in_window(const char* pdf_file) {
  * View HTML file in window (for compatibility)
  */
 int view_html_in_window(const char* html_file) {
-    log_info("HTML viewer not yet implemented");
-    printf("HTML viewing not yet implemented. Use: ./radiant.exe\n");
-    return 1;
+    log_info("Opening HTML file in viewer: %s", html_file);
+    
+    // Forward declaration of refactored window_main function
+    extern int window_main_with_file(const char* html_file);
+    
+    // Use the refactored window_main with HTML file parameter
+    // This leverages ALL existing infrastructure: event handling, rendering,
+    // scrolling, link navigation, CSS layout, form interactions, etc.
+    return window_main_with_file(html_file);
 }

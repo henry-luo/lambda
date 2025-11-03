@@ -21,6 +21,9 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
+// Forward declaration for internal function
+int window_main_with_file(const char* html_file);
+
 // Window dimensions
 bool do_redraw = false;
 UiContext ui_context;
@@ -314,6 +317,11 @@ int run_layout(const char* html_file) {
 }
 
 int window_main(int argc, char* argv[]) {
+    return window_main_with_file(NULL);
+}
+
+// Internal function that accepts an optional HTML file to display
+int window_main_with_file(const char* html_file) {
     // Original GUI mode
     log_init_wrapper();
     ui_context_init(&ui_context, false);
@@ -349,8 +357,17 @@ int window_main(int argc, char* argv[]) {
 
     lxb_url_t* cwd = get_current_dir_lexbor();
     if (cwd) {
-        show_html_doc(cwd, "test/html/index.html");
+        // Use provided HTML file or default to test file
+        const char* file_to_load = html_file ? html_file : "test/html/index.html";
+        Document* doc = show_html_doc(cwd, (char*)file_to_load);
         lxb_url_destroy(cwd);
+        
+        // Set custom window title if HTML file was provided
+        if (html_file && doc) {
+            char title[512];
+            snprintf(title, sizeof(title), "Lambda HTML Viewer - %s", html_file);
+            glfwSetWindowTitle(window, title);
+        }
     }
 
     // main loop
