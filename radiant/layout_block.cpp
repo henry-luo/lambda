@@ -367,7 +367,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
     }
 }
 
-void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block,  Linebox *pa_line, FontBox *pa_font) {
+void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line, FontBox *pa_font) {
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
     lycon->line.left = 0;  lycon->line.right = pa_block->width;
@@ -517,8 +517,6 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
         block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
-        fprintf(stderr, "[LAYOUT] Block '%s': final block->width=%.2f, block->height=%.2f (with padding/border)\n",
-                elmt->name(), block->width, block->height);
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
@@ -553,17 +551,10 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
-    // DEBUG: Track Y coordinate changes for inner div
-    bool is_inner_div = (strcmp(tag_init, "div") == 0 && block->parent && block->parent->node &&
-                         strcmp(block->parent->node->name(), "div") == 0);
-    if (is_inner_div) log_debug("[TRACK] After layout-block-sizes: block->y = %.2f", block->y);
-
-    // layout block content
-    if (is_inner_div) log_debug("[TRACK] Before layout_block_inner_content: block->y = %.2f", block->y);
+    // layout block content, and determine flow width and height
     if (elmt_name != LXB_TAG_IMG) {
         layout_block_inner_content(lycon, block, block->display);
     }
-    if (is_inner_div) log_debug("[TRACK] After layout_block_inner_content: block->y = %.2f", block->y);
 
     // check for margin collapsing with children
     if (block->bound) {
@@ -586,7 +577,6 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     }
 
     // Apply CSS positioning after normal layout
-    if (is_inner_div) log_debug("[TRACK] Before CSS positioning: block->y = %.2f", block->y);
     if (block->position) {
         log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
         log_debug("Position offsets: top=%.2f(%s), right=%.2f(%s), bottom=%.2f(%s), left=%.2f(%s)",
@@ -617,9 +607,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     // Apply CSS clear property after float layout
     if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
-        if (is_inner_div) log_debug("[TRACK] Before clear layout: block->y = %.2f, block=%p", block->y, (void*)block);
         layout_clear_element(lycon, block);
-        if (is_inner_div) log_debug("[TRACK] After clear layout: block->y = %.2f, block=%p", block->y, (void*)block);
     }
 }
 
@@ -659,137 +647,136 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED)) {
         layout_absolute_positioned(lycon, block);
-        log_leave();
-        return;
-    }
+        lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+    } else {
+        // layout block content to determine content width and height
+        layout_block_content(lycon, elmt, block, &pa_block, &pa_line, &pa_font);
 
-    // layout block content to determine content width and height
-    layout_block_content(lycon, elmt, block, &pa_block, &pa_line, &pa_font);
+        // flow the block in parent context
+        log_debug("flow block in parent context, block->y before restoration: %.2f", block->y);
+        lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
-    // flow the block in parent context
-    log_debug("flow block in parent context, block->y before restoration: %.2f", block->y);
-    lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
-
-    // Skip normal flow positioning for absolutely positioned elements
-    if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE ||
-        block->position->position == LXB_CSS_VALUE_FIXED)) {
-        log_debug("Skipping normal flow positioning for absolutely positioned element");
-        // Absolutely positioned elements don't participate in normal flow
-        // Their position was already set by the positioning code above
-    }
-    else if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
-        if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
-        if (lycon->line.advance_x + block->width > lycon->line.right) {
-            line_break(lycon);
-            block->x = lycon->line.left;
-        } else {
-            block->x = lycon->line.advance_x;
+        // Skip normal flow positioning for absolutely positioned elements
+        if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE ||
+            block->position->position == LXB_CSS_VALUE_FIXED)) {
+            log_debug("Skipping normal flow positioning for absolutely positioned element");
+            // Absolutely positioned elements don't participate in normal flow
+            // Their position was already set by the positioning code above
         }
-        if (block->in_line && block->in_line->vertical_align) {
-            float item_height = block->height + (block->bound ?
-                block->bound->margin.top + block->bound->margin.bottom : 0);
-            float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
-            float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
-            float offset = calculate_vertical_align_offset(
-                lycon, block->in_line->vertical_align, item_height, line_height,
-                lycon->line.max_ascender, item_baseline);
-            block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
-            log_debug("valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d",
-                offset, line_height, block->height, lycon->block.advance_y, block->y, block->in_line->vertical_align);
-            lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - lycon->line.max_ascender);
-            log_debug("new max_descender=%f", lycon->line.max_descender);
-        } else {
-            log_debug("valigned-inline-block: default baseline align");
-            block->y = lycon->block.advance_y;
-        }
-        lycon->line.advance_x += block->width;
-        if (block->bound) {
-            block->x += block->bound->margin.left;
-            block->y += block->bound->margin.top;
-            lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
-        }
-        log_debug("inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d",
-            block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
-        // update baseline
-        if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
-            float block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
-            if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_TOP) {
-                lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
+        else if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
+            if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
+            if (lycon->line.advance_x + block->width > lycon->line.right) {
+                line_break(lycon);
+                block->x = lycon->line.left;
+            } else {
+                block->x = lycon->line.advance_x;
             }
-            else if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_BOTTOM) {
-                lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
+            if (block->in_line && block->in_line->vertical_align) {
+                float item_height = block->height + (block->bound ?
+                    block->bound->margin.top + block->bound->margin.bottom : 0);
+                float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
+                float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
+                float offset = calculate_vertical_align_offset(
+                    lycon, block->in_line->vertical_align, item_height, line_height,
+                    lycon->line.max_ascender, item_baseline);
+                block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
+                log_debug("valigned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d",
+                    offset, line_height, block->height, lycon->block.advance_y, block->y, block->in_line->vertical_align);
+                lycon->line.max_descender = max(lycon->line.max_descender, offset + item_height - lycon->line.max_ascender);
+                log_debug("new max_descender=%f", lycon->line.max_descender);
+            } else {
+                log_debug("valigned-inline-block: default baseline align");
+                block->y = lycon->block.advance_y;
             }
-            else {
-                lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
-            }
-        } else {
-            // default baseline alignment for inline block
+            lycon->line.advance_x += block->width;
             if (block->bound) {
-                lycon->line.max_ascender = max(lycon->line.max_ascender, block->height + block->bound->margin.top);
-                // bottom margin is placed below the baseline as descender
-                lycon->line.max_descender = max(lycon->line.max_descender, block->bound->margin.bottom);
+                block->x += block->bound->margin.left;
+                block->y += block->bound->margin.top;
+                lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
             }
-            else {
-                lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+            log_debug("inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d",
+                block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
+            // update baseline
+            if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
+                float block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
+                if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_TOP) {
+                    lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
+                }
+                else if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_BOTTOM) {
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
+                }
+                else {
+                    lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
+                }
+            } else {
+                // default baseline alignment for inline block
+                if (block->bound) {
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, block->height + block->bound->margin.top);
+                    // bottom margin is placed below the baseline as descender
+                    lycon->line.max_descender = max(lycon->line.max_descender, block->bound->margin.bottom);
+                }
+                else {
+                    lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+                }
+                log_debug("inline-block set max_ascender to: %d", lycon->line.max_ascender);
             }
-            log_debug("inline-block set max_ascender to: %d", lycon->line.max_ascender);
+            // line got content
+            lycon->line.reset_space();
         }
-        // line got content
-        lycon->line.reset_space();
-    }
-    else { // normal block
-        if (block->bound) {
-            // collapse top margin with parent block
-            log_debug("check margin collapsing");
-            if (block->parent->child == block) {  // first child
-                if (block->bound->margin.top > 0) {
-                    ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
-                    // parent has top margin, but no border, no padding;  parent->parent to exclude html
-                    if (parent && parent->parent && parent->bound && parent->bound->padding.top == 0 &&
-                        (!parent->bound->border || parent->bound->border->width.top == 0)) {
-                        float margin_top = max(block->bound->margin.top, parent->bound->margin.top);
-                        parent->y += margin_top - parent->bound->margin.top;
-                        parent->bound->margin.top = margin_top;
-                        block->y = 0;  block->bound->margin.top = 0;
-                        log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f", margin_top, parent->y, block->y);
-                    }
-                    else {
-                        log_debug("no parent margin collapsing: parent->bound=%p, border-top=%f, padding-top=%f",
-                            parent ? parent->bound : NULL,
-                            parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0,
-                            parent && parent->bound ? parent->bound->padding.top : 0);
+        else { // normal block
+            if (block->bound) {
+                // collapse top margin with parent block
+                log_debug("check margin collapsing");
+                if (block->parent->child == block) {  // first child
+                    if (block->bound->margin.top > 0) {
+                        ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
+                        // parent has top margin, but no border, no padding;  parent->parent to exclude html
+                        if (parent && parent->parent && parent->bound && parent->bound->padding.top == 0 &&
+                            (!parent->bound->border || parent->bound->border->width.top == 0)) {
+                            float margin_top = max(block->bound->margin.top, parent->bound->margin.top);
+                            parent->y += margin_top - parent->bound->margin.top;
+                            parent->bound->margin.top = margin_top;
+                            block->y = 0;  block->bound->margin.top = 0;
+                            log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f", margin_top, parent->y, block->y);
+                        }
+                        else {
+                            log_debug("no parent margin collapsing: parent->bound=%p, border-top=%f, padding-top=%f",
+                                parent ? parent->bound : NULL,
+                                parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0,
+                                parent && parent->bound ? parent->bound->padding.top : 0);
+                        }
                     }
                 }
-            }
-            else {
-                // check sibling margin collapsing
-                float collapse = 0;
-                View* prev_sibling = block->previous_view();
-                if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
-                    ViewBlock* prev_block = (ViewBlock*)prev_sibling;
-                    if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
-                        collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
-                        block->y -= collapse;
-                        block->bound->margin.top -= collapse;
-                        log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
+                else {
+                    // check sibling margin collapsing
+                    float collapse = 0;
+                    View* prev_sibling = block->previous_view();
+                    if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
+                        ViewBlock* prev_block = (ViewBlock*)prev_sibling;
+                        if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
+                            collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
+                            block->y -= collapse;
+                            block->bound->margin.top -= collapse;
+                            log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
+                        }
                     }
                 }
+                lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
+                lycon->block.max_width = max(lycon->block.max_width, block->width
+                    + block->bound->margin.left + block->bound->margin.right);
+            } else {
+                lycon->block.advance_y += block->height;
+                lycon->block.max_width = max(lycon->block.max_width, block->width);
             }
-            lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
-            lycon->block.max_width = max(lycon->block.max_width, block->width
-                + block->bound->margin.left + block->bound->margin.right);
-        } else {
-            lycon->block.advance_y += block->height;
-            lycon->block.max_width = max(lycon->block.max_width, block->width);
+            assert(lycon->line.is_line_start);
+            log_debug("block end, pa max_width: %f, pa advance_y: %f, block hg: %f",
+                lycon->block.max_width, lycon->block.advance_y, block->height);
         }
-        assert(lycon->line.is_line_start);
-        log_debug("block end, pa max_width: %f, pa advance_y: %f, block hg: %f",
-            lycon->block.max_width, lycon->block.advance_y, block->height);
+        lycon->prev_view = (View*)block;
+        const char* tag = block->node ? block->node->name() : "unknown";
+        float initial_y = pa_block.advance_y;  // This was the initial Y when block was created
+        log_debug("block view: %d (%s), end block, initial y=%.2f, final y=%.2f (diff=%.2f)",
+                block->type, tag, initial_y, block->y, block->y - initial_y);
     }
-    lycon->prev_view = (View*)block;
-    const char* tag = block->node ? block->node->name() : "unknown";
-    float initial_y = pa_block.advance_y;  // This was the initial Y when block was created
-    log_debug("block view: %d (%s), end block, initial y=%.2f, final y=%.2f (diff=%.2f)",
-              block->type, tag, initial_y, block->y, block->y - initial_y);
     log_leave();
 }
