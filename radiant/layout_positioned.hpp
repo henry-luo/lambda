@@ -7,7 +7,7 @@ struct ViewBlock;
 
 /**
  * CSS Positioning Layout Functions
- * 
+ *
  * This module implements CSS positioning support including:
  * - Relative positioning (position: relative)
  * - Absolute positioning (position: absolute)
@@ -15,14 +15,6 @@ struct ViewBlock;
  * - Float layout (float: left/right)
  * - Clear property (clear: left/right/both)
  */
-
-// Stacking context management (Phase 3)
-typedef struct StackingContext {
-    ViewBlock* establishing_element;  // element that creates the context
-    int z_index;                     // z-index of this context
-    struct StackingContext* parent;   // parent stacking context
-    // Note: positioned children list will be added in Phase 3
-} StackingContext;
 
 // Float context management (Phase 4)
 typedef struct FloatBox {

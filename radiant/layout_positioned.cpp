@@ -35,13 +35,9 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
  * Absolute positioning removes the element from normal flow and positions it relative to containing block
  */
 void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->position ||
-        (block->position->position != 335 &&   // LXB_CSS_VALUE_ABSOLUTE
-         block->position->position != 337)) {   // LXB_CSS_VALUE_FIXED
-        return;
-    }
-
     log_debug("Applying absolute positioning to element");
+    // 1. top, right, bottom, left resolved relative to the padding box of the containing block.
+    // 2. margin values do offset the absolutely positioned box from where top/left/right/bottom place it.
 
     // Find containing block
     ViewBlock* containing_block = find_containing_block(block, block->position->position);
