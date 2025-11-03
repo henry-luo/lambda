@@ -940,15 +940,18 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Document Viewer v1.0\n\n");
-            printf("Usage: %s view <file.pdf|file.html>\n", argv[0]);
+            printf("Usage: %s view [file.pdf|file.html]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'view' command opens a document in an interactive window.\n");
             printf("  Supports PDF and HTML documents with full rendering.\n");
+            printf("  If no file is specified, opens test/html/index.html by default.\n");
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
-            printf("  .html      HyperText Markup Language (future)\n");
+            printf("  .html      HyperText Markup Language\n");
             printf("\nExamples:\n");
+            printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
+            printf("  %s view page.html                # View HTML in browser window\n", argv[0]);
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
@@ -957,16 +960,14 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        // Check for file argument
+        // Default to test/html/index.html if no file specified (like radiant.exe)
+        const char* filename;
         if (argc < 3) {
-            printf("Error: view command requires a file argument\n");
-            printf("Usage: %s view <file.pdf|file.html>\n", argv[0]);
-            printf("Use '%s view --help' for more information\n", argv[0]);
-            log_finish();
-            return 1;
+            filename = "test/html/index.html";
+            log_info("No file specified, using default: %s", filename);
+        } else {
+            filename = argv[2];
         }
-
-        const char* filename = argv[2];
 
         // Check if file exists
         if (access(filename, F_OK) != 0) {
