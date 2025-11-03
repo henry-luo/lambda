@@ -303,8 +303,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                    ((View*)lycon->view)->x, ((View*)lycon->view)->y);
         }
         switch (display.outer) {
-        case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
-        case LXB_CSS_VALUE_LIST_ITEM:
+        case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:  case LXB_CSS_VALUE_LIST_ITEM:
             layout_block(lycon, node, display);
             break;
         case LXB_CSS_VALUE_INLINE:
