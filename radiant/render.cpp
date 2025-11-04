@@ -355,6 +355,11 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     log_debug("render block view:%s", block->node->name());
     log_enter();
+    if (block->position && block->position->position != LXB_CSS_VALUE_RELATIVE) {
+        log_debug("absolute/fixed positioned block, skip in normal rendering");
+        log_leave();  return;
+    }
+
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
         setup_font(rdcon->ui_context, &rdcon->font, block->font);
@@ -386,7 +391,17 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         if (block->scroller) {
             setup_scroller(rdcon, block);
         }
+        // render negative z-index children
         render_children(rdcon, view);
+        // render positive z-index children
+        if (block->position && block->position->position != LXB_CSS_VALUE_RELATIVE) {
+            log_debug("render absolute/fixed positioned children");
+            ViewBlock* child_block = block->position->first_abs_child;
+            while (child_block) {
+                render_block_view(rdcon, child_block);
+                child_block = child_block->position->next_abs_block;
+            }
+        }
     }
     else {
         log_debug("view has no child");

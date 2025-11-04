@@ -139,6 +139,9 @@ typedef enum {
     RDT_VIEW_TABLE_CELL,
 } ViewType;
 
+typedef struct View View;
+typedef struct ViewBlock ViewBlock;
+
 typedef struct {
     PropValue outer;
     PropValue inner;
@@ -202,12 +205,15 @@ typedef struct {
 } BoundaryProp;
 
 typedef struct {
-    PropValue position;        // static, relative, absolute, fixed, sticky
+    PropValue position;     // static, relative, absolute, fixed, sticky
     float top, right, bottom, left;  // offset values in pixels
-    int z_index;              // stacking order
+    int z_index;            // stacking order
     bool has_top, has_right, has_bottom, has_left;  // which offsets are set
-    PropValue clear;          // clear property for floats
-    PropValue float_prop;     // float property (left, right, none)
+    PropValue clear;        // clear property for floats
+    PropValue float_prop;   // float property (left, right, none)
+    ViewBlock* first_abs_child;   // first child absolute/fixed positioned view
+    ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
+    ViewBlock* next_abs_block;    // next sibling absolute/fixed positioned view
 } PositionProp;
 
 typedef struct {
@@ -228,7 +234,7 @@ typedef struct {
     // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 
-typedef struct View View;
+
 typedef struct ViewGroup ViewGroup;
 
 // view always has x, y, wd, hg; otherwise, it is a property group
@@ -399,7 +405,7 @@ typedef struct {
     GridProp* grid;
 } EmbedProp;
 
-typedef struct ViewBlock : ViewSpan {
+struct ViewBlock : ViewSpan {
     float content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
@@ -409,11 +415,11 @@ typedef struct ViewBlock : ViewSpan {
     PositionProp* position;
 
     // Child navigation for flex layout tests
-    struct ViewBlock* first_child;
-    struct ViewBlock* last_child;
-    struct ViewBlock* next_sibling;
-    struct ViewBlock* prev_sibling;
-} ViewBlock;
+    ViewBlock* first_child;
+    ViewBlock* last_child;
+    ViewBlock* next_sibling;
+    ViewBlock* prev_sibling;
+};
 
 // Table-specific lightweight subclasses (no additional fields yet)
 // These keep table concerns out of the base ViewBlock while preserving layout/render compatibility.
