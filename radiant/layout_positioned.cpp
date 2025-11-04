@@ -134,6 +134,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 
     float content_width, content_height;
     // calculate horizontal position
+    log_debug("given_width=%f, given_height=%f", lycon->block.given_width, lycon->block.given_height);
     if (block->position->has_left && lycon->block.given_width >= 0) {
         block->x = block->position->left + (block->bound ? block->bound->margin.left : 0);
         content_width = lycon->block.given_width;
@@ -214,8 +215,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
         block->width = content_width;  block->height = content_height;
     }
-    log_debug("calculated x,y, content_width, content_height: (%f, %f) size (%f, %f) within containing block (%f, %f) size (%f, %f)",
-        block->x, block->y, lycon->block.content_width, lycon->block.content_height, cb_x, cb_y, cb_width, cb_height);
+    log_debug("calculated x,y,wd,hg, content_width, content_height: (%f, %f) size (%f, %f), content (%f, %f) within containing block (%f, %f) size (%f, %f)",
+        block->x, block->y, block->width, block->height, lycon->block.content_width, lycon->block.content_height, cb_x, cb_y, cb_width, cb_height);
 }
 
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
@@ -265,16 +266,20 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // adjust block width and height based on content
-    if (!(block->position && block->position->has_left && block->position->has_right && lycon->block.given_width >= 0)) {
+    log_debug("block position: x=%f, y=%f, width=%f, height=%f",
+        block->x, block->y, block->width,  block->height);
+    if (!(block->position->has_left || block->position->has_right || lycon->block.given_width >= 0)) {
         float flow_width = lycon->block.max_width;
         block->width = flow_width + (block->bound ? block->bound->padding.left + block->bound->padding.right +
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0) : 0);
     }
-    if (!(block->position && block->position->has_top && block->position->has_bottom && lycon->block.given_height >= 0)) {
+    if (!(block->position->has_top || block->position->has_bottom || lycon->block.given_height >= 0)) {
         float flow_height = lycon->block.advance_y;
         block->height = flow_height + (block->bound ? block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0) : 0);
     }
+    log_debug("final block position: x=%f, y=%f, width=%f, height=%f",
+        block->x, block->y, block->width,  block->height);
     log_leave();
 }
 
