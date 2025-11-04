@@ -45,8 +45,8 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     }
 
     // Set up block formatting context for nested content
-    lycon->block.width = content_width;
-    lycon->block.height = content_height;
+    lycon->block.content_width = content_width;
+    lycon->block.content_height = content_height;
     lycon->block.advance_y = content_y_offset;
     lycon->block.max_width = 0;
 

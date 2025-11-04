@@ -434,8 +434,8 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 int caption_width = lycon->line.right - lycon->line.left;
                 if (caption_width <= 0) caption_width = 600; // Fallback
 
-                lycon->block.width = (float)caption_width;
-                lycon->block.height = 0;
+                lycon->block.content_width = (float)caption_width;
+                lycon->block.content_height = 0;
                 lycon->block.advance_y = 0;
                 lycon->line.left = lycon->line.left;
                 lycon->line.right = lycon->line.left + caption_width;
@@ -534,10 +534,10 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
                                         // Reset block layout state for cell content area
                                         lycon->block.advance_y = 0;
-                                        lycon->block.width = cell->width - 2; // subtract border
-                                        lycon->block.height = cell->height - 2; // subtract border
+                                        lycon->block.content_width = cell->width - 2; // subtract border
+                                        lycon->block.content_height = cell->height - 2; // subtract border
                                         lycon->line.left = 0;
-                                        lycon->line.right = lycon->block.width;
+                                        lycon->line.right = lycon->block.content_width;
                                         lycon->line.advance_x = 0;
                                         lycon->line.is_line_start = true;
 
@@ -609,10 +609,10 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
                             // Reset block layout state for cell content area
                             lycon->block.advance_y = 0;
-                            lycon->block.width = cell->width - 2; // subtract border
-                            lycon->block.height = cell->height - 2; // subtract border
+                            lycon->block.content_width = cell->width - 2; // subtract border
+                            lycon->block.content_height = cell->height - 2; // subtract border
                             lycon->line.left = 0;
-                            lycon->line.right = lycon->block.width;
+                            lycon->line.right = lycon->block.content_width;
                             lycon->line.advance_x = 0;
                             lycon->line.is_line_start = true;
 
@@ -710,8 +710,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
 
     // Set up layout context for cell content with CORRECT positioning
     // CRITICAL FIX: Set line.left and advance_x to content_start_x to apply padding offset
-    lycon->block.width = content_width;
-    lycon->block.height = content_height;
+    lycon->block.content_width = content_width;
+    lycon->block.content_height = content_height;
     lycon->block.advance_y = content_start_y;  // Start Y position after border+padding
     lycon->line.left = content_start_x;        // Text starts after padding!
     lycon->line.right = content_start_x + content_width;  // Text ends before right padding

@@ -62,8 +62,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
     // Create temporary measurement context
     LayoutContext measure_context = *lycon;
-    measure_context.block.width = -1;  // Unconstrained width for measurement
-    measure_context.block.height = -1; // Unconstrained height for measurement
+    measure_context.block.content_width = -1;  // Unconstrained width for measurement
+    measure_context.block.content_height = -1; // Unconstrained height for measurement
     measure_context.block.advance_y = 0;
     measure_context.block.max_width = 0;
 

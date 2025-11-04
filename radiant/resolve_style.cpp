@@ -321,9 +321,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         } else {
             // todo: handle % based on property
             log_debug("Percentage calculation: %.2f%% of parent width %d = %.2f",
-                   value->u.percentage.num, lycon->block.pa_block->width,
-                   value->u.percentage.num * lycon->block.pa_block->width / 100);
-            result = value->u.percentage.num * lycon->block.pa_block->width / 100;
+                   value->u.percentage.num, lycon->block.pa_block->content_width,
+                   value->u.percentage.num * lycon->block.pa_block->content_width / 100);
+            result = value->u.percentage.num * lycon->block.pa_block->content_width / 100;
         }
         break;
     case LXB_CSS_VALUE_AUTO:

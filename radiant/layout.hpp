@@ -14,7 +14,7 @@ typedef struct StyleContext {
 } StyleContext;
 
 typedef struct Blockbox {
-    float width, height;  // given width and height for the inner content of the block
+    float content_width, content_height;  // computed content width and height for the inner content of the block
     float advance_y;  // advance_y includes padding.top and border.top of current block
     float max_width, max_height;  // max content width and height (without padding)
     float line_height;
@@ -130,7 +130,6 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt);
 
 // CSS Positioning functions
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
-void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block);
 bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 
