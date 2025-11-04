@@ -52,12 +52,12 @@ typedef enum LineFillStatus {
 } LineFillStatus;
 
 // Stacking context for absolute/fixed positioned elements
-typedef struct StackingBox : Blockbox {
-    ViewBlock* establishing_element;  // element that creates the context
-    int z_index;                     // z-index of this context
-    struct StackingBox* parent;       // parent stacking context
-    ArrayList* positioned_children; // list of positioned child elements
-} StackingBox;
+// typedef struct StackingBox : Blockbox {
+//     ViewBlock* establishing_element;  // element that creates the context
+//     int z_index;                     // z-index of this context
+//     struct StackingBox* parent;       // parent stacking context
+//     ArrayList* positioned_children; // list of positioned child elements
+// } StackingBox;
 
 // Integrated flex container layout state
 typedef struct FlexContainerLayout : FlexProp {
@@ -88,7 +88,7 @@ typedef struct LayoutContext {
     Linebox line;  // current linebox
     FontBox font;  // current font style
     float root_font_size;
-    StackingBox* stacking;  // current stacking context for positioned elements
+    // StackingBox* stacking;  // current stacking context for positioned elements
     struct FloatContext* current_float_context;  // Current float context for this layout
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
