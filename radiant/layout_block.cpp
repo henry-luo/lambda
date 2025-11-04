@@ -42,7 +42,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
 
     if (display == LXB_CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
         block->width = min(flow_width, block->width);
+        log_debug("inline-block final width set to: %f", block->width);
     }
+
     // handle horizontal overflow
     if (flow_width > block->width) { // hz overflow
         if (!block->scroller) {
@@ -64,6 +66,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
             block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
         }
     }
+
     // handle vertical overflow and determine block->height
     if (lycon->block.given_height >= 0) { // got specified height
         // no change to block->height
@@ -86,12 +89,13 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
                 block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
             }
         }
-        log_debug("block: given_height: %d, height: %d, flow height: %d", lycon->block.given_height, block->height, flow_height);
+        log_debug("block: given_height: %f, height: %f, flow height: %f", lycon->block.given_height, block->height, flow_height);
     }
     else {
-        log_debug("finalize block flow, set block height to flow height: %d", flow_height);
+        log_debug("finalize block flow, set block height to flow height: %f", flow_height);
         block->height = flow_height;
     }
+    log_debug("block wd:%f, hg:%f after finalize", block->width, block->height);
 }
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
