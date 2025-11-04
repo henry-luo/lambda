@@ -451,9 +451,10 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     html->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
     html->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
     lycon->block.given_width = lycon->ui_context->window_width;
-    // CRITICAL FIX: Don't force HTML height to viewport - let it auto-size to content
-    lycon->block.given_height = -1;  // -1 means auto-size to content
-    // load CSS stylesheets
+    lycon->block.given_height = -1;  // -1 means auto-size to content, instead of setting to viewport height
+    html->position = alloc_position_prop(lycon);
+
+    // resolve CSS style
     log_debug("DEBUG: About to resolve style for elmt, type=%d, name=%s", elmt->type, elmt->name());
     dom_node_resolve_style(elmt, lycon);
     log_debug("DEBUG: After resolve style");

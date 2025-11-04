@@ -240,7 +240,7 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
 PositionProp* alloc_position_prop(LayoutContext* lycon) {
     PositionProp* prop = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
     // set defaults using actual Lexbor constants
-    prop->position = 0x014d;  // LXB_CSS_VALUE_STATIC - default position
+    prop->position = LXB_CSS_VALUE_STATIC;  // default position
     prop->top = prop->right = prop->bottom = prop->left = 0;  // default offsets
     prop->z_index = 0;  // default z-index
     prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
@@ -387,7 +387,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_format(buf, "txt-indent:%.1f, ", block->blk->text_indent);
         strbuf_append_format(buf, "ls-sty-type:%d,\n", block->blk->list_style_type);
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_format(buf, "min-wd:%.1f, ", block->blk->given_min_width);
+        strbuf_append_format(buf, " min-wd:%.1f, ", block->blk->given_min_width);
         strbuf_append_format(buf, "max-wd:%.1f, ", block->blk->given_max_width);
         strbuf_append_format(buf, "min-hg:%.1f, ", block->blk->given_min_height);
         strbuf_append_format(buf, "max-hg:%.1f, ", block->blk->given_max_height);
@@ -508,23 +508,29 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         if (block->position->position) {
             const lxb_css_data_t* pos_value = lxb_css_value_by_id(block->position->position);
             if (pos_value && pos_value->name) {
-                strbuf_append_format(buf, "%s ", pos_value->name);
+                strbuf_append_format(buf, "%s", pos_value->name);
             }
         }
         if (block->position->has_top) {
-            strbuf_append_format(buf, "top:%.1f ", block->position->top);
+            strbuf_append_format(buf, ", top:%.1f", block->position->top);
         }
         if (block->position->has_right) {
-            strbuf_append_format(buf, "right:%.1f ", block->position->right);
+            strbuf_append_format(buf, ", right:%.1f", block->position->right);
         }
         if (block->position->has_bottom) {
-            strbuf_append_format(buf, "bottom:%.1f ", block->position->bottom);
+            strbuf_append_format(buf, ", bottom:%.1f", block->position->bottom);
         }
         if (block->position->has_left) {
-            strbuf_append_format(buf, "left:%.1f ", block->position->left);
+            strbuf_append_format(buf, ", left:%.1f", block->position->left);
         }
         if (block->position->z_index != 0) {
-            strbuf_append_format(buf, "z-index:%d ", block->position->z_index);
+            strbuf_append_format(buf, ", z-index:%d", block->position->z_index);
+        }
+        if (block->position->first_abs_child) {
+            strbuf_append_str(buf, ", has-abs-child");
+        }
+        if (block->position->next_abs_sibling) {
+            strbuf_append_str(buf, ", has-abs-sibling");
         }
         strbuf_append_str(buf, "}\n");
     }

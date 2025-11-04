@@ -213,7 +213,7 @@ typedef struct {
     PropValue float_prop;   // float property (left, right, none)
     ViewBlock* first_abs_child;   // first child absolute/fixed positioned view
     ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
-    ViewBlock* next_abs_block;    // next sibling absolute/fixed positioned view
+    ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
 } PositionProp;
 
 typedef struct {
