@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Clear Right\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-right {\n            float: right;\n            width: 120px;\n            height: 60px;\n            background-color: #ccffcc;\n            margin: 5px;\n            padding: 10px;\n            text-align: center;\n        }\n        .clear-right {\n            clear: right;\n            background-color: #ccccff;\n            padding: 10px;\n            margin: 5px;\n        }\n        .normal-flow {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n        }\n    \n\n\n    \n        Float 1\n        Float 2\n        This element flows normally around floats.\n        This element clears right floats and appears below them.\n    \n    \n    \n    \n    {\n        \"test_id\": \"position_005_clear_right\",\n        \"category\": \"clear\",\n        \"features\": [\"clear\", \"clear-right\", \"float-interaction\"],\n        \"description\": \"Element with clear:right moves below all right-floated elements\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#flow-control\"],\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Clear Right\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-right {\n            float: right;\n            width: 120px;\n            height: 60px;\n            background-color: #ccffcc;\n            margin: 5px;\n            padding: 10px;\n            text-align: center;\n        }\n        .clear-right {\n            clear: right;\n            background-color: #ccccff;\n            padding: 10px;\n            margin: 5px;\n        }\n        .normal-flow {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Clear Right",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Clear Right",
+                "length": 17,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-right {\n            float: right;\n            width: 120px;\n            height: 60px;\n            background-color: #ccffcc;\n            margin: 5px;\n            padding: 10px;\n            text-align: center;\n        }\n        .clear-right {\n            clear: right;\n            background-color: #ccccff;\n            padding: 10px;\n            margin: 5px;\n        }\n        .normal-flow {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-right {\n            float: right;\n            width: 120px;\n            height: 60px;\n            background-color: #ccffcc;\n            margin: 5px;\n            padding: 10px;\n            text-align: center;\n        }\n        .clear-right {\n            clear: right;\n            background-color: #ccccff;\n            padding: 10px;\n            margin: 5px;\n        }\n        .normal-flow {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n        }\n    ",
+                "length": 866,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Float 1\n        Float 2\n        This element flows normally around floats.\n        This element clears right floats and appears below them.\n    \n    \n    \n    \n    {\n        \"test_id\": \"position_005_clear_right\",\n        \"category\": \"clear\",\n        \"features\": [\"clear\", \"clear-right\", \"float-interaction\"],\n        \"description\": \"Element with clear:right moves below all right-floated elements\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#flow-control\"],\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Float 1\n        Float 2\n        This element flows normally around floats.\n        This element clears right floats and appears below them.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 4,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.float-right:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Float 1",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Float 1",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 298.53,
-                        "y": 27,
-                        "width": 48.92,
-                        "height": 17,
-                        "right": 347.45,
-                        "bottom": 44
-                      }
-                    ],
                     "length": 7,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 7
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 298.53,
+                          "y": 27,
+                          "width": 48.92,
+                          "height": 17,
+                          "right": 347.45,
+                          "bottom": 44,
+                          "text": "Float 1",
+                          "startIndex": 0,
+                          "endIndex": 7
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.float-right:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,33 +759,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Float 2",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Float 2",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 168.53,
-                        "y": 27,
-                        "width": 48.92,
-                        "height": 17,
-                        "right": 217.45,
-                        "bottom": 44
-                      }
-                    ],
                     "length": 7,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 7
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 168.53,
+                          "y": 27,
+                          "width": 48.92,
+                          "height": 17,
+                          "right": 217.45,
+                          "bottom": 44,
+                          "text": "Float 2",
+                          "startIndex": 0,
+                          "endIndex": 7
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.normal-flow:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -736,57 +851,125 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This element flows normally around floats.",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "This element flows normally around floats.",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 27,
-                        "y": 27,
-                        "width": 91.59,
-                        "height": 17,
-                        "right": 118.59,
-                        "bottom": 44
-                      },
-                      {
-                        "x": 27,
-                        "y": 45,
-                        "width": 36.45,
-                        "height": 17,
-                        "right": 63.45,
-                        "bottom": 62
-                      },
-                      {
-                        "x": 27,
-                        "y": 63,
-                        "width": 60.47,
-                        "height": 17,
-                        "right": 87.47,
-                        "bottom": 80
-                      },
-                      {
-                        "x": 27,
-                        "y": 81,
-                        "width": 96.95,
-                        "height": 17,
-                        "right": 123.95,
-                        "bottom": 98
-                      }
-                    ],
-                    "length": 42,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 42
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 5,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "This element ",
+                    "length": 13,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 27,
+                          "y": 27,
+                          "width": 91.59,
+                          "height": 17,
+                          "right": 118.59,
+                          "bottom": 44,
+                          "text": "This element ",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "flows ",
+                    "length": 6,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 27,
+                          "y": 45,
+                          "width": 36.45,
+                          "height": 17,
+                          "right": 63.45,
+                          "bottom": 62,
+                          "text": "flows ",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "normally ",
+                    "length": 9,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 27,
+                          "y": 63,
+                          "width": 60.47,
+                          "height": 17,
+                          "right": 87.47,
+                          "bottom": 80,
+                          "text": "normally ",
+                          "startIndex": 0,
+                          "endIndex": 9
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "around floats.",
+                    "length": 14,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 27,
+                          "y": 81,
+                          "width": 96.95,
+                          "height": 17,
+                          "right": 123.95,
+                          "bottom": 98,
+                          "text": "around floats.",
+                          "startIndex": 0,
+                          "endIndex": 14
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.clear-right:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -844,43 +1027,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This element clears right floats and appears below them.",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "This element clears right floats and appears below them.",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 27,
-                        "y": 124,
-                        "width": 310.39,
-                        "height": 17,
-                        "right": 337.39,
-                        "bottom": 141
-                      },
-                      {
-                        "x": 27,
-                        "y": 142,
-                        "width": 86.27,
-                        "height": 17,
-                        "right": 113.27,
-                        "bottom": 159
-                      }
-                    ],
-                    "length": 56,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 56
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 7,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "This element clears right floats and appears ",
+                    "length": 45,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 27,
+                          "y": 124,
+                          "width": 310.39,
+                          "height": 17,
+                          "right": 337.39,
+                          "bottom": 141,
+                          "text": "This element clears right floats and appears ",
+                          "startIndex": 0,
+                          "endIndex": 45
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "below them.",
+                    "length": 11,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 27,
+                          "y": 142,
+                          "width": 86.27,
+                          "height": 17,
+                          "right": 113.27,
+                          "bottom": 159,
+                          "text": "below them.",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -936,12 +1147,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"position_005_clear_right\",\n        \"category\": \"clear\",\n        \"features\": [\"clear\", \"clear-right\", \"float-interaction\"],\n        \"description\": \"Element with clear:right moves below all right-floated elements\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#flow-control\"],\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"position_005_clear_right\",\n        \"category\": \"clear\",\n        \"features\": [\"clear\", \"clear-right\", \"float-interaction\"],\n        \"description\": \"Element with clear:right moves below all right-floated elements\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#flow-control\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 366,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

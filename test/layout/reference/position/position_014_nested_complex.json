@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Complex Nested Positioning\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .float-left {\n            float: left;\n            width: 180px;\n            height: 120px;\n            background-color: #e0e0e0;\n            border: 2px dashed #666;\n            margin: 5px;\n            padding: 5px;\n        }\n        .relative-container {\n            position: relative;\n            width: 160px;\n            height: 80px;\n            background-color: #ccffcc;\n            border: 1px solid #999;\n            padding: 5px;\n            margin: 5px;\n        }\n        .absolute-child {\n            position: absolute;\n            top: 10px;\n            right: -20px;\n            width: 60px;\n            height: 40px;\n            background-color: #ffcccc;\n            border: 1px solid #666;\n            text-align: center;\n            font-size: 12px;\n            padding: 2px;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n            clear: left;\n        }\n    \n\n\n    \n        \n            Floated Container\n            \n                Relative\n                Abs\n            \n        \n        \n            Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"position_014_nested_complex\",\n        \"category\": \"combined\",\n        \"features\": [\"float\", \"position-relative\", \"position-absolute\", \"nested-positioning\", \"clear\"],\n        \"description\": \"Complex nested positioning: absolute within relative within float, with clear\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\", \"https://www.w3.org/TR/CSS22/visudet.html#containing-block-details\"],\n        \"complexity\": \"advanced\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Complex Nested Positioning\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .float-left {\n            float: left;\n            width: 180px;\n            height: 120px;\n            background-color: #e0e0e0;\n            border: 2px dashed #666;\n            margin: 5px;\n            padding: 5px;\n        }\n        .relative-container {\n            position: relative;\n            width: 160px;\n            height: 80px;\n            background-color: #ccffcc;\n            border: 1px solid #999;\n            padding: 5px;\n            margin: 5px;\n        }\n        .absolute-child {\n            position: absolute;\n            top: 10px;\n            right: -20px;\n            width: 60px;\n            height: 40px;\n            background-color: #ffcccc;\n            border: 1px solid #666;\n            text-align: center;\n            font-size: 12px;\n            padding: 2px;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n            clear: left;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Complex Nested Positioning",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Complex Nested Positioning",
+                "length": 32,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .float-left {\n            float: left;\n            width: 180px;\n            height: 120px;\n            background-color: #e0e0e0;\n            border: 2px dashed #666;\n            margin: 5px;\n            padding: 5px;\n        }\n        .relative-container {\n            position: relative;\n            width: 160px;\n            height: 80px;\n            background-color: #ccffcc;\n            border: 1px solid #999;\n            padding: 5px;\n            margin: 5px;\n        }\n        .absolute-child {\n            position: absolute;\n            top: 10px;\n            right: -20px;\n            width: 60px;\n            height: 40px;\n            background-color: #ffcccc;\n            border: 1px solid #666;\n            text-align: center;\n            font-size: 12px;\n            padding: 2px;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n            clear: left;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .float-left {\n            float: left;\n            width: 180px;\n            height: 120px;\n            background-color: #e0e0e0;\n            border: 2px dashed #666;\n            margin: 5px;\n            padding: 5px;\n        }\n        .relative-container {\n            position: relative;\n            width: 160px;\n            height: 80px;\n            background-color: #ccffcc;\n            border: 1px solid #999;\n            padding: 5px;\n            margin: 5px;\n        }\n        .absolute-child {\n            position: absolute;\n            top: 10px;\n            right: -20px;\n            width: 60px;\n            height: 40px;\n            background-color: #ffcccc;\n            border: 1px solid #666;\n            text-align: center;\n            font-size: 12px;\n            padding: 2px;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n            clear: left;\n        }\n    ",
+                "length": 1364,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Floated Container\n            \n                Relative\n                Abs\n            \n        \n        \n            Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"position_014_nested_complex\",\n        \"category\": \"combined\",\n        \"features\": [\"float\", \"position-relative\", \"position-absolute\", \"nested-positioning\", \"clear\"],\n        \"description\": \"Complex nested positioning: absolute within relative within float, with clear\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\", \"https://www.w3.org/TR/CSS22/visudet.html#containing-block-details\"],\n        \"complexity\": \"advanced\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Floated Container\n            \n                Relative\n                Abs\n            \n        \n        \n            Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.float-left:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,32 +667,39 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Floated Container\n            \n                Relative\n                Abs",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "\n            Floated Container\n            ",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 24,
-                        "y": 24,
-                        "width": 127.19,
-                        "height": 17,
-                        "right": 151.19,
-                        "bottom": 41
-                      }
-                    ],
-                    "length": 43,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 43
-                  }
-                ],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "text",
+                    "text": "\n            Floated Container\n            ",
+                    "length": 43,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 24,
+                          "y": 24,
+                          "width": 127.19,
+                          "height": 17,
+                          "right": 151.19,
+                          "bottom": 41,
+                          "text": "\n            Floated Container\n            ",
+                          "startIndex": 0,
+                          "endIndex": 43
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "element",
                     "selector": "div.relative-container",
                     "tag": "div",
                     "id": null,
@@ -651,32 +757,39 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Relative\n                Abs",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                Relative\n                ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 35,
-                            "y": 53,
-                            "width": 57.81,
-                            "height": 17,
-                            "right": 92.81,
-                            "bottom": 70
-                          }
-                        ],
-                        "length": 42,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 42
-                      }
-                    ],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "text",
+                        "text": "\n                Relative\n                ",
+                        "length": 42,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 35,
+                              "y": 53,
+                              "width": 57.81,
+                              "height": 17,
+                              "right": 92.81,
+                              "bottom": 70,
+                              "text": "\n                Relative\n                ",
+                              "startIndex": 0,
+                              "endIndex": 42
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "element",
                         "selector": "div.absolute-child",
                         "tag": "div",
                         "id": null,
@@ -734,37 +847,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Abs",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Abs",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 167.66,
-                                "y": 61,
-                                "width": 20.69,
-                                "height": 14,
-                                "right": 188.34,
-                                "bottom": 75
-                              }
-                            ],
                             "length": 3,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 3
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 167.66,
+                                  "y": 61,
+                                  "width": 20.69,
+                                  "height": 14,
+                                  "right": 188.34,
+                                  "bottom": 75,
+                                  "text": "Abs",
+                                  "startIndex": 0,
+                                  "endIndex": 3
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.content:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -822,51 +943,99 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "\n            Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.\n        ",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 22,
-                        "y": 155,
-                        "width": 337.11,
-                        "height": 17,
-                        "right": 359.11,
-                        "bottom": 172
-                      },
-                      {
-                        "x": 22,
-                        "y": 179,
-                        "width": 332.38,
-                        "height": 17,
-                        "right": 354.38,
-                        "bottom": 196
-                      },
-                      {
-                        "x": 22,
-                        "y": 203,
-                        "width": 333.52,
-                        "height": 17,
-                        "right": 355.52,
-                        "bottom": 220
-                      }
-                    ],
-                    "length": 170,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 170
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 3,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "\n            Content below the floated container with nested ",
+                    "length": 61,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 155,
+                          "width": 337.11,
+                          "height": 17,
+                          "right": 359.11,
+                          "bottom": 172,
+                          "text": "\n            Content below the floated container with nested ",
+                          "startIndex": 0,
+                          "endIndex": 61
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "positioning. The absolute element is positioned ",
+                    "length": 48,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 179,
+                          "width": 332.38,
+                          "height": 17,
+                          "right": 354.38,
+                          "bottom": 196,
+                          "text": "positioning. The absolute element is positioned ",
+                          "startIndex": 0,
+                          "endIndex": 48
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "relative to the relative container within the float.\n        ",
+                    "length": 61,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 203,
+                          "width": 333.52,
+                          "height": 17,
+                          "right": 355.52,
+                          "bottom": 220,
+                          "text": "relative to the relative container within the float.\n        ",
+                          "startIndex": 0,
+                          "endIndex": 61
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -922,12 +1091,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"position_014_nested_complex\",\n        \"category\": \"combined\",\n        \"features\": [\"float\", \"position-relative\", \"position-absolute\", \"nested-positioning\", \"clear\"],\n        \"description\": \"Complex nested positioning: absolute within relative within float, with clear\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\", \"https://www.w3.org/TR/CSS22/visudet.html#containing-block-details\"],\n        \"complexity\": \"advanced\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"position_014_nested_complex\",\n        \"category\": \"combined\",\n        \"features\": [\"float\", \"position-relative\", \"position-absolute\", \"nested-positioning\", \"clear\"],\n        \"description\": \"Complex nested positioning: absolute within relative within float, with clear\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\", \"https://www.w3.org/TR/CSS22/visudet.html#containing-block-details\"],\n        \"complexity\": \"advanced\"\n    }\n    ",
+                "length": 497,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

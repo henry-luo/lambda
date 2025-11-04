@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Relative Position Basic\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .normal {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #ccc;\n        }\n        .relative-element {\n            position: relative;\n            top: 20px;\n            left: 30px;\n            background-color: #ffcccc;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #999;\n        }\n    \n\n\n    \n        Element 1 - Normal flow\n        Element 2 - Relative positioned (offset 20px down, 30px right)\n        Element 3 - Normal flow (original space of relative element is preserved)\n    \n    \n    \n    \n    {\n        \"test_id\": \"position_010_relative_basic\",\n        \"category\": \"relative\",\n        \"features\": [\"position-relative\", \"top\", \"left\", \"normal-flow\"],\n        \"description\": \"Basic relative positioning with top and left offsets while preserving original space\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#relative-positioning\"],\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Relative Position Basic\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .normal {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #ccc;\n        }\n        .relative-element {\n            position: relative;\n            top: 20px;\n            left: 30px;\n            background-color: #ffcccc;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #999;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Relative Position Basic",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Relative Position Basic",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .normal {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #ccc;\n        }\n        .relative-element {\n            position: relative;\n            top: 20px;\n            left: 30px;\n            background-color: #ffcccc;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #999;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            background-color: #f8f8f8;\n        }\n        .normal {\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #ccc;\n        }\n        .relative-element {\n            position: relative;\n            top: 20px;\n            left: 30px;\n            background-color: #ffcccc;\n            padding: 10px;\n            margin: 5px;\n            border: 1px solid #999;\n        }\n    ",
+                "length": 796,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Element 1 - Normal flow\n        Element 2 - Relative positioned (offset 20px down, 30px right)\n        Element 3 - Normal flow (original space of relative element is preserved)\n    \n    \n    \n    \n    {\n        \"test_id\": \"position_010_relative_basic\",\n        \"category\": \"relative\",\n        \"features\": [\"position-relative\", \"top\", \"left\", \"normal-flow\"],\n        \"description\": \"Basic relative positioning with top and left offsets while preserving original space\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#relative-positioning\"],\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Element 1 - Normal flow\n        Element 2 - Relative positioned (offset 20px down, 30px right)\n        Element 3 - Normal flow (original space of relative element is preserved)",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.normal:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Element 1 - Normal flow",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Element 1 - Normal flow",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 28,
-                        "y": 28,
-                        "width": 170.72,
-                        "height": 17,
-                        "right": 198.72,
-                        "bottom": 45
-                      }
-                    ],
                     "length": 23,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 23
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 28,
+                          "y": 28,
+                          "width": 170.72,
+                          "height": 17,
+                          "right": 198.72,
+                          "bottom": 45,
+                          "text": "Element 1 - Normal flow",
+                          "startIndex": 0,
+                          "endIndex": 23
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.relative-element:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,41 +759,69 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Element 2 - Relative positioned (offset 20px down, 30px right)",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "Element 2 - Relative positioned (offset 20px down, 30px right)",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 58,
-                        "y": 93,
-                        "width": 309.22,
-                        "height": 17,
-                        "right": 367.22,
-                        "bottom": 110
-                      },
-                      {
-                        "x": 58,
-                        "y": 111,
-                        "width": 122.73,
-                        "height": 17,
-                        "right": 180.73,
-                        "bottom": 128
-                      }
-                    ],
-                    "length": 62,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 62
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 3,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Element 2 - Relative positioned (offset 20px ",
+                    "length": 45,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 58,
+                          "y": 93,
+                          "width": 309.22,
+                          "height": 17,
+                          "right": 367.22,
+                          "bottom": 110,
+                          "text": "Element 2 - Relative positioned (offset 20px ",
+                          "startIndex": 0,
+                          "endIndex": 45
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "down, 30px right)",
+                    "length": 17,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 58,
+                          "y": 111,
+                          "width": 122.73,
+                          "height": 17,
+                          "right": 180.73,
+                          "bottom": 128,
+                          "text": "down, 30px right)",
+                          "startIndex": 0,
+                          "endIndex": 17
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.normal:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -744,43 +879,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Element 3 - Normal flow (original space of relative element is preserved)",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "Element 3 - Normal flow (original space of relative element is preserved)",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 28,
-                        "y": 136,
-                        "width": 297.02,
-                        "height": 17,
-                        "right": 325.02,
-                        "bottom": 153
-                      },
-                      {
-                        "x": 28,
-                        "y": 154,
-                        "width": 209.88,
-                        "height": 17,
-                        "right": 237.88,
-                        "bottom": 171
-                      }
-                    ],
-                    "length": 73,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 73
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 5,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Element 3 - Normal flow (original space of ",
+                    "length": 43,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 28,
+                          "y": 136,
+                          "width": 297.02,
+                          "height": 17,
+                          "right": 325.02,
+                          "bottom": 153,
+                          "text": "Element 3 - Normal flow (original space of ",
+                          "startIndex": 0,
+                          "endIndex": 43
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "relative element is preserved)",
+                    "length": 30,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 28,
+                          "y": 154,
+                          "width": 209.88,
+                          "height": 17,
+                          "right": 237.88,
+                          "bottom": 171,
+                          "text": "relative element is preserved)",
+                          "startIndex": 0,
+                          "endIndex": 30
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -836,12 +999,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"position_010_relative_basic\",\n        \"category\": \"relative\",\n        \"features\": [\"position-relative\", \"top\", \"left\", \"normal-flow\"],\n        \"description\": \"Basic relative positioning with top and left offsets while preserving original space\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#relative-positioning\"],\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"position_010_relative_basic\",\n        \"category\": \"relative\",\n        \"features\": [\"position-relative\", \"top\", \"left\", \"normal-flow\"],\n        \"description\": \"Basic relative positioning with top and left offsets while preserving original space\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#relative-positioning\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 407,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

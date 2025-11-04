@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Float Left Basic\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-left {\n            float: left;\n            width: 120px;\n            height: 80px;\n            background-color: #ffcccc;\n            margin: 10px;\n            padding: 10px;\n            text-align: center;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n        }\n    \n\n\n    \n        Floated Left\n        \n            This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"position_001_float_left\",\n        \"category\": \"float\",\n        \"features\": [\"float\", \"float-left\", \"text-wrapping\"],\n        \"description\": \"Basic float left with text content wrapping around the floated element\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\"],\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Float Left Basic\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-left {\n            float: left;\n            width: 120px;\n            height: 80px;\n            background-color: #ffcccc;\n            margin: 10px;\n            padding: 10px;\n            text-align: center;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Float Left Basic",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Float Left Basic",
+                "length": 22,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-left {\n            float: left;\n            width: 120px;\n            height: 80px;\n            background-color: #ffcccc;\n            margin: 10px;\n            padding: 10px;\n            text-align: center;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n        }\n        .float-left {\n            float: left;\n            width: 120px;\n            height: 80px;\n            background-color: #ffcccc;\n            margin: 10px;\n            padding: 10px;\n            text-align: center;\n        }\n        .content {\n            background-color: #f0f0f0;\n            padding: 10px;\n            line-height: 1.5;\n        }\n    ",
+                "length": 716,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Floated Left\n        \n            This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"position_001_float_left\",\n        \"category\": \"float\",\n        \"features\": [\"float\", \"float-left\", \"text-wrapping\"],\n        \"description\": \"Basic float left with text content wrapping around the floated element\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\"],\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Floated Left\n        \n            This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.float-left:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Floated Left",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Floated Left",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 39.75,
-                        "y": 32,
-                        "width": 84.5,
-                        "height": 17,
-                        "right": 124.25,
-                        "bottom": 49
-                      }
-                    ],
                     "length": 12,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 12
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 39.75,
+                          "y": 32,
+                          "width": 84.5,
+                          "height": 17,
+                          "right": 124.25,
+                          "bottom": 49,
+                          "text": "Floated Left",
+                          "startIndex": 0,
+                          "endIndex": 12
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.content:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,75 +759,183 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "\n            This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n        ",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 152,
-                        "y": 25,
-                        "width": 177.88,
-                        "height": 17,
-                        "right": 329.88,
-                        "bottom": 42
-                      },
-                      {
-                        "x": 152,
-                        "y": 49,
-                        "width": 194.81,
-                        "height": 17,
-                        "right": 346.81,
-                        "bottom": 66
-                      },
-                      {
-                        "x": 152,
-                        "y": 73,
-                        "width": 197.41,
-                        "height": 17,
-                        "right": 349.41,
-                        "bottom": 90
-                      },
-                      {
-                        "x": 152,
-                        "y": 97,
-                        "width": 220.58,
-                        "height": 17,
-                        "right": 372.58,
-                        "bottom": 114
-                      },
-                      {
-                        "x": 22,
-                        "y": 121,
-                        "width": 342.44,
-                        "height": 17,
-                        "right": 364.44,
-                        "bottom": 138
-                      },
-                      {
-                        "x": 22,
-                        "y": 145,
-                        "width": 100.52,
-                        "height": 17,
-                        "right": 122.52,
-                        "bottom": 162
-                      }
-                    ],
-                    "length": 198,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 198
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 3,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "\n            This content should wrap ",
+                    "length": 38,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 152,
+                          "y": 25,
+                          "width": 177.88,
+                          "height": 17,
+                          "right": 329.88,
+                          "bottom": 42,
+                          "text": "\n            This content should wrap ",
+                          "startIndex": 0,
+                          "endIndex": 38
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "around the floated element. ",
+                    "length": 28,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 152,
+                          "y": 49,
+                          "width": 194.81,
+                          "height": 17,
+                          "right": 346.81,
+                          "bottom": 66,
+                          "text": "around the floated element. ",
+                          "startIndex": 0,
+                          "endIndex": 28
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "Lorem ipsum dolor sit amet, ",
+                    "length": 28,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 152,
+                          "y": 73,
+                          "width": 197.41,
+                          "height": 17,
+                          "right": 349.41,
+                          "bottom": 90,
+                          "text": "Lorem ipsum dolor sit amet, ",
+                          "startIndex": 0,
+                          "endIndex": 28
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "consectetur adipiscing elit. Sed ",
+                    "length": 33,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 152,
+                          "y": 97,
+                          "width": 220.58,
+                          "height": 17,
+                          "right": 372.58,
+                          "bottom": 114,
+                          "text": "consectetur adipiscing elit. Sed ",
+                          "startIndex": 0,
+                          "endIndex": 33
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "do eiusmod tempor incididunt ut labore et dolore ",
+                    "length": 49,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 121,
+                          "width": 342.44,
+                          "height": 17,
+                          "right": 364.44,
+                          "bottom": 138,
+                          "text": "do eiusmod tempor incididunt ut labore et dolore ",
+                          "startIndex": 0,
+                          "endIndex": 49
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "magna aliqua.\n        ",
+                    "length": 22,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 145,
+                          "width": 100.52,
+                          "height": 17,
+                          "right": 122.52,
+                          "bottom": 162,
+                          "text": "magna aliqua.\n        ",
+                          "startIndex": 0,
+                          "endIndex": 22
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -776,12 +991,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"position_001_float_left\",\n        \"category\": \"float\",\n        \"features\": [\"float\", \"float-left\", \"text-wrapping\"],\n        \"description\": \"Basic float left with text content wrapping around the floated element\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\"],\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"position_001_float_left\",\n        \"category\": \"float\",\n        \"features\": [\"float\", \"float-left\", \"text-wrapping\"],\n        \"description\": \"Basic float left with text content wrapping around the floated element\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#float-position\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 369,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

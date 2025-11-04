@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Absolute Position Z-Index\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            position: relative;\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            background-color: #f8f8f8;\n        }\n        .layer-1 {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 150px;\n            height: 100px;\n            background-color: #ffcccc;\n            z-index: 1;\n            padding: 10px;\n        }\n        .layer-2 {\n            position: absolute;\n            top: 80px;\n            left: 80px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccffcc;\n            z-index: 2;\n            padding: 10px;\n        }\n        .layer-3 {\n            position: absolute;\n            top: 110px;\n            left: 110px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccccff;\n            z-index: 3;\n            padding: 10px;\n        }\n        .behind {\n            position: absolute;\n            top: 30px;\n            left: 120px;\n            width: 100px;\n            height: 80px;\n            background-color: #ffffcc;\n            z-index: 0;\n            padding: 10px;\n        }\n    \n\n\n    \n        Layer 1 (z:1)\n        Layer 2 (z:2)\n        Layer 3 (z:3)\n        Behind (z:0)\n    \n    \n    \n    \n    {\n        \"test_id\": \"position_009_absolute_zindex\",\n        \"category\": \"absolute\",\n        \"features\": [\"position-absolute\", \"z-index\", \"stacking-context\", \"layering\"],\n        \"description\": \"Multiple overlapping absolutely positioned elements with different z-index values\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#z-index\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Absolute Position Z-Index\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            position: relative;\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            background-color: #f8f8f8;\n        }\n        .layer-1 {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 150px;\n            height: 100px;\n            background-color: #ffcccc;\n            z-index: 1;\n            padding: 10px;\n        }\n        .layer-2 {\n            position: absolute;\n            top: 80px;\n            left: 80px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccffcc;\n            z-index: 2;\n            padding: 10px;\n        }\n        .layer-3 {\n            position: absolute;\n            top: 110px;\n            left: 110px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccccff;\n            z-index: 3;\n            padding: 10px;\n        }\n        .behind {\n            position: absolute;\n            top: 30px;\n            left: 120px;\n            width: 100px;\n            height: 80px;\n            background-color: #ffffcc;\n            z-index: 0;\n            padding: 10px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Absolute Position Z-Index",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Absolute Position Z-Index",
+                "length": 31,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            position: relative;\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            background-color: #f8f8f8;\n        }\n        .layer-1 {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 150px;\n            height: 100px;\n            background-color: #ffcccc;\n            z-index: 1;\n            padding: 10px;\n        }\n        .layer-2 {\n            position: absolute;\n            top: 80px;\n            left: 80px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccffcc;\n            z-index: 2;\n            padding: 10px;\n        }\n        .layer-3 {\n            position: absolute;\n            top: 110px;\n            left: 110px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccccff;\n            z-index: 3;\n            padding: 10px;\n        }\n        .behind {\n            position: absolute;\n            top: 30px;\n            left: 120px;\n            width: 100px;\n            height: 80px;\n            background-color: #ffffcc;\n            z-index: 0;\n            padding: 10px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            position: relative;\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            background-color: #f8f8f8;\n        }\n        .layer-1 {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 150px;\n            height: 100px;\n            background-color: #ffcccc;\n            z-index: 1;\n            padding: 10px;\n        }\n        .layer-2 {\n            position: absolute;\n            top: 80px;\n            left: 80px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccffcc;\n            z-index: 2;\n            padding: 10px;\n        }\n        .layer-3 {\n            position: absolute;\n            top: 110px;\n            left: 110px;\n            width: 150px;\n            height: 100px;\n            background-color: #ccccff;\n            z-index: 3;\n            padding: 10px;\n        }\n        .behind {\n            position: absolute;\n            top: 30px;\n            left: 120px;\n            width: 100px;\n            height: 80px;\n            background-color: #ffffcc;\n            z-index: 0;\n            padding: 10px;\n        }\n    ",
+                "length": 1407,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Layer 1 (z:1)\n        Layer 2 (z:2)\n        Layer 3 (z:3)\n        Behind (z:0)\n    \n    \n    \n    \n    {\n        \"test_id\": \"position_009_absolute_zindex\",\n        \"category\": \"absolute\",\n        \"features\": [\"position-absolute\", \"z-index\", \"stacking-context\", \"layering\"],\n        \"description\": \"Multiple overlapping absolutely positioned elements with different z-index values\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#z-index\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Layer 1 (z:1)\n        Layer 2 (z:2)\n        Layer 3 (z:3)\n        Behind (z:0)",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 4,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.layer-1:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +667,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Layer 1 (z:1)",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Layer 1 (z:1)",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 62,
-                        "y": 62,
-                        "width": 89.81,
-                        "height": 17,
-                        "right": 151.81,
-                        "bottom": 79
-                      }
-                    ],
                     "length": 13,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 13
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 62,
+                          "y": 62,
+                          "width": 89.81,
+                          "height": 17,
+                          "right": 151.81,
+                          "bottom": 79,
+                          "text": "Layer 1 (z:1)",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.layer-2:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,33 +759,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Layer 2 (z:2)",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Layer 2 (z:2)",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 92,
-                        "y": 92,
-                        "width": 89.81,
-                        "height": 17,
-                        "right": 181.81,
-                        "bottom": 109
-                      }
-                    ],
                     "length": 13,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 13
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 92,
+                          "y": 92,
+                          "width": 89.81,
+                          "height": 17,
+                          "right": 181.81,
+                          "bottom": 109,
+                          "text": "Layer 2 (z:2)",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.layer-3:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -736,33 +851,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Layer 3 (z:3)",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Layer 3 (z:3)",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 122,
-                        "y": 122,
-                        "width": 89.81,
-                        "height": 17,
-                        "right": 211.81,
-                        "bottom": 139
-                      }
-                    ],
                     "length": 13,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 13
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 122,
+                          "y": 122,
+                          "width": 89.81,
+                          "height": 17,
+                          "right": 211.81,
+                          "bottom": 139,
+                          "text": "Layer 3 (z:3)",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.behind:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -820,43 +943,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Behind (z:0)",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "Behind (z:0)",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 132,
-                        "y": 42,
-                        "width": 49.83,
-                        "height": 17,
-                        "right": 181.83,
-                        "bottom": 59
-                      },
-                      {
-                        "x": 132,
-                        "y": 60,
-                        "width": 32,
-                        "height": 17,
-                        "right": 164,
-                        "bottom": 77
-                      }
-                    ],
-                    "length": 12,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 12
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 7,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Behind ",
+                    "length": 7,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 132,
+                          "y": 42,
+                          "width": 49.83,
+                          "height": 17,
+                          "right": 181.83,
+                          "bottom": 59,
+                          "text": "Behind ",
+                          "startIndex": 0,
+                          "endIndex": 7
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "(z:0)",
+                    "length": 5,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 132,
+                          "y": 60,
+                          "width": 32,
+                          "height": 17,
+                          "right": 164,
+                          "bottom": 77,
+                          "text": "(z:0)",
+                          "startIndex": 0,
+                          "endIndex": 5
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -912,12 +1063,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"position_009_absolute_zindex\",\n        \"category\": \"absolute\",\n        \"features\": [\"position-absolute\", \"z-index\", \"stacking-context\", \"layering\"],\n        \"description\": \"Multiple overlapping absolutely positioned elements with different z-index values\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#z-index\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"position_009_absolute_zindex\",\n        \"category\": \"absolute\",\n        \"features\": [\"position-absolute\", \"z-index\", \"stacking-context\", \"layering\"],\n        \"description\": \"Multiple overlapping absolutely positioned elements with different z-index values\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#z-index\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 412,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }
