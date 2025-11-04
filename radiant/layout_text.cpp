@@ -37,8 +37,8 @@ void line_reset(LayoutContext* lycon) {
 }
 
 void line_init(LayoutContext* lycon, float left, float right) {
-    line_reset(lycon);
     lycon->line.left = left;  lycon->line.right = right;
+    line_reset(lycon);
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;  // vertical-align does not inherit
 }
 
