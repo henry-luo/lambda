@@ -20,7 +20,7 @@ typedef struct FontfaceEntry {
 
 // Function declarations
 int fontface_compare(const void *a, const void *b, void *udata);
-void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
+void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 bool fontface_entry_free(const void *item, void *udata);
 void fontface_cleanup(UiContext* uicon);
 

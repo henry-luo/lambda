@@ -86,7 +86,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.ft_face->family_name, view_span->font);
+            setup_font(evcon->ui_context, &evcon->font, view_span->font);
         }
         target_children(evcon, view);
     }
@@ -124,7 +124,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     view = block->child;
     if (view) {
         if (block->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.ft_face->family_name, block->font);
+            setup_font(evcon->ui_context, &evcon->font, block->font);
         }
         target_children(evcon, view);
     }
@@ -157,7 +157,7 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         FontBox pa_font = evcon->font;
         FontProp* default_font = view_tree->html_version == HTML5 ? &evcon->ui_context->default_font : &evcon->ui_context->legacy_default_font;
         log_debug("target_html_doc default font: %s, html version: %d", default_font->family, view_tree->html_version);
-        setup_font(evcon->ui_context, &evcon->font, default_font->family, default_font);
+        setup_font(evcon->ui_context, &evcon->font, default_font);
         target_block_view(evcon, (ViewBlock*)root_view);
         evcon->font = pa_font;
     }
@@ -262,7 +262,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     evcon->ui_context = uicon;
     evcon->event = *event;
     // load default font Arial, size 16 px
-    setup_font(uicon, &evcon->font, uicon->default_font.family, &evcon->ui_context->default_font);
+    setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = LXB_CSS_VALUE_AUTO;
     if (!uicon->document->state) {
         uicon->document->state = (StateStore*)calloc(1, sizeof(StateStore));

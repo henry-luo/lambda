@@ -93,7 +93,7 @@ void setup_font_with_pixel_ratio(UiContext* uicon, FontBox *fbox, const char* fo
     scaled_fprop.font_size = scaled_font_size;
 
     // Use existing setup_font function
-    setup_font(uicon, fbox, font_name, &scaled_fprop);
+    setup_font(uicon, fbox, &scaled_fprop);
 
     // Store original font size and pixel ratio info
     fbox->current_font_size = fprop->font_size; // Original size

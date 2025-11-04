@@ -171,7 +171,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     View* child = span->child;
     if (child) {
         if (span->font) {
-            setup_font(lycon->ui_context, &lycon->font, pa_font.ft_face->family_name, span->font);
+            setup_font(lycon->ui_context, &lycon->font, span->font);
         }
         if (span->in_line && span->in_line->vertical_align) {
             lycon->line.vertical_align = span->in_line->vertical_align;
@@ -459,7 +459,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     log_debug("DEBUG: After resolve style");
 
     if (html->font) {
-        setup_font(lycon->ui_context, &lycon->font, lycon->font.ft_face->family_name, html->font);
+        setup_font(lycon->ui_context, &lycon->font, html->font);
     }
     if (lycon->root_font_size < 0) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
@@ -639,7 +639,7 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
 
     // setup default font
     FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
-    setup_font(uicon, &lycon->font, default_font->family, default_font);
+    setup_font(uicon, &lycon->font, default_font);
 
     // Initialize float context to NULL - will be created when needed
     lycon->current_float_context = NULL;

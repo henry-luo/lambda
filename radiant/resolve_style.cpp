@@ -1115,9 +1115,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_TEXT_DECORATION: {
         const lxb_css_property_text_decoration_t *text_decoration = declr->u.text_decoration;
         log_debug("text decoration property: %d", text_decoration->line.type);
-        if (!span->font) {
-            span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
-        }
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->text_deco = text_decoration->line.type;
         break;
     }

@@ -129,7 +129,19 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 }
 
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
-    log_debug("layout block content");
+    log_debug("layout block inner content");
+    // setup line height
+    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
+        lycon->block.line_height = inherit_line_height(lycon, block);
+    } else {
+        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
+    }
+    // setup initial ascender and descender
+    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
+        lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
         uintptr_t elmt_name = block->node->tag();
@@ -367,7 +379,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
     }
 }
 
-void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line, FontBox *pa_font) {
+void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
     block->x = pa_line->left;  block->y = pa_block->advance_y;
@@ -532,21 +544,8 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
 
     // setup inline context
     if (block->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font->ft_face->family_name, block->font);
+        setup_font(lycon->ui_context, &lycon->font, block->font);
     }
-    // setup line height
-    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
-        lycon->block.line_height = inherit_line_height(lycon, block);
-    }
-    else {
-        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
-    }
-    // setup initial ascender and descender
-    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
-    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
-    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
-        lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block, block->display);
@@ -640,7 +639,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     } else {
         // layout block content to determine content width and height
-        layout_block_content(lycon, elmt, block, &pa_block, &pa_line, &pa_font);
+        layout_block_content(lycon, elmt, block, &pa_block, &pa_line);
 
         // flow the block in parent context
         log_debug("flow block in parent context, block->y before restoration: %.2f", block->y);
