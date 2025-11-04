@@ -367,9 +367,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
     }
 }
 
-void setup_inline(LayoutContext* lycon, ViewBlock* block, float content_width) {
+void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // setup inline context
-    lycon->block.advance_y = 0;
+    float content_width = lycon->block.content_width;
+    lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     line_init(lycon, 0, content_width);
     if (block->bound) {
         if (block->bound->border) {
@@ -403,7 +404,6 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block, float content_width) {
 }
 
 void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
-    lycon->block.max_width = 0;
     block->x = pa_line->left;  block->y = pa_block->advance_y;
     const char* tag = elmt->name();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag, block->x, block->y, pa_block->advance_y);
@@ -508,8 +508,11 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         }
     }
-    else { // derive from content flow height
-        content_height = lycon->block.advance_y;
+    else { // derive from parent block height
+        if (block->bound) {
+            content_height = pa_block->content_height - block->bound->margin.top - block->bound->margin.bottom;
+        }
+        else { content_height = pa_block->content_height; }
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             content_height = adjust_min_max_height(block, content_height);
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
@@ -552,7 +555,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
     // setup inline context
-    setup_inline(lycon, block, content_width);
+    setup_inline(lycon, block);
 
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block, block->display);
