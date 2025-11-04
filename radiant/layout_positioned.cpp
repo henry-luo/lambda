@@ -233,6 +233,15 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     if (!cb) { log_error("Missing containing block");  return; }
     log_debug("found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d",
         cb, cb->width, cb->height, cb->content_width, cb->content_height);
+    // link to containing block's float context
+    if (cb->position) {
+        if (!cb->position->first_abs_child) {
+            cb->position->last_abs_child = cb->position->first_abs_child = block;
+        } else {
+            cb->position->last_abs_child->position->next_abs_block = block;
+            cb->position->last_abs_child = block;
+        }
+    }
 
     // calculate position based on offset properties and containing block
     calculate_absolute_position(lycon, block, cb);
