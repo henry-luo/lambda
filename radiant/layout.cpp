@@ -439,9 +439,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     lycon->block.height = 0;  // Will be calculated based on content
     lycon->block.advance_y = 0;  lycon->block.line_height = -1;
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
-    lycon->line.left = 0;  lycon->line.right = lycon->block.width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-    line_init(lycon);
+    line_init(lycon, 0, lycon->block.width);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, elmt);

@@ -68,10 +68,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     measure_context.block.max_width = 0;
 
     // Set up measurement environment
-    measure_context.line.left = 0;
-    measure_context.line.right = 10000; // Large but finite for measurement
-    measure_context.line.vertical_align = LXB_CSS_VALUE_BASELINE;
-    line_init(&measure_context);
+    line_init(&measure_context, 0, 10000);
 
     // Perform layout in measurement mode to determine intrinsic sizes
     ViewBlock* temp_view = nullptr;

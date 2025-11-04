@@ -257,11 +257,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     }
 
     // Set up line formatting context for inline content
-    lycon->line.left = content_x_offset;
-    lycon->line.right = content_x_offset + content_width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-
-    line_init(lycon);
+    line_init(lycon, content_x_offset, content_x_offset + content_width);
 
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
