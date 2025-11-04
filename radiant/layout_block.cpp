@@ -370,10 +370,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
 void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line, FontBox *pa_font) {
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
-    line_init(lycon, 0, pa_block->width);
     block->x = pa_line->left;  block->y = pa_block->advance_y;
-    const char* tag_init = block->node ? block->node->name() : "unknown";
-    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag_init, block->x, block->y, pa_block->advance_y);
+    const char* tag = elmt->name();
+    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag, block->x, block->y, pa_block->advance_y);
 
     uintptr_t elmt_name = elmt->tag();
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
@@ -429,24 +428,6 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
             // todo: use a placeholder
         }
     }
-
-    log_debug("setting up block");
-    if (block->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font->ft_face->family_name, block->font);
-    }
-    // setup line height
-    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
-        lycon->block.line_height = inherit_line_height(lycon, block);
-    }
-    else {
-        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
-    }
-    // setup initial ascender and descender
-    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
-    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
-    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
-        lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 
     // determine block width and height
     float content_width = -1;
@@ -510,6 +491,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
     lycon->block.width = content_width;  lycon->block.height = content_height;
 
+    line_init(lycon, 0, pa_block->width);
     if (block->bound) {
         block->width = content_width + block->bound->padding.left + block->bound->padding.right +
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
@@ -529,7 +511,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
         log_debug("Y coordinate: before margin=%f, margin.top=%f, after margin=%f (tag=%s)",
-                  y_before_margin, block->bound->margin.top, block->y, tag_init);
+                  y_before_margin, block->bound->margin.top, block->y, tag);
         if (block->bound->border) {
             lycon->line.advance_x += block->bound->border->width.left;
             lycon->block.advance_y += block->bound->border->width.top;
@@ -537,8 +519,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         lycon->line.advance_x += block->bound->padding.left;
         lycon->block.advance_y += block->bound->padding.top;
         lycon->line.left = lycon->line.advance_x;
-        // CRITICAL FIX: Set line.right to content area (block width - right padding)
-        lycon->line.right = lycon->line.advance_x + content_width;
+        lycon->line.right = lycon->line.advance_x + content_width;  // set line.right to content area (block width - right padding)
     }
     else {
         block->width = content_width;  block->height = content_height;
@@ -549,10 +530,26 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
-    // layout block content, and determine flow width and height
-    if (elmt_name != LXB_TAG_IMG) {
-        layout_block_inner_content(lycon, block, block->display);
+    // setup inline context
+    if (block->font) {
+        setup_font(lycon->ui_context, &lycon->font, pa_font->ft_face->family_name, block->font);
     }
+    // setup line height
+    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
+        lycon->block.line_height = inherit_line_height(lycon, block);
+    }
+    else {
+        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
+    }
+    // setup initial ascender and descender
+    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
+        lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
+
+    // layout block content, and determine flow width and height
+    layout_block_inner_content(lycon, block, block->display);
 
     // check for margin collapsing with children
     if (block->bound) {
@@ -574,7 +571,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         }
     }
 
-    // Apply CSS positioning after normal layout
+    // apply CSS positioning after normal layout
     if (block->position) {
         log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
         log_debug("Position offsets: top=%.2f(%s), right=%.2f(%s), bottom=%.2f(%s), left=%.2f(%s)",
@@ -586,23 +583,18 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         if (block->position->position == LXB_CSS_VALUE_RELATIVE) {
             log_debug("Applying relative positioning");
             layout_relative_positioned(lycon, block);
-        } else if (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED) {
-            log_debug("Applying absolute positioning");
-            layout_absolute_positioned(lycon, block);
-        } else {
-            log_debug("Position type %d not handled yet", block->position->position);
         }
     } else {
         log_debug("No position property found for element %s", elmt->name());
     }
 
-    // Apply CSS float layout after positioning
+    // apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
         layout_float_element(lycon, block);
     }
 
-    // Apply CSS clear property after float layout
+    // apply CSS clear property after float layout
     if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);

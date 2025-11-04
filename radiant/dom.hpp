@@ -90,10 +90,11 @@ typedef struct DomNode {
     DomNode* _next;  // cached next sibling
 
     public:
-    // Basic node information
-    char* name();  // Moved to .cpp to avoid incomplete type issues
+    // for all nodes, element, text and comment
+    char* name();
 
-    uintptr_t tag();  // Moved to .cpp to avoid incomplete type issues
+    // enum ID for element
+    uintptr_t tag();
 
     // Helper function to convert tag name string to Lexbor tag ID
     static uintptr_t tag_name_to_lexbor_id(const char* tag_name);

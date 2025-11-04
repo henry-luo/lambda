@@ -6,6 +6,11 @@
 ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
 void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y);
 void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block);
+float adjust_min_max_width(ViewBlock* block, float width);
+float adjust_min_max_height(ViewBlock* block, float height);
+float adjust_border_padding_width(ViewBlock* block, float width);
+float adjust_border_padding_height(ViewBlock* block, float height);
+void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
 
 /**
  * Apply relative positioning to an element
@@ -55,6 +60,7 @@ void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block) {
 
     log_debug("Applied absolute positioning: final position (%d, %d)", block->x, block->y);
 }
+
 
 /**
  * Calculate relative positioning offset from CSS properties
@@ -221,6 +227,247 @@ void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block) 
     log_debug("Calculated absolute position: (%d, %d) size (%d, %d) relative to containing block (%d, %d) size (%d, %d)",
               block->x, block->y, block->width, block->height,
               cb_x, cb_y, cb_width, cb_height);
+}
+
+void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line, FontBox *pa_font) {
+    lycon->block.advance_y = 0;  lycon->block.max_width = 0;
+    if (block->blk) lycon->block.text_align = block->blk->text_align;
+    line_init(lycon, 0, pa_block->width);
+    block->x = pa_line->left;  block->y = pa_block->advance_y;
+    const char* tag_init = elmt->name();
+    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag_init, block->x, block->y, pa_block->advance_y);
+
+    uintptr_t elmt_name = elmt->tag();
+    if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
+        size_t value_len;  const lxb_char_t *value;
+        value = elmt->get_attribute("src", &value_len);
+        if (value && value_len) {
+            StrBuf* src = strbuf_new_cap(value_len);
+            strbuf_append_str_n(src, (const char*)value, value_len);
+            log_debug("image src: %s", src->str);
+            if (!block->embed) {
+                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+            block->embed->img = load_image(lycon->ui_context, src->str);
+            strbuf_free(src);
+            if (!block->embed->img) {
+                log_debug("Failed to load image");
+                // todo: use a placeholder
+            }
+        }
+        if (block->embed->img) {
+            ImageSurface* img = block->embed->img;
+            if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
+                // scale image by pixel ratio
+                float w = img->width * lycon->ui_context->pixel_ratio;
+                float h = img->height * lycon->ui_context->pixel_ratio;
+                log_debug("image intrinsic dims: %f x %f, given: %f x %f", w, h,
+                    lycon->block.given_width, lycon->block.given_height);
+                if (lycon->block.given_width >= 0) { // scale unspecified height
+                    lycon->block.given_height = lycon->block.given_width * h / w;
+                }
+                else if (lycon->block.given_height >= 0) { // scale unspecified width
+                    lycon->block.given_width = lycon->block.given_height * w / h;
+                }
+                else { // both width and height unspecified
+                    if (img->format == IMAGE_FORMAT_SVG) {
+                        // scale to parent block width
+                        lycon->block.given_width = lycon->block.pa_block->width;
+                        lycon->block.given_height = lycon->block.given_width * h / w;
+                    }
+                    else { // use image intrinsic dimensions
+                        lycon->block.given_width = w;  lycon->block.given_height = h;
+                    }
+                }
+            }
+            // else both width and height specified
+            if (img->format == IMAGE_FORMAT_SVG) {
+                img->max_render_width = max(lycon->block.given_width, img->max_render_width);
+            }
+            log_debug("image dimensions: %f x %f", lycon->block.given_width, lycon->block.given_height);
+        }
+        else { // failed to load image
+            lycon->block.given_width = 40;  lycon->block.given_height = 30;
+            // todo: use a placeholder
+        }
+    }
+
+    log_debug("setting up block");
+    if (block->font) {
+        setup_font(lycon->ui_context, &lycon->font, pa_font->ft_face->family_name, block->font);
+    }
+    // setup line height
+    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
+        lycon->block.line_height = inherit_line_height(lycon, block);
+    }
+    else {
+        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
+    }
+    // setup initial ascender and descender
+    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
+        lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
+
+    // determine block width and height
+    float content_width = -1;
+    log_debug("Block '%s': given_width=%.2f,  given_height=%.2f, blk=%p, width_type=%d",
+            elmt->name(), lycon->block.given_width, lycon->block.given_height, (void*)block->blk,
+            block->blk ? block->blk->given_width_type : -1);
+    bool cond1 = (lycon->block.given_width >= 0);
+    bool cond2 = (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO);
+    if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO)) {
+        content_width = max(lycon->block.given_width, 0);
+        fprintf(stderr, "[LAYOUT] Using given_width: content_width=%.2f\n", content_width);
+        content_width = adjust_min_max_width(block, content_width);
+        fprintf(stderr, "[LAYOUT] After adjust_min_max_width: content_width=%.2f\n", content_width);
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            if (block->bound) content_width = adjust_border_padding_width(block, content_width);
+            fprintf(stderr, "[LAYOUT] After adjust_border_padding (border-box): content_width=%.2f\n", content_width);
+        }
+    }
+    else { // derive from parent block width
+        fprintf(stderr, "[LAYOUT] Deriving from parent: pa_block.width=%.2f\n", pa_block->width);
+        if (block->bound) {
+            content_width = pa_block->width
+                - (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
+                - (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
+        }
+        else { content_width = pa_block->width; }
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            content_width = adjust_min_max_width(block, content_width);
+            if (block->bound) content_width = adjust_border_padding_width(block, content_width);
+        } else {
+            content_width = adjust_border_padding_width(block, content_width);
+            if (block->bound) content_width = adjust_min_max_width(block, content_width);
+        }
+    }
+    assert(content_width >= 0);
+    log_debug("content_width=%f, given_width=%f, max_width=%f", content_width, lycon->block.given_width,
+        block->blk && block->blk->given_max_width >= 0 ? block->blk->given_max_width : -1);
+
+    float content_height = -1;
+    fprintf(stderr, "[LAYOUT] Block '%s': given_height=%.2f\n", elmt->name(), lycon->block.given_height);
+    if (lycon->block.given_height >= 0) {
+        content_height = max(lycon->block.given_height, 0);
+        fprintf(stderr, "[LAYOUT] Using given_height: content_height=%.2f\n", content_height);
+        content_height = adjust_min_max_height(block, content_height);
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            if (block->bound) content_height = adjust_border_padding_height(block, content_height);
+        }
+    }
+    else { // derive from content flow height
+        content_height = lycon->block.advance_y;
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            content_height = adjust_min_max_height(block, content_height);
+            if (block->bound) content_height = adjust_border_padding_height(block, content_height);
+        } else {
+            content_height = adjust_border_padding_height(block, content_height);
+            if (block->bound) content_height = adjust_min_max_height(block, content_height);
+        }
+    }
+    assert(content_height >= 0);
+    log_debug("content_height=%f, given_height=%f, max_height=%f", content_height, lycon->block.given_height,
+        block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
+    lycon->block.width = content_width;  lycon->block.height = content_height;
+
+    if (block->bound) {
+        block->width = content_width + block->bound->padding.left + block->bound->padding.right +
+            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
+        block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
+            (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
+        // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
+        log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
+            block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
+        if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO && block->bound->margin.right_type == LXB_CSS_VALUE_AUTO)  {
+            block->bound->margin.left = block->bound->margin.right = max((pa_block->width - block->width) / 2, 0);
+        } else {
+            if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO) block->bound->margin.left = 0;
+            if (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO) block->bound->margin.right = 0;
+        }
+        log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
+        float y_before_margin = block->y;
+        block->x += block->bound->margin.left;
+        block->y += block->bound->margin.top;
+        log_debug("Y coordinate: before margin=%f, margin.top=%f, after margin=%f (tag=%s)",
+                  y_before_margin, block->bound->margin.top, block->y, tag_init);
+        if (block->bound->border) {
+            lycon->line.advance_x += block->bound->border->width.left;
+            lycon->block.advance_y += block->bound->border->width.top;
+        }
+        lycon->line.advance_x += block->bound->padding.left;
+        lycon->block.advance_y += block->bound->padding.top;
+        lycon->line.left = lycon->line.advance_x;
+        lycon->line.right = lycon->line.advance_x + content_width;  // set line.right to content area (block width - right padding)
+    }
+    else {
+        // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
+        block->width = content_width;  block->height = content_height;
+        lycon->line.right = lycon->block.width;
+    }
+
+    log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
+        block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
+
+    // layout block content, and determine flow width and height
+    if (elmt_name != LXB_TAG_IMG) {
+        layout_block_inner_content(lycon, block, block->display);
+    }
+
+    // check for margin collapsing with children
+    if (block->bound) {
+        // collapse bottom margin with last child block
+        if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
+            block->bound->padding.bottom == 0 && block->child) {
+            View* last_child = block->child;
+            while (last_child && last_child->next) { last_child = last_child->next; }
+            if (last_child->is_block() && ((ViewBlock*)last_child)->bound) {
+                ViewBlock* last_child_block = (ViewBlock*)last_child;
+                if (last_child_block->bound->margin.bottom > 0) {
+                    float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
+                    block->height -= last_child_block->bound->margin.bottom;
+                    block->bound->margin.bottom = margin_bottom;
+                    last_child_block->bound->margin.bottom = 0;
+                    log_debug("collapsed bottom margin %f between block and last child", margin_bottom);
+                }
+            }
+        }
+    }
+
+    // Apply CSS positioning after normal layout
+    if (block->position) {
+        log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
+        log_debug("Position offsets: top=%.2f(%s), right=%.2f(%s), bottom=%.2f(%s), left=%.2f(%s)",
+            block->position->top, block->position->has_top ? "set" : "unset",
+            block->position->right, block->position->has_right ? "set" : "unset",
+            block->position->bottom, block->position->has_bottom ? "set" : "unset",
+            block->position->left, block->position->has_left ? "set" : "unset");
+
+        if (block->position->position == LXB_CSS_VALUE_RELATIVE) {
+            log_debug("Applying relative positioning");
+            layout_relative_positioned(lycon, block);
+        } else if (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED) {
+            log_debug("Applying absolute positioning");
+            layout_absolute_positioned(lycon, block);
+        } else {
+            log_debug("Position type %d not handled yet", block->position->position);
+        }
+    } else {
+        log_debug("No position property found for element %s", elmt->name());
+    }
+
+    // Apply CSS float layout after positioning
+    if (block->position && element_has_float(block)) {
+        log_debug("Element has float property, applying float layout");
+        layout_float_element(lycon, block);
+    }
+
+    // Apply CSS clear property after float layout
+    if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
+        log_debug("Element has clear property, applying clear layout");
+        layout_clear_element(lycon, block);
+    }
 }
 
 /**

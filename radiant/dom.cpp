@@ -24,9 +24,8 @@ char* DomNode::name() {
     else if (type == MARK_COMMENT && dom_comment) {
         return (char*)"#comment";
     }
-
     // debug: log what went wrong
-    fprintf(stderr, "[DOM DEBUG] #null node detected - type=%d, dom_element=%p, dom_text=%p, lxb_elmt=%p, lxb_node=%p, this=%p\n",
+    log_error("[DOM] #null node detected - type=%d, dom_element=%p, dom_text=%p, lxb_elmt=%p, lxb_node=%p, this=%p",
             type, (void*)dom_element, (void*)dom_text, (void*)lxb_elmt, (void*)lxb_node, (void*)this);
     return (char*)"#null";
 }
