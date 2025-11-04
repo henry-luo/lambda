@@ -17,12 +17,15 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 
 void target_children(EventContext* evcon, View* view) {
     do {
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-            view->type == RDT_VIEW_LIST_ITEM) {
+        if (view->is_block()) {
             ViewBlock* block = (ViewBlock*)view;
             log_debug("target view block:%s, x:%f, y:%f, wd:%f, hg:%f",
                 block->node->name(), block->x, block->y, block->width, block->height);
-            target_block_view(evcon, block);
+            if (block->position && block->position->position != LXB_CSS_VALUE_STATIC) {
+                log_debug("skip absolute/fixed positioned block");
+            } else {
+                target_block_view(evcon, block);
+            }
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
@@ -126,6 +129,20 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         evcon->block.x -= block->scroller->pane->h_scroll_position;
         evcon->block.y -= block->scroller->pane->v_scroll_position;
     }
+
+    // target absolute/fixed positioned children
+    if (block->position && block->position->first_abs_child) {
+        ViewBlock* abs_child = block->position->first_abs_child;
+        do {
+            // todo: should target based on z-index order
+            log_debug("targetting positioned child block: %s", abs_child->node->name());
+            target_block_view(evcon, abs_child);
+            if (evcon->target) { goto RETURN; }
+            abs_child = abs_child->position->next_abs_sibling;
+        } while (abs_child);
+    }
+
+    // target static positioned children
     view = block->child;
     if (view) {
         if (block->font) {
@@ -133,9 +150,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
         target_children(evcon, view);
     }
-    else {
-        log_debug("view has no child");
-    }
+
     RETURN:
     evcon->block = pa_block;  evcon->font = pa_font;
     if (!evcon->target) { // check the block itself
