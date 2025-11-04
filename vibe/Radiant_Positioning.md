@@ -84,19 +84,19 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // 1. Layout element in normal flow first
     // 2. Apply offset without affecting other elements
     // 3. Update visual position only
-    
+
     if (!block->position || block->position->position != LXB_CSS_VALUE_RELATIVE) {
         return;
     }
-    
+
     // Calculate offset from top/right/bottom/left properties
     int offset_x = 0, offset_y = 0;
     calculate_relative_offset(block, &offset_x, &offset_y);
-    
+
     // Apply offset to visual position
     block->x += offset_x;
     block->y += offset_y;
-    
+
     log_debug("Applied relative positioning: offset (%d, %d)", offset_x, offset_y);
 }
 ```
@@ -106,7 +106,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
 ```cpp
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // ... existing layout logic
-    
+
     // After normal layout, apply relative positioning
     if (block->position && block->position->position == LXB_CSS_VALUE_RELATIVE) {
         layout_relative_positioned(lycon, block);
@@ -124,16 +124,16 @@ void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block) {
     // 2. Find containing block
     // 3. Calculate position based on offset properties
     // 4. Size element based on content or constraints
-    
+
     ViewBlock* containing_block = find_containing_block(block, LXB_CSS_VALUE_ABSOLUTE);
     Rect cb_rect = get_containing_block_rect(containing_block, block);
-    
+
     // Calculate position
-    calculate_absolute_position(block, &cb_rect);
-    
+    calculate_absolute_position(lycon, block, &cb_rect);
+
     // Layout content
     layout_absolute_content(lycon, block);
-    
+
     log_debug("Positioned absolutely at (%d, %d)", block->x, block->y);
 }
 ```
@@ -180,15 +180,15 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block, FloatContext* 
     // 2. Find available position considering existing floats
     // 3. Place float and update float context
     // 4. Adjust line boxes around floats
-    
+
     size_float_element(lycon, block);
-    
+
     Rect float_position = find_float_position(float_ctx, block);
     block->x = float_position.x;
     block->y = float_position.y;
-    
+
     add_float_to_context(float_ctx, block);
-    
+
     log_debug("Floated element to (%d, %d)", block->x, block->y);
 }
 ```
@@ -200,7 +200,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
     // Adjust line.left and line.right based on intersecting floats
     int line_top = lycon->block.advance_y;
     int line_bottom = line_top + lycon->block.line_height;
-    
+
     // Check left floats
     for (int i = 0; i < float_ctx->left_floats->count; i++) {
         FloatBox* float_box = (FloatBox*)arraylist_get(float_ctx->left_floats, i);
@@ -208,7 +208,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
             lycon->line.left = max(lycon->line.left, float_box->bounds.x + float_box->bounds.width);
         }
     }
-    
+
     // Check right floats
     for (int i = 0; i < float_ctx->right_floats->count; i++) {
         FloatBox* float_box = (FloatBox*)arraylist_get(float_ctx->right_floats, i);
@@ -228,7 +228,7 @@ void apply_clear_property(LayoutContext* lycon, ViewBlock* block, FloatContext* 
     if (!block->blk || block->blk->clear == LXB_CSS_VALUE_NONE) {
         return;
     }
-    
+
     int clear_y = calculate_clear_position(float_ctx, block->blk->clear);
     if (clear_y > lycon->block.advance_y) {
         lycon->block.advance_y = clear_y;
@@ -245,19 +245,19 @@ void apply_clear_property(LayoutContext* lycon, ViewBlock* block, FloatContext* 
 ```cpp
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     // ... existing logic
-    
+
     // Check for positioning properties
     if (element_has_positioning(node)) {
         handle_positioned_element(lycon, node);
         return;
     }
-    
+
     // Check for float property
     if (element_has_float(node)) {
         handle_float_element(lycon, node);
         return;
     }
-    
+
     // Continue with normal flow layout
 }
 ```
