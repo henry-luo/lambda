@@ -42,10 +42,10 @@ void target_children(EventContext* evcon, View* view) {
 
 void target_text_view(EventContext* evcon, ViewText* text) {
     unsigned char* str = text->node->text_data();
-    NEXT_RECT:
     TextRect *text_rect = text->rect;
+    NEXT_RECT:
     float x = evcon->block.x + text_rect->x, y = evcon->block.y + text_rect->y;
-    unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
+    unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + max(text_rect->length, 0);
     log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
         str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
     bool has_space = false;
@@ -77,11 +77,15 @@ void target_text_view(EventContext* evcon, ViewText* text) {
         // advance to the next position
         x += wd;
     }
+    assert(text_rect->next != text_rect);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
+    log_debug("hit not on text");
 }
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
+    log_debug("targetting inline: %s", view_span->node->name());
+    log_enter();
     FontBox pa_font = evcon->font;
     View* view = view_span->child;
     if (view) {
@@ -94,11 +98,12 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
         log_debug("view has no child");
     }
     evcon->font = pa_font;
+    log_leave();
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
-    log_enter();
     log_debug("targetting block: %s", block->node->name());
+    log_enter();
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
