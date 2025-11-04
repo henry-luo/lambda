@@ -357,7 +357,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
-        setup_font(rdcon->ui_context, &rdcon->font, pa_font.ft_face->family_name, block->font);
+        setup_font(rdcon->ui_context, &rdcon->font, block->font);
     }
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
     if (block->type == RDT_VIEW_LIST_ITEM) {
@@ -517,7 +517,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 FontBox pa_font = rdcon->font;
                 FontProp* default_font = doc->view_tree->html_version == HTML5 ? &rdcon->ui_context->default_font : &rdcon->ui_context->legacy_default_font;
                 log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
-                setup_font(rdcon->ui_context, &rdcon->font, default_font->family, default_font);
+                setup_font(rdcon->ui_context, &rdcon->font, default_font);
 
                 render_block_view(rdcon, (ViewBlock*)root_view);
 
@@ -542,7 +542,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(rdcon->ui_context, &rdcon->font, pa_font.ft_face->family_name, view_span->font);
+            setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
         if (view_span->in_line && view_span->in_line->color.c) {
             rdcon->color = view_span->in_line->color;
@@ -607,7 +607,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     // load default font
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     log_debug("render_init default font: %s, html version: %d", default_font->family, view_tree->html_version);
-    setup_font(uicon, &rdcon->font, default_font->family, default_font);
+    setup_font(uicon, &rdcon->font, default_font);
     rdcon->block.clip = (Bound){0, 0, (float)uicon->surface->width, (float)uicon->surface->height};
 }
 
