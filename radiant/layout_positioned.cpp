@@ -243,25 +243,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block, block->display);
 
-    // check for margin collapsing with children
-    if (block->bound) {
-        // collapse bottom margin with last child block
-        if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
-            block->bound->padding.bottom == 0 && block->child) {
-            View* last_child = block->child;
-            while (last_child && last_child->next) { last_child = last_child->next; }
-            if (last_child->is_block() && ((ViewBlock*)last_child)->bound) {
-                ViewBlock* last_child_block = (ViewBlock*)last_child;
-                if (last_child_block->bound->margin.bottom > 0) {
-                    float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
-                    block->height -= last_child_block->bound->margin.bottom;
-                    block->bound->margin.bottom = margin_bottom;
-                    last_child_block->bound->margin.bottom = 0;
-                    log_debug("collapsed bottom margin %f between block and last child", margin_bottom);
-                }
-            }
-        }
-    }
+    // no margin collapsing with children
 
     // Apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
@@ -273,6 +255,18 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
+    }
+
+    // adjust block width and height based on content
+    if (!(block->position && block->position->has_left && block->position->has_right && lycon->block.given_width >= 0)) {
+        float flow_width = lycon->block.max_width;
+        block->width = flow_width + (block->bound ? block->bound->padding.left + block->bound->padding.right +
+            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0) : 0);
+    }
+    if (!(block->position && block->position->has_top && block->position->has_bottom && lycon->block.given_height >= 0)) {
+        float flow_height = lycon->block.advance_y;
+        block->height = flow_height + (block->bound ? block->bound->padding.top + block->bound->padding.bottom +
+            (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0) : 0);
     }
     log_leave();
 }

@@ -647,6 +647,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED)) {
         layout_abs_block(lycon, elmt, block, &pa_block, &pa_line);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+        lycon->prev_view = (View*)block;
     } else {
         // layout block content to determine content width and height
         layout_block_content(lycon, elmt, block, &pa_block, &pa_line);
@@ -765,10 +766,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->block.max_width, lycon->block.advance_y, block->height);
         }
         lycon->prev_view = (View*)block;
-        const char* tag = block->node ? block->node->name() : "unknown";
-        float initial_y = pa_block.advance_y;  // This was the initial Y when block was created
-        log_debug("block view: %d (%s), end block, initial y=%.2f, final y=%.2f (diff=%.2f)",
-                block->type, tag, initial_y, block->y, block->y - initial_y);
     }
     log_leave();
 }
