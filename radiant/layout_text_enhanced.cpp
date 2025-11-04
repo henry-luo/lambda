@@ -7,7 +7,7 @@
 // Enhanced line initialization with Unicode support
 void line_init_enhanced(LayoutContext* lycon) {
     // Call existing line_init first
-    line_init(lycon);
+    line_init(lycon, 0, 0);
 
     // Initialize enhanced text flow logging if not already done
     if (!text_log) {

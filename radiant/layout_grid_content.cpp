@@ -59,15 +59,11 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     }
 
     // Set up line formatting context for inline content
-    lycon->line.left = content_x_offset;
-    lycon->line.right = content_x_offset + content_width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-
     log_debug("GRID - Content area: %dx%d, offset (%d,%d), line (%d to %d)\n",
            content_width, content_height, content_x_offset, content_y_offset,
            lycon->line.left, lycon->line.right);
 
-    line_init(lycon);
+    line_init(lycon, content_x_offset, content_x_offset + content_width);
 
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.

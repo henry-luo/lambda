@@ -370,9 +370,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
 void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line, FontBox *pa_font) {
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
-    lycon->line.left = 0;  lycon->line.right = pa_block->width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-    line_init(lycon);
+    line_init(lycon, 0, pa_block->width);
     block->x = pa_line->left;  block->y = pa_block->advance_y;
     const char* tag_init = block->node ? block->node->name() : "unknown";
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag_init, block->x, block->y, pa_block->advance_y);

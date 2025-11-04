@@ -15,7 +15,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
     return RDT_NOT_SURE;
 }
 
-void line_init(LayoutContext* lycon) {
+void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.advance_x = lycon->line.left;
@@ -34,6 +34,12 @@ void line_init(LayoutContext* lycon) {
     } else {
         log_debug("DEBUG: No float context available for line adjustment");
     }
+}
+
+void line_init(LayoutContext* lycon, float left, float right) {
+    line_reset(lycon);
+    lycon->line.left = left;  lycon->line.right = right;
+    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;  // vertical-align does not inherit
 }
 
 void line_break(LayoutContext* lycon) {
@@ -91,7 +97,7 @@ void line_break(LayoutContext* lycon) {
     //        font_line_height, css_line_height, has_mixed_fonts ? "yes" : "no", used_line_height);
     lycon->block.advance_y += used_line_height;
     // reset the new line
-    line_init(lycon);
+    line_reset(lycon);
 }
 
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
