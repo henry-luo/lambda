@@ -11,6 +11,7 @@ float adjust_min_max_height(ViewBlock* block, float height);
 float adjust_border_padding_width(ViewBlock* block, float width);
 float adjust_border_padding_height(ViewBlock* block, float height);
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
+void setup_inline(LayoutContext* lycon, ViewBlock* block, float content_width);
 
 /**
  * Apply relative positioning to an element
@@ -34,33 +35,6 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     log_debug("Applied relative positioning: offset (%d, %d), final position (%d, %d)",
               offset_x, offset_y, block->x, block->y);
 }
-
-/**
- * Apply absolute positioning to an element
- * Absolute positioning removes the element from normal flow and positions it relative to containing block
- */
-void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block) {
-    log_debug("Applying absolute positioning to element");
-    // 1. top, right, bottom, left resolved relative to the padding box of the containing block.
-    // 2. margin values do offset the absolutely positioned box from where top/left/right/bottom place it.
-
-    // Find containing block
-    ViewBlock* containing_block = find_containing_block(block, block->position->position);
-    if (!containing_block) {
-        log_warn("No containing block found for absolutely positioned element");
-        return;
-    }
-
-    printf("DEBUG: Found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d\n",
-           containing_block, containing_block->width, containing_block->height,
-           containing_block->content_width, containing_block->content_height);
-
-    // Calculate position based on offset properties and containing block
-    calculate_absolute_position(block, containing_block);
-
-    log_debug("Applied absolute positioning: final position (%d, %d)", block->x, block->y);
-}
-
 
 /**
  * Calculate relative positioning offset from CSS properties
@@ -143,99 +117,91 @@ ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type) {
     return nullptr;
 }
 
-/**
- * Calculate absolute position based on containing block and offset properties
- */
+//  Calculate absolute position based on containing block and offset properties
 void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block) {
-    if (!block->position || !containing_block) return;
+    // 1. top, right, bottom, left resolved relative to the padding box of the containing block.
+    // 2. margin values do offset the absolutely positioned box from where top/left/right/bottom place it.
 
-    // Get containing block dimensions (content area)
-    int cb_x = containing_block->x;
-    int cb_y = containing_block->y;
+    // get containing block dimensions
+    float cb_x = containing_block->x, cb_y = containing_block->y;
+    float cb_width = containing_block->width, cb_height = containing_block->height;
 
-    // Calculate content dimensions directly since content_width/content_height may not be set yet
-    int cb_width = containing_block->width;
-    int cb_height = containing_block->height;
-
-    // Subtract borders and padding to get content area dimensions
+    // update to padding box
     if (containing_block->bound) {
         if (containing_block->bound->border) {
+            cb_x += containing_block->bound->border->width.left;
+            cb_y += containing_block->bound->border->width.top;
             cb_width -= (containing_block->bound->border->width.left + containing_block->bound->border->width.right);
             cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
         }
-        cb_width -= (containing_block->bound->padding.left + containing_block->bound->padding.right);
-        cb_height -= (containing_block->bound->padding.top + containing_block->bound->padding.bottom);
     }
+    log_debug("containing block padding box: (%d, %d) size (%d, %d)\n", cb_x, cb_y, cb_width, cb_height);
 
-    printf("DEBUG: Containing block initial position: (%d, %d) size (%d, %d)\n",
-           cb_x, cb_y, cb_width, cb_height);
-
-    // Account for containing block borders and padding to get content area position
-    if (containing_block->bound) {
-        if (containing_block->bound->border) {
-            printf("DEBUG: Containing block border: left=%d, top=%d\n",
-                   containing_block->bound->border->width.left, containing_block->bound->border->width.top);
-            cb_x += containing_block->bound->border->width.left;
-            cb_y += containing_block->bound->border->width.top;
-        }
-        printf("DEBUG: Containing block padding: left=%d, top=%d\n",
-               containing_block->bound->padding.left, containing_block->bound->padding.top);
-        cb_x += containing_block->bound->padding.left;
-        cb_y += containing_block->bound->padding.top;
-    }
-
-    printf("DEBUG: Final containing block content area: (%d, %d)\n", cb_x, cb_y);
-
-    // Calculate horizontal position
+    // calculate horizontal position
     if (block->position->has_left && block->position->has_right) {
-        // Both left and right specified - calculate width
+        // both left and right specified - calculate width
         block->x = cb_x + block->position->left;
         int right_edge = cb_x + cb_width - block->position->right;
         block->width = right_edge - block->x;
         if (block->width < 0) block->width = 0;
-    } else if (block->position->has_left) {
-        // Only left specified
+    }
+    else if (block->position->has_left) {
+        // only left specified
         block->x = cb_x + block->position->left;
-        printf("DEBUG: Set x position: cb_x=%d + left=%d = %d\n", cb_x, block->position->left, block->x);
-    } else if (block->position->has_right) {
-        // Only right specified
+        log_debug("set x position: cb_x=%d + left=%d = %d", cb_x, block->position->left, block->x);
+    }
+    else if (block->position->has_right) {
+        // only right specified
         block->x = cb_x + cb_width - block->position->right - block->width;
-    } else {
-        // Neither left nor right - use static position (for now, use left edge)
+    }
+    else {
+        // neither left nor right - use static position (for now, use left edge)
         block->x = cb_x;
     }
 
-    // Calculate vertical position
+    // calculate vertical position
     if (block->position->has_top && block->position->has_bottom) {
-        // Both top and bottom specified - calculate height
+        // both top and bottom specified - calculate height
         block->y = cb_y + block->position->top;
         int bottom_edge = cb_y + cb_height - block->position->bottom;
         block->height = bottom_edge - block->y;
         if (block->height < 0) block->height = 0;
     } else if (block->position->has_top) {
-        // Only top specified
+        // only top specified
         block->y = cb_y + block->position->top;
-        printf("DEBUG: Set y position: cb_y=%d + top=%d = %d\n", cb_y, block->position->top, block->y);
+        log_debug("set y position: cb_y=%d + top=%d = %d", cb_y, block->position->top, block->y);
     } else if (block->position->has_bottom) {
-        // Only bottom specified
+        // only bottom specified
         block->y = cb_y + cb_height - block->position->bottom - block->height;
     } else {
-        // Neither top nor bottom - use static position (for now, use top edge)
+        // neither top nor bottom - use static position (for now, use top edge)
         block->y = cb_y;
     }
 
     log_debug("Calculated absolute position: (%d, %d) size (%d, %d) relative to containing block (%d, %d) size (%d, %d)",
-              block->x, block->y, block->width, block->height,
-              cb_x, cb_y, cb_width, cb_height);
+        block->x, block->y, block->width, block->height, cb_x, cb_y, cb_width, cb_height);
 }
 
-void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
-    lycon->block.advance_y = 0;  lycon->block.max_width = 0;
-    if (block->blk) lycon->block.text_align = block->blk->text_align;
-    line_init(lycon, 0, pa_block->width);
-    block->x = pa_line->left;  block->y = pa_block->advance_y;
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
+    log_debug("layout_abs_block");
+    log_enter();
+
+    lycon->block.max_width = 0;  block->x = pa_line->left;  block->y = pa_block->advance_y;
     const char* tag_init = elmt->name();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag_init, block->x, block->y, pa_block->advance_y);
+
+    // find containing block
+    ViewBlock* containing_block = find_containing_block(block, block->position->position);
+    if (!containing_block) {
+        log_warn("No containing block found for absolutely positioned element");
+        return;
+    }
+    log_debug("found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d",
+        containing_block, containing_block->width, containing_block->height,
+        containing_block->content_width, containing_block->content_height);
+
+    // calculate position based on offset properties and containing block
+    calculate_absolute_position(block, containing_block);
 
     uintptr_t elmt_name = elmt->tag();
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
@@ -272,7 +238,7 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
                 else { // both width and height unspecified
                     if (img->format == IMAGE_FORMAT_SVG) {
                         // scale to parent block width
-                        lycon->block.given_width = lycon->block.pa_block->width;
+                        lycon->block.given_width = lycon->block.pa_block->content_width;
                         lycon->block.given_height = lycon->block.given_width * h / w;
                     }
                     else { // use image intrinsic dimensions
@@ -300,22 +266,22 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
     bool cond2 = (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO);
     if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO)) {
         content_width = max(lycon->block.given_width, 0);
-        fprintf(stderr, "[LAYOUT] Using given_width: content_width=%.2f\n", content_width);
+        log_debug("Using given_width: content_width=%.2f", content_width);
         content_width = adjust_min_max_width(block, content_width);
-        fprintf(stderr, "[LAYOUT] After adjust_min_max_width: content_width=%.2f\n", content_width);
+        log_debug("After adjust_min_max_width: content_width=%.2f", content_width);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
-            fprintf(stderr, "[LAYOUT] After adjust_border_padding (border-box): content_width=%.2f\n", content_width);
+            log_debug("After adjust_border_padding (border-box): content_width=%.2f", content_width);
         }
     }
     else { // derive from parent block width
-        fprintf(stderr, "[LAYOUT] Deriving from parent: pa_block.width=%.2f\n", pa_block->width);
+        log_debug("Deriving from parent: pa_block.width=%.2f", pa_block->content_width);
         if (block->bound) {
-            content_width = pa_block->width
+            content_width = pa_block->content_width
                 - (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
                 - (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
         }
-        else { content_width = pa_block->width; }
+        else { content_width = pa_block->content_width; }
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             content_width = adjust_min_max_width(block, content_width);
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
@@ -329,10 +295,8 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
         block->blk && block->blk->given_max_width >= 0 ? block->blk->given_max_width : -1);
 
     float content_height = -1;
-    fprintf(stderr, "[LAYOUT] Block '%s': given_height=%.2f\n", elmt->name(), lycon->block.given_height);
     if (lycon->block.given_height >= 0) {
         content_height = max(lycon->block.given_height, 0);
-        fprintf(stderr, "[LAYOUT] Using given_height: content_height=%.2f\n", content_height);
         content_height = adjust_min_max_height(block, content_height);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
@@ -351,7 +315,7 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
     assert(content_height >= 0);
     log_debug("content_height=%f, given_height=%f, max_height=%f", content_height, lycon->block.given_height,
         block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
-    lycon->block.width = content_width;  lycon->block.height = content_height;
+    lycon->block.content_width = content_width;  lycon->block.content_height = content_height;
 
     if (block->bound) {
         block->width = content_width + block->bound->padding.left + block->bound->padding.right +
@@ -362,7 +326,7 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
         if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO && block->bound->margin.right_type == LXB_CSS_VALUE_AUTO)  {
-            block->bound->margin.left = block->bound->margin.right = max((pa_block->width - block->width) / 2, 0);
+            block->bound->margin.left = block->bound->margin.right = max((pa_block->content_width - block->width) / 2, 0);
         } else {
             if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO) block->bound->margin.left = 0;
             if (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO) block->bound->margin.right = 0;
@@ -373,27 +337,18 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
         block->y += block->bound->margin.top;
         log_debug("Y coordinate: before margin=%f, margin.top=%f, after margin=%f (tag=%s)",
                   y_before_margin, block->bound->margin.top, block->y, tag_init);
-        if (block->bound->border) {
-            lycon->line.advance_x += block->bound->border->width.left;
-            lycon->block.advance_y += block->bound->border->width.top;
-        }
-        lycon->line.advance_x += block->bound->padding.left;
-        lycon->block.advance_y += block->bound->padding.top;
-        lycon->line.left = lycon->line.advance_x;
-        lycon->line.right = lycon->line.advance_x + content_width;  // set line.right to content area (block width - right padding)
     }
     else {
         // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
         block->width = content_width;  block->height = content_height;
-        lycon->line.right = lycon->block.width;
     }
 
     log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
-    if (block->font) {
-        setup_font(lycon->ui_context, &lycon->font, block->font);
-    }
+    // setup inline context
+    setup_inline(lycon, block, content_width);
+
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block, block->display);
 
@@ -417,23 +372,6 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
         }
     }
 
-    // Apply CSS positioning after normal layout
-    if (block->position) {
-        log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
-        log_debug("Position offsets: top=%.2f(%s), right=%.2f(%s), bottom=%.2f(%s), left=%.2f(%s)",
-            block->position->top, block->position->has_top ? "set" : "unset",
-            block->position->right, block->position->has_right ? "set" : "unset",
-            block->position->bottom, block->position->has_bottom ? "set" : "unset",
-            block->position->left, block->position->has_left ? "set" : "unset");
-
-        if (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED) {
-            log_debug("Applying absolute positioning");
-            layout_absolute_positioned(lycon, block);
-        }
-    } else {
-        log_debug("No position property found for element %s", elmt->name());
-    }
-
     // Apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
@@ -445,6 +383,7 @@ void layout_abs_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* bl
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
     }
+    log_leave();
 }
 
 /**

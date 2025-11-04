@@ -1328,7 +1328,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     break;
                 }
                 // Calculate pixel value from percentage
-                float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
+                float parent_width = lycon->block.pa_block ? lycon->block.pa_block->content_width : 0;
                 float width = percentage * parent_width / 100.0f;
                 if (width < 0.0f) {
                     log_debug("[CSS] Width: %.2f%% (calculated %.2f px, negative, ignored)", percentage, width);
@@ -1724,7 +1724,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     padding = convert_lambda_length_to_px(value, lycon, prop_id);
                 } else {
                     // Padding percentages are relative to parent width (per CSS spec)
-                    float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
+                    float parent_width = lycon->block.pa_block ? lycon->block.pa_block->content_width : 0;
                     padding = value->data.percentage.value * parent_width / 100.0f;
                 }
                 span->bound->padding.top = padding;
@@ -1746,7 +1746,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     if (v->type == CSS_VALUE_LENGTH) {
                         return convert_lambda_length_to_px(v, lycon, prop_id);
                     } else if (v->type == CSS_VALUE_PERCENTAGE) {
-                        float parent_width = lycon->block.pa_block ? lycon->block.pa_block->width : 0;
+                        float parent_width = lycon->block.pa_block ? lycon->block.pa_block->content_width : 0;
                         return v->data.percentage.value * parent_width / 100.0f;
                     } else if (v->type == CSS_VALUE_NUMBER) {
                         // Unitless number, treat as pixels (like margin fix)

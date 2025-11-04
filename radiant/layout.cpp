@@ -263,10 +263,10 @@ void line_align(LayoutContext* lycon) {
             float line_width = lycon->line.advance_x -lycon->line.left;
             float offset = 0;
             if (lycon->block.text_align == LXB_CSS_VALUE_CENTER) {
-                offset = (lycon->block.width - line_width) / 2;
+                offset = (lycon->block.content_width - line_width) / 2;
             }
             else if (lycon->block.text_align == LXB_CSS_VALUE_RIGHT) {
-                offset = lycon->block.width - line_width;
+                offset = lycon->block.content_width - line_width;
             }
             if (offset <= 0) return;  // no need to adjust the views
             view_line_align(lycon, offset, view);
@@ -433,17 +433,17 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     log_debug("DEBUG: Initializing layout context");
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
-    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;
+    lycon->block.max_width = lycon->block.content_width = lycon->ui_context->window_width;
     // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
     // This matches browser behavior where HTML element fits content, not viewport
-    lycon->block.height = 0;  // Will be calculated based on content
+    lycon->block.content_height = 0;  // Will be calculated based on content
     lycon->block.advance_y = 0;  lycon->block.line_height = -1;
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
-    line_init(lycon, 0, lycon->block.width);
+    line_init(lycon, 0, lycon->block.content_width);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
-    html->width = lycon->block.width;  html->height = lycon->block.height;
+    html->width = lycon->block.content_width;  html->height = lycon->block.content_height;
     lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
     lycon->elmt = elmt;
     // default html styles

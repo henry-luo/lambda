@@ -33,7 +33,6 @@ typedef struct FloatContext {
 
 // Core positioning functions
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
-void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block);
 
 // Utility functions
 bool element_has_positioning(ViewBlock* block);
