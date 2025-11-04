@@ -82,13 +82,10 @@ ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type) {
         // Find nearest positioned ancestor
         ViewGroup* ancestor = element->parent;
         while (ancestor) {
-            if (ancestor->type == RDT_VIEW_BLOCK ||
-                ancestor->type == RDT_VIEW_INLINE_BLOCK) {
+            if (ancestor->is_block()) {
                 ViewBlock* ancestor_block = (ViewBlock*)ancestor;
-
                 // Check if ancestor is positioned
-                if (ancestor_block->position &&
-                    ancestor_block->position->position != LXB_CSS_VALUE_STATIC) {
+                if (ancestor_block->position && ancestor_block->position->position != LXB_CSS_VALUE_STATIC) {
                     return ancestor_block;
                 }
             }
@@ -106,8 +103,7 @@ ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type) {
     // For relative positioning, use nearest block container
     ViewGroup* ancestor = element->parent;
     while (ancestor) {
-        if (ancestor->type == RDT_VIEW_BLOCK ||
-            ancestor->type == RDT_VIEW_INLINE_BLOCK) {
+        if (ancestor->is_block()) {
             return (ViewBlock*)ancestor;
         }
         ancestor = ancestor->parent;
@@ -238,9 +234,11 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         if (!cb->position->first_abs_child) {
             cb->position->last_abs_child = cb->position->first_abs_child = block;
         } else {
-            cb->position->last_abs_child->position->next_abs_block = block;
+            cb->position->last_abs_child->position->next_abs_sibling = block;
             cb->position->last_abs_child = block;
         }
+    } else {
+        log_error("Containing block has no position property");
     }
 
     // calculate position based on offset properties and containing block
