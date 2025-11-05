@@ -4,7 +4,6 @@
 
 // Forward declarations
 ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
-void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y);
 float adjust_min_max_width(ViewBlock* block, float width);
 float adjust_min_max_height(ViewBlock* block, float height);
 float adjust_border_padding_width(ViewBlock* block, float width);
@@ -17,48 +16,28 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
  * Relative positioning moves the element from its normal position without affecting other elements
  */
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->position || block->position->position != 334) {  // LXB_CSS_VALUE_RELATIVE
-        return;
-    }
-
     log_debug("Applying relative positioning to element");
-
     // Calculate offset from top/right/bottom/left properties
     int offset_x = 0, offset_y = 0;
-    calculate_relative_offset(block, &offset_x, &offset_y);
-
-    // Apply offset to visual position (doesn't affect layout of other elements)
-    block->x += offset_x;
-    block->y += offset_y;
-
-    log_debug("Applied relative positioning: offset (%d, %d), final position (%d, %d)",
-              offset_x, offset_y, block->x, block->y);
-}
-
-/**
- * Calculate relative positioning offset from CSS properties
- */
-void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y) {
-    *offset_x = 0;
-    *offset_y = 0;
-
-    if (!block->position) return;
 
     // Horizontal offset: left takes precedence over right
     if (block->position->has_left) {
-        *offset_x = block->position->left;
+        offset_x = block->position->left;
     } else if (block->position->has_right) {
-        *offset_x = -block->position->right;
+        offset_x = -block->position->right;
     }
-
     // Vertical offset: top takes precedence over bottom
     if (block->position->has_top) {
-        *offset_y = block->position->top;
+        offset_y = block->position->top;
     } else if (block->position->has_bottom) {
-        *offset_y = -block->position->bottom;
+        offset_y = -block->position->bottom;
     }
+    log_debug("Calculated relative offset: x=%d, y=%d", offset_x, offset_y);
 
-    log_debug("Calculated relative offset: x=%d, y=%d", *offset_x, *offset_y);
+    // Apply offset to visual position (doesn't affect layout of other elements)
+    block->x += offset_x;  block->y += offset_y;
+    log_debug("Applied relative positioning: offset (%d, %d), final position (%d, %d)",
+              offset_x, offset_y, block->x, block->y);
 }
 
 /**
