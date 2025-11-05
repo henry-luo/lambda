@@ -1,7 +1,6 @@
 #include "view.hpp"
 #include <locale.h>
 #include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
-#include "font_precision.h"      // For configure_freetype_subpixel
 
 #include "../lib/log.h"
 void view_pool_destroy(ViewTree* tree);
@@ -17,6 +16,22 @@ char *fallback_fonts[] = {
     "Times New Roman", // for Arabic
     NULL
 };
+
+// Configure FreeType for optimal sub-pixel rendering
+void configure_freetype_subpixel(FT_Library library) {
+    if (!library) {
+        log_error("Invalid FreeType library handle");
+        return;
+    }
+    // Enable LCD filtering for sub-pixel rendering
+    FT_Error error = FT_Library_SetLcdFilter(library, FT_LCD_FILTER_DEFAULT);
+    if (error) {
+        log_warn("Failed to set LCD filter: %d", error);
+    } else {
+        log_debug("LCD filter enabled for sub-pixel rendering");
+    }
+    log_info("FreeType configured for sub-pixel rendering (basic mode)");
+}
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
