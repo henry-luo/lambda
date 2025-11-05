@@ -21,7 +21,7 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 }
 
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
-    lxb_url_t* abs_url = parse_lexbor_url(uicon->document->url, img_url);
+    Url* abs_url = parse_url(uicon->document->url, img_url);
     if (!abs_url) {
         printf("Failed to parse URL: %s\n", img_url);
         return NULL;
@@ -29,7 +29,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     char* file_path = url_to_local_path(abs_url);
     if (!file_path) {
         printf("Failed to parse URL: %s\n", img_url);
-        lxb_url_destroy(abs_url);
+        url_destroy(abs_url);
         return NULL;
     }
 
@@ -43,7 +43,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
     if (entry) {
         printf("Image loaded from cache: %s\n", file_path);
-        lxb_url_destroy(abs_url);
+        url_destroy(abs_url);
         return entry->image;
     }
     else {
@@ -100,7 +100,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
     free((char*)entry->path);
-    if (entry->image->url) lxb_url_destroy(entry->image->url);
+    if (entry->image->url) url_destroy(entry->image->url);
     image_surface_destroy(entry->image);
     return true;
 }

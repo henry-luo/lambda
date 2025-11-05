@@ -4,29 +4,6 @@
 #include "../lib/file.h"
 #include "../lib/url.h"
 
-char* url_to_local_path(lxb_url_t *url) {
-    if (!url) {
-        return NULL;
-    }
-
-    // Get the path string from lexbor URL
-    const lexbor_str_t* path_str = &url->path.str;
-    if (!path_str || !path_str->data || path_str->length == 0) {
-        return NULL;
-    }
-
-    // Copy the path to a null-terminated string
-    char* local_path = (char*)malloc(path_str->length + 1);
-    if (!local_path) {
-        return NULL;
-    }
-
-    memcpy(local_path, path_str->data, path_str->length);
-    local_path[path_str->length] = '\0';
-
-    return local_path;
-}
-
 char* read_text_doc(lxb_url_t *url) {
     if (!url) {
         return NULL;
@@ -99,53 +76,4 @@ void parse_html_doc(Document* doc) {
     // free(output);
 
     doc->dom_tree = document;
-}
-
-lxb_url_t* parse_lexbor_url(lxb_url_t *base, const char* doc_url) {
-    // Create memory pool for URL parsing
-    lexbor_mraw_t *mraw = lexbor_mraw_create();
-    if (!mraw) {
-        return NULL;
-    }
-
-    lxb_status_t status = lexbor_mraw_init(mraw, 1024 * 16); // 16KB initial size
-    if (status != LXB_STATUS_OK) {
-        lexbor_mraw_destroy(mraw, true);
-        return NULL;
-    }
-
-    lxb_url_parser_t *parser = lxb_url_parser_create();
-    if (!parser) {
-        lexbor_mraw_destroy(mraw, true);
-        return NULL;
-    }
-
-    lxb_status_t init_status = lxb_url_parser_init(parser, mraw);
-    if (init_status != LXB_STATUS_OK) {
-        lxb_url_parser_destroy(parser, true);
-        lexbor_mraw_destroy(mraw, true);
-        return NULL;
-    }
-
-    lxb_url_t *url = lxb_url_parse(parser, base, (const lxb_char_t*)doc_url, strlen(doc_url));
-
-    lxb_url_parser_destroy(parser, false); // Don't destroy mraw yet
-    // Note: don't destroy mraw here as url depends on it - caller must handle cleanup
-
-    return url;
-}
-
-Document* load_html_doc(lxb_url_t *base, char* doc_url) {
-    log_debug("loading HTML document: %s, base: %s", doc_url, base ? (char*)base->path.str.data : "NULL");
-    lxb_url_t* url = parse_lexbor_url(base, doc_url);
-    if (!url) {
-        log_error("failed to parse URL: %s", doc_url);
-        return NULL;
-    }
-    // parse the html document
-    Document* doc = (Document*)calloc(1, sizeof(Document));
-    doc->doc_type = DOC_TYPE_LEXBOR;  // Mark as Lexbor document
-    doc->url = url;
-    parse_html_doc(doc);
-    return doc;
 }

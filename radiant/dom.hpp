@@ -39,13 +39,13 @@ extern "C" {
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
-#include <lexbor/url/url.h>
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/utf.h"
+#include "../lib/url.h"
 #include "../lib/file.h"
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
@@ -77,8 +77,6 @@ typedef struct Style {
 typedef struct DomNode {
     NodeType type;
     union {
-        lxb_dom_node_t* lxb_node;     // base node (for LEXBOR_NODE)
-        lxb_html_element_t *lxb_elmt; // Lexbor HTML element (for LEXBOR_ELEMENT)
         DomElement* dom_element;      // Lambda CSS DOM element (for MARK_ELEMENT)
         DomText* dom_text;            // Lambda CSS DOM text (for MARK_TEXT)
         DomComment* dom_comment;      // Lambda CSS DOM comment (for MARK_COMMENT)
@@ -100,31 +98,17 @@ typedef struct DomNode {
     static uintptr_t tag_name_to_lexbor_id(const char* tag_name);
 
     bool is_element() {
-        return (type == LEXBOR_ELEMENT || type == MARK_ELEMENT);
+        return type == MARK_ELEMENT;
     }
 
     bool is_text() {
         if (type == MARK_TEXT) return true;
-        if (type != LEXBOR_NODE) return false;
-
-        // Use Lexbor API to distinguish between text nodes and comment nodes
-        if (lxb_node && lxb_node->type == LXB_DOM_NODE_TYPE_TEXT) {
-            return true;
-        }
-
         // Filter out comments and other non-text node types
         return false;
     }
 
     bool is_comment() {
         if (type == MARK_COMMENT) return true;
-        if (type != LEXBOR_NODE) return false;
-
-        // Check if Lexbor node is a comment
-        if (lxb_node && lxb_node->type == LXB_DOM_NODE_TYPE_COMMENT) {
-            return true;
-        }
-
         return false;
     }
 
@@ -150,14 +134,6 @@ typedef struct DomNode {
     // Clean up cached children (for stack-allocated root nodes)
     void free_cached_children();
 
-    // Access to underlying lexbor objects for transition period
-    lxb_html_element_t* as_element() {
-        return (type == LEXBOR_ELEMENT) ? lxb_elmt : nullptr;
-    }
-
-    lxb_dom_node_t* as_node() {
-        return lxb_node;
-    }
     DomNode* first_child();
     DomNode* next_sibling();
 } DomNode;
@@ -170,23 +146,18 @@ typedef enum {
 typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 
 typedef struct {
-    lxb_url_t* url;  // document URL
-    DocumentType doc_type;  // document source type
-    union {
-        lxb_html_document_t* dom_tree;     // Lexbor HTML document DOM tree
-        DomElement* lambda_dom_root;        // Lambda CSS DOM root element
-    };
-    Element* lambda_html_root;  // Lambda HTML parser root (for Lambda CSS docs)
-    int html_version;           // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
+    Url* url;                 // document URL
+    DocumentType doc_type;          // document source type
+    DomElement* lambda_dom_root;    // Lambda CSS DOM root element
+    Element* lambda_html_root;      // Lambda HTML parser root (for Lambda CSS docs)
+    int html_version;               // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
     ViewTree* view_tree;
     StateStore* state;
-    DomNode* root_dom_node;  // Root DomNode wrapper (heap-allocated, freed with view tree)
+    DomNode* root_dom_node;         // Root DomNode wrapper (heap-allocated, freed with view tree)
 } Document;
 
 typedef unsigned short PropValue;
 
-lxb_url_t* parse_lexbor_url(lxb_url_t *base, const char* doc_url);
-char* url_to_local_path(lxb_url_t *url);
-Document* load_html_doc(lxb_url_t *base, char* doc_filename);
+Document* load_html_doc(Url *base, char* doc_filename);
 Document* load_lambda_html_doc(const char* html_filename, const char* css_filename, int viewport_width, int viewport_height, Pool* pool);
 void free_document(Document* doc);

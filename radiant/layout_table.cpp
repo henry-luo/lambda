@@ -51,10 +51,7 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
     // These apply regardless of table-layout mode
 
     // Handle both Lexbor and Lambda CSS elements for border properties
-    if (element->type == LEXBOR_ELEMENT && element->lxb_elmt) {
-        // TODO: Add Lexbor border-collapse and border-spacing reading
-        // For now, use defaults set in view_pool.cpp
-    } else if (element->type == MARK_ELEMENT && element->dom_element) {
+    if (element->type == MARK_ELEMENT && element->dom_element) {
         // Lambda CSS path - read border-collapse and border-spacing
         DomElement* dom_elem = element->dom_element;
 
@@ -132,33 +129,7 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
     bool has_explicit_width = false;
     bool has_explicit_height = false;
 
-    // Handle both Lexbor and Lambda CSS elements
-    if (element->type == LEXBOR_ELEMENT && element->lxb_elmt) {
-        // Lexbor path (original code)
-        lxb_html_element_t* html_element = element->lxb_elmt;
-
-        if (html_element->element.style) {
-            // Check for explicit width
-            const lxb_css_rule_declaration_t* width_decl =
-                lxb_dom_element_style_by_id(
-                    (lxb_dom_element_t*)html_element,
-                    LXB_CSS_PROPERTY_WIDTH);
-
-            if (width_decl && width_decl->u.width) {
-                has_explicit_width = true;
-            }
-
-            // Check for explicit height
-            const lxb_css_rule_declaration_t* height_decl =
-                lxb_dom_element_style_by_id(
-                    (lxb_dom_element_t*)html_element,
-                    LXB_CSS_PROPERTY_HEIGHT);
-
-            if (height_decl && height_decl->u.height) {
-                has_explicit_height = true;
-            }
-        }
-    } else if (element->type == MARK_ELEMENT && element->dom_element) {
+    if (element->type == MARK_ELEMENT && element->dom_element) {
         // Lambda CSS path
         DomElement* dom_elem = element->dom_element;
 
@@ -203,82 +174,9 @@ static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
     cell->col_index = -1;
     cell->row_index = -1;
     cell->vertical_align = ViewTableCell::CELL_VALIGN_TOP;
-
     if (!cellNode->is_element()) return;
 
-    log_debug("parse_cell_attributes: cellNode->type=%d (LEXBOR=%d, MARK=%d)",
-           cellNode->type, LEXBOR_ELEMENT, MARK_ELEMENT);
-
-    // Handle both Lexbor and Lambda CSS elements
-    if (cellNode->type == LEXBOR_ELEMENT && cellNode->lxb_elmt) {
-        log_debug("Using Lexbor path for cell attributes");
-        // Lexbor path (original code)
-        lxb_html_element_t* element = cellNode->lxb_elmt;
-
-        // Parse colspan
-        lxb_dom_attr_t* colspan_attr = lxb_dom_element_attr_by_name(
-            lxb_dom_interface_element(element), (const lxb_char_t*)"colspan", 7);
-        if (colspan_attr && colspan_attr->value) {
-            size_t attr_len;
-            const char* colspan_str = (const char*)lxb_dom_attr_value(colspan_attr, &attr_len);
-            if (colspan_str && attr_len > 0) {
-                int span = atoi(colspan_str);
-                if (span > 0 && span <= 1000) {
-                    cell->col_span = span;
-                }
-            }
-        }
-
-        // Parse rowspan
-        lxb_dom_attr_t* rowspan_attr = lxb_dom_element_attr_by_name(
-            lxb_dom_interface_element(element), (const lxb_char_t*)"rowspan", 7);
-        if (rowspan_attr && rowspan_attr->value) {
-            size_t attr_len;
-            const char* rowspan_str = (const char*)lxb_dom_attr_value(rowspan_attr, &attr_len);
-            if (rowspan_str && attr_len > 0) {
-                int span = atoi(rowspan_str);
-                if (span > 0 && span <= 65534) {
-                    cell->row_span = span;
-                }
-            }
-        }
-
-        // Parse vertical-align CSS property
-        if (element->element.style) {
-            const lxb_css_rule_declaration_t* valign_decl =
-                lxb_dom_element_style_by_id(
-                    (lxb_dom_element_t*)element,
-                    LXB_CSS_PROPERTY_VERTICAL_ALIGN);
-            if (valign_decl && valign_decl->u.vertical_align) {
-                lxb_css_property_vertical_align_t* vertical_align = valign_decl->u.vertical_align;
-                PropValue valign = vertical_align->alignment.type ?
-                    vertical_align->alignment.type : vertical_align->shift.type;
-
-                // Map CSS vertical-align values to cell enum
-                switch (valign) {
-                    case LXB_CSS_VALUE_TOP:
-                        cell->vertical_align = ViewTableCell::CELL_VALIGN_TOP;
-                        log_debug("Cell vertical-align: top");
-                        break;
-                    case LXB_CSS_VALUE_MIDDLE:
-                        cell->vertical_align = ViewTableCell::CELL_VALIGN_MIDDLE;
-                        log_debug("Cell vertical-align: middle");
-                        break;
-                    case LXB_CSS_VALUE_BOTTOM:
-                        cell->vertical_align = ViewTableCell::CELL_VALIGN_BOTTOM;
-                        log_debug("Cell vertical-align: bottom");
-                        break;
-                    case LXB_CSS_VALUE_BASELINE:
-                        cell->vertical_align = ViewTableCell::CELL_VALIGN_BASELINE;
-                        log_debug("Cell vertical-align: baseline");
-                        break;
-                    default:
-                        // Keep default (top)
-                        break;
-                }
-            }
-        }
-    } else if (cellNode->type == MARK_ELEMENT && cellNode->dom_element) {
+    if (cellNode->type == MARK_ELEMENT && cellNode->dom_element) {
         // Lambda CSS path
         DomElement* dom_elem = cellNode->dom_element;
         log_debug("Lambda CSS: parse_cell_attributes for element type=%d", cellNode->type);
@@ -748,18 +646,7 @@ static int measure_cell_min_width(ViewTableCell* cell) {
 
     // STEP 1: Check for explicit CSS width first
     if (cell->node) {
-        if (cell->node->type == LEXBOR_ELEMENT && cell->node->lxb_elmt && cell->node->lxb_elmt->element.style) {
-            const lxb_css_rule_declaration_t* width_decl =
-                lxb_dom_element_style_by_id(
-                    (lxb_dom_element_t*)cell->node->lxb_elmt,
-                    LXB_CSS_PROPERTY_WIDTH);
-            if (width_decl && width_decl->u.width) {
-                // Note: resolve_length_value needs a LayoutContext, but we don't have one here
-                // For now, we'll just detect that explicit width exists and measure content
-                // The width will be properly applied later in the fixed layout or column width calculation
-                log_debug("Cell has explicit CSS width property");
-            }
-        } else if (cell->node->type == MARK_ELEMENT && cell->node->dom_element) {
+        if (cell->node->type == MARK_ELEMENT && cell->node->dom_element) {
             DomElement* dom_elem = cell->node->dom_element;
             if (dom_elem->specified_style) {
                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -916,37 +803,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int table_content_width = 0; // Width available for cells
 
     if (table->node) {
-        if (table->node->type == LEXBOR_ELEMENT && table->node->lxb_elmt && table->node->lxb_elmt->element.style) {
-            const lxb_css_rule_declaration_t* width_decl =
-                lxb_dom_element_style_by_id(
-                    (lxb_dom_element_t*)table->node->lxb_elmt,
-                    LXB_CSS_PROPERTY_WIDTH);
-            if (width_decl && width_decl->u.width) {
-                explicit_table_width = resolve_length_value(
-                    lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
-
-                // Calculate content width (subtract borders and spacing)
-                table_content_width = explicit_table_width;
-
-                // Subtract table border
-                if (table->bound && table->bound->border) {
-                    table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
-                }
-
-                // Subtract table padding
-                if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
-                    table_content_width -= table->bound->padding.left + table->bound->padding.right;
-                }
-
-                // Subtract border-spacing
-                if (!table->border_collapse && table->border_spacing_h > 0) {
-                    table_content_width -= (columns + 1) * table->border_spacing_h;
-                }
-
-                log_debug("Table explicit width: %dpx, content width for cells: %dpx",
-                       explicit_table_width, table_content_width);
-            }
-        } else if (table->node->type == MARK_ELEMENT && table->node->dom_element) {
+        if (table->node->type == MARK_ELEMENT && table->node->dom_element) {
             DomElement* dom_elem = table->node->dom_element;
             if (dom_elem->specified_style) {
                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1019,53 +876,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // Try to get explicit width from CSS first
                             int cell_width = 0;
                             if (tcell->node) {
-                                if (tcell->node->type == LEXBOR_ELEMENT && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
-                                    const lxb_css_rule_declaration_t* width_decl =
-                                        lxb_dom_element_style_by_id(
-                                            (lxb_dom_element_t*)tcell->node->lxb_elmt,
-                                            LXB_CSS_PROPERTY_WIDTH);
-                                    if (width_decl && width_decl->u.width) {
-                                        // Check if it's a percentage value
-                                        if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE && table_content_width > 0) {
-                                            // Calculate percentage relative to table content width
-                                            float percentage = width_decl->u.width->u.percentage.num;
-                                            int css_content_width = (int)(table_content_width * percentage / 100.0f);
-
-                                            // CSS width is content-box, need to add border and padding
-                                            cell_width = css_content_width;
-
-                                            // Add padding
-                                            if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-                                                cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-                                            }
-
-                                            // Add border (1px left + 1px right)
-                                            cell_width += 2;
-
-                                            log_debug("Cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
-                                                   percentage, table_content_width, css_content_width, cell_width);
-                                        } else {
-                                            // Absolute width
-                                            int css_content_width = resolve_length_value(
-                                                lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
-                                            if (css_content_width > 0) {
-                                                // CSS width is content-box, need to add border and padding
-                                                cell_width = css_content_width;
-
-                                                // Add padding
-                                                if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-                                                    cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-                                                }
-
-                                                // Add border (1px left + 1px right)
-                                                cell_width += 2;
-
-                                                log_debug("Cell explicit CSS width: %dpx content + padding + border = %dpx total",
-                                                       css_content_width, cell_width);
-                                            }
-                                        }
-                                    }
-                                } else if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
+                                if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
                                     DomElement* dom_elem = tcell->node->dom_element;
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1176,53 +987,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Try to get explicit width from CSS first
                     int cell_width = 0;
                     if (tcell->node) {
-                        if (tcell->node->type == LEXBOR_ELEMENT && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
-                            const lxb_css_rule_declaration_t* width_decl =
-                                lxb_dom_element_style_by_id(
-                                    (lxb_dom_element_t*)tcell->node->lxb_elmt,
-                                    LXB_CSS_PROPERTY_WIDTH);
-                            if (width_decl && width_decl->u.width) {
-                                // Check if it's a percentage value
-                                if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE && table_content_width > 0) {
-                                    // Calculate percentage relative to table content width
-                                    float percentage = width_decl->u.width->u.percentage.num;
-                                    int css_content_width = (int)(table_content_width * percentage / 100.0f);
-
-                                    // CSS width is content-box, need to add border and padding
-                                    cell_width = css_content_width;
-
-                                    // Add padding
-                                    if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-                                        cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-                                    }
-
-                                    // Add border (1px left + 1px right)
-                                    cell_width += 2;
-
-                                    log_debug("Direct row cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
-                                           percentage, table_content_width, css_content_width, cell_width);
-                                } else {
-                                    // Absolute width
-                                    int css_content_width = resolve_length_value(
-                                        lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
-                                    if (css_content_width > 0) {
-                                        // CSS width is content-box, need to add border and padding
-                                        cell_width = css_content_width;
-
-                                        // Add padding
-                                        if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-                                            cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-                                        }
-
-                                        // Add border (1px left + 1px right)
-                                        cell_width += 2;
-
-                                        log_debug("Direct row cell explicit CSS width: %dpx content + padding + border = %dpx total",
-                                               css_content_width, cell_width);
-                                    }
-                                }
-                            }
-                        } else if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
+                        if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
                             DomElement* dom_elem = tcell->node->dom_element;
                             if (dom_elem->specified_style) {
                                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1317,17 +1082,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // Try to read width directly from table element's CSS
         if (table->node) {
-            if (table->node->type == LEXBOR_ELEMENT && table->node->lxb_elmt && table->node->lxb_elmt->element.style) {
-                const lxb_css_rule_declaration_t* width_decl =
-                    lxb_dom_element_style_by_id(
-                        (lxb_dom_element_t*)table->node->lxb_elmt,
-                        LXB_CSS_PROPERTY_WIDTH);
-                if (width_decl && width_decl->u.width) {
-                    explicit_table_width = resolve_length_value(
-                        lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
-                    log_debug("FIXED LAYOUT - read table CSS width: %dpx", explicit_table_width);
-                }
-            } else if (table->node->type == MARK_ELEMENT && table->node->dom_element) {
+            if (table->node->type == MARK_ELEMENT && table->node->dom_element) {
                 DomElement* dom_elem = table->node->dom_element;
                 if (dom_elem->specified_style) {
                     CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1408,27 +1163,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Try to get explicit width from CSS
                     int cell_width = 0;
                     if (cell->node) {
-                        if (cell->node->type == LEXBOR_ELEMENT && cell->node->lxb_elmt && cell->node->lxb_elmt->element.style) {
-                            const lxb_css_rule_declaration_t* width_decl =
-                                lxb_dom_element_style_by_id(
-                                    (lxb_dom_element_t*)cell->node->lxb_elmt,
-                                    LXB_CSS_PROPERTY_WIDTH);
-                            if (width_decl && width_decl->u.width) {
-                                // Check if it's a percentage value
-                                if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE) {
-                                    // Calculate percentage relative to table content width
-                                    float percentage = width_decl->u.width->u.percentage.num;
-                                    cell_width = (int)(content_width * percentage / 100.0f);
-                                    log_debug("  Column %d: percentage width %.1f%% of %dpx = %dpx",
-                                           col, percentage, content_width, cell_width);
-                                } else {
-                                    // Absolute width (px, em, etc.)
-                                    cell_width = resolve_length_value(
-                                        lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
-                                    log_debug("  Column %d: absolute width %dpx", col, cell_width);
-                                }
-                            }
-                        } else if (cell->node->type == MARK_ELEMENT && cell->node->dom_element) {
+                        if (cell->node->type == MARK_ELEMENT && cell->node->dom_element) {
                             DomElement* dom_elem = cell->node->dom_element;
                             if (dom_elem->specified_style) {
                                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1522,17 +1257,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // If table has height: 300px, distribute that height across rows
         int explicit_table_height = 0;
         if (table->node) {
-            if (table->node->type == LEXBOR_ELEMENT && table->node->lxb_elmt && table->node->lxb_elmt->element.style) {
-                const lxb_css_rule_declaration_t* height_decl =
-                    lxb_dom_element_style_by_id(
-                        (lxb_dom_element_t*)table->node->lxb_elmt,
-                        LXB_CSS_PROPERTY_HEIGHT);
-                if (height_decl && height_decl->u.height) {
-                    explicit_table_height = resolve_length_value(
-                        lycon, LXB_CSS_PROPERTY_HEIGHT, height_decl->u.height);
-                    log_debug("FIXED LAYOUT - read table CSS height: %dpx", explicit_table_height);
-                }
-            } else if (table->node->type == MARK_ELEMENT && table->node->dom_element) {
+            if (table->node->type == MARK_ELEMENT && table->node->dom_element) {
                 DomElement* dom_elem = table->node->dom_element;
                 if (dom_elem->specified_style) {
                     CssDeclaration* height_decl = style_tree_get_declaration(
@@ -1820,17 +1545,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // STEP 1: Check for explicit CSS height property first
                             int explicit_cell_height = 0;
                             if (tcell->node) {
-                                if (tcell->node->type == LEXBOR_ELEMENT && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
-                                    const lxb_css_rule_declaration_t* height_decl =
-                                        lxb_dom_element_style_by_id(
-                                            (lxb_dom_element_t*)tcell->node->lxb_elmt,
-                                            LXB_CSS_PROPERTY_HEIGHT);
-                                    if (height_decl && height_decl->u.height) {
-                                        explicit_cell_height = resolve_length_value(
-                                            lycon, LXB_CSS_PROPERTY_HEIGHT, height_decl->u.height);
-                                        log_debug("Cell has explicit CSS height: %dpx", explicit_cell_height);
-                                    }
-                                } else if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
+                                if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
                                     DomElement* dom_elem = tcell->node->dom_element;
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* height_decl = style_tree_get_declaration(
@@ -1855,17 +1570,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     // Check if child has explicit CSS height
                                     int child_css_height = 0;
                                     if (block->node) {
-                                        if (block->node->type == LEXBOR_ELEMENT && block->node->lxb_elmt && block->node->lxb_elmt->element.style) {
-                                            const lxb_css_rule_declaration_t* child_height_decl =
-                                                lxb_dom_element_style_by_id(
-                                                    (lxb_dom_element_t*)block->node->lxb_elmt,
-                                                    LXB_CSS_PROPERTY_HEIGHT);
-                                            if (child_height_decl && child_height_decl->u.height) {
-                                                child_css_height = resolve_length_value(
-                                                    lycon, LXB_CSS_PROPERTY_HEIGHT, child_height_decl->u.height);
-                                                log_debug("Child element (type=%d) has explicit CSS height: %dpx", cc->type, child_css_height);
-                                            }
-                                        } else if (block->node->type == MARK_ELEMENT && block->node->dom_element) {
+                                        if (block->node->type == MARK_ELEMENT && block->node->dom_element) {
                                             DomElement* dom_elem = block->node->dom_element;
                                             if (dom_elem->specified_style) {
                                                 CssDeclaration* child_height_decl = style_tree_get_declaration(
@@ -2081,17 +1786,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // STEP 1: Check for explicit CSS height property first
                     int explicit_cell_height = 0;
                     if (tcell->node) {
-                        if (tcell->node->type == LEXBOR_ELEMENT && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
-                            const lxb_css_rule_declaration_t* height_decl =
-                                lxb_dom_element_style_by_id(
-                                    (lxb_dom_element_t*)tcell->node->lxb_elmt,
-                                    LXB_CSS_PROPERTY_HEIGHT);
-                            if (height_decl && height_decl->u.height) {
-                                explicit_cell_height = resolve_length_value(
-                                    lycon, LXB_CSS_PROPERTY_HEIGHT, height_decl->u.height);
-                                log_debug("Cell has explicit CSS height: %dpx", explicit_cell_height);
-                            }
-                        } else if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
+                        if (tcell->node->type == MARK_ELEMENT && tcell->node->dom_element) {
                             DomElement* dom_elem = tcell->node->dom_element;
                             if (dom_elem->specified_style) {
                                 CssDeclaration* height_decl = style_tree_get_declaration(
@@ -2116,17 +1811,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // Check if child has explicit CSS height
                             int child_css_height = 0;
                             if (block->node) {
-                                if (block->node->type == LEXBOR_ELEMENT && block->node->lxb_elmt && block->node->lxb_elmt->element.style) {
-                                    const lxb_css_rule_declaration_t* child_height_decl =
-                                        lxb_dom_element_style_by_id(
-                                            (lxb_dom_element_t*)block->node->lxb_elmt,
-                                            LXB_CSS_PROPERTY_HEIGHT);
-                                    if (child_height_decl && child_height_decl->u.height) {
-                                        child_css_height = resolve_length_value(
-                                            lycon, LXB_CSS_PROPERTY_HEIGHT, child_height_decl->u.height);
-                                        log_debug("Direct row child element (type=%d) has explicit CSS height: %dpx", cc->type, child_css_height);
-                                    }
-                                } else if (block->node->type == MARK_ELEMENT && block->node->dom_element) {
+                                if (block->node->type == MARK_ELEMENT && block->node->dom_element) {
                                     DomElement* dom_elem = block->node->dom_element;
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* child_height_decl = style_tree_get_declaration(

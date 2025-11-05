@@ -652,3 +652,124 @@ Url* parse_url(Url *base, const char* doc_url) {
         return url_parse(doc_url);
     }
 }
+
+// helper function to decode percent-encoded characters
+static int hex_to_int(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+// URL decode a string (decode percent-encoded characters)
+static char* url_decode(const char* str) {
+    if (!str) return NULL;
+
+    size_t len = strlen(str);
+    char* decoded = malloc(len + 1);  // decoded string will be same size or smaller
+    if (!decoded) return NULL;
+
+    size_t i = 0, j = 0;
+    while (i < len) {
+        if (str[i] == '%' && i + 2 < len) {
+            int high = hex_to_int(str[i + 1]);
+            int low = hex_to_int(str[i + 2]);
+            if (high >= 0 && low >= 0) {
+                decoded[j++] = (char)((high << 4) | low);
+                i += 3;
+                continue;
+            }
+        }
+        decoded[j++] = str[i++];
+    }
+    decoded[j] = '\0';
+    return decoded;
+}
+
+// Convert file:// URL to local file system path
+// Returns a newly allocated string that must be freed by the caller
+// Returns NULL if the URL is not a valid file:// URL
+char* url_to_local_path(const Url* url) {
+    if (!url || !url->is_valid) {
+        log_warn("Invalid URL provided to url_to_local_path");
+        return NULL;
+    }
+
+    // Check if this is a file:// URL
+    if (url->scheme != URL_SCHEME_FILE) {
+        log_warn("URL scheme is not 'file://', got: %s", url_scheme_to_string(url->scheme));
+        return NULL;
+    }
+
+    // Get the pathname
+    const char* pathname = url_get_pathname(url);
+    if (!pathname || pathname[0] == '\0') {
+        log_warn("URL has no pathname");
+        return NULL;
+    }
+
+    // Decode percent-encoded characters
+    char* decoded_path = url_decode(pathname);
+    if (!decoded_path) {
+        log_error("Failed to decode URL path");
+        return NULL;
+    }
+
+    // Handle different platform path conventions
+    #ifdef _WIN32
+    // Windows: file:///C:/path/to/file or file://host/share/path (UNC)
+    const char* hostname = url_get_hostname(url);
+
+    if (hostname && hostname[0] != '\0') {
+        // UNC path: file://hostname/share/path -> \\hostname\share\path
+        size_t result_len = 2 + strlen(hostname) + strlen(decoded_path) + 1;
+        char* result = malloc(result_len);
+        if (!result) {
+            free(decoded_path);
+            return NULL;
+        }
+        snprintf(result, result_len, "\\\\%s%s", hostname, decoded_path);
+
+        // Convert forward slashes to backslashes
+        for (char* p = result; *p; p++) {
+            if (*p == '/') *p = '\\';
+        }
+
+        free(decoded_path);
+        return result;
+    } else {
+        // Local path: file:///C:/path -> C:\path
+        // Skip leading slash if followed by drive letter
+        const char* path = decoded_path;
+        if (path[0] == '/' && path[1] && path[2] == ':') {
+            path++;  // skip the leading /
+        }
+
+        // Allocate new string and convert slashes
+        char* result = strdup(path);
+        free(decoded_path);
+
+        if (!result) return NULL;
+
+        // Convert forward slashes to backslashes
+        for (char* p = result; *p; p++) {
+            if (*p == '/') *p = '\\';
+        }
+
+        return result;
+    }
+    #else
+    // Unix (macOS, Linux): file:///path/to/file or file://localhost/path/to/file
+    const char* hostname = url_get_hostname(url);
+
+    // For Unix, hostname should be empty or "localhost"
+    if (hostname && hostname[0] != '\0' && strcmp(hostname, "localhost") != 0) {
+        log_warn("Non-localhost hostname in file:// URL: %s", hostname);
+        free(decoded_path);
+        return NULL;
+    }
+
+    // On Unix, the pathname is already in the correct format
+    return decoded_path;
+    #endif
+}

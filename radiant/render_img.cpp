@@ -13,8 +13,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-lxb_url_t* get_current_dir_lexbor();
-Document* load_html_doc(lxb_url_t* base, char* doc_url);
+Document* load_html_doc(Url* base, char* doc_url);
 
 // Save surface to PNG using libpng
 void save_surface_to_png(ImageSurface* surface, const char* filename) {
@@ -159,7 +158,7 @@ int render_html_to_png(const char* html_file, const char* png_file) {
     ui_context_create_surface(&ui_context, default_width, default_height);
 
     // Get current directory for relative path resolution
-    lxb_url_t* cwd = get_current_dir_lexbor();
+    Url* cwd = get_current_dir();
     if (!cwd) {
         log_debug("Could not get current directory");
         ui_context_cleanup(&ui_context);
@@ -177,7 +176,7 @@ int render_html_to_png(const char* html_file, const char* png_file) {
     ui_context.document = doc;
 
     // Layout the document
-    if (doc->dom_tree) {
+    if (doc->lambda_dom_root) {
         layout_html_doc(&ui_context, doc, false);
     }
 
@@ -212,7 +211,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     ui_context_create_surface(&ui_context, default_width, default_height);
 
     // Get current directory for relative path resolution
-    lxb_url_t* cwd = get_current_dir_lexbor();
+    Url* cwd = get_current_dir();
     if (!cwd) {
         log_debug("Could not get current directory");
         ui_context_cleanup(&ui_context);
@@ -230,7 +229,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     ui_context.document = doc;
 
     // Layout the document
-    if (doc->dom_tree) {
+    if (doc->lambda_dom_root) {
         layout_html_doc(&ui_context, doc, false);
     }
 

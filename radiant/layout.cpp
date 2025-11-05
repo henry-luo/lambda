@@ -117,12 +117,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     log_debug("resolving style for elment '%s' of type %d", node->name(), node ? node->type : -1);
     log_enter();
 
-    if (node && node->type == LEXBOR_ELEMENT && node->lxb_elmt && node->lxb_elmt->element.style) {
-        // Lexbor CSS path - use existing resolution
-        lexbor_avl_foreach_recursion(NULL, node->lxb_elmt->element.style, resolve_element_style, lycon);
-        log_debug("resolved element style for: %s", node->name());
-    }
-    else if (node && node->type == MARK_ELEMENT && node->style) {
+    if (node && node->type == MARK_ELEMENT && node->style) {
         // Lambda CSS path - use parallel resolution function
         DomElement* dom_elem = (DomElement*)node->style;
         resolve_lambda_css_styles(dom_elem, lycon);
@@ -335,6 +330,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     log_debug("end flow node, block advance_y: %d", lycon->block.advance_y);
 }
 
+/*
 void load_style(LayoutContext* lycon, unsigned char* style_source) {
     lxb_css_parser_t *parser;  lxb_status_t status;  lxb_css_stylesheet_t *sst;
     parser = lxb_css_parser_create();
@@ -355,7 +351,9 @@ void load_style(LayoutContext* lycon, unsigned char* style_source) {
     }
     lxb_css_parser_destroy(parser, true);
 }
+*/
 
+/*
 void apply_header_style(LayoutContext* lycon) {
     // apply header styles - only for Lexbor documents
     // Lambda CSS documents have CSS already applied during load_lambda_html_doc()
@@ -387,7 +385,7 @@ void apply_header_style(LayoutContext* lycon) {
                     lxb_dom_attr_t* href = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_HREF);
 
                     if (href) {
-                        lxb_url_t* abs_url = parse_lexbor_url(lycon->ui_context->document->url, (const char*)href->value->data);
+                        Url* abs_url = parse_url(lycon->ui_context->document->url, (const char*)href->value->data);
                         if (!abs_url) {
                             log_debug("Failed to parse URL");
                             goto NEXT;
@@ -421,12 +419,13 @@ void apply_header_style(LayoutContext* lycon) {
         }
     }
 }
+*/
 
 void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     log_debug("layout html root");
     log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? elmt->type : -1);
-    log_debug("DEBUG: About to call apply_header_style");
-    apply_header_style(lycon);
+    //log_debug("DEBUG: About to call apply_header_style");
+    //apply_header_style(lycon);
     log_debug("DEBUG: apply_header_style complete");
 
     // init context
@@ -472,17 +471,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     // layout body content - handle both Lexbor and Lambda CSS documents
     DomNode* body_node = nullptr;
 
-    if (lycon->doc->doc_type == DOC_TYPE_LEXBOR) {
-        // Lexbor document - use Lexbor API to find body
-        lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
-        if (lexbor_body) {
-            body_node = (DomNode*)malloc(sizeof(DomNode));
-            memset(body_node, 0, sizeof(DomNode));
-            body_node->type = LEXBOR_ELEMENT;
-            body_node->lxb_node = (lxb_dom_node_t*)lexbor_body;
-            log_debug("Found Lexbor body element");
-        }
-    } else if (lycon->doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+    if (lycon->doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - navigate DomNode tree to find body
         log_debug("Searching for body element in Lambda CSS document");
         DomNode* child = elmt->first_child();
@@ -512,6 +501,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
 }
 
 // Function to determine HTML version from DOCTYPE and compat mode
+/*
 HtmlVersion detect_html_version(lxb_html_document_t* html_doc) {
     lxb_dom_document_t* dom_doc = lxb_html_document_original_ref(html_doc);
     if (!dom_doc) {
@@ -600,6 +590,7 @@ HtmlVersion detect_html_version(lxb_html_document_t* html_doc) {
     // }
     return HTML5;  // "HTML5 (Standards Mode)";
 }
+*/
 
 int detect_html_version_lambda_css(Document* doc) {
     if (!doc || doc->doc_type != DOC_TYPE_LAMBDA_CSS) {
@@ -622,11 +613,7 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     // This is a simplified implementation - in a full system, this would be done during CSS parsing
     if (doc) {
         // Detect HTML version based on document type
-        if (doc->doc_type == DOC_TYPE_LEXBOR && doc->dom_tree) {
-            doc->view_tree->html_version = detect_html_version(doc->dom_tree);
-            clog_info(font_log, "Processing @font-face rules for document");
-            parse_font_face_rule(lycon, NULL); // NULL rule for hardcoded implementation
-        } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+        if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
             // Detect HTML version from Lambda CSS document
             doc->view_tree->html_version = (HtmlVersion)detect_html_version_lambda_css(doc);
             clog_info(font_log, "Lambda CSS document - detected HTML version: %d", doc->view_tree->html_version);
@@ -680,13 +667,7 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     }
     doc->root_dom_node = root_node;  // Store in Document for later cleanup
 
-    if (doc->doc_type == DOC_TYPE_LEXBOR) {
-        // Lexbor HTML document
-        lxb_html_element_t *lexbor_root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
-        root_node->type = LEXBOR_ELEMENT;
-        root_node->lxb_node = (lxb_dom_node_t*)lexbor_root;
-        log_debug("layout lexbor html root %s", root_node->name());
-    } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+    if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - DomNode wraps DomElement directly
         log_debug("DEBUG: Setting root_node.type to MARK_ELEMENT (%d)", MARK_ELEMENT);
         root_node->type = MARK_ELEMENT;

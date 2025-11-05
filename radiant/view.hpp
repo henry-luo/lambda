@@ -31,6 +31,12 @@ extern "C" {
 #include "event.hpp"
 #include "flex.hpp"
 
+typedef struct {
+    const char *name;
+    size_t     length;
+    uintptr_t  unique;
+} css_data;
+
 #define RDT_DISPLAY_TEXT                (LXB_CSS_VALUE__LAST_ENTRY + 10)
 #define RDT_DISPLAY_REPLACED            (LXB_CSS_VALUE__LAST_ENTRY + 11)
 
@@ -112,7 +118,7 @@ typedef struct ImageSurface {
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
     Tvg_Paint* pic;        // ThorVG picture for SVG image
     int max_render_width;  // maximum width for rendering the image
-    lxb_url_t* url;        // the resolved absolute URL of the image
+    Url* url;        // the resolved absolute URL of the image
 } ImageSurface;
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);

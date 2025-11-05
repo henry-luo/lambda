@@ -10,10 +10,9 @@
 #include "../lib/log.h"
 #include "layout.hpp"
 
-lxb_url_t* get_current_dir_lexbor();
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-Document* load_html_doc(lxb_url_t *base, char* doc_filename);
+Document* load_html_doc(Url* base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 
@@ -28,12 +27,12 @@ int window_main_with_file(const char* html_file);
 bool do_redraw = false;
 UiContext ui_context;
 
-Document* show_html_doc(lxb_url_t *base, char* doc_url) {
+Document* show_html_doc(Url* base, char* doc_url) {
     log_debug("Showing HTML document %s", doc_url);
     Document* doc = load_html_doc(base, doc_url);
     ui_context.document = doc;
     // layout html doc
-    if (doc->dom_tree) {
+    if (doc->lambda_dom_root) {
         layout_html_doc(&ui_context, doc, false);
     }
     // render html doc
@@ -45,7 +44,7 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
 }
 
 void reflow_html_doc(Document* doc) {
-    if (!doc || !doc->dom_tree) {
+    if (!doc || !doc->lambda_dom_root) {
         log_debug("No document to reflow");
         return;
     }
@@ -224,49 +223,6 @@ void log_cleanup() {
     log_finish();
 }
 
-lxb_url_t* get_current_dir_lexbor() {
-    char cwd[1024];
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-        return NULL;
-    }
-
-    // Convert to file:// URL format
-    char file_url[1200];
-    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
-
-    // Create memory pool for URL parsing
-    lexbor_mraw_t *mraw = lexbor_mraw_create();
-    if (!mraw) {
-        return NULL;
-    }
-
-    lxb_status_t status = lexbor_mraw_init(mraw, 1024 * 16);
-    if (status != LXB_STATUS_OK) {
-        lexbor_mraw_destroy(mraw, true);
-        return NULL;
-    }
-
-    lxb_url_parser_t *parser = lxb_url_parser_create();
-    if (!parser) {
-        lexbor_mraw_destroy(mraw, true);
-        return NULL;
-    }
-
-    status = lxb_url_parser_init(parser, mraw);
-    if (status != LXB_STATUS_OK) {
-        lxb_url_parser_destroy(parser, true);
-        lexbor_mraw_destroy(mraw, true);
-        return NULL;
-    }
-
-    lxb_url_t *url = lxb_url_parse(parser, NULL, (const lxb_char_t*)file_url, strlen(file_url));
-
-    lxb_url_parser_destroy(parser, false);
-    // Note: don't destroy mraw here as url depends on it
-
-    return url;
-}
-
 // Layout test function for headless testing
 int run_layout(const char* html_file) {
     log_debug("Radiant Layout Test Mode");
@@ -285,7 +241,7 @@ int run_layout(const char* html_file) {
     ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
 
     // Get current directory for relative path resolution
-    lxb_url_t* cwd = get_current_dir_lexbor();
+    Url* cwd = get_current_dir();
     if (!cwd) {
         log_error("Error: Could not get current directory");
         ui_context_cleanup(&ui_context);
@@ -297,7 +253,7 @@ int run_layout(const char* html_file) {
     Document* doc = load_html_doc(cwd, (char*)html_file);
     if (!doc) {
         log_error("Error: Could not load HTML file: %s", html_file);
-        lxb_url_destroy(cwd);
+        url_destroy(cwd);
         ui_context_cleanup(&ui_context);
         return 1;
     }
@@ -310,7 +266,7 @@ int run_layout(const char* html_file) {
     log_debug("Layout completed successfully!");
 
     // Cleanup
-    lxb_url_destroy(cwd);
+    url_destroy(cwd);
     ui_context_cleanup(&ui_context);
     log_cleanup();
     return 0;
@@ -355,13 +311,13 @@ int window_main_with_file(const char* html_file) {
     double deltaTime = 0.0;
     int frames = 0;
 
-    lxb_url_t* cwd = get_current_dir_lexbor();
+    Url* cwd = get_current_dir();
     if (cwd) {
         // Use provided HTML file or default to test file
         const char* file_to_load = html_file ? html_file : "test/html/index.html";
         Document* doc = show_html_doc(cwd, (char*)file_to_load);
-        lxb_url_destroy(cwd);
-        
+        url_destroy(cwd);
+
         // Set custom window title if HTML file was provided
         if (html_file && doc) {
             char title[512];

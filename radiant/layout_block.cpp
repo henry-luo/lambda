@@ -116,7 +116,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             } else {
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 block->embed->doc = doc; // assign loaded document to embed property
-                if (doc->dom_tree) {
+                if (doc->lambda_html_root) {
                     layout_html_doc(lycon->ui_context, doc, false);
                 }
             }

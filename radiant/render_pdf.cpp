@@ -16,7 +16,6 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-lxb_url_t* get_current_dir_lexbor();
 
 #ifndef _WIN32
 
@@ -372,7 +371,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
     ui_context_create_surface(&ui_context, default_width, default_height);
 
     // Get current directory for relative path resolution
-    lxb_url_t* cwd = get_current_dir_lexbor();
+    Url* cwd = get_current_dir();
     if (!cwd) {
         log_debug("Could not get current directory");
         ui_context_cleanup(&ui_context);
@@ -384,7 +383,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
     Document* doc = load_html_doc(cwd, (char*)html_file);
     if (!doc) {
         log_debug("Could not load HTML file: %s", html_file);
-        lxb_url_destroy(cwd);
+        url_destroy(cwd);
         ui_context_cleanup(&ui_context);
         return 1;
     }
@@ -419,7 +418,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
                 printf("Successfully rendered HTML to PDF: %s\\n", pdf_file);
                 HPDF_Free(pdf_doc);
-                lxb_url_destroy(cwd);
+                url_destroy(cwd);
                 ui_context_cleanup(&ui_context);
                 return 0;
             } else {
@@ -434,7 +433,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
     }
 
     // Cleanup
-    lxb_url_destroy(cwd);
+    url_destroy(cwd);
     ui_context_cleanup(&ui_context);
     return 1;
 }

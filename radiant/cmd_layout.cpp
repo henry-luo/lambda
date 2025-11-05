@@ -43,7 +43,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio, DocumentType doc_type);
+void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio, DocumentType doc_type);
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
@@ -54,8 +54,6 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
-// DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool);  // OBSOLETE: DomNode now wraps DomElement directly
-ViewGroup* compute_layout_tree(DomNode* root_node, LayoutContext* lycon);
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
 void dom_element_print(DomElement* element, StrBuf* buf, int indent);
 
@@ -802,8 +800,6 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
     }
 }
 
-
-
 /**
  * Load HTML document with Lambda CSS system
  * Parses HTML, applies CSS cascade, builds DOM tree, returns Document for layout
@@ -973,20 +969,7 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     doc->lambda_dom_root = dom_root;
     doc->lambda_html_root = html_root;
     doc->html_version = detected_version;
-
-    // Create a minimal URL structure for print_view_tree
-    doc->url = (lxb_url_t*)calloc(1, sizeof(lxb_url_t));
-    if (doc->url) {
-        // Just set the path field which is what print_view_tree uses
-        const char* path = html_filename;
-        size_t len = strlen(path);
-        doc->url->path.str.data = (lxb_char_t*)malloc(len + 1);
-        if (doc->url->path.str.data) {
-            memcpy(doc->url->path.str.data, path, len + 1);
-            doc->url->path.str.length = len;
-        }
-    }
-
+    doc->url = url;
     doc->view_tree = nullptr;  // Will be created during layout
     doc->state = nullptr;
 
@@ -994,31 +977,24 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     return doc;
 }
 
-/**
- * Compute layout using Radiant layout engine (simplified for Lambda)
- * Returns the root ViewGroup with computed layout
- *
- * Note: This is a simplified version that doesn't initialize the full Radiant
- * subsystems (fonts, images, etc.). For full layout with text rendering,
- * use the Radiant window system.
- */
-ViewGroup* compute_layout_tree(DomNode* root_node, int viewport_width, int viewport_height, Pool* pool) {
-    if (!root_node) return nullptr;
+Document* load_html_doc(Url *base, char* doc_url) {
+    // log_debug("loading HTML document: %s, base: %s", doc_url, base ? (char*)base->path.str.data : "NULL");
+    // Url* url = parse_url(base, doc_url);
+    // if (!url) {
+    //     log_error("failed to parse URL: %s", doc_url);
+    //     return NULL;
+    // }
+    // // parse the html document
+    // Document* doc = (Document*)calloc(1, sizeof(Document));
+    // doc->doc_type = DOC_TYPE_LEXBOR;  // Mark as Lexbor document
+    // doc->url = url;
+    // parse_html_doc(doc);
 
-    log_debug("[Layout] Radiant layout computation currently requires full UI context");
-    log_debug("[Layout] CSS styling complete - layout computation pending");
-    log_debug("[Layout] For full layout, run: ./radiant.exe %s", "(html_file)");
+    Pool* pool = pool_create();
+    if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
-    // TODO: Implement minimal layout computation without full UiContext
-    // This requires:
-    // 1. Implementing view_pool_init(), layout_init(), layout_cleanup() as standalone
-    // 2. Creating minimal font subsystem for text measurement
-    // 3. Implementing basic box model computation
-    //
-    // For now, return nullptr to indicate layout not computed
-    // The CSS styling is still fully functional and applied
-
-    return nullptr;
+    Document* doc = load_lambda_html_doc(doc_url, NULL, 0, 0, pool);
+    return doc;
 }
 
 /**
