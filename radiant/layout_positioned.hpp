@@ -37,7 +37,6 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 // Utility functions
 bool element_has_positioning(ViewBlock* block);
 ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
-void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y);
 
 // Float context functions (Phase 4)
 FloatContext* create_float_context(ViewBlock* container);

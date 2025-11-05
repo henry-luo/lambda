@@ -584,23 +584,6 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         }
     }
 
-    // apply CSS positioning after normal layout
-    if (block->position) {
-        log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
-        log_debug("Position offsets: top=%.2f(%s), right=%.2f(%s), bottom=%.2f(%s), left=%.2f(%s)",
-            block->position->top, block->position->has_top ? "set" : "unset",
-            block->position->right, block->position->has_right ? "set" : "unset",
-            block->position->bottom, block->position->has_bottom ? "set" : "unset",
-            block->position->left, block->position->has_left ? "set" : "unset");
-
-        if (block->position->position == LXB_CSS_VALUE_RELATIVE) {
-            log_debug("Applying relative positioning");
-            layout_relative_positioned(lycon, block);
-        }
-    } else {
-        log_debug("No position property found for element %s", elmt->name());
-    }
-
     // apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
@@ -769,6 +752,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             log_debug("block end, pa max_width: %f, pa advance_y: %f, block hg: %f",
                 lycon->block.max_width, lycon->block.advance_y, block->height);
         }
+
+        // apply CSS relative positioning after normal layout
+        if (block->position && block->position->position == LXB_CSS_VALUE_RELATIVE) {
+            log_debug("Applying relative positioning");
+            layout_relative_positioned(lycon, block);
+        }
+
         lycon->prev_view = (View*)block;
     }
     log_leave();
