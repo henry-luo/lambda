@@ -177,7 +177,7 @@ typedef struct Margin : Spacing {
     lxb_css_value_type_t top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
 } Margin;
 
-typedef struct Corner : Spacing {
+typedef struct Corner {
     struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
     int32_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
 } Corner;

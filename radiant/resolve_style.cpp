@@ -994,7 +994,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS,
-            (lxb_css_property_margin_t*)border_radius, specificity, &span->bound->border->radius);
+            (lxb_css_property_margin_t*)border_radius, specificity, (Spacing*)&span->bound->border->radius);
         break;
     }
     /*
