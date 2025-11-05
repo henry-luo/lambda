@@ -17,16 +17,16 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
  */
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     log_debug("Applying relative positioning to element");
-    // Calculate offset from top/right/bottom/left properties
+    // calculate offset from top/right/bottom/left properties
     int offset_x = 0, offset_y = 0;
 
-    // Horizontal offset: left takes precedence over right
+    // horizontal offset: left takes precedence over right
     if (block->position->has_left) {
         offset_x = block->position->left;
     } else if (block->position->has_right) {
         offset_x = -block->position->right;
     }
-    // Vertical offset: top takes precedence over bottom
+    // vertical offset: top takes precedence over bottom
     if (block->position->has_top) {
         offset_y = block->position->top;
     } else if (block->position->has_bottom) {
@@ -34,10 +34,13 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     }
     log_debug("Calculated relative offset: x=%d, y=%d", offset_x, offset_y);
 
-    // Apply offset to visual position (doesn't affect layout of other elements)
+    // apply offset to visual position (doesn't affect layout of other elements)
     block->x += offset_x;  block->y += offset_y;
     log_debug("Applied relative positioning: offset (%d, %d), final position (%d, %d)",
               offset_x, offset_y, block->x, block->y);
+
+    // todo: add to chain of positioned elements for z-index stacking
+    // find containing block; add to its positioned children list;
 }
 
 /**
@@ -230,6 +233,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block, block->display);
 
+    // no relative positioning adjustment here
     // no margin collapsing with children
 
     // Apply CSS float layout after positioning
