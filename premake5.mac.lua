@@ -362,7 +362,6 @@ project "radiant"
         "radiant/view_pool.cpp",
         "radiant/dom.cpp",
         "radiant/font.cpp",
-        "radiant/font_precision.cpp",
         "radiant/font_face.cpp",
         "radiant/surface.cpp",
         "radiant/render.cpp",
@@ -423,8 +422,11 @@ project "radiant"
         "build/lib",
     }
     
+    links {
+        "lexbor",
+    }
+    
     linkoptions {
-        "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "/opt/homebrew/lib/libhpdf.a",
@@ -556,7 +558,6 @@ project "lambda"
         "lambda/input/css/selector_matcher.c",
         "radiant/dom.cpp",
         "radiant/ui_context.cpp",
-        "radiant/parse_html.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
         "radiant/layout_inline.cpp",
@@ -572,12 +573,10 @@ project "lambda"
         "radiant/grid_positioning.cpp",
         "radiant/layout_grid_content.cpp",
         "radiant/grid_advanced.cpp",
-        "radiant/resolve_style.cpp",
         "radiant/lambda_css_resolve.cpp",
         "radiant/scroller.cpp",
         "radiant/view_pool.cpp",
         "radiant/font.cpp",
-        "radiant/font_precision.cpp",
         "radiant/font_face.cpp",
         "radiant/surface.cpp",
         "radiant/render.cpp",
@@ -716,7 +715,6 @@ project "lambda"
         "/opt/homebrew/lib/libnghttp2.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-        "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
         "/opt/homebrew/lib/libpng.a",
@@ -2472,13 +2470,13 @@ project "test_lambda_domnode_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "lexbor",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-        "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
     }
     
     linkoptions {

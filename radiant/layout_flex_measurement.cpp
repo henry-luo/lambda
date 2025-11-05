@@ -200,13 +200,7 @@ DisplayValue resolve_display_value(DomNode* child) {
     DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
 
     if (child && child->is_element()) {
-        if (child->type == LEXBOR_ELEMENT) {
-            // Lexbor element - use existing resolve_display
-            lxb_html_element_t* elmt = child->as_element();
-            if (elmt) {
-                display = resolve_display(elmt);
-            }
-        } else if (child->type == MARK_ELEMENT) {
+        if (child->type == MARK_ELEMENT) {
             // Lambda CSS element - resolve display from CSS if available
             const char* tag_name = child->name();
 
@@ -496,12 +490,8 @@ void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* 
     (void)lycon; // Suppress unused parameter warning
     if (!view || !node) return;
 
-    // Resolve CSS properties for the flex item
-    lxb_html_element_t* element = node->as_element();
-    if (!element) return;
-
     // Get display properties
-    view->display = resolve_display(element);
+    view->display = resolve_display_value(node);
 
     // Initialize position and sizing
     view->x = 0;
@@ -542,8 +532,7 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     log_debug("*** TRACE: Current prev_view before creation: %p", lycon->prev_view);
 
     // Get display properties for the element
-    lxb_html_element_t* elmt = node->as_element();
-    DisplayValue display = resolve_display(elmt);
+    DisplayValue display = resolve_display_value(node);
 
     // Create ViewBlock directly (similar to layout_block but without child processing)
     ViewBlock* block = (ViewBlock*)alloc_view(lycon,

@@ -129,12 +129,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
 }
 
 void free_document(Document* doc) {
-    if (doc->doc_type == DOC_TYPE_LEXBOR) {
-        // Lexbor document - free dom_tree
-        if (doc->dom_tree) {
-            lxb_html_document_destroy(doc->dom_tree);
-        }
-    } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+    if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - free lambda structures
         // Note: lambda_dom_root and lambda_html_root are managed by Pool
         // so we don't free them here
@@ -155,18 +150,7 @@ void free_document(Document* doc) {
     }
 
     if (doc->url) {
-        // For Lexbor documents, the URL and its path data are managed by Lexbor's
-        // memory pool (lexbor_mraw), so we shouldn't free them with free()
-        // The URL will be destroyed when the Lexbor document is destroyed above
-        if (doc->doc_type != DOC_TYPE_LEXBOR) {
-            // For non-Lexbor documents, we might have manually allocated URL data
-            if (doc->url->path.str.data) {
-                free(doc->url->path.str.data);
-            }
-            free(doc->url);
-        }
-        // Note: For Lexbor documents, url points to memory managed by lexbor_mraw
-        // which is freed when lxb_html_document_destroy() is called
+        url_destroy(doc->url);
     }
 
     free(doc);

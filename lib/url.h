@@ -161,9 +161,13 @@ String* url_string_clone(const String* str);
 Url* get_current_dir();
 Url* parse_url(Url *base, const char* doc_url);
 
+// Convert file:// URL to local file system path
+// Returns a newly allocated string that must be freed by the caller
+// Returns NULL if the URL is not a valid file:// URL
+char* url_to_local_path(const Url* url);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif // URL_H
-

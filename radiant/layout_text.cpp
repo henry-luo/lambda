@@ -131,13 +131,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             if (result) { return result; }
         }
         else if (node->is_element()) {
-            lxb_html_element_t *elmt = node->as_element();
-            if (!elmt) {
-                log_debug("node_has_line_filled: as_element() returned NULL, skipping node");
-                node = node->next_sibling();
-                continue;
-            }
-            PropValue outer_display = resolve_display(elmt).outer;
+            PropValue outer_display = resolve_display_value(node).outer;
             if (outer_display == LXB_CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
             else if (outer_display == LXB_CSS_VALUE_INLINE) {
                 LineFillStatus result = span_has_line_filled(lycon, node);

@@ -8,14 +8,7 @@ extern "C" {
 // DomNode member function implementations
 
 char* DomNode::name() {
-    if (type == LEXBOR_ELEMENT && lxb_elmt) {
-        const lxb_char_t* element_name = lxb_dom_element_local_name(lxb_dom_interface_element(lxb_elmt), NULL);
-        return element_name ? (char*)element_name : (char*)"#element";
-    }
-    else if (type == LEXBOR_NODE && lxb_node) {
-        return (char*)"#text";
-    }
-    else if (type == MARK_ELEMENT && dom_element) {
+    if (type == MARK_ELEMENT && dom_element) {
         return (char*)dom_element->tag_name;
     }
     else if (type == MARK_TEXT && dom_text) {
@@ -25,8 +18,8 @@ char* DomNode::name() {
         return (char*)"#comment";
     }
     // debug: log what went wrong
-    log_error("[DOM] #null node detected - type=%d, dom_element=%p, dom_text=%p, lxb_elmt=%p, lxb_node=%p, this=%p",
-            type, (void*)dom_element, (void*)dom_text, (void*)lxb_elmt, (void*)lxb_node, (void*)this);
+    log_error("[DOM] #null node detected - type=%d, dom_element=%p, dom_text=%p, this=%p",
+            type, (void*)dom_element, (void*)dom_text, (void*)this);
     return (char*)"#null";
 }
 
@@ -34,18 +27,11 @@ unsigned char* DomNode::text_data() {
     if (type == MARK_TEXT && dom_text) {
         return (unsigned char*)dom_text->text;
     }
-    else if (is_text()) {
-        lxb_dom_text_t* text = lxb_dom_interface_text(lxb_node);
-        return text ? text->char_data.data.data : nullptr;
-    }
     return nullptr;
 }
 
 uintptr_t DomNode::tag() {
-    if (type == LEXBOR_ELEMENT && lxb_elmt) {
-        return lxb_dom_interface_element(lxb_elmt)->node.local_name;
-    }
-    else if (type == MARK_ELEMENT && dom_element) {
+    if (type == MARK_ELEMENT && dom_element) {
         // Convert Lambda CSS element tag name to Lexbor tag enum
         return tag_name_to_lexbor_id(dom_element->tag_name);
     }
@@ -164,13 +150,7 @@ uintptr_t DomNode::tag_name_to_lexbor_id(const char* tag_name) {
 }
 
 const lxb_char_t* DomNode::get_attribute(const char* attr_name, size_t* value_len) {
-    if (type == LEXBOR_ELEMENT && lxb_elmt) {
-        size_t len;
-        if (!value_len) value_len = &len;
-        return lxb_dom_element_get_attribute((lxb_dom_element_t*)lxb_elmt,
-            (lxb_char_t*)attr_name, strlen(attr_name), value_len);
-    }
-    else if (type == MARK_ELEMENT && dom_element) {
+    if (type == MARK_ELEMENT && dom_element) {
         // Use DOM element's attribute system
         const char* value = dom_element_get_attribute(dom_element, attr_name);
         if (value) {
@@ -187,30 +167,6 @@ DomNode* DomNode::first_child() {
                 this->type, _child->type, _child->dom_element);
         return _child;
     }
-
-    // Handle Lexbor elements
-    if (type == LEXBOR_ELEMENT && lxb_elmt) {
-        lxb_dom_node_t* chd = lxb_dom_node_first_child(lxb_dom_interface_node(lxb_elmt));
-
-        // Skip comment nodes
-        while (chd && chd->type == LXB_DOM_NODE_TYPE_COMMENT) {
-            chd = lxb_dom_node_next(chd);
-        }
-
-        if (chd) {
-            DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
-            if (chd->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-                dn->type = LEXBOR_ELEMENT;
-                dn->lxb_elmt = (lxb_html_element_t*)chd;
-            } else {
-                dn->type = LEXBOR_NODE;
-                dn->lxb_node = chd;
-            }
-            this->_child = dn;  dn->parent = this;
-            return dn;
-        }
-    }
-
     // Handle mark elements (now using DomElement)
     if (type == MARK_ELEMENT && dom_element) {
         // Navigate to first child through DomElement tree
@@ -248,7 +204,6 @@ DomNode* DomNode::first_child() {
             }
         }
     }
-
     return NULL;
 }
 
@@ -298,37 +253,6 @@ DomNode* DomNode::next_sibling() {
                         this->type, sibling_node->type, sibling_node->dom_element);
                 this->_next = sibling_node;
                 return sibling_node;
-            }
-        }
-    }
-    else { // handle lexbor nodes
-        lxb_dom_node_t* current_node = nullptr;
-        if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            current_node = lxb_dom_interface_node(lxb_elmt);
-        }
-        else if (type == LEXBOR_NODE && lxb_node) {
-            current_node = lxb_node;
-        }
-        if (current_node) {
-            lxb_dom_node_t* nxt = lxb_dom_node_next(current_node);
-
-            // Skip comment nodes
-            while (nxt && nxt->type == LXB_DOM_NODE_TYPE_COMMENT) {
-                nxt = lxb_dom_node_next(nxt);
-            }
-
-            if (nxt) {
-                DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
-                dn->parent = this->parent;
-                if (nxt->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-                    dn->type = LEXBOR_ELEMENT;
-                    dn->lxb_elmt = (lxb_html_element_t*)nxt;
-                } else {
-                    dn->type = LEXBOR_NODE;
-                    dn->lxb_node = nxt;
-                }
-                this->_next = dn;
-                return dn;
             }
         }
     }

@@ -1,7 +1,7 @@
 #include "handler.hpp"
 
 #include "../lib/log.h"
-Document* show_html_doc(lxb_url_t *base, char* doc_filename);
+Document* show_html_doc(Url *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void to_repaint();
 
@@ -299,47 +299,46 @@ lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_spec
 }
 
 // find iframe by name and set new src using selector
-lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document,
-    const char *target_name, const char *new_src) {
-    lxb_status_t status;
-    lxb_css_parser_t *parser = lxb_css_parser_create();
-    status = lxb_css_parser_init(parser, NULL);
-    if (status != LXB_STATUS_OK) { return NULL; }
+DomNode *set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
+    // lxb_status_t status;
+    // lxb_css_parser_t *parser = lxb_css_parser_create();
+    // status = lxb_css_parser_init(parser, NULL);
+    // if (status != LXB_STATUS_OK) { return NULL; }
 
-    // create selector
-    lxb_selectors_t *selectors = lxb_selectors_create();
-    status = lxb_selectors_init(selectors);
-    if (status != LXB_STATUS_OK) {
-        lxb_selectors_destroy(selectors, true);
-        return NULL;
-    }
+    // // create selector
+    // lxb_selectors_t *selectors = lxb_selectors_create();
+    // status = lxb_selectors_init(selectors);
+    // if (status != LXB_STATUS_OK) {
+    //     lxb_selectors_destroy(selectors, true);
+    //     return NULL;
+    // }
 
-    // construct selector string: iframe[name="target_name"]
-    char selector_str[128];
-    snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
-    lxb_css_selector_list_t *list = lxb_css_selectors_parse(parser, (const lxb_char_t *)selector_str, strlen(selector_str));
-    if (parser->status != LXB_STATUS_OK) {
-        return NULL;
-    }
+    // // construct selector string: iframe[name="target_name"]
+    // char selector_str[128];
+    // snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
+    // lxb_css_selector_list_t *list = lxb_css_selectors_parse(parser, (const lxb_char_t *)selector_str, strlen(selector_str));
+    // if (parser->status != LXB_STATUS_OK) {
+    //     return NULL;
+    // }
 
-    lxb_dom_element_t *element = NULL;
-    status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list,
-        set_iframe_src_callback, (void*)&element);
-    if (element) {
-        log_debug("set iframe src: %s", new_src);
-        lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3,
-            (const lxb_char_t *)new_src, (size_t)strlen((char*)new_src));
-    }
-    // cleanup
-    lxb_selectors_destroy(selectors, true);
-    lxb_css_selector_list_destroy_memory(list);
-    lxb_css_parser_destroy(parser, true);
-    return element;
+    // lxb_dom_element_t *element = NULL;
+    // status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list,
+    //     set_iframe_src_callback, (void*)&element);
+    // if (element) {
+    //     log_debug("set iframe src: %s", new_src);
+    //     lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3,
+    //         (const lxb_char_t *)new_src, (size_t)strlen((char*)new_src));
+    // }
+    // // cleanup
+    // lxb_selectors_destroy(selectors, true);
+    // lxb_css_selector_list_destroy_memory(list);
+    // lxb_css_parser_destroy(parser, true);
+    // return element;
 }
 
 // find the sub-view that matches the given node
-View* find_view(View* view, lxb_dom_node_t *node) {
-    if (view->node && view->node->as_node() == node) { return view; }
+View* find_view(View* view, DomNode *node) {
+    if (view->node && view->node == node) { return view; }
     if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
         view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_INLINE) {
         ViewGroup* group = (ViewGroup*)view;
@@ -356,7 +355,7 @@ View* find_view(View* view, lxb_dom_node_t *node) {
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("Handling event %d", event->type);
-    if (!doc || !doc->dom_tree) {
+    if (!doc || !doc->lambda_html_root) {
         log_error("No document to handle event");
         return;
     }
@@ -441,8 +440,8 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
-                lxb_dom_element_t *elmt = set_iframe_src_by_name(doc->dom_tree, evcon.new_target, evcon.new_url);
-                View* iframe = find_view(doc->view_tree->root, (lxb_dom_node_t*)elmt);
+                DomNode *elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
+                View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) && ((ViewBlock*)iframe)->embed) {
                         log_debug("updating doc of iframe view");
@@ -456,7 +455,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                         Document* old_doc = block->embed->doc;
                         Document* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url);
-                        if (new_doc && new_doc->dom_tree) {
+                        if (new_doc && new_doc->lambda_html_root) {
                             layout_html_doc(evcon.ui_context, new_doc, false);
                             if (new_doc->view_tree && new_doc->view_tree->root) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;

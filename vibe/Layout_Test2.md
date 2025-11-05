@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
     if (argc >= 3 && strcmp(argv[1], "layout") == 0) {
         return run_layout_test(argv[2]);
     }
-    
+
     // Original GUI mode code...
     log_init_wrapper();
     // ... rest of existing main function
@@ -52,51 +52,51 @@ int main(int argc, char* argv[]) {
 int run_layout_test(const char* html_file) {
     log_init_wrapper();
     ui_context_init(&ui_context);
-    
+
     // Set consistent test viewport
     ui_context.window_width = 1200;
     ui_context.window_height = 800;
     ui_context.pixel_ratio = 1.0;
-    
+
     // Create surface for layout (no actual window needed)
     ui_context_create_surface(&ui_context, 1200, 800);
-    
+
     // Load and layout the HTML file
-    lxb_url_t* cwd = get_current_dir_lexbor();
+    Url* cwd = get_current_dir();
     if (!cwd) {
         fprintf(stderr, "Error: Could not get current directory\n");
         return 1;
     }
-    
+
     Document* doc = load_html_doc(cwd, (char*)html_file);
     if (!doc) {
         fprintf(stderr, "Error: Could not load HTML file: %s\n", html_file);
-        lxb_url_destroy(cwd);
+        url_destroy(cwd);
         return 1;
     }
-    
+
     // Layout the document
     View* root_view = layout_html_doc(&ui_context, doc, false);
     if (!root_view) {
         fprintf(stderr, "Error: Layout failed for file: %s\n", html_file);
         free_document(doc);
-        lxb_url_destroy(cwd);
+        url_destroy(cwd);
         return 1;
     }
-    
+
     // Print view tree (existing functionality)
     printf("Layout completed successfully for: %s\n", html_file);
     print_view_tree((ViewGroup*)root_view);
-    
+
     // Generate JSON output (new functionality)
     print_view_tree_json((ViewGroup*)root_view);
-    
+
     // Cleanup
     free_document(doc);
-    lxb_url_destroy(cwd);
+    url_destroy(cwd);
     ui_context_cleanup(&ui_context);
     log_cleanup();
-    
+
     return 0;
 }
 ```
@@ -121,29 +121,29 @@ int run_layout_test(const char* html_file) {
 // Add JSON generation function
 void print_view_tree_json(ViewGroup* view_root) {
     StrBuf* json_buf = strbuf_new_cap(2048);
-    
+
     strbuf_append_str(json_buf, "{\n");
     strbuf_append_str(json_buf, "  \"test_info\": {\n");
     strbuf_append_str(json_buf, "    \"timestamp\": \"");
-    
+
     // Add timestamp
     time_t now = time(0);
     char* time_str = ctime(&now);
     time_str[strlen(time_str) - 1] = '\0'; // Remove newline
     strbuf_append_str(json_buf, time_str);
     strbuf_append_str(json_buf, "\",\n");
-    
+
     strbuf_append_str(json_buf, "    \"radiant_version\": \"1.0\",\n");
     strbuf_append_str(json_buf, "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n");
     strbuf_append_str(json_buf, "  },\n");
-    
+
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     print_block_json((ViewBlock*)view_root, json_buf, 2);
     strbuf_append_str(json_buf, "\n}\n");
-    
+
     // Write to file
     write_string_to_file("view_tree.json", json_buf->str);
-    
+
     printf("JSON layout data written to: view_tree.json\n");
     strbuf_free(json_buf);
 }
@@ -154,67 +154,67 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_str(buf, "null");
         return;
     }
-    
+
     // Add indentation
     for (int i = 0; i < indent; i++) strbuf_append_str(buf, " ");
-    
+
     strbuf_append_str(buf, "{\n");
-    
+
     // Basic view properties
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
     strbuf_append_str(buf, "\"type\": \"");
     strbuf_append_str(buf, get_view_type_name(block->type));
     strbuf_append_str(buf, "\",\n");
-    
+
     // Layout properties
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"layout\": {\n");
-    
+
     for (int i = 0; i < indent + 4; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"x\": %.2f,\n", block->x);
-    
+
     for (int i = 0; i < indent + 4; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"y\": %.2f,\n", block->y);
-    
+
     for (int i = 0; i < indent + 4; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"width\": %.2f,\n", block->width);
-    
+
     for (int i = 0; i < indent + 4; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"height\": %.2f\n", block->height);
-    
+
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
     strbuf_append_str(buf, "},\n");
-    
+
     // CSS properties (if available)
     if (block->computed_style) {
         print_css_properties_json(block->computed_style, buf, indent + 2);
     }
-    
+
     // Children
     if (block->child && block->child_count > 0) {
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
         strbuf_append_str(buf, "\"children\": [\n");
-        
+
         ViewBlock* child = block->child;
         int child_index = 0;
         while (child) {
             print_block_json(child, buf, indent + 4);
             child = child->next;
             child_index++;
-            
+
             if (child_index < block->child_count) {
                 strbuf_append_str(buf, ",");
             }
             strbuf_append_str(buf, "\n");
         }
-        
+
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
         strbuf_append_str(buf, "]\n");
     } else {
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
         strbuf_append_str(buf, "\"children\": []\n");
     }
-    
+
     for (int i = 0; i < indent; i++) strbuf_append_str(buf, " ");
     strbuf_append_str(buf, "}");
 }
@@ -241,52 +241,52 @@ const char* get_view_type_name(RdtViewType type) {
 // In layout_flex.cpp - add flex properties to ViewBlock
 void print_css_properties_json(ComputedStyle* style, StrBuf* buf, int indent) {
     if (!style) return;
-    
+
     for (int i = 0; i < indent; i++) strbuf_append_str(buf, " ");
     strbuf_append_str(buf, "\"css_properties\": {\n");
-    
+
     // Display property
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-    strbuf_append_format(buf, "\"display\": \"%s\",\n", 
+    strbuf_append_format(buf, "\"display\": \"%s\",\n",
                         style->display == CSS_DISPLAY_FLEX ? "flex" : "block");
-    
+
     // Flex container properties
     if (style->display == CSS_DISPLAY_FLEX) {
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-        strbuf_append_format(buf, "\"flex_direction\": \"%s\",\n", 
+        strbuf_append_format(buf, "\"flex_direction\": \"%s\",\n",
                             get_flex_direction_name(style->flex_direction));
-        
+
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-        strbuf_append_format(buf, "\"justify_content\": \"%s\",\n", 
+        strbuf_append_format(buf, "\"justify_content\": \"%s\",\n",
                             get_justify_content_name(style->justify_content));
-        
+
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-        strbuf_append_format(buf, "\"align_items\": \"%s\",\n", 
+        strbuf_append_format(buf, "\"align_items\": \"%s\",\n",
                             get_align_items_name(style->align_items));
-        
+
         for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-        strbuf_append_format(buf, "\"flex_wrap\": \"%s\",\n", 
+        strbuf_append_format(buf, "\"flex_wrap\": \"%s\",\n",
                             get_flex_wrap_name(style->flex_wrap));
     }
-    
+
     // Flex item properties
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"flex_grow\": %.2f,\n", style->flex_grow);
-    
+
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
     strbuf_append_format(buf, "\"flex_shrink\": %.2f,\n", style->flex_shrink);
-    
+
     // Box model properties
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-    strbuf_append_format(buf, "\"margin\": [%.2f, %.2f, %.2f, %.2f],\n", 
-                        style->margin_top, style->margin_right, 
+    strbuf_append_format(buf, "\"margin\": [%.2f, %.2f, %.2f, %.2f],\n",
+                        style->margin_top, style->margin_right,
                         style->margin_bottom, style->margin_left);
-    
+
     for (int i = 0; i < indent + 2; i++) strbuf_append_str(buf, " ");
-    strbuf_append_format(buf, "\"padding\": [%.2f, %.2f, %.2f, %.2f]\n", 
-                        style->padding_top, style->padding_right, 
+    strbuf_append_format(buf, "\"padding\": [%.2f, %.2f, %.2f, %.2f]\n",
+                        style->padding_top, style->padding_right,
                         style->padding_bottom, style->padding_left);
-    
+
     for (int i = 0; i < indent; i++) strbuf_append_str(buf, " ");
     strbuf_append_str(buf, "},\n");
 }
@@ -316,48 +316,48 @@ class RadiantLayoutValidator {
             details: []
         };
     }
-    
+
     async validateAllTests() {
         console.log('🎨 Radiant Layout Validation Suite');
         console.log('=====================================\n');
-        
+
         const categories = ['basic', 'intermediate', 'advanced'];
-        
+
         for (const category of categories) {
             console.log(`📂 Processing ${category} tests...`);
             await this.validateCategory(category);
         }
-        
+
         this.printSummary();
         return this.results;
     }
-    
+
     async validateCategory(category) {
         const dataDir = `./data/${category}`;
         const referenceDir = `./reference/${category}`;
-        
+
         if (!fs.existsSync(dataDir)) {
             console.log(`⚠️  Warning: ${dataDir} not found, skipping`);
             return;
         }
-        
+
         const htmlFiles = fs.readdirSync(dataDir)
             .filter(f => f.endsWith('.html'))
             .sort();
-        
+
         for (const htmlFile of htmlFiles) {
             const testName = path.basename(htmlFile, '.html');
             const referenceFile = `${referenceDir}/${testName}.json`;
-            
+
             console.log(`  🧪 Testing: ${testName}`);
-            
+
             try {
                 const result = await this.validateSingleTest(
                     `${dataDir}/${htmlFile}`,
                     referenceFile,
                     testName
                 );
-                
+
                 this.results.total++;
                 if (result.passed) {
                     this.results.passed++;
@@ -367,14 +367,14 @@ class RadiantLayoutValidator {
                     console.log(`    ❌ FAIL (${result.matchedElements}/${result.totalElements} elements)`);
                     console.log(`       Max difference: ${result.maxDifference.toFixed(2)}px`);
                 }
-                
+
                 this.results.details.push(result);
-                
+
             } catch (error) {
                 this.results.total++;
                 this.results.errors++;
                 console.log(`    💥 ERROR: ${error.message}`);
-                
+
                 this.results.details.push({
                     testName,
                     passed: false,
@@ -382,29 +382,29 @@ class RadiantLayoutValidator {
                 });
             }
         }
-        
+
         console.log('');
     }
-    
+
     async validateSingleTest(htmlFile, referenceFile, testName) {
         // Run Radiant layout command
         try {
-            execSync(`./radiant.exe layout "${htmlFile}"`, { 
+            execSync(`./radiant.exe layout "${htmlFile}"`, {
                 stdio: 'pipe',
                 timeout: 10000 // 10 second timeout
             });
         } catch (error) {
             throw new Error(`Radiant execution failed: ${error.message}`);
         }
-        
+
         // Check if output files were generated
         if (!fs.existsSync('view_tree.json')) {
             throw new Error('view_tree.json not generated');
         }
-        
+
         // Load Radiant output
         const radiantData = JSON.parse(fs.readFileSync('view_tree.json', 'utf8'));
-        
+
         // Load browser reference (if available)
         let referenceData = null;
         if (fs.existsSync(referenceFile)) {
@@ -421,16 +421,16 @@ class RadiantLayoutValidator {
                 note: 'No reference data - validated Radiant execution only'
             };
         }
-        
+
         // Compare layouts
         const comparison = this.compareLayouts(radiantData, referenceData);
-        
+
         // Cleanup
         fs.unlinkSync('view_tree.json');
         if (fs.existsSync('view_tree.txt')) {
             fs.unlinkSync('view_tree.txt');
         }
-        
+
         return {
             testName,
             passed: comparison.maxDifference <= this.tolerance,
@@ -440,25 +440,25 @@ class RadiantLayoutValidator {
             differences: comparison.differences
         };
     }
-    
+
     compareLayouts(radiantData, referenceData) {
         const differences = [];
         let maxDifference = 0;
         let matchedElements = 0;
         let totalElements = 0;
-        
+
         // Extract elements from both layouts
         const radiantElements = this.extractElements(radiantData.layout_tree);
         const referenceElements = referenceData.layout_data || {};
-        
+
         // Compare each element
         for (const [selector, radiantElement] of Object.entries(radiantElements)) {
             totalElements++;
-            
+
             if (referenceElements[selector]) {
                 const refElement = referenceElements[selector];
                 const elementDiff = this.compareElement(radiantElement, refElement);
-                
+
                 if (elementDiff.maxDiff <= this.tolerance) {
                     matchedElements++;
                 } else {
@@ -468,11 +468,11 @@ class RadiantLayoutValidator {
                         maxDiff: elementDiff.maxDiff
                     });
                 }
-                
+
                 maxDifference = Math.max(maxDifference, elementDiff.maxDiff);
             }
         }
-        
+
         return {
             matchedElements,
             totalElements,
@@ -480,18 +480,18 @@ class RadiantLayoutValidator {
             differences
         };
     }
-    
+
     extractElements(layoutTree, path = '', elements = {}) {
         if (!layoutTree) return elements;
-        
+
         // Generate selector for this element
         const selector = path || 'root';
-        
+
         elements[selector] = {
             layout: layoutTree.layout,
             css_properties: layoutTree.css_properties || {}
         };
-        
+
         // Process children
         if (layoutTree.children && layoutTree.children.length > 0) {
             layoutTree.children.forEach((child, index) => {
@@ -499,21 +499,21 @@ class RadiantLayoutValidator {
                 this.extractElements(child, childPath, elements);
             });
         }
-        
+
         return elements;
     }
-    
+
     compareElement(radiantElement, referenceElement) {
         const differences = [];
         let maxDiff = 0;
-        
+
         // Compare layout properties
         const layoutProps = ['x', 'y', 'width', 'height'];
         for (const prop of layoutProps) {
             const radiantValue = radiantElement.layout[prop] || 0;
             const referenceValue = referenceElement.layout[prop] || 0;
             const diff = Math.abs(radiantValue - referenceValue);
-            
+
             if (diff > 0.1) { // Ignore tiny differences
                 differences.push({
                     property: prop,
@@ -524,10 +524,10 @@ class RadiantLayoutValidator {
                 maxDiff = Math.max(maxDiff, diff);
             }
         }
-        
+
         return { differences, maxDiff };
     }
-    
+
     printSummary() {
         console.log('📊 Test Results Summary');
         console.log('=======================');
@@ -535,12 +535,12 @@ class RadiantLayoutValidator {
         console.log(`✅ Passed: ${this.results.passed}`);
         console.log(`❌ Failed: ${this.results.failed}`);
         console.log(`💥 Errors: ${this.results.errors}`);
-        
+
         if (this.results.total > 0) {
             const passRate = (this.results.passed / this.results.total * 100).toFixed(1);
             console.log(`📈 Pass rate: ${passRate}%`);
         }
-        
+
         // Save detailed results
         const reportFile = `./reports/radiant_validation_${Date.now()}.json`;
         fs.writeFileSync(reportFile, JSON.stringify(this.results, null, 2));
@@ -577,7 +577,7 @@ module.exports = RadiantLayoutValidator;
   "scripts": {
     "validate": "node validate_radiant.js",
     "validate:basic": "node validate_radiant.js --category=basic",
-    "validate:intermediate": "node validate_radiant.js --category=intermediate", 
+    "validate:intermediate": "node validate_radiant.js --category=intermediate",
     "validate:advanced": "node validate_radiant.js --category=advanced",
     "extract-references": "node extract_layout.js",
     "generate-tests": "node generate_tests.js"

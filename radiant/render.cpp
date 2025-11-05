@@ -12,8 +12,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-lxb_url_t* get_current_dir_lexbor();
-Document* load_html_doc(lxb_url_t* base, const char* doc_url);
+Document* load_html_doc(Url* base, const char* doc_url);
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -179,6 +178,7 @@ void formatListNumber(StrBuf* buf, int num, PropValue list_style) {
     }
 }
 */
+
 void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
@@ -191,35 +191,35 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
         log_debug("render list decimal");
-        StrBuf* num = strbuf_new_cap(10);
-        strbuf_append_format(num, "%d.", rdcon->list.item_index);
-        // output the number as VIEW_TEXT
-        lxb_dom_text_t lxb_node;  ViewText text;
-        // Initialize the lexbor text node structure properly
-        memset(&lxb_node, 0, sizeof(lxb_dom_text_t));
-        lxb_node.char_data.node.type = LXB_DOM_NODE_TYPE_TEXT;
-        lxb_node.char_data.data.data = (lxb_char_t *)num->str;
-        lxb_node.char_data.data.length = num->length;
+        // StrBuf* num = strbuf_new_cap(10);
+        // strbuf_append_format(num, "%d.", rdcon->list.item_index);
+        // // output the number as VIEW_TEXT
+        // lxb_dom_text_t lxb_node;  ViewText text;
+        // // Initialize the lexbor text node structure properly
+        // memset(&lxb_node, 0, sizeof(lxb_dom_text_t));
+        // lxb_node.char_data.node.type = LXB_DOM_NODE_TYPE_TEXT;
+        // lxb_node.char_data.data.data = (lxb_char_t *)num->str;
+        // lxb_node.char_data.data.length = num->length;
 
-        // Initialize the ViewText structure
-        text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
-        text.font = rdcon->font.style;
-        TextRect text_rect;
-        text.rect = &text_rect;  text_rect.next = NULL;
-        text_rect.start_index = 0;  text_rect.length = num->length;
+        // // Initialize the ViewText structure
+        // text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
+        // text.font = rdcon->font.style;
+        // TextRect text_rect;
+        // text.rect = &text_rect;  text_rect.next = NULL;
+        // text_rect.start_index = 0;  text_rect.length = num->length;
 
-        // Create DomNode wrapper
-        DomNode dom_wrapper;
-        memset(&dom_wrapper, 0, sizeof(DomNode));
-        dom_wrapper.type = LEXBOR_NODE;
-        dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
-        text.node = &dom_wrapper;
-        float font_size = rdcon->font.ft_face->size->metrics.y_ppem / 64.0;
-        text.x = list_item->x - 20 * ratio;
-        text.y = list_item->y;  // align at top the list item
-        text.width = text_rect.length * font_size;  text.height = font_size;
-        render_text_view(rdcon, &text);
-        strbuf_free(num);
+        // // Create DomNode wrapper
+        // DomNode dom_wrapper;
+        // memset(&dom_wrapper, 0, sizeof(DomNode));
+        // dom_wrapper.type = LEXBOR_NODE;
+        // dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
+        // text.node = &dom_wrapper;
+        // float font_size = rdcon->font.ft_face->size->metrics.y_ppem / 64.0;
+        // text.x = list_item->x - 20 * ratio;
+        // text.y = list_item->y;  // align at top the list item
+        // text.width = text_rect.length * font_size;  text.height = font_size;
+        // render_text_view(rdcon, &text);
+        // strbuf_free(num);
     }
     else {
         log_debug("unknown list style type");

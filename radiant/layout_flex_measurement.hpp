@@ -45,6 +45,3 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node);
 void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
 void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
                                     DisplayValue display, MeasurementCacheEntry* cached);
-
-// Helper functions
-ViewBlock* find_view_for_node(LayoutContext* lycon, DomNode* node);

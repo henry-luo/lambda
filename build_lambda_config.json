@@ -66,7 +66,6 @@
         "lambda/input/css/selector_matcher.c",
         "radiant/dom.cpp",
         "radiant/ui_context.cpp",
-        "radiant/parse_html.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
         "radiant/layout_inline.cpp",
@@ -82,12 +81,10 @@
         "radiant/grid_positioning.cpp",
         "radiant/layout_grid_content.cpp",
         "radiant/grid_advanced.cpp",
-        "radiant/resolve_style.cpp",
         "radiant/lambda_css_resolve.cpp",
         "radiant/scroller.cpp",
         "radiant/view_pool.cpp",
         "radiant/font.cpp",
-        "radiant/font_precision.cpp",
         "radiant/font_face.cpp",
         "radiant/surface.cpp",
         "radiant/render.cpp",
@@ -204,13 +201,6 @@
             "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
             "include": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
             "lib": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-            "link": "static"
-        },
-        {
-            "name": "lexbor",
-            "description": "Fast HTML/CSS parser and manipulation library (custom build)",
-            "include": "lexbor/source",
-            "lib": "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
             "link": "static"
         },
         {
@@ -401,7 +391,6 @@
                 "radiant/view_pool.cpp",
                 "radiant/dom.cpp",
                 "radiant/font.cpp",
-                "radiant/font_precision.cpp",
                 "radiant/font_face.cpp",
                 "radiant/surface.cpp",
                 "radiant/render.cpp",
