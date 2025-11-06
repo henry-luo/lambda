@@ -661,7 +661,7 @@ typedef struct CssValue {
         // List of values
         struct {
             struct CssValue** values;
-            size_t count;
+            int count;
             bool comma_separated;
         } list;
 
@@ -669,7 +669,7 @@ typedef struct CssValue {
         struct {
             const char* name;
             struct CssValue** args;
-            size_t arg_count;
+            int arg_count;
         } function;
 
         // CSS Variable reference

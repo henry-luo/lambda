@@ -142,7 +142,7 @@ typedef enum {
 typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 
 typedef struct {
-    Url* url;                 // document URL
+    Url* url;                       // document URL
     DocumentType doc_type;          // document source type
     DomElement* lambda_dom_root;    // Lambda CSS DOM root element
     Element* lambda_html_root;      // Lambda HTML parser root (for Lambda CSS docs)
