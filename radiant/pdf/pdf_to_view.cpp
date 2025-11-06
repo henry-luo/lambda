@@ -692,7 +692,6 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     if (elem_node) {
         elem_node->type = LEXBOR_ELEMENT;
         elem_node->dom_element = dom_elem;
-        elem_node->style = nullptr;
         elem_node->parent = nullptr;
     }
 
@@ -834,7 +833,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
     if (text_node) {
         text_node->type = MARK_TEXT;
         text_node->dom_text = dom_text;
-        text_node->style = nullptr;
+        text_node->dom_element = nullptr;
         text_node->parent = nullptr;
     }
 

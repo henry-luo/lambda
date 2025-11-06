@@ -71,9 +71,6 @@ typedef enum {
     MARK_COMMENT,     // 4 - Lambda DOM comment (DomComment)
 } NodeType;
 
-typedef struct Style {
-} Style;
-
 typedef struct DomNode {
     NodeType type;
     union {
@@ -81,7 +78,6 @@ typedef struct DomNode {
         DomText* dom_text;            // Lambda CSS DOM text (for MARK_TEXT)
         DomComment* dom_comment;      // Lambda CSS DOM comment (for MARK_COMMENT)
     };
-    struct Style* style;  // associated style (DomElement* for Lambda CSS integration)
     DomNode* parent;
     private:
     DomNode* _child;  // cached first child

@@ -117,9 +117,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     log_debug("resolving style for elment '%s' of type %d", node->name(), node ? node->type : -1);
     log_enter();
 
-    if (node && node->type == MARK_ELEMENT && node->style) {
+    if (node && node->type == MARK_ELEMENT && node->dom_element) {
         // Lambda CSS path - use parallel resolution function
-        DomElement* dom_elem = (DomElement*)node->style;
+        DomElement* dom_elem = node->dom_element;
         resolve_lambda_css_styles(dom_elem, lycon);
         log_debug("resolved lambda css style for: %s", node->name());
     }
@@ -672,7 +672,6 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         log_debug("DEBUG: Setting root_node.type to MARK_ELEMENT (%d)", MARK_ELEMENT);
         root_node->type = MARK_ELEMENT;
         root_node->dom_element = doc->lambda_dom_root;  // DomElement contains all data
-        root_node->style = (Style*)doc->lambda_dom_root;  // Also store in style for compatibility
         log_debug("DEBUG: root_node.type is now %d", root_node->type);
         log_debug("layout lambda css html root %s", root_node->name());
     } else {
