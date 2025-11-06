@@ -1,12 +1,4 @@
-#include "lambda_css_resolve.h"
-#include "view.hpp"
-#include <string.h>
-#include <strings.h>
-#include <ctype.h>
-
-extern "C" {
-#include <lexbor/css/css.h>
-}
+#include "layout.hpp"
 
 // ============================================================================
 // Value Conversion Functions

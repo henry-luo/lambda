@@ -3,6 +3,8 @@
 #pragma once
 #include "view.hpp"
 #include "dom.hpp"
+#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/css_style.h"
 
 // Forward declaration for FloatContext
 struct FloatContext;
@@ -112,19 +114,93 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
 
+// ============================================================================
+// Keyword Mapping: Lambda CSS strings → Lexbor enum values
+// ============================================================================
+
+/**
+ * Map CSS keyword string to Lexbor enum value
+ *
+ * @param keyword CSS keyword string (e.g., "block", "inline", "flex")
+ * @return Lexbor LXB_CSS_VALUE_* constant, or 0 if unknown
+ */
+int map_css_keyword_to_lexbor(const char* keyword);
+
+/**
+ * Map Lambda color keyword to RGBA value
+ * @param keyword const char* keyword string (e.g., "red", "blue")
+ * @return uint32_t RGBA color (0xRRGGBBAA format)
+ */
+uint32_t map_lambda_color_keyword(const char* keyword);
+
+/**
+ * Map Lambda font-size keyword to pixel value
+ * @param keyword const char* keyword string (e.g., "small", "large")
+ * @return float font size in pixels
+ */
+float map_lambda_font_size_keyword(const char* keyword);
+
+/**
+ * Map Lambda font-weight keyword to numeric value
+ * @param keyword const char* keyword string (e.g., "normal", "bold")
+ * @return int font weight (100-900)
+ */
+int map_lambda_font_weight_keyword(const char* keyword);
+
+/**
+ * Map Lambda font-family keyword to font name
+ * @param keyword const char* keyword string (e.g., "serif", "sans-serif")
+ * @return const char* font family name
+ */
+const char* map_lambda_font_family_keyword(const char* keyword);
+
+// ============================================================================
+// Value Conversion: Lambda CSS → Radiant Property Structures
+// ============================================================================
+
+/**
+ * Convert Lambda CSS length/percentage to pixels
+ *
+ * @param value CssValue with length or percentage type
+ * @param lycon Layout context for font size, viewport calculations
+ * @param prop_id Property ID for context-specific resolution
+ * @return Float value in pixels
+ */
+float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
+                                   CssPropertyId prop_id);
+
+// Convert Lambda CSS color to Radiant Color type
+Color convert_lambda_color(const CssValue* value);
+Color color_name_to_rgb(PropValue color_name);
+
+/**
+ * Get specificity value from Lambda CSS declaration
+ * Converts Lambda CssSpecificity to Lexbor-compatible int32_t
+ *
+ * @param decl CSS declaration with specificity info
+ * @return int32_t specificity value
+ */
+int32_t get_lambda_specificity(const CssDeclaration* decl);
+
+// Resolve CSS length value to pixels
+float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+
+// Resolve Lambda CSS styles for a DomElement
+// Parallel function to resolve_element_style() for Lexbor
+void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
+
+// Process single Lambda CSS property declaration
+// Called for each property in DomElement->specified_style
+void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
+DisplayValue resolve_display_value(DomNode* child); // Unified function for both Lexbor and Lambda CSS
+int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
+
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
 void layout_flow_node(LayoutContext* lycon, DomNode *node);
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode *text_node);
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
-// lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
-//     lexbor_avl_node_t *node, void *ctx);
-// DisplayValue resolve_display(lxb_html_element_t* elmt);
-DisplayValue resolve_display_value(DomNode* child); // Unified function for both Lexbor and Lambda CSS
-int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
-Color color_name_to_rgb(PropValue color_name);
-
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode *elmt);
 

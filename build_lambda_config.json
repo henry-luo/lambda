@@ -81,7 +81,7 @@
         "radiant/grid_positioning.cpp",
         "radiant/layout_grid_content.cpp",
         "radiant/grid_advanced.cpp",
-        "radiant/lambda_css_resolve.cpp",
+        "radiant/resolve_css_style.cpp",
         "radiant/scroller.cpp",
         "radiant/view_pool.cpp",
         "radiant/font.cpp",
