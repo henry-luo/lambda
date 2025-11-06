@@ -9,172 +9,6 @@ extern "C" {
 }
 
 // ============================================================================
-// CSS Keyword to Lexbor Enum Mapping
-// ============================================================================
-
-/**
- * Comprehensive mapping table for CSS keyword strings to Lexbor enum values
- * Extracted from lexbor/source/lexbor/css/value/const.h
- */
-struct KeywordMapping {
-    const char* keyword;
-    int lexbor_value;
-};
-
-// NOTE: keywords MUST be sorted alphabetically for binary search to work correctly
-static const KeywordMapping keyword_map[] = {
-    {"absolute", 0x014f},        // LXB_CSS_VALUE_ABSOLUTE
-    {"alternate", 0x0095},       // LXB_CSS_VALUE_ALTERNATE (animation-direction)
-    {"alternate-reverse", 0x0096}, // LXB_CSS_VALUE_ALTERNATE_REVERSE
-    {"auto", 0x000c},            // LXB_CSS_VALUE_AUTO
-    {"backwards", 0x009a},       // LXB_CSS_VALUE_BACKWARDS (animation-fill-mode)
-    {"baseline", 0x000b},        // LXB_CSS_VALUE_BASELINE
-    {"black", 0x003b},           // LXB_CSS_VALUE_BLACK
-    {"block", 0x00ef},           // LXB_CSS_VALUE_BLOCK
-    {"blue", 0x003d},            // LXB_CSS_VALUE_BLUE
-    {"bold", 0x013d},            // LXB_CSS_VALUE_BOLD
-    {"bolder", 0x013e},          // LXB_CSS_VALUE_BOLDER
-    {"border-box", 0x002a},      // LXB_CSS_VALUE_BORDER_BOX
-    {"both", 0x0174},            // LXB_CSS_VALUE_BOTH
-    {"bottom", 0x0019},          // LXB_CSS_VALUE_BOTTOM
-    {"break-all", 0x0039},       // LXB_CSS_VALUE_BREAK_ALL (word-break)
-    {"break-word", 0x003a},      // LXB_CSS_VALUE_BREAK_WORD (word-wrap)
-    {"brown", 0x003f},           // LXB_CSS_VALUE_BROWN
-    {"capitalize", 0x0053},      // LXB_CSS_VALUE_CAPITALIZE
-    {"center", 0x0007},          // LXB_CSS_VALUE_CENTER
-    {"circle", 0x0220},          // Custom value for list-style-type circle
-    {"clip", 0x003c},            // LXB_CSS_VALUE_CLIP (text-overflow)
-    {"collapse", 0x0210},        // Custom value for border-collapse collapse
-    {"column", 0x010e},          // LXB_CSS_VALUE_COLUMN (flex-direction)
-    {"column-reverse", 0x010f},  // LXB_CSS_VALUE_COLUMN_REVERSE
-    {"contain", 0x0200},         // Custom value for background-size contain
-    {"content-box", 0x0029},     // LXB_CSS_VALUE_CONTENT_BOX
-    {"cover", 0x0201},           // Custom value for background-size cover
-    {"currentcolor", 0x0031},    // LXB_CSS_VALUE_CURRENTCOLOR
-    {"dashed", 0x0022},          // LXB_CSS_VALUE_DASHED
-    {"decimal", 0x0221},         // Custom value for list-style-type decimal
-    {"disc", 0x0222},            // Custom value for list-style-type disc
-    {"dotted", 0x0021},          // LXB_CSS_VALUE_DOTTED
-    {"double", 0x0024},          // LXB_CSS_VALUE_DOUBLE
-    {"ease", 0x0083},            // LXB_CSS_VALUE_EASE (animation-timing-function)
-    {"ease-in", 0x0084},         // LXB_CSS_VALUE_EASE_IN
-    {"ease-in-out", 0x0085},     // LXB_CSS_VALUE_EASE_IN_OUT
-    {"ease-out", 0x0086},        // LXB_CSS_VALUE_EASE_OUT
-    {"ellipsis", 0x0056},        // LXB_CSS_VALUE_ELLIPSIS
-    {"fixed", 0x0151},           // LXB_CSS_VALUE_FIXED
-    {"flex", 0x00f5},            // LXB_CSS_VALUE_FLEX
-    {"flex-end", 0x0006},        // LXB_CSS_VALUE_FLEX_END
-    {"flex-start", 0x0005},      // LXB_CSS_VALUE_FLEX_START
-    {"forwards", 0x009b},        // LXB_CSS_VALUE_FORWARDS (animation-fill-mode)
-    {"gold", 0x0067},            // LXB_CSS_VALUE_GOLD
-    {"gray", 0x0069},            // LXB_CSS_VALUE_GRAY
-    {"green", 0x006a},           // LXB_CSS_VALUE_GREEN
-    {"grid", 0x00f6},            // LXB_CSS_VALUE_GRID
-    {"hidden", 0x0020},          // LXB_CSS_VALUE_HIDDEN
-    {"hide", 0x0211},            // Custom value for empty-cells hide
-    {"infinite", 0x0097},        // LXB_CSS_VALUE_INFINITE (animation-iteration-count)
-    {"inline", 0x00f0},          // LXB_CSS_VALUE_INLINE
-    {"inline-block", 0x00f1},    // LXB_CSS_VALUE_INLINE_BLOCK
-    {"inline-flex", 0x00f2},     // LXB_CSS_VALUE_INLINE_FLEX
-    {"inline-grid", 0x00f3},     // LXB_CSS_VALUE_INLINE_GRID
-    {"inside", 0x0223},          // Custom value for list-style-position inside
-    {"italic", 0x013b},          // LXB_CSS_VALUE_ITALIC
-    {"justify", 0x0152},         // LXB_CSS_VALUE_JUSTIFY
-    {"keep-all", 0x0058},        // LXB_CSS_VALUE_KEEP_ALL (word-break)
-    {"left", 0x002f},            // LXB_CSS_VALUE_LEFT
-    {"line-through", 0x0159},    // LXB_CSS_VALUE_LINE_THROUGH
-    {"linear", 0x0087},          // LXB_CSS_VALUE_LINEAR (animation-timing-function)
-    {"local", 0x0202},           // Custom value for background-attachment local
-    {"lowercase", 0x0060},       // LXB_CSS_VALUE_LOWERCASE
-    {"middle", 0x0010},          // LXB_CSS_VALUE_MIDDLE
-    {"move", 0x00ec},            // LXB_CSS_VALUE_MOVE
-    {"multiply", 0x0204},        // Custom value for background-blend-mode multiply
-    {"none", 0x001f},            // LXB_CSS_VALUE_NONE
-    {"normal", 0x0132},          // LXB_CSS_VALUE_NORMAL
-    {"nowrap", 0x0111},          // LXB_CSS_VALUE_NOWRAP
-    {"oblique", 0x013c},         // LXB_CSS_VALUE_OBLIQUE
-    {"orange", 0x009d},          // LXB_CSS_VALUE_ORANGE
-    {"outside", 0x0224},         // Custom value for list-style-position outside
-    {"overlay", 0x0205},         // Custom value for background-blend-mode overlay
-    {"overline", 0x0158},        // LXB_CSS_VALUE_OVERLINE
-    {"padding-box", 0x0203},     // Custom value for background-origin/clip padding-box
-    {"pink", 0x00a7},            // LXB_CSS_VALUE_PINK
-    {"pointer", 0x00e6},         // LXB_CSS_VALUE_POINTER
-    {"pre", 0x016e},             // LXB_CSS_VALUE_PRE
-    {"pre-line", 0x0171},        // LXB_CSS_VALUE_PRE_LINE
-    {"pre-wrap", 0x016f},        // LXB_CSS_VALUE_PRE_WRAP
-    {"purple", 0x00aa},          // LXB_CSS_VALUE_PURPLE
-    {"red", 0x00ac},             // LXB_CSS_VALUE_RED
-    {"relative", 0x014e},        // LXB_CSS_VALUE_RELATIVE
-    {"reverse", 0x0098},         // LXB_CSS_VALUE_REVERSE (animation-direction)
-    {"right", 0x0030},           // LXB_CSS_VALUE_RIGHT
-    {"round", 0x0206},           // Custom value for background-repeat round
-    {"row", 0x010c},             // LXB_CSS_VALUE_ROW (flex-direction)
-    {"row-reverse", 0x010d},     // LXB_CSS_VALUE_ROW_REVERSE
-    {"running", 0x009c},         // LXB_CSS_VALUE_RUNNING (animation-play-state)
-    {"scroll", 0x014b},          // LXB_CSS_VALUE_SCROLL
-    {"separate", 0x0212},        // Custom value for border-collapse separate
-    {"show", 0x0213},            // Custom value for empty-cells show
-    {"silver", 0x00b5},          // LXB_CSS_VALUE_SILVER
-    {"small-caps", 0x0062},      // LXB_CSS_VALUE_SMALL_CAPS (font-variant)
-    {"solid", 0x0023},           // LXB_CSS_VALUE_SOLID
-    {"space", 0x0207},           // Custom value for background-repeat space
-    {"space-around", 0x0009},    // LXB_CSS_VALUE_SPACE_AROUND
-    {"space-between", 0x0008},   // LXB_CSS_VALUE_SPACE_BETWEEN
-    {"space-evenly", 0x0199},    // LXB_CSS_VALUE_SPACE_EVENLY (LXB_CSS_VALUE__LAST_ENTRY + 28)
-    {"square", 0x0225},          // Custom value for list-style-type square
-    {"static", 0x014d},          // LXB_CSS_VALUE_STATIC
-    {"sticky", 0x0150},          // LXB_CSS_VALUE_STICKY
-    {"stretch", 0x000a},         // LXB_CSS_VALUE_STRETCH
-    {"sub", 0x0016},             // LXB_CSS_VALUE_SUB
-    {"super", 0x0017},           // LXB_CSS_VALUE_SUPER
-    {"text", 0x00e7},            // LXB_CSS_VALUE_TEXT (cursor)
-    {"text-bottom", 0x000d},     // LXB_CSS_VALUE_TEXT_BOTTOM
-    {"text-top", 0x0013},        // LXB_CSS_VALUE_TEXT_TOP
-    {"top", 0x0018},             // LXB_CSS_VALUE_TOP
-    {"transparent", 0x0032},     // LXB_CSS_VALUE_TRANSPARENT
-    {"underline", 0x0157},       // LXB_CSS_VALUE_UNDERLINE
-    {"uppercase", 0x0164},       // LXB_CSS_VALUE_UPPERCASE
-    {"visible", 0x0149},         // LXB_CSS_VALUE_VISIBLE
-    {"white", 0x00c4},           // LXB_CSS_VALUE_WHITE
-    {"wrap", 0x0112},            // LXB_CSS_VALUE_WRAP
-    {"wrap-reverse", 0x0113},    // LXB_CSS_VALUE_WRAP_REVERSE
-    {"yellow", 0x00c6},          // LXB_CSS_VALUE_YELLOW
-};
-
-static const size_t keyword_map_size = sizeof(keyword_map) / sizeof(keyword_map[0]);
-
-/**
- * Binary search for keyword in sorted mapping table
- */
-static int keyword_compare(const void* a, const void* b) {
-    const char* key = (const char*)a;
-    const KeywordMapping* mapping = (const KeywordMapping*)b;
-    return strcasecmp(key, mapping->keyword);
-}
-
-int map_css_keyword_to_lexbor(const char* keyword) {
-    if (!keyword) return 0;
-
-    // binary search in sorted keyword table
-    const KeywordMapping* result = (const KeywordMapping*)bsearch(
-        keyword,
-        keyword_map,
-        keyword_map_size,
-        sizeof(KeywordMapping),
-        keyword_compare
-    );
-
-    if (result) {
-        return result->lexbor_value;
-    }
-
-    // unknown keyword, return 0
-    // TODO: log warning for debugging
-    return 0;
-}
-
-// ============================================================================
 // Value Conversion Functions
 // ============================================================================
 
@@ -1310,13 +1144,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             log_debug("[CSS] Processing line-height property");
-            if (!block || !block->blk) {
-                if (block) {
-                    block->blk = alloc_block_prop(lycon);
-                } else {
-                    break; // inline elements don't have line-height in our model
-                }
-            }
+            if (!block) { break; }
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
 
             // Allocate lxb_css_property_line_height_t structure (compatible with Lexbor)
             lxb_css_property_line_height_t* line_height =
@@ -1363,20 +1192,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         }
 
         // ===== GROUP 5: Text Properties =====
-
         case CSS_PROPERTY_TEXT_ALIGN: {
             log_debug("[CSS] Processing text-align property");
-            if (!block || !block->blk) {
-                if (block) {
-                    block->blk = alloc_block_prop(lycon);
-                } else {
-                    break; // inline elements don't have text-align
-                }
-            }
-
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_KEYWORD) {
-                int align_value = map_css_keyword_to_lexbor(value->data.keyword);
-                if (align_value > 0) {
+                PropValue align_value = css_value_by_name(value->data.keyword);
+                if (align_value != LXB_CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     log_debug("[CSS] Text-align: %s -> 0x%04X", value->data.keyword, align_value);
                 }
@@ -1391,8 +1213,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int deco_value = map_css_keyword_to_lexbor(value->data.keyword);
-                if (deco_value > 0) {
+                PropValue deco_value = css_value_by_name(value->data.keyword);
+                if (deco_value != LXB_CSS_VALUE__UNDEF) {
                     span->font->text_deco = deco_value;
                     log_debug("[CSS] Text-decoration: %s -> 0x%04X", value->data.keyword, deco_value);
                 }
@@ -1407,8 +1229,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int valign_value = map_css_keyword_to_lexbor(value->data.keyword);
-                if (valign_value > 0) {
+                PropValue valign_value = css_value_by_name(value->data.keyword);
+                if (valign_value != LXB_CSS_VALUE__UNDEF) {
                     span->in_line->vertical_align = valign_value;
                     log_debug("[CSS] Vertical-align: %s -> 0x%04X", value->data.keyword, valign_value);
                 } else {
@@ -1434,8 +1256,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int cursor_value = map_css_keyword_to_lexbor(value->data.keyword);
-                if (cursor_value > 0) {
+                PropValue cursor_value = css_value_by_name(value->data.keyword);
+                if (cursor_value != LXB_CSS_VALUE__UNDEF) {
                     span->in_line->cursor = cursor_value;
                     log_debug("[CSS] Cursor: %s -> 0x%04X", value->data.keyword, cursor_value);
                 }
@@ -2335,7 +2157,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->top_style = lexbor_val;
                 log_debug("[CSS] Border-top-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2352,7 +2174,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->right_style = lexbor_val;
                 log_debug("[CSS] Border-right-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2369,7 +2191,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->bottom_style = lexbor_val;
                 log_debug("[CSS] Border-bottom-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2386,7 +2208,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->left_style = lexbor_val;
                 log_debug("[CSS] Border-left-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2572,7 +2394,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                                    strcasecmp(keyword, "inset") == 0 || strcasecmp(keyword, "outset") == 0 ||
                                    strcasecmp(keyword, "none") == 0 || strcasecmp(keyword, "hidden") == 0) {
                             // Style keyword
-                            border_style = map_css_keyword_to_lexbor(keyword);
+                            border_style = css_value_by_name(keyword);
                         } else {
                             // Color keyword
                             border_color.c = map_lambda_color_keyword(keyword);
@@ -2606,7 +2428,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                                strcasecmp(keyword, "groove") == 0 || strcasecmp(keyword, "ridge") == 0 ||
                                strcasecmp(keyword, "inset") == 0 || strcasecmp(keyword, "outset") == 0 ||
                                strcasecmp(keyword, "none") == 0 || strcasecmp(keyword, "hidden") == 0) {
-                        border_style = map_css_keyword_to_lexbor(keyword);
+                        border_style = css_value_by_name(keyword);
                     } else {
                         border_color.c = map_lambda_color_keyword(keyword);
                     }
@@ -2718,8 +2540,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 4 values: top, right, bottom, left
             if (value->type == CSS_VALUE_KEYWORD) {
                 // Single value - all sides get same style
-                int border_style = map_css_keyword_to_lexbor(value->data.keyword);
-                if (border_style > 0) {
+                PropValue border_style = css_value_by_name(value->data.keyword);
+                if (border_style != LXB_CSS_VALUE__UNDEF) {
                     span->bound->border->top_style = border_style;
                     span->bound->border->right_style = border_style;
                     span->bound->border->bottom_style = border_style;
@@ -2734,8 +2556,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
                 if (count == 2 && values[0]->type == CSS_VALUE_KEYWORD && values[1]->type == CSS_VALUE_KEYWORD) {
                     // top/bottom, left/right
-                    int vertical = map_css_keyword_to_lexbor(values[0]->data.keyword);
-                    int horizontal = map_css_keyword_to_lexbor(values[1]->data.keyword);
+                    PropValue vertical = css_value_by_name(values[0]->data.keyword);
+                    PropValue horizontal = css_value_by_name(values[1]->data.keyword);
                     span->bound->border->top_style = vertical;
                     span->bound->border->bottom_style = vertical;
                     span->bound->border->left_style = horizontal;
@@ -2745,9 +2567,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 else if (count == 3 && values[0]->type == CSS_VALUE_KEYWORD &&
                            values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD) {
                     // top, left/right, bottom
-                    int top = map_css_keyword_to_lexbor(values[0]->data.keyword);
-                    int horizontal = map_css_keyword_to_lexbor(values[1]->data.keyword);
-                    int bottom = map_css_keyword_to_lexbor(values[2]->data.keyword);
+                    PropValue top = css_value_by_name(values[0]->data.keyword);
+                    PropValue horizontal = css_value_by_name(values[1]->data.keyword);
+                    PropValue bottom = css_value_by_name(values[2]->data.keyword);
                     span->bound->border->top_style = top;
                     span->bound->border->left_style = horizontal;
                     span->bound->border->right_style = horizontal;
@@ -2758,10 +2580,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                            values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD &&
                            values[3]->type == CSS_VALUE_KEYWORD) {
                     // top, right, bottom, left
-                    int top = map_css_keyword_to_lexbor(values[0]->data.keyword);
-                    int right = map_css_keyword_to_lexbor(values[1]->data.keyword);
-                    int bottom = map_css_keyword_to_lexbor(values[2]->data.keyword);
-                    int left = map_css_keyword_to_lexbor(values[3]->data.keyword);
+                    PropValue top = css_value_by_name(values[0]->data.keyword);
+                    PropValue right = css_value_by_name(values[1]->data.keyword);
+                    PropValue bottom = css_value_by_name(values[2]->data.keyword);
+                    PropValue left = css_value_by_name(values[3]->data.keyword);
                     span->bound->border->top_style = top;
                     span->bound->border->right_style = right;
                     span->bound->border->bottom_style = bottom;
@@ -3233,7 +3055,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 block->position->position = lexbor_val;
                 log_debug("[CSS] Position: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -3363,7 +3185,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int float_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue float_value = css_value_by_name(value->data.keyword);
                 if (float_value > 0) {
                     block->position->float_prop = float_value;
                     log_debug("[CSS] Float: %s -> 0x%04X", value->data.keyword, float_value);
@@ -3380,7 +3202,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int clear_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue clear_value = css_value_by_name(value->data.keyword);
                 if (clear_value > 0) {
                     block->position->clear = clear_value;
                     log_debug("[CSS] Clear: %s -> 0x%04X", value->data.keyword, clear_value);
@@ -3399,7 +3221,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int overflow_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
                     block->scroller->overflow_y = overflow_value;
@@ -3417,7 +3239,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int overflow_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
                     log_debug("[CSS] Overflow-x: %s -> 0x%04X", value->data.keyword, overflow_value);
@@ -3434,7 +3256,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int overflow_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_y = overflow_value;
                     log_debug("[CSS] Overflow-y: %s -> 0x%04X", value->data.keyword, overflow_value);
@@ -3456,7 +3278,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int whitespace_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue whitespace_value = css_value_by_name(value->data.keyword);
                 if (whitespace_value > 0) {
                     block->blk->white_space = whitespace_value;
                     log_debug("[CSS] White-space: %s -> 0x%04X", value->data.keyword, whitespace_value);
@@ -3471,7 +3293,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing visibility property");
             // Visibility applies to all elements, stored in ViewSpan
             if (value->type == CSS_VALUE_KEYWORD) {
-                int visibility_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue visibility_value = css_value_by_name(value->data.keyword);
                 if (visibility_value > 0) {
                     span->visibility = visibility_value;
                     log_debug("[CSS] Visibility: %s -> 0x%04X", value->data.keyword, visibility_value);
@@ -3533,7 +3355,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int boxsizing_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue boxsizing_value = css_value_by_name(value->data.keyword);
                 if (boxsizing_value > 0) {
                     block->blk->box_sizing = boxsizing_value;
                     log_debug("[CSS] Box-sizing: %s -> 0x%04X", value->data.keyword, boxsizing_value);
@@ -3552,7 +3374,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     span->font->font_style = lexbor_value;
                     log_debug("[CSS] font-style: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3573,7 +3395,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_transform field to BlockProp would be needed
                     // For now, log the value that would be set
@@ -3596,7 +3418,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_overflow field to BlockProp would be needed
                     log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)",
@@ -3618,7 +3440,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_break field to BlockProp would be needed
                     log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
@@ -3640,7 +3462,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_wrap field to BlockProp would be needed
                     log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)",
@@ -3658,7 +3480,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding font_variant field to FontProp would be needed
                     log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)",
@@ -3732,7 +3554,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->direction = lexbor_value;
                     log_debug("[CSS] flex-direction: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3752,7 +3574,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->wrap = lexbor_value;
                     log_debug("[CSS] flex-wrap: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3772,7 +3594,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->justify = lexbor_value;
                     log_debug("[CSS] justify-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3792,7 +3614,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->align_items = lexbor_value;
                     log_debug("[CSS] align-items: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3812,7 +3634,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->align_content = lexbor_value;
                     log_debug("[CSS] align-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3921,7 +3743,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_ALIGN_SELF: {
             log_debug("[CSS] Processing align-self property");
             if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     span->align_self = lexbor_value;
                     log_debug("[CSS] align-self: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -4103,7 +3925,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation-timing-function property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* timing = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(timing);
+                PropValue lexbor_value = css_value_by_name(timing);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] animation-timing-function: %s -> 0x%04X", timing, lexbor_value);
                 } else {
@@ -4137,7 +3959,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation-direction property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* direction = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(direction);
+                PropValue lexbor_value = css_value_by_name(direction);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] animation-direction: %s -> 0x%04X", direction, lexbor_value);
                 } else {
@@ -4151,7 +3973,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation-fill-mode property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* fill_mode = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(fill_mode);
+                PropValue lexbor_value = css_value_by_name(fill_mode);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] animation-fill-mode: %s -> 0x%04X", fill_mode, lexbor_value);
                 } else {
@@ -4196,7 +4018,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing border-collapse property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* collapse = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(collapse);
+                PropValue lexbor_value = css_value_by_name(collapse);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] border-collapse: %s -> 0x%04X", collapse, lexbor_value);
                 } else {
@@ -4236,7 +4058,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing empty-cells property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* cells = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(cells);
+                PropValue lexbor_value = css_value_by_name(cells);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] empty-cells: %s -> 0x%04X", cells, lexbor_value);
                 } else {
@@ -4251,7 +4073,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing list-style-type property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* type = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(type);
+                PropValue lexbor_value = css_value_by_name(type);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] list-style-type: %s -> 0x%04X", type, lexbor_value);
                 } else {
@@ -4265,7 +4087,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing list-style-position property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 const char* position = value->data.keyword;
-                int lexbor_value = map_css_keyword_to_lexbor(position);
+                PropValue lexbor_value = css_value_by_name(position);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] list-style-position: %s -> 0x%04X", position, lexbor_value);
                 } else {

@@ -2,12 +2,14 @@
 #include "grid.hpp"
 #include <time.h>
 
+extern "C" {
 #include "../lib/log.h"
 #include "../lib/mempool.h"
+#include "../lib/hashmap.h"
+}
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent, DocumentType doc_type);
 
-static const css_data lxb_css_value_data[LXB_CSS_VALUE__LAST_ENTRY] =
-{
+static const css_data lxb_css_value_data[] = {
     {"_undef", 6, LXB_CSS_VALUE__UNDEF},
     {"initial", 7, LXB_CSS_VALUE_INITIAL},
     {"inherit", 7, LXB_CSS_VALUE_INHERIT},
@@ -388,28 +390,100 @@ static const css_data lxb_css_value_data[LXB_CSS_VALUE__LAST_ENTRY] =
     {"vertical-rl", 11, LXB_CSS_VALUE_VERTICAL_RL},
     {"vertical-lr", 11, LXB_CSS_VALUE_VERTICAL_LR},
     {"sideways-rl", 11, LXB_CSS_VALUE_SIDEWAYS_RL},
-    {"sideways-lr", 11, LXB_CSS_VALUE_SIDEWAYS_LR}
+    {"sideways-lr", 11, LXB_CSS_VALUE_SIDEWAYS_LR},
+    // Custom values added from Lambda CSS resolve
+    {"contain", 7, LXB_CSS_VALUE_CONTAIN},
+    {"cover", 5, LXB_CSS_VALUE_COVER},
+    {"local", 5, LXB_CSS_VALUE_LOCAL},
+    {"padding-box", 11, LXB_CSS_VALUE_PADDING_BOX},
+    {"multiply", 8, LXB_CSS_VALUE_MULTIPLY},
+    {"overlay", 7, LXB_CSS_VALUE_OVERLAY},
+    {"round", 5, LXB_CSS_VALUE_ROUND},
+    {"space", 5, LXB_CSS_VALUE_SPACE},
+    {"collapse-table", 14, LXB_CSS_VALUE_COLLAPSE_TABLE},  // Use different name to avoid conflict with LXB_CSS_VALUE_COLLAPSE
+    {"separate", 8, LXB_CSS_VALUE_SEPARATE},
+    {"hide", 4, LXB_CSS_VALUE_HIDE},
+    {"show", 4, LXB_CSS_VALUE_SHOW},
+    {"fit-content", 11, LXB_CSS_VALUE_FIT_CONTENT},
+    {"fr", 2, LXB_CSS_VALUE_FR},
+    {"dense", 5, LXB_CSS_VALUE_DENSE}
 };
 
 const css_data* css_value_by_id(PropValue id) {
+    // Support both standard and custom value IDs
     if (id < LXB_CSS_VALUE__LAST_ENTRY) {
         return &lxb_css_value_data[id];
     }
+    // For custom values beyond LXB_CSS_VALUE__LAST_ENTRY, calculate index
+    if (id >= LXB_CSS_VALUE_CONTAIN && id <= LXB_CSS_VALUE_DENSE) {
+        size_t custom_index = LXB_CSS_VALUE__LAST_ENTRY + (id - LXB_CSS_VALUE_CONTAIN);
+        if (custom_index < sizeof(lxb_css_value_data) / sizeof(lxb_css_value_data[0])) {
+            return &lxb_css_value_data[custom_index];
+        }
+    }
     return NULL;
+}
+
+// hash function for CSS keyword strings (case-insensitive)
+static uint64_t css_keyword_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const char* str = *(const char**)item;
+    // convert to lowercase for case-insensitive hashing
+    char lower[256];
+    size_t i = 0;
+    while (str[i] && i < 255) {
+        lower[i] = tolower((unsigned char)str[i]);
+        i++;
+    }
+    lower[i] = '\0';
+    return hashmap_sip(lower, i, seed0, seed1);
+}
+
+// comparison function for CSS keyword strings (case-insensitive)
+static int css_keyword_compare(const void *a, const void *b, void *udata) {
+    const char* str_a = *(const char**)a;
+    const char* str_b = *(const char**)b;
+    return strcasecmp(str_a, str_b);
 }
 
 // Look up CSS value by name (case-insensitive)
 // Returns the LXB_CSS_VALUE enum, or LXB_CSS_VALUE__UNDEF if not found
 PropValue css_value_by_name(const char* name) {
     if (!name) return LXB_CSS_VALUE__UNDEF;
-    // Linear search through the table (could be optimized with hash table if needed)
-    for (size_t i = 0; i < LXB_CSS_VALUE__LAST_ENTRY; i++) {
-        size_t length = lxb_css_value_data[i].length;
-        // case-insensitive comparison
-        if (strncasecmp(lxb_css_value_data[i].name, name, length) == 0) {
-            return lxb_css_value_data[i].unique;
+
+    static HashMap* keyword_cache = NULL;
+    static const size_t table_size = sizeof(lxb_css_value_data) / sizeof(lxb_css_value_data[0]);
+
+    // initialize hashmap on first use
+    if (!keyword_cache) {
+        keyword_cache = hashmap_new(
+            sizeof(const char*),  // key is pointer to string
+            table_size,           // initial capacity
+            0, 0,                 // seeds (0 means random)
+            css_keyword_hash,
+            css_keyword_compare,
+            NULL,                 // no element free function
+            (void*)lxb_css_value_data  // udata pointing to value table
+        );
+
+        // populate hashmap with all keywords
+        for (size_t i = 0; i < table_size; i++) {
+            const char* keyword = lxb_css_value_data[i].name;
+            hashmap_set(keyword_cache, &keyword);
         }
     }
+
+    // lookup in hashmap
+    const char** result = (const char**)hashmap_get(keyword_cache, &name);
+    if (result) {
+        // find index in table to get the unique value
+        const char* found_name = *result;
+        for (size_t i = 0; i < table_size; i++) {
+            if (lxb_css_value_data[i].name == found_name) {
+                return lxb_css_value_data[i].unique;
+            }
+        }
+    }
+
     return LXB_CSS_VALUE__UNDEF;
 }
 
