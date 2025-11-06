@@ -4,8 +4,7 @@
 // Value Conversion Functions
 // ============================================================================
 
-float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
-                                   CssPropertyId prop_id) {
+float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon, CssPropertyId prop_id) {
     if (!value) return 0.0f;
 
     switch (value->type) {
@@ -372,13 +371,10 @@ PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
 
 int32_t get_lambda_specificity(const CssDeclaration* decl) {
     if (!decl) return 0;
-
     // Lambda CssSpecificity is a struct with (a, b, c) components
-    // Convert to Lexbor-compatible int32_t by packing:
-    // specificity = (a << 16) | (b << 8) | c
-    // TODO: verify Lambda CssSpecificity structure
-
-    return 0; // placeholder - needs proper implementation
+    // Convert to int32_t by packing:
+    int32_t specificity = (decl->specificity.ids << 16) | (decl->specificity.classes << 8) | decl->specificity.elements;
+    return specificity;
 }
 
 DisplayValue resolve_display_value(DomNode* child) {
@@ -610,10 +606,8 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
  * @return Resolved value in pixels
  */
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
-    if (!value) {
-        log_debug("resolve_length_value: null value");
-        return 0.0f;
-    }
+    if (!value) { log_debug("resolve_length_value: null value");  return 0.0f; }
+
     float result = 0.0f;
     switch (value->type) {
     case CSS_VALUE_NUMBER:
@@ -767,29 +761,29 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     const CssValue *src_space, int32_t specificity, Spacing* trg_spacing) {
     Margin sp;  // temporal space
     int value_cnt = 1;  bool is_margin = property == CSS_PROPERTY_MARGIN;
-    log_debug("resolve_spacing_prop");
+    log_debug("resolve_spacing_prop with specificity %d", specificity);
     if (src_space->type == CSS_VALUE_LIST) {
         // Multi-value margin
         value_cnt = src_space->data.list.count;
         CssValue** values = src_space->data.list.values;
         switch (value_cnt) {
         case 4:
-            log_debug("resolving spacing 4th");
+            log_debug("resolving 4th spacing");
             sp.left = resolve_length_value(lycon, property, values[3]);
             sp.left_type = values[3]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[3]->data.keyword) : 0;
             // intended fall through
         case 3:
-            log_debug("resolving spacing 3rd");
+            log_debug("resolving 3rd spacing");
             sp.bottom = resolve_length_value(lycon, property, values[2]);
             sp.bottom_type = values[2]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[2]->data.keyword) : 0;
             // intended fall through
         case 2:
-            log_debug("resolving spacing 2nd");
+            log_debug("resolving 2nd spacing");
             sp.right = resolve_length_value(lycon, property, values[1]);
             sp.right_type = values[1]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[1]->data.keyword) : 0;
             // intended fall through
         case 1:
-            log_debug("resolving spacing 1st");
+            log_debug("resolving 1st spacing");
             sp.top = resolve_length_value(lycon, property, values[0]);
             sp.top_type = values[0]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[0]->data.keyword) : 0;
             break;
@@ -805,16 +799,11 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         break;
     case 2:
         sp.bottom = sp.top;  sp.left = sp.right;
-        if (is_margin) {
-            sp.top_type = sp.bottom_type;
-            sp.left_type = sp.right_type;
-        }
+        if (is_margin) { sp.bottom_type = sp.top_type;  sp.left_type = sp.right_type; }
         break;
     case 3:
         sp.left = sp.right;
-        if (is_margin) {
-            sp.left_type = sp.right_type;
-        }
+        if (is_margin) { sp.left_type = sp.right_type; }
         break;
     case 4:
         // no change to values
@@ -827,6 +816,8 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         trg_spacing->top_specificity = specificity;
         if (trg_margin) trg_margin->top_type = sp.top_type;
         log_debug("updated top spacing to %f", trg_spacing->top);
+    } else {
+        log_debug("skipped top spacing update due to lower specificity: %d <= %d", specificity, trg_spacing->top_specificity);
     }
     if (specificity > trg_spacing->bottom_specificity) {
         trg_spacing->bottom = sp.bottom;
