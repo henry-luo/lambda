@@ -101,6 +101,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     Document* doc = NULL;
+    log_debug("layout iframe");
     if (!(block->embed && block->embed->doc)) {
         // load iframe document
         size_t value_len;
@@ -108,11 +109,11 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
         if (value && value_len) {
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);
-            printf("iframe doc src: %s\n", src->str);
+            log_debug("load iframe doc src: %s", src->str);
             doc = load_html_doc(lycon->ui_context->document->url, src->str);
             strbuf_free(src);
             if (!doc) {
-                printf("Failed to load iframe document\n");
+                log_debug("failed to load iframe document");
                 // todo: use a placeholder
             } else {
                 if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
@@ -121,6 +122,8 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                     layout_html_doc(lycon->ui_context, doc, false);
                 }
             }
+        } else {
+            log_debug("iframe has no src attribute");
         }
     }
     else {

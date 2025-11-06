@@ -1,6 +1,9 @@
 #include "handler.hpp"
 
 #include "../lib/log.h"
+#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/selector_matcher.h"
+#include "../lambda/input/css/css_parser.h"
 Document* show_html_doc(Url *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void to_repaint();
@@ -300,47 +303,73 @@ lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_spec
 
 // find iframe by name and set new src using selector
 DomNode *set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
-    // lxb_status_t status;
-    // lxb_css_parser_t *parser = lxb_css_parser_create();
-    // status = lxb_css_parser_init(parser, NULL);
-    // if (status != LXB_STATUS_OK) { return NULL; }
+    if (!document || !target_name || !new_src) {
+        log_error("Invalid parameters to set_iframe_src_by_name");
+        return NULL;
+    }
+    // get memory pool from document
+    Pool* pool = document->pool;
+    if (!pool) {
+        log_error("Document has no memory pool");
+        return NULL;
+    }
 
-    // // create selector
-    // lxb_selectors_t *selectors = lxb_selectors_create();
-    // status = lxb_selectors_init(selectors);
-    // if (status != LXB_STATUS_OK) {
-    //     lxb_selectors_destroy(selectors, true);
-    //     return NULL;
-    // }
+    // construct selector string: iframe[name="target_name"]
+    char selector_str[256];
+    int len = snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
+    if (len < 0 || len >= (int)sizeof(selector_str)) {
+        log_error("Selector string too long");
+        return NULL;
+    }
 
-    // // construct selector string: iframe[name="target_name"]
-    // char selector_str[128];
-    // snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
-    // lxb_css_selector_list_t *list = lxb_css_selectors_parse(parser, (const lxb_char_t *)selector_str, strlen(selector_str));
-    // if (parser->status != LXB_STATUS_OK) {
-    //     return NULL;
-    // }
+    log_debug("parsing iframe selector: %s", selector_str);
+    // tokenize the selector
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(selector_str, (size_t)len, pool, &token_count);
+    if (!tokens || token_count == 0) {
+        log_error("Failed to tokenize selector");
+        return NULL;
+    }
+    // parse the selector
+    int pos = 0;
+    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
+    if (!selector) {
+        log_error("Failed to parse selector");
+        return NULL;
+    }
+    // create selector matcher
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) {
+        log_error("Failed to create selector matcher");
+        return NULL;
+    }
 
-    // lxb_dom_element_t *element = NULL;
-    // status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list,
-    //     set_iframe_src_callback, (void*)&element);
-    // if (element) {
-    //     log_debug("set iframe src: %s", new_src);
-    //     lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3,
-    //         (const lxb_char_t *)new_src, (size_t)strlen((char*)new_src));
-    // }
-    // // cleanup
-    // lxb_selectors_destroy(selectors, true);
-    // lxb_css_selector_list_destroy_memory(list);
-    // lxb_css_parser_destroy(parser, true);
-    // return element;
+    // find the iframe element matching the selector
+    DomNode* node_found = NULL;
+    DomElement* iframe_element = selector_matcher_find_first(matcher, selector, document);
+    if (iframe_element) {
+        log_debug("Found iframe with name='%s', setting src to: %s", target_name, new_src);
+        // set the src attribute
+        if (!dom_element_set_attribute(iframe_element, "src", new_src)) {
+            log_error("Failed to set src attribute");
+        } else {
+            // return the DomNode wrapper if needed
+            // note: this function returns DomNode* but we found a DomElement*
+            // we need to find the corresponding DomNode wrapper
+            node_found = DomNode::create_mark_element(iframe_element);
+            log_debug("iframe src attribute set successfully");
+        }
+    } else {
+        log_debug("No iframe found with name='%s'", target_name);
+    }
+    selector_matcher_destroy(matcher);
+    return node_found;
 }
 
 // find the sub-view that matches the given node
 View* find_view(View* view, DomNode *node) {
-    if (view->node && view->node == node) { return view; }
-    if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-        view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_INLINE) {
+    if (view->node && view->node->type == node->type && view->node->dom_element == node->dom_element) { return view; }
+    if (view->is_group()) {
         ViewGroup* group = (ViewGroup*)view;
         View* child = group->child;
         while (child) {
@@ -349,6 +378,7 @@ View* find_view(View* view, DomNode *node) {
             child = child->next;
         }
     }
+    // log_debug("view not found for node: %s", node->name());
     return NULL;
 }
 
@@ -443,6 +473,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                 DomNode *elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
+                    log_debug("found iframe view");
                     if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) && ((ViewBlock*)iframe)->embed) {
                         log_debug("updating doc of iframe view");
                         ViewBlock* block = (ViewBlock*)iframe;
@@ -466,6 +497,9 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                         }
                         free_document(old_doc);
                         uicon->document->state->is_dirty = true;
+                    }
+                    else {
+                        log_debug("iframe view has no embed");
                     }
                 } else {
                     log_debug("failed to find iframe view");

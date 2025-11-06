@@ -443,7 +443,6 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
     } else {
         effective_type = type->chars;
     }
-    printf("Effective type for input: %s\n", effective_type);
 
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text

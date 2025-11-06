@@ -266,6 +266,8 @@ struct View {
     ViewGroup* parent;  // corrected the type to ViewGroup
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
 
+    inline bool is_group() { return type >= RDT_VIEW_INLINE; }
+
     inline bool is_inline() { return type == RDT_VIEW_TEXT || type == RDT_VIEW_INLINE || type == RDT_VIEW_INLINE_BLOCK; }
 
     inline bool is_block() {
