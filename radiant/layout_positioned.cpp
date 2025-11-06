@@ -8,7 +8,7 @@ float adjust_min_max_width(ViewBlock* block, float width);
 float adjust_min_max_height(ViewBlock* block, float height);
 float adjust_border_padding_width(ViewBlock* block, float width);
 float adjust_border_padding_height(ViewBlock* block, float height);
-void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
+void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
 /**
@@ -231,7 +231,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     setup_inline(lycon, block);
 
     // layout block content, and determine flow width and height
-    layout_block_inner_content(lycon, block, block->display);
+    layout_block_inner_content(lycon, block);
 
     // no relative positioning adjustment here
     // no margin collapsing with children
