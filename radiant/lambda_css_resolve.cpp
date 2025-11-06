@@ -568,6 +568,175 @@ int32_t get_lambda_specificity(const CssDeclaration* decl) {
     return 0; // placeholder - needs proper implementation
 }
 
+DisplayValue resolve_display_value(DomNode* child) {
+    // Resolve display value for a DOM node
+    DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
+
+    if (child && child->type == MARK_ELEMENT) {
+        // Lambda CSS element - resolve display from CSS if available
+        const char* tag_name = child->name();
+
+        // First, try to get display from CSS
+        DomElement* dom_elem = (DomElement*)child->dom_element;
+        if (dom_elem && dom_elem->specified_style) {
+            StyleTree* style_tree = dom_elem->specified_style;
+            if (style_tree->tree) {
+                // Look for display property (ID=1) in the AVL tree
+                AvlNode* node = avl_tree_search(style_tree->tree, CSS_PROPERTY_DISPLAY);
+                if (node) {
+                    StyleNode* style_node = (StyleNode*)node->declaration;
+                    if (style_node && style_node->winning_decl) {
+                        CssDeclaration* decl = style_node->winning_decl;
+                        if (decl->value && decl->value->type == CSS_VALUE_KEYWORD) {
+                            const char* keyword = decl->value->data.keyword;
+
+                            // Map keyword to display values
+                            if (strcmp(keyword, "flex") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_FLEX;
+                                return display;
+                            } else if (strcmp(keyword, "inline-flex") == 0) {
+                                display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_FLEX;
+                                return display;
+                            } else if (strcmp(keyword, "grid") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_GRID;
+                                return display;
+                            } else if (strcmp(keyword, "inline-grid") == 0) {
+                                display.outer = LXB_CSS_VALUE_INLINE;
+                                display.inner = LXB_CSS_VALUE_GRID;
+                                return display;
+                            } else if (strcmp(keyword, "block") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_FLOW;
+                                return display;
+                            } else if (strcmp(keyword, "inline") == 0) {
+                                display.outer = LXB_CSS_VALUE_INLINE;
+                                display.inner = LXB_CSS_VALUE_FLOW;
+                                return display;
+                            } else if (strcmp(keyword, "inline-block") == 0) {
+                                display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_FLOW;
+                                return display;
+                            } else if (strcmp(keyword, "none") == 0) {
+                                display.outer = LXB_CSS_VALUE_NONE;
+                                display.inner = LXB_CSS_VALUE_NONE;
+                                return display;
+                            } else if (strcmp(keyword, "table") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE;
+                                return display;
+                            } else if (strcmp(keyword, "inline-table") == 0) {
+                                display.outer = LXB_CSS_VALUE_INLINE;
+                                display.inner = LXB_CSS_VALUE_TABLE;
+                                return display;
+                            } else if (strcmp(keyword, "table-row") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_ROW;
+                                return display;
+                            } else if (strcmp(keyword, "table-cell") == 0) {
+                                display.outer = LXB_CSS_VALUE_TABLE_CELL;
+                                display.inner = LXB_CSS_VALUE_TABLE_CELL;
+                                return display;
+                            } else if (strcmp(keyword, "table-row-group") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_ROW_GROUP;
+                                return display;
+                            } else if (strcmp(keyword, "table-header-group") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_HEADER_GROUP;
+                                return display;
+                            } else if (strcmp(keyword, "table-footer-group") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_FOOTER_GROUP;
+                                return display;
+                            } else if (strcmp(keyword, "table-column") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_COLUMN;
+                                return display;
+                            } else if (strcmp(keyword, "table-column-group") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;
+                                return display;
+                            } else if (strcmp(keyword, "table-caption") == 0) {
+                                display.outer = LXB_CSS_VALUE_BLOCK;
+                                display.inner = LXB_CSS_VALUE_TABLE_CAPTION;
+                                return display;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to default display values based on tag name
+        if (strcmp(tag_name, "body") == 0 || strcmp(tag_name, "h1") == 0 ||
+            strcmp(tag_name, "h2") == 0 || strcmp(tag_name, "h3") == 0 ||
+            strcmp(tag_name, "h4") == 0 || strcmp(tag_name, "h5") == 0 ||
+            strcmp(tag_name, "h6") == 0 || strcmp(tag_name, "p") == 0 ||
+            strcmp(tag_name, "div") == 0 || strcmp(tag_name, "center") == 0 ||
+            strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0 ||
+            strcmp(tag_name, "header") == 0 || strcmp(tag_name, "main") == 0 ||
+            strcmp(tag_name, "section") == 0 || strcmp(tag_name, "footer") == 0 ||
+            strcmp(tag_name, "article") == 0 || strcmp(tag_name, "aside") == 0 ||
+            strcmp(tag_name, "nav") == 0 || strcmp(tag_name, "address") == 0 ||
+            strcmp(tag_name, "blockquote") == 0 || strcmp(tag_name, "details") == 0 ||
+            strcmp(tag_name, "dialog") == 0 || strcmp(tag_name, "figure") == 0 ||
+            strcmp(tag_name, "menu") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_FLOW;
+        } else if (strcmp(tag_name, "li") == 0 || strcmp(tag_name, "summary") == 0) {
+            display.outer = LXB_CSS_VALUE_LIST_ITEM;
+            display.inner = LXB_CSS_VALUE_FLOW;
+        } else if (strcmp(tag_name, "img") == 0 || strcmp(tag_name, "video") == 0 ||
+                    strcmp(tag_name, "input") == 0 || strcmp(tag_name, "select") == 0 ||
+                    strcmp(tag_name, "textarea") == 0 || strcmp(tag_name, "button") == 0 ||
+                    strcmp(tag_name, "iframe") == 0) {
+            display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+            display.inner = RDT_DISPLAY_REPLACED;
+        } else if (strcmp(tag_name, "hr") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = RDT_DISPLAY_REPLACED;
+        } else if (strcmp(tag_name, "script") == 0 || strcmp(tag_name, "style") == 0 ||
+                    strcmp(tag_name, "svg") == 0) {
+            display.outer = LXB_CSS_VALUE_NONE;
+            display.inner = LXB_CSS_VALUE_NONE;
+        } else if (strcmp(tag_name, "table") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_TABLE;
+        } else if (strcmp(tag_name, "caption") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_FLOW;
+        } else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 ||
+                    strcmp(tag_name, "tfoot") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_TABLE_ROW_GROUP;
+        } else if (strcmp(tag_name, "tr") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_TABLE_ROW;
+        } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
+            display.outer = LXB_CSS_VALUE_TABLE_CELL;
+            display.inner = LXB_CSS_VALUE_TABLE_CELL;
+        } else if (strcmp(tag_name, "colgroup") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;
+        } else if (strcmp(tag_name, "col") == 0) {
+            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.inner = LXB_CSS_VALUE_TABLE_COLUMN;
+        } else {
+            // Default for unknown elements (inline)
+            display.outer = LXB_CSS_VALUE_INLINE;
+            display.inner = LXB_CSS_VALUE_FLOW;
+        }
+
+        // TODO: Check for CSS display property in child->style (DomElement)
+        // For now, using tag-based defaults is sufficient
+    }
+
+    return display;
+}
+
 // ============================================================================
 // Main Style Resolution
 // ============================================================================

@@ -196,7 +196,6 @@ DomNode* DomNode::first_child() {
 
             if (child_node) {
                 child_node->parent = this;
-                child_node->style = (Style*)first;  // Link to DomElement/DomText for CSS
                 fprintf(stderr, "[DOM DEBUG] Caching first_child - parent_type=%d, child_type=%d, child_ptr=%p\n",
                         this->type, child_node->type, child_node->dom_element);
                 this->_child = child_node;
@@ -248,7 +247,6 @@ DomNode* DomNode::next_sibling() {
 
             if (sibling_node) {
                 sibling_node->parent = parent;
-                sibling_node->style = (Style*)next;  // Link to DomElement/DomText for CSS
                 fprintf(stderr, "[DOM DEBUG] Caching next_sibling - parent_type=%d, sibling_type=%d, sibling_ptr=%p\n",
                         this->type, sibling_node->type, sibling_node->dom_element);
                 this->_next = sibling_node;
@@ -310,7 +308,6 @@ DomNode* DomNode::create_mark_element(DomElement* element) {
     DomNode* node = (DomNode*)calloc(1, sizeof(DomNode));
     node->type = MARK_ELEMENT;
     node->dom_element = element;
-    node->style = nullptr;
     node->parent = nullptr;
     node->_next = nullptr;
     node->_child = nullptr;
@@ -327,7 +324,6 @@ DomNode* DomNode::create_mark_text(DomText* text) {
     DomNode* node = (DomNode*)calloc(1, sizeof(DomNode));
     node->type = MARK_TEXT;
     node->dom_text = text;
-    node->style = nullptr;
     node->parent = nullptr;
     node->_next = nullptr;
     node->_child = nullptr;
@@ -341,7 +337,6 @@ DomNode* DomNode::create_mark_comment(DomComment* comment) {
     DomNode* node = (DomNode*)calloc(1, sizeof(DomNode));
     node->type = MARK_COMMENT;
     node->dom_comment = comment;
-    node->style = nullptr;
     node->parent = nullptr;
     node->_next = nullptr;
     node->_child = nullptr;
