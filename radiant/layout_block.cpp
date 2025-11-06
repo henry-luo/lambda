@@ -40,6 +40,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
         flow_height = block->content_height = lycon->block.advance_y;
     }
 
+    log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
     if (display == LXB_CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
         block->width = min(flow_width, block->width);
         log_debug("inline-block final width set to: %f", block->width);
@@ -95,7 +96,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
         log_debug("finalize block flow, set block height to flow height: %f", flow_height);
         block->height = flow_height;
     }
-    log_debug("block wd:%f, hg:%f after finalize", block->width, block->height);
+    log_debug("finalized block wd:%f, hg:%f", block->width, block->height);
 }
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
@@ -133,19 +134,19 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     finalize_block_flow(lycon, block, display.outer);
 }
 
-void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
+void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("layout block inner content");
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
         uintptr_t elmt_name = block->node->tag();
         if (elmt_name == LXB_TAG_IFRAME) {
-            layout_iframe(lycon, block, display);
+            layout_iframe(lycon, block, block->display);
         }
         // else LXB_TAG_IMG
     } else {  // layout block child content
         DomNode *child = block->node->first_child();
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
-            if (display.inner == LXB_CSS_VALUE_FLOW) {
+            if (block->display.inner == LXB_CSS_VALUE_FLOW) {
                 // inline content flow
                 do {
                     layout_flow_node(lycon, child);
@@ -155,12 +156,12 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayV
                 // handle last line
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
-            else if (display.inner == LXB_CSS_VALUE_FLEX) {
+            else if (block->display.inner == LXB_CSS_VALUE_FLEX) {
                 log_debug("Setting up flex container for %s", block->node->name());
                 layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node->name());
             }
-            else if (display.inner == LXB_CSS_VALUE_GRID) {
+            else if (block->display.inner == LXB_CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s", block->node->name());
                 GridContainerLayout* pa_grid = lycon->grid_container;
                 init_grid_container(lycon, block);
@@ -188,10 +189,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayV
                 lycon->grid_container = pa_grid;
                 log_debug("Finished layout_grid_container");
             }
-            else if (display.inner == LXB_CSS_VALUE_TABLE) {
+            else if (block->display.inner == LXB_CSS_VALUE_TABLE) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
-                        display.outer, display.inner, block->node->name());
-                layout_table(lycon, block->node, display);
+                        block->display.outer, block->display.inner, block->node->name());
+                layout_table(lycon, block->node, block->display);
                 return;
             }
             else {
@@ -199,7 +200,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block, DisplayV
             }
             lycon->parent = block->parent;
         }
-        finalize_block_flow(lycon, block, display.outer);
+        finalize_block_flow(lycon, block, block->display.outer);
     }
 }
 
@@ -410,7 +411,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
 void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
     const char* tag = elmt->name();
-    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag, block->x, block->y, pa_block->advance_y);
+    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d",
+        tag, block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
 
     uintptr_t elmt_name = elmt->tag();
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
@@ -562,7 +564,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     setup_inline(lycon, block);
 
     // layout block content, and determine flow width and height
-    layout_block_inner_content(lycon, block, block->display);
+    layout_block_inner_content(lycon, block);
 
     // check for margin collapsing with children
     if (block->bound) {
@@ -600,7 +602,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_enter();
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    log_debug("layout block %s (display.inner=%d)", elmt->name(), display.inner);
+    log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->name(), display.outer, display.inner);
 
     // Check if this block is a flex item
     ViewBlock* parent_block = (ViewBlock*)lycon->parent;
