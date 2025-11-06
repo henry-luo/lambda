@@ -479,7 +479,7 @@ uint32_t map_lambda_color_keyword(const char* keyword) {
     if (!keyword) return 0xFF000000; // default black in ABGR format
 
     // convert keyword to enum value
-    uintptr_t color_enum = css_value_by_name(keyword, strlen(keyword));
+    uintptr_t color_enum = css_value_by_name(keyword);
 
     if (color_enum == LXB_CSS_VALUE__UNDEF) {
         // keyword not recognized
@@ -538,19 +538,6 @@ PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
     }
 
     return LXB_CSS_VALUE_NORMAL; // default
-}
-
-const char* map_lambda_font_family_keyword(const char* keyword) {
-    if (!keyword) return "sans-serif";
-
-    // Map generic font family keywords to system fonts
-    if (strcasecmp(keyword, "serif") == 0) return "serif";
-    if (strcasecmp(keyword, "sans-serif") == 0) return "sans-serif";
-    if (strcasecmp(keyword, "monospace") == 0) return "monospace";
-    if (strcasecmp(keyword, "cursive") == 0) return "cursive";
-    if (strcasecmp(keyword, "fantasy") == 0) return "fantasy";
-
-    return "sans-serif"; // default
 }
 
 // ============================================================================
@@ -738,6 +725,303 @@ DisplayValue resolve_display_value(DomNode* child) {
     return display;
 }
 
+/**
+ * Helper function to resolve font size for Lambda CSS
+ * Used internally by resolve_length_value for em/rem calculations
+ */
+static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) {
+    log_debug("resolve font size property (Lambda CSS)");
+
+    if (!decl && lycon->view) {
+        // Try to get font-size from the view's font property
+        ViewSpan* span = (ViewSpan*)lycon->view;
+        if (span->font && span->font->font_size > 0) {
+            lycon->font.current_font_size = span->font->font_size;
+            log_debug("resolved font size from view: %.2f px", lycon->font.current_font_size);
+            return;
+        }
+    }
+
+    if (decl && decl->value) {
+        // resolve font size from declaration
+        const CssValue* value = decl->value;
+
+        if (value->type == CSS_VALUE_LENGTH) {
+            // Direct length value
+            lycon->font.current_font_size = resolve_length_value(lycon,
+                LXB_CSS_PROPERTY_FONT_SIZE, value);
+            log_debug("resolved font size from declaration: %.2f px", lycon->font.current_font_size);
+            return;
+        } else if (value->type == CSS_VALUE_KEYWORD) {
+            // Keyword font size
+            float size = map_lambda_font_size_keyword(value->data.keyword);
+            if (size > 0) {
+                lycon->font.current_font_size = size;
+                log_debug("resolved font size from keyword '%s': %.2f px",
+                         value->data.keyword, size);
+                return;
+            }
+        }
+    }
+
+    // fallback: use font size from style context
+    if (lycon->font.style && lycon->font.style->font_size > 0) {
+        lycon->font.current_font_size = lycon->font.style->font_size;
+        log_debug("resolved font size from style context: %.2f px", lycon->font.current_font_size);
+    } else {
+        // ultimate fallback: use default
+        lycon->font.current_font_size = 16.0f;
+        log_debug("resolved font size to default: 16.0 px");
+    }
+}
+
+/**
+ * Resolve length/percentage value to pixels using Lambda CSS value structures
+ *
+ * @param lycon Layout context for font size, viewport, and parent dimensions
+ * @param property CSS property ID for context-specific resolution
+ * @param value Lambda CssValue pointer (CSS_VALUE_LENGTH, CSS_VALUE_PERCENTAGE, or CSS_VALUE_NUMBER)
+ * @return Resolved value in pixels
+ */
+float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value) {
+    if (!value) {
+        log_debug("resolve_length_value: null value");
+        return 0.0f;
+    }
+    float result = 0.0f;
+    switch (value->type) {
+    case CSS_VALUE_NUMBER:
+        // unitless number - treat as pixels for most properties
+        log_debug("number value: %.2f", value->data.number.value);
+        result = (float)value->data.number.value;
+        break;
+
+    case CSS_VALUE_INTEGER:
+        // integer value - treat as pixels
+        log_debug("integer value: %d", value->data.integer.value);
+        result = (float)value->data.integer.value;
+        break;
+
+    case CSS_VALUE_LENGTH: {
+        double num = value->data.length.value;
+        CssUnit unit = value->data.length.unit;
+        log_debug("length value: %.2f, unit: %d", num, unit);
+
+        switch (unit) {
+        // absolute units
+        case CSS_UNIT_Q:  // 1Q = 1cm / 40
+            result = num * (96 / 2.54 / 40) * lycon->ui_context->pixel_ratio;
+            break;
+        case CSS_UNIT_CM:  // 96px / 2.54
+            result = num * (96 / 2.54) * lycon->ui_context->pixel_ratio;
+            break;
+        case CSS_UNIT_IN:  // 96px
+            result = num * 96 * lycon->ui_context->pixel_ratio;
+            break;
+        case CSS_UNIT_MM:  // 1mm = 1cm / 10
+            result = num * (96 / 25.4) * lycon->ui_context->pixel_ratio;
+            break;
+        case CSS_UNIT_PC:  // 1pc = 12pt = 1in / 6
+            result = num * 16 * lycon->ui_context->pixel_ratio;
+            break;
+        case CSS_UNIT_PT:  // 1pt = 1in / 72
+            result = num * 4 / 3 * lycon->ui_context->pixel_ratio;
+            break;
+        case CSS_UNIT_PX:
+            result = num * lycon->ui_context->pixel_ratio;
+            break;
+
+        // relative units
+        case CSS_UNIT_REM:
+            if (lycon->root_font_size < 0) {
+                log_debug("resolving font size for rem value");
+                resolve_font_size(lycon, NULL);
+                lycon->root_font_size = lycon->font.current_font_size < 0 ?
+                    lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
+            }
+            result = num * lycon->root_font_size;
+            break;
+        case CSS_UNIT_EM:
+            if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
+                result = num * lycon->font.style->font_size;
+            } else {
+                if (lycon->font.current_font_size < 0) {
+                    log_debug("resolving font size for em value");
+                    resolve_font_size(lycon, NULL);
+                }
+                result = num * lycon->font.current_font_size;
+            }
+            break;
+        case CSS_UNIT_VW:
+            // viewport width percentage
+            if (lycon && lycon->width > 0) {
+                result = (num / 100.0) * lycon->width;
+            }
+            break;
+        case CSS_UNIT_VH:
+            // viewport height percentage
+            if (lycon && lycon->height > 0) {
+                result = (num / 100.0) * lycon->height;
+            }
+            break;
+        case CSS_UNIT_VMIN: {
+            float vmin = (lycon->width < lycon->height) ? lycon->width : lycon->height;
+            result = (num / 100.0) * vmin;
+            break;
+        }
+        case CSS_UNIT_VMAX: {
+            float vmax = (lycon->width > lycon->height) ? lycon->width : lycon->height;
+            result = (num / 100.0) * vmax;
+            break;
+        }
+        case CSS_UNIT_EX:
+            // relative to x-height (approximate as 0.5em)
+            if (lycon->font.current_font_size < 0) {
+                resolve_font_size(lycon, NULL);
+            }
+            result = num * lycon->font.current_font_size * 0.5;
+            break;
+        case CSS_UNIT_CH:
+            // relative to width of "0" character (approximate as 0.5em)
+            if (lycon->font.current_font_size < 0) {
+                resolve_font_size(lycon, NULL);
+            }
+            result = num * lycon->font.current_font_size * 0.5;
+            break;
+
+        default:
+            result = num;  // fallback: assume pixels for unknown units
+            log_debug("unknown unit: %d, treating as pixels", unit);
+            break;
+        }
+        break;
+    }
+    case CSS_VALUE_PERCENTAGE: {
+        double percentage = value->data.percentage.value;
+        if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
+            // font-size percentage is relative to parent font size
+            result = percentage * lycon->font.style->font_size / 100.0;
+        } else {
+            // most properties: percentage relative to parent width
+            if (lycon->block.pa_block) {
+                log_debug("percentage calculation: %.2f%% of parent width %d = %.2f",
+                       percentage, lycon->block.pa_block->content_width,
+                       percentage * lycon->block.pa_block->content_width / 100.0);
+                result = percentage * lycon->block.pa_block->content_width / 100.0;
+            } else {
+                log_debug("percentage value %.2f%% without parent context", percentage);
+                result = 0.0f;
+            }
+        }
+        break;
+    }
+    case CSS_VALUE_KEYWORD: {
+        // todo: handle special keywords like 'auto'
+        const char* keyword = value->data.keyword;
+        if (keyword && strcasecmp(keyword, "auto") == 0) {
+            log_info("length value: auto");
+            result = 0.0f;  // auto represented as 0, caller should check keyword separately
+        } else {
+            log_debug("length keyword: %s (treating as 0)", keyword ? keyword : "null");
+            result = 0.0f;
+        }
+        break;
+    }
+    default:
+        log_warn("unknown length value type: %d", value->type);
+        result = 0.0f;
+        break;
+    }
+    log_debug("resolved length value: type %d -> %.2f px", value->type, result);
+    return result;
+}
+
+// resolve property 'margin', 'padding', etc.
+void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
+    const CssValue *src_space, int32_t specificity, Spacing* trg_spacing) {
+    Margin sp;  // temporal space
+    int value_cnt = 1;  bool is_margin = property == CSS_PROPERTY_MARGIN;
+    log_debug("resolve_spacing_prop");
+    if (src_space->type == CSS_VALUE_LIST) {
+        // Multi-value margin
+        value_cnt = src_space->data.list.count;
+        CssValue** values = src_space->data.list.values;
+        switch (value_cnt) {
+        case 4:
+            log_debug("resolving spacing 4th");
+            sp.left = resolve_length_value(lycon, property, values[3]);
+            sp.left_type = values[3]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[3]->data.keyword) : 0;
+            // intended fall through
+        case 3:
+            log_debug("resolving spacing 3rd");
+            sp.bottom = resolve_length_value(lycon, property, values[2]);
+            sp.bottom_type = values[2]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[2]->data.keyword) : 0;
+            // intended fall through
+        case 2:
+            log_debug("resolving spacing 2nd");
+            sp.right = resolve_length_value(lycon, property, values[1]);
+            sp.right_type = values[1]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[1]->data.keyword) : 0;
+            // intended fall through
+        case 1:
+            log_debug("resolving spacing 1st");
+            sp.top = resolve_length_value(lycon, property, values[0]);
+            sp.top_type = values[0]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[0]->data.keyword) : 0;
+            break;
+        default:
+            log_warn("unexpected spacing value count: %d", value_cnt);
+            break;
+        }
+    }
+    switch (value_cnt) {
+    case 1:
+        sp.right = sp.left = sp.bottom = sp.top;
+        if (is_margin) { sp.right_type = sp.left_type = sp.bottom_type = sp.top_type; }
+        break;
+    case 2:
+        sp.bottom = sp.top;  sp.left = sp.right;
+        if (is_margin) {
+            sp.top_type = sp.bottom_type;
+            sp.left_type = sp.right_type;
+        }
+        break;
+    case 3:
+        sp.left = sp.right;
+        if (is_margin) {
+            sp.left_type = sp.right_type;
+        }
+        break;
+    case 4:
+        // no change to values
+        break;
+    }
+    // store value in final spacing struct if specificity is higher
+    Margin *trg_margin = is_margin ? (Margin *) trg_spacing : NULL;
+    if (specificity > trg_spacing->top_specificity) {
+        trg_spacing->top = sp.top;
+        trg_spacing->top_specificity = specificity;
+        if (trg_margin) trg_margin->top_type = sp.top_type;
+        log_debug("updated top spacing to %f", trg_spacing->top);
+    }
+    if (specificity > trg_spacing->bottom_specificity) {
+        trg_spacing->bottom = sp.bottom;
+        trg_spacing->bottom_specificity = specificity;
+        if (trg_margin) trg_margin->bottom_type = sp.bottom_type;
+    }
+    if (specificity > trg_spacing->right_specificity) {
+        // only margin-left and right support auto value
+        trg_spacing->right = sp.right;
+        trg_spacing->right_specificity = specificity;
+        if (trg_margin) trg_margin->right_type = sp.right_type;
+    }
+    if (specificity > trg_spacing->left_specificity) {
+        trg_spacing->left = sp.left;
+        trg_spacing->left_specificity = specificity;
+        if (trg_margin) trg_margin->left_type = sp.left_type;
+    }
+    log_debug("spacing value: top %f, right %f, bottom %f, left %f",
+        trg_spacing->top, trg_spacing->right, trg_spacing->bottom, trg_spacing->left);
+}
+
 // ============================================================================
 // Main Style Resolution
 // ============================================================================
@@ -764,35 +1048,23 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
 
     // resolve this property
     resolve_lambda_css_property(prop_id, decl, lycon);
-
     return true; // continue iteration
 }
 
 void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
-    if (!dom_elem || !lycon) {
-        log_debug("[Lambda CSS] resolve_lambda_css_styles: null input (dom_elem=%p, lycon=%p)", (void*)dom_elem, (void*)lycon);
-        return;
-    }
-
+    assert(dom_elem);
     log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
 
     // iterate through specified_style AVL tree
     StyleTree* style_tree = dom_elem->specified_style;
-    if (!style_tree) {
+    if (!style_tree || !style_tree->tree) {
         log_debug("[Lambda CSS] No style tree found for element");
         return;
     }
-
-    if (!style_tree->tree) {
-        log_debug("[Lambda CSS] Style tree has no AVL tree");
-        return;
-    }
-
     log_debug("[Lambda CSS] Style tree has %d nodes", style_tree->tree->node_count);
 
     // Traverse the AVL tree and resolve each property
     int processed = avl_tree_foreach_inorder(style_tree->tree, resolve_property_callback, lycon);
-
     log_debug("[Lambda CSS] Processed %d style properties", processed);
 
     // Handle CSS inheritance for inheritable properties not explicitly set
@@ -860,405 +1132,18 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
     log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
-
     if (!decl || !lycon || !lycon->view) {
         log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
                   (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
         return;
     }
-
     const CssValue* value = decl->value;
     if (!value) {
         log_debug("[Lambda CSS Property] No value in declaration");
         return;
     }
-
     log_debug("[Lambda CSS Property] Processing property %d, value type=%d", prop_id, value->type);
-
-    // DEBUG: Special logging for margin property
-    if (prop_id == CSS_PROPERTY_MARGIN) {
-        log_debug("[MARGIN DEBUG] Property=%d, value_type=%d", prop_id, value->type);
-        if (value->type == CSS_VALUE_LIST) {
-            log_debug("[MARGIN DEBUG] CSS_VALUE_LIST detected with count=%zu", value->data.list.count);
-        } else if (value->type == CSS_VALUE_NUMBER) {
-            log_debug("[MARGIN DEBUG] CSS_VALUE_NUMBER detected with value=%.2f", value->data.number.value);
-        } else if (value->type == CSS_VALUE_LENGTH) {
-            log_debug("[MARGIN DEBUG] CSS_VALUE_LENGTH detected with value=%.2f", value->data.length.value);
-        }
-    }
-
-    // handle shorthand properties by expanding to longhands
-    bool is_shorthand = css_property_is_shorthand(prop_id);
-    log_debug("[Lambda CSS Property] is_shorthand=%d for prop_id=%d (CSS_PROPERTY_FLEX=%d)", is_shorthand, prop_id, CSS_PROPERTY_FLEX);
-
-    // DEBUG: manually check the property
-    const CssProperty* dbg_prop = css_property_get_by_id(prop_id);
-    if (dbg_prop) {
-        log_debug("[Lambda CSS Property] Property found: name='%s', shorthand=%d",
-                dbg_prop->name, dbg_prop->shorthand);
-    } else {
-        log_debug("[Lambda CSS Property] Property NOT found in database!");
-    }
-
-    // Special case: margin and padding with CSS_VALUE_LIST should be handled by switch statement
-    // Don't treat them as shorthands that need expansion
-    // Same for border-width, border-style, border-color with CSS_VALUE_LIST
-    bool handle_in_switch = false;
-    if ((prop_id == CSS_PROPERTY_MARGIN || prop_id == CSS_PROPERTY_PADDING) &&
-        value->type == CSS_VALUE_LIST) {
-        log_debug("[Lambda CSS Property] Multi-value margin/padding will be handled in switch statement");
-        handle_in_switch = true;
-        is_shorthand = false; // Override: treat as longhand for switch processing
-    }
-    if ((prop_id == CSS_PROPERTY_BORDER_WIDTH || prop_id == CSS_PROPERTY_BORDER_STYLE ||
-         prop_id == CSS_PROPERTY_BORDER_COLOR) && value->type == CSS_VALUE_LIST) {
-        log_debug("[Lambda CSS Property] Multi-value border shorthand will be handled in switch statement");
-        handle_in_switch = true;
-        is_shorthand = false; // Override: treat as longhand for switch processing
-    }    if (is_shorthand) {
-        log_debug("[Lambda CSS Shorthand] Property %d is a shorthand, expanding...", prop_id);
-
-        if (prop_id == CSS_PROPERTY_BACKGROUND) {
-            // background shorthand can set background-color, background-image, etc.
-            // simple case: single color value (e.g., "background: green;")
-            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
-                CssDeclaration color_decl = *decl;
-                color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
-                log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
-                resolve_lambda_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
-                return;
-            }
-            log_debug("[Lambda CSS Shorthand] Complex background shorthand not yet implemented");
-            return;
-        }
-
-        if (prop_id == CSS_PROPERTY_MARGIN) {
-            // margin shorthand: 1-4 values (top, right, bottom, left)
-            // NOTE: multi-value margins (CSS_VALUE_LIST) are handled by the switch statement below
-            // This section only handles the single-value expansion optimization
-            log_debug("[Lambda CSS Shorthand] Processing margin shorthand (value type: %d)", value->type);
-
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_KEYWORD ||
-                value->type == CSS_VALUE_NUMBER) {
-                // single value - expand to all four sides for clarity
-                log_debug("[Lambda CSS Shorthand] Expanding single-value margin to all sides");
-                CssDeclaration side_decl = *decl;
-                side_decl.property_id = CSS_PROPERTY_MARGIN_TOP;
-                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_TOP, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_MARGIN_RIGHT;
-                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_RIGHT, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_MARGIN_BOTTOM;
-                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_BOTTOM, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_MARGIN_LEFT;
-                resolve_lambda_css_property(CSS_PROPERTY_MARGIN_LEFT, &side_decl, lycon);
-                return;
-            }
-            // Multi-value margin (CSS_VALUE_LIST) - fall through to switch statement below
-            log_debug("[Lambda CSS Shorthand] Multi-value margin, letting switch statement handle it");
-            // DON'T RETURN - let it fall through to the switch statement
-        }
-
-        if (prop_id == CSS_PROPERTY_PADDING) {
-            // padding shorthand: 1-4 values (top, right, bottom, left)
-            // NOTE: multi-value padding (CSS_VALUE_LIST) should be handled by switch statement below
-            log_debug("[Lambda CSS Shorthand] Processing padding shorthand (value type: %d)", value->type);
-
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
-                // single value - expand to all four sides
-                log_debug("[Lambda CSS Shorthand] Expanding single-value padding to all sides");
-                CssDeclaration side_decl = *decl;
-                side_decl.property_id = CSS_PROPERTY_PADDING_TOP;
-                resolve_lambda_css_property(CSS_PROPERTY_PADDING_TOP, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_PADDING_RIGHT;
-                resolve_lambda_css_property(CSS_PROPERTY_PADDING_RIGHT, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_PADDING_BOTTOM;
-                resolve_lambda_css_property(CSS_PROPERTY_PADDING_BOTTOM, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_PADDING_LEFT;
-                resolve_lambda_css_property(CSS_PROPERTY_PADDING_LEFT, &side_decl, lycon);
-                return;
-            }
-            // Multi-value padding - fall through to switch statement
-            log_debug("[Lambda CSS Shorthand] Multi-value padding, letting switch statement handle it");
-            // DON'T RETURN - let it fall through
-        }        if (prop_id == CSS_PROPERTY_BORDER) {
-            // border shorthand: width style color (applies to all sides)
-            log_debug("[Lambda CSS Shorthand] Expanding border shorthand");
-            log_debug("[Lambda CSS Shorthand] Border value type: %d", value->type);
-
-            // CSS border shorthand: "border: <width> <style> <color>"
-            // The parser should have given us a list of values
-            // Expand to: border-top-*, border-right-*, border-bottom-*, border-left-*
-
-            // check if we have a list of values
-            if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
-                CssValue** values = value->data.list.values;
-                size_t count = value->data.list.count;
-
-                log_debug("[Lambda CSS Shorthand] Border has %zu values", count);
-
-                // Identify width, style, and color from the values
-                CssValue* width_val = NULL;
-                CssValue* style_val = NULL;
-                CssValue* color_val = NULL;
-
-                for (size_t i = 0; i < count; i++) {
-                    CssValue* v = values[i];
-                    if (!v) continue;
-
-                    log_debug("[Lambda CSS Shorthand] Border value[%zu]: type=%d", i, v->type);
-
-                    if (v->type == CSS_VALUE_LENGTH || v->type == CSS_VALUE_NUMBER) {
-                        width_val = v;
-                        log_debug("[Lambda CSS Shorthand] Found border width");
-                    } else if (v->type == CSS_VALUE_KEYWORD) {
-                        // Could be style (solid, dashed, etc.) or color (red, blue, etc.)
-                        // Check if it's a border style keyword
-                        const char* kw = v->data.keyword;
-                        if (strcasecmp(kw, "solid") == 0 || strcasecmp(kw, "dashed") == 0 ||
-                            strcasecmp(kw, "dotted") == 0 || strcasecmp(kw, "double") == 0 ||
-                            strcasecmp(kw, "groove") == 0 || strcasecmp(kw, "ridge") == 0 ||
-                            strcasecmp(kw, "inset") == 0 || strcasecmp(kw, "outset") == 0 ||
-                            strcasecmp(kw, "none") == 0 || strcasecmp(kw, "hidden") == 0) {
-                            style_val = v;
-                            log_debug("[Lambda CSS Shorthand] Found border style: %s", kw);
-                        } else {
-                            // Assume it's a color keyword
-                            color_val = v;
-                            log_debug("[Lambda CSS Shorthand] Found border color keyword: %s", kw);
-                        }
-                    } else if (v->type == CSS_VALUE_COLOR) {
-                        color_val = v;
-                        log_debug("[Lambda CSS Shorthand] Found border color");
-                    }
-                }
-
-                // Apply width to all sides
-                if (width_val) {
-                    CssDeclaration width_decl = *decl;
-                    width_decl.value = width_val;
-                    width_decl.property_id = CSS_PROPERTY_BORDER_TOP_WIDTH;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_WIDTH, &width_decl, lycon);
-                    width_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_WIDTH;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_WIDTH, &width_decl, lycon);
-                    width_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, &width_decl, lycon);
-                    width_decl.property_id = CSS_PROPERTY_BORDER_LEFT_WIDTH;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_WIDTH, &width_decl, lycon);
-                }
-
-                // Apply style to all sides
-                if (style_val) {
-                    CssDeclaration style_decl = *decl;
-                    style_decl.value = style_val;
-                    style_decl.property_id = CSS_PROPERTY_BORDER_TOP_STYLE;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_STYLE, &style_decl, lycon);
-                    style_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_STYLE;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_STYLE, &style_decl, lycon);
-                    style_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_STYLE;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_STYLE, &style_decl, lycon);
-                    style_decl.property_id = CSS_PROPERTY_BORDER_LEFT_STYLE;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_STYLE, &style_decl, lycon);
-                }
-
-                // Apply color to all sides
-                if (color_val) {
-                    CssDeclaration color_decl = *decl;
-                    color_decl.value = color_val;
-                    color_decl.property_id = CSS_PROPERTY_BORDER_TOP_COLOR;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_COLOR, &color_decl, lycon);
-                    color_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_COLOR;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_COLOR, &color_decl, lycon);
-                    color_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_COLOR;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_COLOR, &color_decl, lycon);
-                    color_decl.property_id = CSS_PROPERTY_BORDER_LEFT_COLOR;
-                    resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_COLOR, &color_decl, lycon);
-                }
-
-                log_debug("[Lambda CSS Shorthand] Border shorthand expansion complete");
-                return;
-            }
-
-            // TEMPORARY WORKAROUND: CSS parser currently only gives us the first value (width)
-            // For now, assume "border: Npx solid black" and expand it manually
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
-                // We have the width - use it for all sides
-                CssDeclaration width_decl = *decl;
-                width_decl.value = (CssValue*)value;  // cast away const - we're not modifying it
-
-                width_decl.property_id = CSS_PROPERTY_BORDER_TOP_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_WIDTH, &width_decl, lycon);
-                width_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_WIDTH, &width_decl, lycon);
-                width_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, &width_decl, lycon);
-                width_decl.property_id = CSS_PROPERTY_BORDER_LEFT_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_WIDTH, &width_decl, lycon);
-
-                // Assume default style: solid
-                log_debug("[Lambda CSS Shorthand] Creating solid style value");
-                CssValue* solid_value = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
-                if (!solid_value) {
-                    log_debug("[Lambda CSS Shorthand] ERROR: alloc_prop failed for solid_value");
-                    return;
-                }
-                solid_value->type = CSS_VALUE_KEYWORD;
-
-                // Allocate string for keyword
-                char* solid_str = (char*)alloc_prop(lycon, 6); // "solid" + \0
-                strcpy(solid_str, "solid");
-                solid_value->data.keyword = solid_str;
-                log_debug("[Lambda CSS Shorthand] solid_value created: keyword=%s", solid_value->data.keyword);
-
-                CssDeclaration style_decl = *decl;
-                style_decl.value = solid_value;
-
-                log_debug("[Lambda CSS Shorthand] Applying border-top-style");
-                style_decl.property_id = CSS_PROPERTY_BORDER_TOP_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_STYLE, &style_decl, lycon);
-
-                log_debug("[Lambda CSS Shorthand] Applying border-right-style");
-                style_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_STYLE, &style_decl, lycon);
-
-                log_debug("[Lambda CSS Shorthand] Applying border-bottom-style");
-                style_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_STYLE, &style_decl, lycon);
-
-                log_debug("[Lambda CSS Shorthand] Applying border-left-style");
-                style_decl.property_id = CSS_PROPERTY_BORDER_LEFT_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_STYLE, &style_decl, lycon);
-
-                // Assume default color: black
-                CssValue* black_value = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
-                black_value->type = CSS_VALUE_KEYWORD;
-
-                char* black_str = (char*)alloc_prop(lycon, 6); // "black" + \0
-                strcpy(black_str, "black");
-                black_value->data.keyword = black_str;
-
-                CssDeclaration color_decl = *decl;
-                color_decl.value = black_value;
-                color_decl.property_id = CSS_PROPERTY_BORDER_TOP_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_COLOR, &color_decl, lycon);
-                color_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_COLOR, &color_decl, lycon);
-                color_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_COLOR, &color_decl, lycon);
-                color_decl.property_id = CSS_PROPERTY_BORDER_LEFT_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_COLOR, &color_decl, lycon);
-
-                log_debug("[Lambda CSS Shorthand] Border shorthand expansion complete (workaround: solid black assumed)");
-                return;
-            }
-
-            log_debug("[Lambda CSS Shorthand] Border shorthand value is not a list or length");
-            return;
-        }
-
-        if (prop_id == CSS_PROPERTY_BORDER_WIDTH) {
-            // border-width shorthand: 1-4 values (top, right, bottom, left)
-            log_debug("[Lambda CSS Shorthand] Expanding border-width shorthand");
-
-            if (value->type == CSS_VALUE_LENGTH) {
-                CssDeclaration side_decl = *decl;
-                side_decl.property_id = CSS_PROPERTY_BORDER_TOP_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_WIDTH, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_WIDTH, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_LEFT_WIDTH;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_WIDTH, &side_decl, lycon);
-                return;
-            }
-            log_debug("[Lambda CSS Shorthand] Complex border-width shorthand not yet implemented");
-            return;
-        }
-
-        if (prop_id == CSS_PROPERTY_BORDER_STYLE) {
-            // border-style shorthand: 1-4 values (top, right, bottom, left)
-            log_debug("[Lambda CSS Shorthand] Expanding border-style shorthand");
-
-            if (value->type == CSS_VALUE_KEYWORD) {
-                CssDeclaration side_decl = *decl;
-                side_decl.property_id = CSS_PROPERTY_BORDER_TOP_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_STYLE, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_STYLE, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_STYLE, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_LEFT_STYLE;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_STYLE, &side_decl, lycon);
-                return;
-            }
-            log_debug("[Lambda CSS Shorthand] Complex border-style shorthand not yet implemented");
-            return;
-        }
-
-        if (prop_id == CSS_PROPERTY_BORDER_COLOR) {
-            // border-color shorthand: 1-4 values (top, right, bottom, left)
-            log_debug("[Lambda CSS Shorthand] Expanding border-color shorthand");
-
-            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
-                CssDeclaration side_decl = *decl;
-                side_decl.property_id = CSS_PROPERTY_BORDER_TOP_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_TOP_COLOR, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_RIGHT_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_RIGHT_COLOR, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_BOTTOM_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_BOTTOM_COLOR, &side_decl, lycon);
-                side_decl.property_id = CSS_PROPERTY_BORDER_LEFT_COLOR;
-                resolve_lambda_css_property(CSS_PROPERTY_BORDER_LEFT_COLOR, &side_decl, lycon);
-                return;
-            }
-            log_debug("[Lambda CSS Shorthand] Complex border-color shorthand not yet implemented");
-            return;
-        }
-
-        if (prop_id == CSS_PROPERTY_GAP) {
-            // gap shorthand: 1-2 values (row-gap column-gap)
-            // If only one value is specified, it's used for both row and column gap
-            log_debug("[Lambda CSS Shorthand] Expanding gap shorthand");
-
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
-                // single value - use for both row-gap and column-gap
-                log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
-                CssDeclaration gap_decl = *decl;
-                gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
-                gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
-                return;
-            } else if (value->type == CSS_VALUE_LIST && value->data.list.count == 2) {
-                // two values: row-gap column-gap
-                log_debug("[Lambda CSS Shorthand] Expanding two-value gap");
-                CssValue** values = value->data.list.values;
-
-                CssDeclaration row_gap_decl = *decl;
-                row_gap_decl.value = values[0];
-                row_gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
-
-                CssDeclaration col_gap_decl = *decl;
-                col_gap_decl.value = values[1];
-                col_gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
-                return;
-            }
-            log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");
-            return;
-        }
-
-        if (prop_id == CSS_PROPERTY_FLEX) {
-            // flex shorthand should be handled by the switch statement below
-            // don't return here - let it fall through
-            log_debug("[Lambda CSS Shorthand] flex shorthand (ID=%d): letting switch statement handle it", prop_id);
-        } else {
-            // other shorthands not yet implemented
-            log_debug("[Lambda CSS Shorthand] Shorthand %d expansion not yet implemented", prop_id);
-            return;
-        }
-    }    int32_t specificity = get_lambda_specificity(decl);
+    int32_t specificity = get_lambda_specificity(decl);
     log_debug("[Lambda CSS Property] Specificity: %d", specificity);
 
     // Dispatch based on property ID
@@ -1268,7 +1153,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
     switch (prop_id) {
         // ===== GROUP 1: Core Typography & Color =====
-
         case CSS_PROPERTY_COLOR: {
             log_debug("[CSS] Processing color property");
             if (!span->in_line) {
@@ -1389,44 +1273,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
-
             if (value->type == CSS_VALUE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
-                const char* family = value->data.string;
-                if (family && strlen(family) > 0) {
-                    span->font->family = strdup(family);
-                    log_debug("[CSS] Font family: %s", family);
-                }
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+                span->font->family = (char*)value->data.string;
+            }
+            else if (value->type == CSS_VALUE_KEYWORD) {
                 // Keyword font family - check if generic or specific
-                const char* keyword = value->data.keyword;
-                const char* family = NULL;
-
-                if (strcasecmp(keyword, "serif") == 0 ||
-                    strcasecmp(keyword, "sans-serif") == 0 ||
-                    strcasecmp(keyword, "monospace") == 0 ||
-                    strcasecmp(keyword, "cursive") == 0 ||
-                    strcasecmp(keyword, "fantasy") == 0) {
-                    // Generic keyword - map it
-                    family = map_lambda_font_family_keyword(keyword);
-                    log_debug("[CSS] Font family generic keyword: %s -> %s", keyword, family);
-                } else {
-                    // Specific font name (e.g., Arial, Times) - quotes already stripped during parsing
-                    family = keyword;
-                    log_debug("[CSS] Font family specific name: %s", family);
-                }
-
-                if (family) {
-                    span->font->family = strdup(family);
-                    log_debug("[CSS] Set span->font->family = '%s' (ptr=%p)", span->font->family, span->font->family);
-                }
-            } else if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
+                span->font->family = (char*)value->data.keyword;
+                log_debug("[CSS] Set span->font->family = '%s'", span->font->family);
+            }
+            else if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Arial, sans-serif")
                 // Use the first available font family
                 for (size_t i = 0; i < value->data.list.count; i++) {
                     CssValue* item = value->data.list.values[i];
                     if (!item) continue;
-
                     const char* family = NULL;
                     log_debug("[CSS] Font family list item type: %d", item->type);
                     if (item->type == CSS_VALUE_STRING && item->data.string) {
@@ -1434,23 +1295,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         log_debug("[CSS] Font family STRING value: '%s'", family);
                     } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
                         // Check if it's a generic font family keyword
-                        const char* keyword = item->data.keyword;
-                        if (strcasecmp(keyword, "serif") == 0 ||
-                            strcasecmp(keyword, "sans-serif") == 0 ||
-                            strcasecmp(keyword, "monospace") == 0 ||
-                            strcasecmp(keyword, "cursive") == 0 ||
-                            strcasecmp(keyword, "fantasy") == 0) {
-                            // Generic keyword - map it
-                            family = map_lambda_font_family_keyword(keyword);
-                        } else {
-                            // Specific font name (quotes already stripped during parsing)
-                            family = keyword;
-                        }
+                        family = item->data.keyword;
                     }
-
-                    if (family && strlen(family) > 0) {
+                    if (family) {
                         // Quotes already stripped during parsing
-                        span->font->family = strdup(family);
+                        span->font->family = (char*)family;
                         log_debug("[CSS] Font family from list[%zu]: %s", i, family);
                         break; // Use first font in the list
                     }
@@ -1859,158 +1708,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_MARGIN: {
             log_debug("[CSS Switch] Entered CSS_PROPERTY_MARGIN case! value type: %d, span: %p, bound: %p",
-                    value->type, (void*)span, (void*)(span->bound));
-            log_debug("[CSS] Processing margin shorthand property (value type: %d)", value->type);
+                value->type, (void*)span, (void*)(span->bound));
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-                log_debug("[CSS Switch] Allocated new bound: %p", (void*)(span->bound));
-            }            // CSS margin shorthand: 1-4 values (same as padding)
-            // 1 value: all sides
-            // 2 values: top/bottom, left/right
-            // 3 values: top, left/right, bottom
-            // 4 values: top, right, bottom, left
-            // Note: margins can be length or 'auto' keyword
-
-            if (value->type == CSS_VALUE_LENGTH) {
-                // Single value - all sides get same value
-                float margin = value->data.length.value;
-                span->bound->margin.top = margin;
-                span->bound->margin.right = margin;
-                span->bound->margin.bottom = margin;
-                span->bound->margin.left = margin;
-                span->bound->margin.top_specificity = specificity;
-                span->bound->margin.right_specificity = specificity;
-                span->bound->margin.bottom_specificity = specificity;
-                span->bound->margin.left_specificity = specificity;
-                log_debug("[CSS] Margin (all): %.2f px", margin);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
-                // Single keyword (auto) - all sides get auto
-                span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
-                span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
-                span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
-                span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
-                span->bound->margin.top_specificity = specificity;
-                span->bound->margin.right_specificity = specificity;
-                span->bound->margin.bottom_specificity = specificity;
-                span->bound->margin.left_specificity = specificity;
-                log_debug("[CSS] Margin (all): auto");
-            } else if (value->type == CSS_VALUE_LIST) {
-                // Multi-value margin
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-                log_debug("[CSS Switch] CSS_VALUE_LIST: count=%zu", count);
-
-                if (count == 2) {
-                    // top/bottom, left/right (can be length or auto)
-                    log_debug("[CSS Switch] Processing count==2: values[0]->type=%d, values[1]->type=%d",
-                            values[0]->type, values[1]->type);
-                    // Handle first value (top/bottom)
-                    if (values[0]->type == CSS_VALUE_LENGTH) {
-                        float vertical = values[0]->data.length.value;
-                        span->bound->margin.top = vertical;
-                        span->bound->margin.bottom = vertical;
-                        log_debug("[CSS Switch] Set margin top/bottom = %.2f", vertical);
-                    } else if (values[0]->type == CSS_VALUE_NUMBER) {
-                        float vertical = values[0]->data.number.value;
-                        span->bound->margin.top = vertical;
-                        span->bound->margin.bottom = vertical;
-                        log_debug("[CSS Switch] Set margin top/bottom = %.2f (from number)", vertical);
-                    } else if (values[0]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
-                        span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.top_specificity = specificity;
-                    span->bound->margin.bottom_specificity = specificity;
-
-                    // Handle second value (left/right)
-                    if (values[1]->type == CSS_VALUE_LENGTH) {
-                        float horizontal = values[1]->data.length.value;
-                        span->bound->margin.left = horizontal;
-                        span->bound->margin.right = horizontal;
-                        log_debug("[CSS Switch] Set margin left/right = %.2f", horizontal);
-                        log_debug("[CSS] Margin (2 values): %.2f %.2f px",
-                                values[0]->data.length.value, horizontal);
-                    } else if (values[1]->type == CSS_VALUE_NUMBER) {
-                        float horizontal = values[1]->data.number.value;
-                        span->bound->margin.left = horizontal;
-                        span->bound->margin.right = horizontal;
-                        log_debug("[CSS Switch] Set margin left/right = %.2f (from number)", horizontal);
-                        log_debug("[CSS] Margin (2 values): %.2f %.2f px",
-                                values[0]->data.length.value, horizontal);
-                    } else if (values[1]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
-                        span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
-                        log_debug("[CSS] Margin (2 values): %.2f auto",
-                                values[0]->type == CSS_VALUE_LENGTH ? values[0]->data.length.value : 0.0f);
-                    }
-                    span->bound->margin.left_specificity = specificity;
-                    span->bound->margin.right_specificity = specificity;
-                } else if (count == 3) {
-                    // top, left/right, bottom
-                    // Handle top
-                    if (values[0]->type == CSS_VALUE_LENGTH) {
-                        span->bound->margin.top = values[0]->data.length.value;
-                    } else if (values[0]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.top_specificity = specificity;
-
-                    // Handle left/right
-                    if (values[1]->type == CSS_VALUE_LENGTH) {
-                        float horizontal = values[1]->data.length.value;
-                        span->bound->margin.left = horizontal;
-                        span->bound->margin.right = horizontal;
-                    } else if (values[1]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
-                        span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.left_specificity = specificity;
-                    span->bound->margin.right_specificity = specificity;
-
-                    // Handle bottom
-                    if (values[2]->type == CSS_VALUE_LENGTH) {
-                        span->bound->margin.bottom = values[2]->data.length.value;
-                    } else if (values[2]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.bottom_specificity = specificity;
-                    log_debug("[CSS] Margin (3 values)");
-                } else if (count == 4) {
-                    // top, right, bottom, left
-                    // Handle top
-                    if (values[0]->type == CSS_VALUE_LENGTH) {
-                        span->bound->margin.top = values[0]->data.length.value;
-                    } else if (values[0]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.top_specificity = specificity;
-
-                    // Handle right
-                    if (values[1]->type == CSS_VALUE_LENGTH) {
-                        span->bound->margin.right = values[1]->data.length.value;
-                    } else if (values[1]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.right_specificity = specificity;
-
-                    // Handle bottom
-                    if (values[2]->type == CSS_VALUE_LENGTH) {
-                        span->bound->margin.bottom = values[2]->data.length.value;
-                    } else if (values[2]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.bottom_specificity = specificity;
-
-                    // Handle left
-                    if (values[3]->type == CSS_VALUE_LENGTH) {
-                        span->bound->margin.left = values[3]->data.length.value;
-                    } else if (values[3]->type == CSS_VALUE_KEYWORD) {
-                        span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
-                    }
-                    span->bound->margin.left_specificity = specificity;
-                    log_debug("[CSS] Margin (4 values)");
-                }
             }
+            resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, value, specificity, &span->bound->margin);
             break;
         }
 
@@ -2019,93 +1721,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // CSS padding shorthand: 1-4 values
-            // 1 value: all sides
-            // 2 values: top/bottom, left/right
-            // 3 values: top, left/right, bottom
-            // 4 values: top, right, bottom, left
-
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_PERCENTAGE) {
-                // Single value - all sides get same value
-                float padding;
-                if (value->type == CSS_VALUE_LENGTH) {
-                    padding = convert_lambda_length_to_px(value, lycon, prop_id);
-                } else {
-                    // Padding percentages are relative to parent width (per CSS spec)
-                    float parent_width = lycon->block.pa_block ? lycon->block.pa_block->content_width : 0;
-                    padding = value->data.percentage.value * parent_width / 100.0f;
-                }
-                span->bound->padding.top = padding;
-                span->bound->padding.right = padding;
-                span->bound->padding.bottom = padding;
-                span->bound->padding.left = padding;
-                span->bound->padding.top_specificity = specificity;
-                span->bound->padding.right_specificity = specificity;
-                span->bound->padding.bottom_specificity = specificity;
-                span->bound->padding.left_specificity = specificity;
-                log_debug("[CSS] Padding (all): %.2f px", padding);
-            } else if (value->type == CSS_VALUE_LIST) {
-                // Multi-value padding
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-
-                // Helper to convert value to pixels
-                auto convert_val = [&](CssValue* v) -> float {
-                    if (v->type == CSS_VALUE_LENGTH) {
-                        return convert_lambda_length_to_px(v, lycon, prop_id);
-                    } else if (v->type == CSS_VALUE_PERCENTAGE) {
-                        float parent_width = lycon->block.pa_block ? lycon->block.pa_block->content_width : 0;
-                        return v->data.percentage.value * parent_width / 100.0f;
-                    } else if (v->type == CSS_VALUE_NUMBER) {
-                        // Unitless number, treat as pixels (like margin fix)
-                        return (float)v->data.number.value;
-                    }
-                    return 0.0f;
-                };
-
-                if (count == 2) {
-                    // top/bottom, left/right
-                    float vertical = convert_val(values[0]);
-                    float horizontal = convert_val(values[1]);
-                    span->bound->padding.top = vertical;
-                    span->bound->padding.bottom = vertical;
-                    span->bound->padding.left = horizontal;
-                    span->bound->padding.right = horizontal;
-                    span->bound->padding.top_specificity = specificity;
-                    span->bound->padding.right_specificity = specificity;
-                    span->bound->padding.bottom_specificity = specificity;
-                    span->bound->padding.left_specificity = specificity;
-                    log_debug("[CSS] Padding (vertical/horizontal): %.2f %.2f px", vertical, horizontal);
-                } else if (count == 3) {
-                    // top, left/right, bottom
-                    float top = convert_val(values[0]);
-                    float horizontal = convert_val(values[1]);
-                    float bottom = convert_val(values[2]);
-                    span->bound->padding.top = top;
-                    span->bound->padding.left = horizontal;
-                    span->bound->padding.right = horizontal;
-                    span->bound->padding.bottom = bottom;
-                    span->bound->padding.top_specificity = specificity;
-                    span->bound->padding.right_specificity = specificity;
-                    span->bound->padding.bottom_specificity = specificity;
-                    span->bound->padding.left_specificity = specificity;
-                    log_debug("[CSS] Padding (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
-                } else if (count == 4) {
-                    // top, right, bottom, left
-                    span->bound->padding.top = convert_val(values[0]);
-                    span->bound->padding.right = convert_val(values[1]);
-                    span->bound->padding.bottom = convert_val(values[2]);
-                    span->bound->padding.left = convert_val(values[3]);
-                    span->bound->padding.top_specificity = specificity;
-                    span->bound->padding.right_specificity = specificity;
-                    span->bound->padding.bottom_specificity = specificity;
-                    span->bound->padding.left_specificity = specificity;
-                    log_debug("[CSS] Padding (4 values): %.2f %.2f %.2f %.2f px",
-                            span->bound->padding.top, span->bound->padding.right,
-                            span->bound->padding.bottom, span->bound->padding.left);
-                }
-            }
+            resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, value, specificity, &span->bound->padding);
             break;
         }
 
@@ -2928,9 +2544,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             // Border shorthand: <width> <style> <color> (any order)
             // Parse values from the list or single value
-            float border_width = -1.0f;
-            int border_style = -1;
-            Color border_color = {0};
+            float border_width = -1.0f;  int border_style = -1;  Color border_color = {0};
 
             if (value->type == CSS_VALUE_LIST) {
                 // Multiple values
@@ -2942,7 +2556,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     if (val->type == CSS_VALUE_LENGTH) {
                         // Width - convert to pixels
                         border_width = convert_lambda_length_to_px(val, lycon, prop_id);
-                    } else if (val->type == CSS_VALUE_KEYWORD) {
+                    }
+                    else if (val->type == CSS_VALUE_KEYWORD) {
                         // Could be width keyword, style, or color
                         const char* keyword = val->data.keyword;
                         if (strcasecmp(keyword, "thin") == 0) {
@@ -2962,8 +2577,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                             // Color keyword
                             border_color.c = map_lambda_color_keyword(keyword);
                         }
-                    } else if (val->type == CSS_VALUE_COLOR) {
+                    }
+                    else if (val->type == CSS_VALUE_COLOR) {
                         // Color
+                        log_debug("[CSS] Border color value type: %d", val->data.color.type);
                         if (val->data.color.type == CSS_COLOR_RGB) {
                             border_color.r = val->data.color.data.rgba.r;
                             border_color.g = val->data.color.data.rgba.g;
@@ -3099,7 +2716,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 2 values: top/bottom, left/right
             // 3 values: top, left/right, bottom
             // 4 values: top, right, bottom, left
-
             if (value->type == CSS_VALUE_KEYWORD) {
                 // Single value - all sides get same style
                 int border_style = map_css_keyword_to_lexbor(value->data.keyword);
@@ -3110,7 +2726,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->left_style = border_style;
                     log_debug("[CSS] Border-style (all): %s -> 0x%04X", value->data.keyword, border_style);
                 }
-            } else if (value->type == CSS_VALUE_LIST) {
+            }
+            else if (value->type == CSS_VALUE_LIST) {
                 // Multi-value border-style
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
@@ -3124,7 +2741,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->left_style = horizontal;
                     span->bound->border->right_style = horizontal;
                     log_debug("[CSS] Border-style (2 values): %s %s", values[0]->data.keyword, values[1]->data.keyword);
-                } else if (count == 3 && values[0]->type == CSS_VALUE_KEYWORD &&
+                }
+                else if (count == 3 && values[0]->type == CSS_VALUE_KEYWORD &&
                            values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD) {
                     // top, left/right, bottom
                     int top = map_css_keyword_to_lexbor(values[0]->data.keyword);
@@ -3135,7 +2753,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->right_style = horizontal;
                     span->bound->border->bottom_style = bottom;
                     log_debug("[CSS] Border-style (3 values): %s %s %s", values[0]->data.keyword, values[1]->data.keyword, values[2]->data.keyword);
-                } else if (count == 4 && values[0]->type == CSS_VALUE_KEYWORD &&
+                }
+                else if (count == 4 && values[0]->type == CSS_VALUE_KEYWORD &&
                            values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD &&
                            values[3]->type == CSS_VALUE_KEYWORD) {
                     // top, right, bottom, left
@@ -3167,7 +2786,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 2 values: top/bottom, left/right
             // 3 values: top, left/right, bottom
             // 4 values: top, right, bottom, left
-
             if (value->type == CSS_VALUE_LENGTH) {
                 // Single value - all sides get same width
                 float width = value->data.length.value;
@@ -3190,7 +2808,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->width.left_specificity = specificity;
                 }
                 log_debug("[CSS] Border-width (all): %.2f px", width);
-            } else if (value->type == CSS_VALUE_LIST) {
+            }
+            else if (value->type == CSS_VALUE_LIST) {
                 // Multi-value border-width
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
@@ -3219,7 +2838,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->width.right_specificity = specificity;
                     }
                     log_debug("[CSS] Border-width (2 values): %.2f %.2f px", vertical, horizontal);
-                } else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
+                }
+                else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
                            (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
                     // top, left/right, bottom
@@ -3245,7 +2865,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->width.bottom_specificity = specificity;
                     }
                     log_debug("[CSS] Border-width (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
-                } else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
+                }
+                else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
                            (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
                            (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
@@ -3318,11 +2939,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->left_color_specificity = specificity;
                 }
                 log_debug("[CSS] Border-color (all): 0x%08X", color.c);
-            } else if (value->type == CSS_VALUE_LIST) {
+            }
+            else if (value->type == CSS_VALUE_LIST) {
                 // Multi-value border-color
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
-
                 if (count == 2) {
                     // top/bottom, left/right
                     Color vertical = convert_lambda_color(values[0]);
@@ -3346,7 +2967,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->right_color_specificity = specificity;
                     }
                     log_debug("[CSS] Border-color (2 values): 0x%08X 0x%08X", vertical.c, horizontal.c);
-                } else if (count == 3) {
+                }
+                else if (count == 3) {
                     // top, left/right, bottom
                     Color top = convert_lambda_color(values[0]);
                     Color horizontal = convert_lambda_color(values[1]);
@@ -3370,7 +2992,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->bottom_color_specificity = specificity;
                     }
                     log_debug("[CSS] Border-color (3 values): 0x%08X 0x%08X 0x%08X", top.c, horizontal.c, bottom.c);
-                } else if (count == 4) {
+                }
+                else if (count == 4) {
                     // top, right, bottom, left
                     Color top = convert_lambda_color(values[0]);
                     Color right = convert_lambda_color(values[1]);
@@ -4700,6 +4323,54 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
             break;
+        }
+
+       case CSS_PROPERTY_BACKGROUND: {
+            // background shorthand can set background-color, background-image, etc.
+            // simple case: single color value (e.g., "background: green;")
+            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
+                CssDeclaration color_decl = *decl;
+                color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
+                log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
+                resolve_lambda_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                return;
+            }
+            log_debug("[Lambda CSS Shorthand] Complex background shorthand not yet implemented");
+            return;
+        }
+
+        case CSS_PROPERTY_GAP: {
+            // gap shorthand: 1-2 values (row-gap column-gap)
+            // If only one value is specified, it's used for both row and column gap
+            log_debug("[Lambda CSS Shorthand] Expanding gap shorthand");
+
+            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
+                // single value - use for both row-gap and column-gap
+                log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
+                CssDeclaration gap_decl = *decl;
+                gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
+                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
+                gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
+                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
+                return;
+            } else if (value->type == CSS_VALUE_LIST && value->data.list.count == 2) {
+                // two values: row-gap column-gap
+                log_debug("[Lambda CSS Shorthand] Expanding two-value gap");
+                CssValue** values = value->data.list.values;
+
+                CssDeclaration row_gap_decl = *decl;
+                row_gap_decl.value = values[0];
+                row_gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
+                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
+
+                CssDeclaration col_gap_decl = *decl;
+                col_gap_decl.value = values[1];
+                col_gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
+                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
+                return;
+            }
+            log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");
+            return;
         }
 
         default:

@@ -270,6 +270,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         }
     }
     if (view->bound->border) {
+        log_debug("render border");
         if (view->bound->border->left_color.a) {
             Rect border_rect = rect;
             border_rect.width = view->bound->border->width.left;

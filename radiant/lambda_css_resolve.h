@@ -1,25 +1,12 @@
-#ifndef LAMBDA_CSS_RESOLVE_H
-#define LAMBDA_CSS_RESOLVE_H
-
+#pragma once
 #include "layout.hpp"
 #include "../lambda/input/css/dom_element.h"
 #include "../lambda/input/css/css_style.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * Lambda CSS Style Resolution for Radiant Layout Engine
  *
- * Parallel implementation to resolve_element_style() that works with
- * Lambda CSS DomElement structures instead of Lexbor elements.
- *
- * Key Design:
- * - Separate function for clean separation of Lexbor vs Lambda CSS paths
- * - Maps Lambda CSS keyword strings to Lexbor enum values
- * - Converts Lambda CssValue structures to Radiant property structures
- * - Maintains same behavior as Lexbor resolution for layout compatibility
+ * Implementation of resolve_element_style() that works with Lambda CSS DomElement structures.
  */
 
 // ============================================================================
@@ -108,6 +95,16 @@ Color convert_lambda_color(const CssValue* value);
  */
 int32_t get_lambda_specificity(const CssDeclaration* decl);
 
+/**
+ * Resolve length/percentage value to pixels using Lambda CSS value structures
+ *
+ * @param lycon Layout context for font size, viewport, and parent dimensions
+ * @param property CSS property ID for context-specific resolution
+ * @param value Lambda CssValue pointer (CSS_VALUE_LENGTH, CSS_VALUE_PERCENTAGE, or CSS_VALUE_NUMBER)
+ * @return Resolved value in pixels
+ */
+float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+
 // ============================================================================
 // Main Style Resolution
 // ============================================================================
@@ -132,11 +129,4 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
  * @param decl CSS declaration with value
  * @param lycon Layout context
  */
-void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl,
-                                  LayoutContext* lycon);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // LAMBDA_CSS_RESOLVE_H
+void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);

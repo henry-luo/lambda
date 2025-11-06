@@ -34,11 +34,11 @@ extern "C" {
 typedef struct {
     const char *name;
     size_t     length;
-    uintptr_t  unique;
+    PropValue  unique;
 } css_data;
 
-const css_data* css_value_by_id(uintptr_t id);
-uintptr_t css_value_by_name(const char* name, size_t length);
+const css_data* css_value_by_id(PropValue id);
+PropValue css_value_by_name(const char* name);
 
 #define RDT_DISPLAY_TEXT                (LXB_CSS_VALUE__LAST_ENTRY + 10)
 #define RDT_DISPLAY_REPLACED            (LXB_CSS_VALUE__LAST_ENTRY + 11)
@@ -183,7 +183,7 @@ typedef struct Spacing {
 } Spacing;
 
 typedef struct Margin : Spacing {
-    lxb_css_value_type_t top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
+    PropValue top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
 } Margin;
 
 typedef struct Corner {
@@ -239,7 +239,7 @@ typedef struct {
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
     PropValue white_space;  // LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NOWRAP, LXB_CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
-    lxb_css_value_type_t given_width_type;
+    PropValue given_width_type;
     // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 

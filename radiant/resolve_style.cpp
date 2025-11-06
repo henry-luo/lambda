@@ -488,15 +488,6 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, specificity, &span->bound->margin);
-
-        // Handle shorthand expansion (1-4 values)
-        int value_cnt = 0;
-        if (margin->top.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
-        if (margin->right.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
-        if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
-        if (margin->left.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
-        log_debug("margin value: top %f, right %f, bottom %f, left %f",
-            span->bound->margin.top, span->bound->margin.right, span->bound->margin.bottom, span->bound->margin.left);
         break;
     }
     case LXB_CSS_PROPERTY_PADDING: {

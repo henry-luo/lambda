@@ -391,7 +391,7 @@ static const css_data lxb_css_value_data[LXB_CSS_VALUE__LAST_ENTRY] =
     {"sideways-lr", 11, LXB_CSS_VALUE_SIDEWAYS_LR}
 };
 
-const css_data* css_value_by_id(uintptr_t id) {
+const css_data* css_value_by_id(PropValue id) {
     if (id < LXB_CSS_VALUE__LAST_ENTRY) {
         return &lxb_css_value_data[id];
     }
@@ -400,19 +400,16 @@ const css_data* css_value_by_id(uintptr_t id) {
 
 // Look up CSS value by name (case-insensitive)
 // Returns the LXB_CSS_VALUE enum, or LXB_CSS_VALUE__UNDEF if not found
-uintptr_t css_value_by_name(const char* name, size_t length) {
+PropValue css_value_by_name(const char* name) {
     if (!name) return LXB_CSS_VALUE__UNDEF;
-
     // Linear search through the table (could be optimized with hash table if needed)
     for (size_t i = 0; i < LXB_CSS_VALUE__LAST_ENTRY; i++) {
-        if (lxb_css_value_data[i].length == length) {
-            // Case-insensitive comparison
-            if (strncasecmp(lxb_css_value_data[i].name, name, length) == 0) {
-                return lxb_css_value_data[i].unique;
-            }
+        size_t length = lxb_css_value_data[i].length;
+        // case-insensitive comparison
+        if (strncasecmp(lxb_css_value_data[i].name, name, length) == 0) {
+            return lxb_css_value_data[i].unique;
         }
     }
-
     return LXB_CSS_VALUE__UNDEF;
 }
 
@@ -781,7 +778,7 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent, DocumentType do
                 span->bound->border->top_style, span->bound->border->right_style,
                 span->bound->border->bottom_style, span->bound->border->left_style);
             strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_format(buf, "  tl-rds:%f, tr-rds:%f, br-rds:%f, bl-rds:%f}\n",
+            strbuf_append_format(buf, "  tl-rd:%f, tr-rd:%f, br-rd:%f, bl-rd:%f}\n",
                 span->bound->border->radius.top_left, span->bound->border->radius.top_right,
                 span->bound->border->radius.bottom_right, span->bound->border->radius.bottom_left);
         }
