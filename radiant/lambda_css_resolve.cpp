@@ -478,38 +478,18 @@ Color color_name_to_rgb(PropValue color_name) {
 uint32_t map_lambda_color_keyword(const char* keyword) {
     if (!keyword) return 0xFF000000; // default black in ABGR format
 
-    // Map CSS color keywords to ABGR values
-    // NOTE: Color union uses ABGR format (0xAABBGGRR), NOT RGBA!
-    // Format: 0xAABBGGRR where AA=alpha, BB=blue, GG=green, RR=red
-    if (strcasecmp(keyword, "black") == 0) return 0xFF000000;       // rgb(0,0,0)
-    if (strcasecmp(keyword, "white") == 0) return 0xFFFFFFFF;       // rgb(255,255,255)
-    if (strcasecmp(keyword, "red") == 0) return 0xFF0000FF;         // rgb(255,0,0)
-    if (strcasecmp(keyword, "green") == 0) return 0xFF008000;       // rgb(0,128,0)
-    if (strcasecmp(keyword, "blue") == 0) return 0xFFFF0000;        // rgb(0,0,255)
-    if (strcasecmp(keyword, "yellow") == 0) return 0xFF00FFFF;      // rgb(255,255,0)
-    if (strcasecmp(keyword, "cyan") == 0) return 0xFFFFFF00;        // rgb(0,255,255)
-    if (strcasecmp(keyword, "magenta") == 0) return 0xFFFF00FF;     // rgb(255,0,255)
-    if (strcasecmp(keyword, "gray") == 0) return 0xFF808080;        // rgb(128,128,128)
-    if (strcasecmp(keyword, "grey") == 0) return 0xFF808080;        // rgb(128,128,128)
-    if (strcasecmp(keyword, "silver") == 0) return 0xFFC0C0C0;      // rgb(192,192,192)
-    if (strcasecmp(keyword, "lightgray") == 0) return 0xFFD3D3D3;   // rgb(211,211,211)
-    if (strcasecmp(keyword, "lightgrey") == 0) return 0xFFD3D3D3;   // rgb(211,211,211)
-    if (strcasecmp(keyword, "darkgray") == 0) return 0xFFA9A9A9;    // rgb(169,169,169)
-    if (strcasecmp(keyword, "darkgrey") == 0) return 0xFFA9A9A9;    // rgb(169,169,169)
-    if (strcasecmp(keyword, "maroon") == 0) return 0xFF000080;      // rgb(128,0,0)
-    if (strcasecmp(keyword, "purple") == 0) return 0xFF800080;      // rgb(128,0,128)
-    if (strcasecmp(keyword, "fuchsia") == 0) return 0xFFFF00FF;     // rgb(255,0,255)
-    if (strcasecmp(keyword, "lime") == 0) return 0xFF00FF00;        // rgb(0,255,0)
-    if (strcasecmp(keyword, "olive") == 0) return 0xFF008080;       // rgb(128,128,0)
-    if (strcasecmp(keyword, "navy") == 0) return 0xFF800000;        // rgb(0,0,128)
-    if (strcasecmp(keyword, "teal") == 0) return 0xFF808000;        // rgb(0,128,128)
-    if (strcasecmp(keyword, "aqua") == 0) return 0xFFFFFF00;        // rgb(0,255,255)
-    if (strcasecmp(keyword, "orange") == 0) return 0xFF00A5FF;      // rgb(255,165,0)
-    if (strcasecmp(keyword, "transparent") == 0) return 0x00000000; // rgba(0,0,0,0)
+    // convert keyword to enum value
+    uintptr_t color_enum = css_value_by_name(keyword, strlen(keyword));
 
-    // TODO: Add more color keywords (148 total CSS3 colors)
+    if (color_enum == LXB_CSS_VALUE__UNDEF) {
+        // keyword not recognized
+        log_debug("[CSS] Unknown color keyword: '%s', defaulting to black", keyword);
+        return 0xFF000000;
+    }
 
-    return 0xFF000000; // default to black
+    // convert color enum to RGB color value
+    Color color = color_name_to_rgb((PropValue)color_enum);
+    return color.c;
 }
 
 float map_lambda_font_size_keyword(const char* keyword) {
