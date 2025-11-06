@@ -155,5 +155,4 @@ typedef struct {
 typedef unsigned short PropValue;
 
 Document* load_html_doc(Url *base, char* doc_filename);
-Document* load_lambda_html_doc(const char* html_filename, const char* css_filename, int viewport_width, int viewport_height, Pool* pool);
 void free_document(Document* doc);

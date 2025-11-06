@@ -522,7 +522,7 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     }
 
     // create DomElement
-    DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
+    DomElement* dom_elem = dom_element_create(pool, tag_name, elem);
     if (!dom_elem) return nullptr;
 
     // extract id and class attributes from Lambda Element
@@ -811,19 +811,19 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
  * @param pool Memory pool for allocations
  * @return Document structure with Lambda CSS DOM, ready for layout
  */
-Document* load_lambda_html_doc(const char* html_filename, const char* css_filename,
-                                int viewport_width, int viewport_height, Pool* pool) {
-    if (!html_filename || !pool) {
+Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
+    int viewport_width, int viewport_height, Pool* pool) {
+    if (!html_url || !pool) {
         log_error("load_lambda_html_doc: invalid parameters");
         return nullptr;
     }
 
-    log_debug("[Lambda CSS] Loading HTML document: %s", html_filename);
-
+    char* html_filepath = url_to_local_path(html_url);
+    log_debug("[Lambda CSS] Loading HTML document: %s", html_filepath);
     // Step 1: Parse HTML with Lambda parser
-    char* html_content = read_text_file(html_filename);
+    char* html_content = read_text_file(html_filepath);
     if (!html_content) {
-        log_error("Failed to read HTML file: %s", html_filename);
+        log_error("Failed to read HTML file: %s", html_filepath);
         return nullptr;
     }
 
@@ -832,12 +832,11 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     type_str->len = 4;
     strcpy(type_str->chars, "html");
 
-    Url* url = url_parse(html_filename);
-    Input* input = input_from_source(html_content, url, type_str, nullptr);
+    Input* input = input_from_source(html_content, html_url, type_str, nullptr);
     free(html_content);
 
     if (!input) {
-        log_error("Failed to create input for file: %s", html_filename);
+        log_error("Failed to create input for file: %s", html_filepath);
         return nullptr;
     }
 
@@ -909,7 +908,7 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     log_debug("[Lambda CSS] Extracting inline <style> elements...");
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, css_engine, html_filename, pool, &inline_stylesheet_count);
+        html_root, css_engine, html_filepath, pool, &inline_stylesheet_count);
     // print internal stylesheets for debugging
     for (int i = 0; i < inline_stylesheet_count; i++) {
         const char* formatted_css = css_stylesheet_to_string_styled(
@@ -969,7 +968,7 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     doc->lambda_dom_root = dom_root;
     doc->lambda_html_root = html_root;
     doc->html_version = detected_version;
-    doc->url = url;
+    doc->url = html_url;
     doc->view_tree = nullptr;  // Will be created during layout
     doc->state = nullptr;
 
@@ -978,22 +977,16 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
 }
 
 Document* load_html_doc(Url *base, char* doc_url) {
-    // log_debug("loading HTML document: %s, base: %s", doc_url, base ? (char*)base->path.str.data : "NULL");
-    // Url* url = parse_url(base, doc_url);
-    // if (!url) {
-    //     log_error("failed to parse URL: %s", doc_url);
-    //     return NULL;
-    // }
-    // // parse the html document
-    // Document* doc = (Document*)calloc(1, sizeof(Document));
-    // doc->doc_type = DOC_TYPE_LEXBOR;  // Mark as Lexbor document
-    // doc->url = url;
-    // parse_html_doc(doc);
-
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
-    Document* doc = load_lambda_html_doc(doc_url, NULL, 0, 0, pool);
+    Url* full_url = parse_url(base, doc_url);
+    if (!full_url) {
+        log_error("Failed to parse URL: %s, with base: %p", doc_url, base);
+        pool_destroy(pool);
+        return NULL;
+    }
+    Document* doc = load_lambda_html_doc(full_url, NULL, 0, 0, pool);
     return doc;
 }
 
@@ -1097,9 +1090,12 @@ int cmd_layout(int argc, char** argv) {
         return 1;
     }
 
+    // get cwd
+    Url* cwd = get_current_dir();
+    Url* input_url = url_parse_with_base(opts.input_file, cwd);
     // Load HTML document with Lambda CSS system
     Document* doc = load_lambda_html_doc(
-        opts.input_file,
+        input_url,
         opts.css_file,
         opts.viewport_width,
         opts.viewport_height,

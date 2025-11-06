@@ -28,6 +28,7 @@ extern "C" {
  */
 
 // Forward declarations
+typedef struct Element Element;
 typedef struct DomElement DomElement;
 typedef struct DomText DomText;
 typedef struct DomComment DomComment;
@@ -139,7 +140,7 @@ typedef struct DomElement {
     DomNodeType node_type;       // Always DOM_NODE_ELEMENT for DomElement
 
     // Basic element information
-    void* native_element;        // Pointer to native element (lexbor or Lambda Element)
+    Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
     void* tag_name_ptr;          // Tag name pointer from name_pool (for fast comparison)
     const char* id;              // Element ID attribute (cached)
@@ -262,7 +263,7 @@ const char** attribute_storage_get_names(AttributeStorage* storage, int* count);
  * @param native_element Optional pointer to native element (lexbor/Lambda)
  * @return New DomElement or NULL on failure
  */
-DomElement* dom_element_create(Pool* pool, const char* tag_name, void* native_element);
+DomElement* dom_element_create(Pool* pool, const char* tag_name, Element* native_element);
 
 /**
  * Destroy a DomElement
@@ -278,7 +279,7 @@ void dom_element_destroy(DomElement* element);
  * @param native_element Optional pointer to native element
  * @return true on success, false on failure
  */
-bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, void* native_element);
+bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Element* native_element);
 
 /**
  * Clear all data from a DomElement (without freeing the structure)

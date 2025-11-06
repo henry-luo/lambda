@@ -7,8 +7,68 @@
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
 #include "../../../lib/log.h"
+#include "../../../lib/strview.h"
+#include "../../lambda.h"
 #include <string.h>
 #include <stdio.h>
+
+// Forward declarations for Lambda types (to avoid full include dependency)
+// These match the structures in lambda-data.hpp but simplified for C
+typedef struct TypeBase {
+    uint8_t type_id;
+    uint8_t is_literal:1;
+    uint8_t is_const:1;
+} TypeBase;
+
+typedef struct TypeMap {
+    uint8_t type_id;
+    uint8_t is_literal:1;
+    uint8_t is_const:1;
+    int64_t length;
+    int64_t byte_size;
+    int type_index;
+    void* shape;  // ShapeEntry*
+    void* last;
+} TypeMap;
+
+typedef struct TypeElmt {
+    uint8_t type_id;
+    uint8_t is_literal:1;
+    uint8_t is_const:1;
+    int64_t length;
+    int64_t byte_size;
+    int type_index;
+    void* shape;  // ShapeEntry*
+    void* last;
+    void* name;  // StrView
+    int64_t content_length;
+} TypeElmt;
+
+// StrView is already defined in strview.h - no need to redefine
+
+typedef struct ShapeEntry {
+    StrView* name;
+    TypeBase* type;  // Type*
+    int64_t byte_offset;
+    struct ShapeEntry* next;
+} ShapeEntry;
+
+// Minimal Element definition matching lambda-data.hpp Element structure
+// Element extends List, so we need the List fields first
+struct Element {
+    TypeId type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;
+    // List fields
+    Item* items;
+    int64_t length;
+    int64_t extra;
+    int64_t capacity;
+    // Element-specific fields
+    void* type;  // attr type/shape (TypeElmt*)
+    void* data;  // packed data struct of the attrs
+    int data_cap;  // capacity of the data struct
+};
 
 // Forward declaration for strtok_r (POSIX function)
 #ifndef strtok_r
@@ -209,6 +269,7 @@ const char* attribute_storage_get(AttributeStorage* storage, const char* name) {
                 return storage->storage.array[i].value;
             }
         }
+        log_debug("attribute '%s' not found in array storage", name);
         return NULL;
     }
 }
@@ -294,7 +355,7 @@ const char** attribute_storage_get_names(AttributeStorage* storage, int* count) 
 // DOM Element Creation and Destruction
 // ============================================================================
 
-DomElement* dom_element_create(Pool* pool, const char* tag_name, void* native_element) {
+DomElement* dom_element_create(Pool* pool, const char* tag_name, Element* native_element) {
     if (!pool || !tag_name) {
         return NULL;
     }
@@ -311,7 +372,7 @@ DomElement* dom_element_create(Pool* pool, const char* tag_name, void* native_el
     return element;
 }
 
-bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, void* native_element) {
+bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Element* native_element) {
     if (!element || !pool || !tag_name) {
         return false;
     }
@@ -356,6 +417,82 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, voi
     element->attributes = attribute_storage_create(pool);
     if (!element->attributes) {
         return false;
+    }
+
+    // Copy attributes from native_element if present
+    if (native_element && native_element->type && native_element->data) {
+        TypeElmt* elmt_type = (TypeElmt*)native_element->type;
+        ShapeEntry* field = elmt_type->shape;
+
+        // Iterate through all attribute fields
+        while (field) {
+            // skip nested maps (fields without names)
+            if (!field->name) {
+                field = field->next;
+                continue;
+            }
+
+            // Get field value from packed data
+            void* field_ptr = (char*)native_element->data + field->byte_offset;
+            TypeId type_id = field->type->type_id;
+
+            // Convert attribute name from StrView to C string
+            size_t name_len = field->name->length;
+            char* attr_name = (char*)pool_alloc(pool, name_len + 1);
+            if (!attr_name) {
+                log_warn("failed to allocate attribute name");
+                field = field->next;
+                continue;
+            }
+            memcpy(attr_name, field->name->str, name_len);
+            attr_name[name_len] = '\0';
+
+            // Convert value to string and set attribute
+            char value_buf[256];  // temporary buffer for numeric conversions
+            const char* attr_value = NULL;
+
+            switch (type_id) {
+            case LMD_TYPE_NULL:
+                // skip null attributes
+                break;
+            case LMD_TYPE_BOOL:
+                attr_value = *(bool*)field_ptr ? "true" : "false";
+                break;
+            case LMD_TYPE_INT:
+                snprintf(value_buf, sizeof(value_buf), "%d", *(int*)field_ptr);
+                attr_value = value_buf;
+                break;
+            case LMD_TYPE_INT64:
+                snprintf(value_buf, sizeof(value_buf), "%" PRId64, *(int64_t*)field_ptr);
+                attr_value = value_buf;
+                break;
+            case LMD_TYPE_FLOAT:
+                snprintf(value_buf, sizeof(value_buf), "%g", *(double*)field_ptr);
+                attr_value = value_buf;
+                break;
+            case LMD_TYPE_STRING:
+            case LMD_TYPE_SYMBOL: {
+                String* str = *(String**)field_ptr;
+                if (str) {
+                    attr_value = str->chars;
+                }
+                break;
+            }
+            default:
+                // for other types, skip or log a warning
+                log_debug("skipping attribute '%s' with unsupported type %d", attr_name, type_id);
+                break;
+            }
+
+            // Set the attribute if we have a value
+            if (attr_value) {
+                if (!attribute_storage_set(element->attributes, attr_name, attr_value)) {
+                    log_warn("failed to set attribute '%s'", attr_name);
+                }
+            }
+
+            field = field->next;
+        }
     }
 
     return true;
@@ -448,9 +585,10 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
     if (!element || !name || name[0] == '\0' || !element->attributes) {
         return NULL;  // Empty attribute names never match
     }
-
     return attribute_storage_get(element->attributes, name);
-}bool dom_element_remove_attribute(DomElement* element, const char* name) {
+}
+
+bool dom_element_remove_attribute(DomElement* element, const char* name) {
     if (!element || !name || !element->attributes) {
         return false;
     }

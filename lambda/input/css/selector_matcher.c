@@ -365,12 +365,20 @@ static DomElement* traverse_and_find_first_match(SelectorMatcher* matcher,
         return element;
     }
 
-    // Traverse children
-    DomElement* child = element->first_child;
-    while (child) {
-        DomElement* found = traverse_and_find_first_match(matcher, selector, child);
-        if (found) return found;
-        child = child->next_sibling;
+    // Traverse children - need to check node type since first_child is void*
+    void* child_node = element->first_child;
+    while (child_node) {
+        // check if this is an element node (not text or comment)
+        if (dom_node_is_element(child_node)) {
+            DomElement* child = (DomElement*)child_node;
+            DomElement* found = traverse_and_find_first_match(matcher, selector, child);
+            if (found) return found;
+            child_node = child->next_sibling;
+        } else {
+            // skip text/comment nodes - get their next sibling
+            DomText* text_node = (DomText*)child_node;
+            child_node = text_node->next_sibling;
+        }
     }
 
     return NULL;
@@ -404,6 +412,11 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
         case CSS_SELECTOR_TYPE_ELEMENT:
             // Match element type
             if (simple_selector->value) {
+                // safety check for NULL or invalid tag_name
+                if (!element->tag_name || (uintptr_t)element->tag_name < 0x1000) {
+                    log_error("Invalid tag_name pointer in element: %p", element->tag_name);
+                    return false;
+                }
                 // Use case-insensitive comparison for HTML element names (standard)
                 return strcasecmp_local(element->tag_name, simple_selector->value) == 0;
             }
