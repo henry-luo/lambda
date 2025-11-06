@@ -37,6 +37,9 @@ typedef struct {
     uintptr_t  unique;
 } css_data;
 
+const css_data* css_value_by_id(uintptr_t id);
+uintptr_t css_value_by_name(const char* name, size_t length);
+
 #define RDT_DISPLAY_TEXT                (LXB_CSS_VALUE__LAST_ENTRY + 10)
 #define RDT_DISPLAY_REPLACED            (LXB_CSS_VALUE__LAST_ENTRY + 11)
 

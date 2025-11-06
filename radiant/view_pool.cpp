@@ -398,6 +398,24 @@ const css_data* css_value_by_id(uintptr_t id) {
     return NULL;
 }
 
+// Look up CSS value by name (case-insensitive)
+// Returns the LXB_CSS_VALUE enum, or LXB_CSS_VALUE__UNDEF if not found
+uintptr_t css_value_by_name(const char* name, size_t length) {
+    if (!name) return LXB_CSS_VALUE__UNDEF;
+
+    // Linear search through the table (could be optimized with hash table if needed)
+    for (size_t i = 0; i < LXB_CSS_VALUE__LAST_ENTRY; i++) {
+        if (lxb_css_value_data[i].length == length) {
+            // Case-insensitive comparison
+            if (strncasecmp(lxb_css_value_data[i].name, name, length) == 0) {
+                return lxb_css_value_data[i].unique;
+            }
+        }
+    }
+
+    return LXB_CSS_VALUE__UNDEF;
+}
+
 // Helper function to get view type name for JSON
 const char* View::name() {
     switch (this->type) {
