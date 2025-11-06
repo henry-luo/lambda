@@ -55,14 +55,26 @@ PropValue css_value_by_name(const char* name);
 // Additional CSS constants for flex layout
 #define LXB_CSS_VALUE_SPACE_EVENLY      (LXB_CSS_VALUE__LAST_ENTRY + 28)
 
-// Additional CSS constants for grid layout
-#define LXB_CSS_VALUE_FIT_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 34)
-#define LXB_CSS_VALUE_FR                (LXB_CSS_VALUE__LAST_ENTRY + 35)
-#define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 36)
+// Additional CSS constants for background properties
+#define LXB_CSS_VALUE_CONTAIN           (LXB_CSS_VALUE__LAST_ENTRY + 29)  // background-size contain
+#define LXB_CSS_VALUE_COVER             (LXB_CSS_VALUE__LAST_ENTRY + 30)  // background-size cover
+#define LXB_CSS_VALUE_LOCAL             (LXB_CSS_VALUE__LAST_ENTRY + 31)  // background-attachment local
+#define LXB_CSS_VALUE_PADDING_BOX       (LXB_CSS_VALUE__LAST_ENTRY + 32)  // background-origin/clip padding-box
+#define LXB_CSS_VALUE_MULTIPLY          (LXB_CSS_VALUE__LAST_ENTRY + 33)  // background-blend-mode multiply
+#define LXB_CSS_VALUE_OVERLAY           (LXB_CSS_VALUE__LAST_ENTRY + 34)  // background-blend-mode overlay
+#define LXB_CSS_VALUE_ROUND             (LXB_CSS_VALUE__LAST_ENTRY + 35)  // background-repeat round
+#define LXB_CSS_VALUE_SPACE             (LXB_CSS_VALUE__LAST_ENTRY + 36)  // background-repeat space
 
-// Note: CSS positioning constants are already defined in Lexbor:
-// LXB_CSS_VALUE_STATIC = 0x014d, LXB_CSS_VALUE_RELATIVE = 0x014e,
-// LXB_CSS_VALUE_ABSOLUTE = 0x014f, LXB_CSS_VALUE_FIXED = 0x0151, LXB_CSS_VALUE_STICKY = 0x0150
+// Additional CSS constants for table properties
+#define LXB_CSS_VALUE_COLLAPSE_TABLE    (LXB_CSS_VALUE__LAST_ENTRY + 37)  // border-collapse collapse
+#define LXB_CSS_VALUE_SEPARATE          (LXB_CSS_VALUE__LAST_ENTRY + 38)  // border-collapse separate
+#define LXB_CSS_VALUE_HIDE              (LXB_CSS_VALUE__LAST_ENTRY + 39)  // empty-cells hide
+#define LXB_CSS_VALUE_SHOW              (LXB_CSS_VALUE__LAST_ENTRY + 40)  // empty-cells show
+
+// Additional CSS constants for grid layout
+#define LXB_CSS_VALUE_FIT_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 41)
+#define LXB_CSS_VALUE_FR                (LXB_CSS_VALUE__LAST_ENTRY + 42)
+#define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 43)
 
 // static inline float pack_as_nan(int value) {
 //     uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
