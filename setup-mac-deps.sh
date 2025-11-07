@@ -227,81 +227,6 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
-# Function to build lexbor submodule for Mac
-build_lexbor_submodule_for_mac() {
-    echo "Building lexbor submodule for Mac..."
-
-    # Check if already built in submodule directory
-    if [ -f "lexbor/liblexbor_static.a" ]; then
-        echo "lexbor submodule already built"
-        return 0
-    fi
-
-    # Ensure submodule is initialized
-    if [ ! -f "lexbor/CMakeLists.txt" ]; then
-        echo "Initializing lexbor submodule..."
-        git submodule update --init lexbor || {
-            echo "❌ Failed to initialize lexbor submodule"
-            return 1
-        }
-    fi
-
-    # Check if CMakeLists.txt exists
-    if [ ! -f "lexbor/CMakeLists.txt" ]; then
-        echo "❌ CMakeLists.txt not found in lexbor submodule directory"
-        return 1
-    fi
-
-    cd lexbor
-
-    # Clean previous builds
-    rm -rf build-mac liblexbor_static.a 2>/dev/null || true
-
-    # Create build directory
-    mkdir -p build-mac
-    cd build-mac
-
-    echo "Configuring lexbor submodule with CMake..."
-    if cmake \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLEXBOR_BUILD_SHARED=OFF \
-        -DLEXBOR_BUILD_STATIC=ON \
-        -DLEXBOR_BUILD_TESTS=OFF \
-        -DLEXBOR_BUILD_EXAMPLES=OFF \
-        -DLEXBOR_INSTALL=OFF \
-        ..; then
-
-        echo "Building lexbor submodule..."
-        if make -j$(sysctl -n hw.ncpu); then
-            # Copy the static library to the lexbor root directory where build config expects it
-            if [ -f "source/liblexbor_static.a" ]; then
-                cp source/liblexbor_static.a ../liblexbor_static.a
-                echo "✅ lexbor submodule built successfully"
-                cd - > /dev/null
-                cd - > /dev/null
-                return 0
-            elif [ -f "liblexbor_static.a" ]; then
-                cp liblexbor_static.a ../liblexbor_static.a
-                echo "✅ lexbor submodule built successfully"
-                cd - > /dev/null
-                cd - > /dev/null
-                return 0
-            else
-                echo "❌ lexbor static library not found after build"
-                find . -name "*lexbor*" -type f | head -5
-                cd - > /dev/null
-                cd - > /dev/null
-                return 1
-            fi
-        fi
-    fi
-
-    echo "❌ lexbor submodule build failed"
-    cd - > /dev/null
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build MIR for Mac
 build_mir_for_mac() {
     echo "Building MIR for Mac..."
@@ -925,9 +850,9 @@ build_fontconfig_minimal_for_mac() {
     echo "Configuring FontConfig without libintl/iconv support..."
     echo "FreeType path: $FREETYPE_PATH"
     echo "Expat path: $EXPAT_PATH"
-    
+
     export PKG_CONFIG_PATH="$FREETYPE_PATH/lib/pkgconfig:$EXPAT_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
-    
+
     if ./configure --prefix=/opt/homebrew \
         --enable-static --disable-shared \
         --disable-nls \
@@ -992,8 +917,11 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     cd - > /dev/null
     echo "Tree-sitter-lambda built successfully"
 else
-    echo "Tree-sitter-lambda already built for Mac"
+    echo "Tree-sitter-lambda already built for macOS"
 fi
+
+# Build ThorVG v1.0-pre11 for Mac
+echo "Setting up ThorVG ..."
 
 # Build tree-sitter-javascript for Mac
 if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
@@ -1020,19 +948,6 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     echo "Tree-sitter-javascript built successfully"
 else
     echo "Tree-sitter-javascript already built for Mac"
-fi
-
-# Build lexbor submodule for Mac
-echo "Setting up lexbor submodule..."
-if [ -f "lexbor/liblexbor_static.a" ]; then
-    echo "lexbor submodule already built"
-else
-    if ! build_lexbor_submodule_for_mac; then
-        echo "❌ lexbor submodule build failed - required for Lambda project"
-        exit 1
-    else
-        echo "✅ lexbor submodule built successfully"
-    fi
 fi
 
 # Build ThorVG v1.0-pre11 for Mac
@@ -1194,7 +1109,6 @@ HOMEBREW_DEPS=(
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: freetype is handled separately to ensure specific version 2.13.3
-# Note: lexbor is built from submodule instead of Homebrew
 # Note: fontconfig is built from source without libintl/iconv (see build_fontconfig_minimal_for_mac)
 RADIANT_DEPS=(
     "glfw"       # OpenGL window and context management
@@ -1297,7 +1211,6 @@ if command -v brew >/dev/null 2>&1; then
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo ""
     echo "Radiant project dependencies:"
-    echo "- lexbor (submodule): $([ -f "lexbor/liblexbor_static.a" ] && echo "✓ Built" || echo "✗ Missing")"
     echo "- freetype: $(brew list freetype >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"

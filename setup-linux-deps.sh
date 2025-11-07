@@ -22,7 +22,6 @@ ALL_LIBS=(
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: freetype is included but may need specific version handling
-# Note: lexbor is built from submodule instead of system package
 # Note: ThorVG is built from source (see build_thorvg_v1_0_pre11_for_linux function)
 RADIANT_DEPS=(
     "libglfw3-dev"           # OpenGL window and context management
@@ -695,85 +694,6 @@ build_mpdecimal_for_linux() {
     return 1
 }
 
-# Function to build lexbor for Linux
-build_lexbor_for_linux() {
-    echo "Building lexbor for Linux..."
-
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
-        echo "lexbor already installed in system location"
-        return 0
-    fi
-
-    # Try apt package first (if available)
-    echo "Checking for lexbor package..."
-    if dpkg -l | grep -q liblexbor-dev; then
-        echo "lexbor development package already installed"
-        return 0
-    else
-        # lexbor is not commonly available in Ubuntu repos, so build from source
-        echo "lexbor not available via apt, building from source..."
-    fi
-
-    # Build from source
-    if [ ! -d "build_temp/lexbor" ]; then
-        cd build_temp
-        echo "Cloning lexbor repository..."
-        git clone https://github.com/lexbor/lexbor.git || {
-            echo "Warning: Could not clone lexbor repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-
-    cd "build_temp/lexbor"
-
-    # Check if CMakeLists.txt exists
-    if [ ! -f "CMakeLists.txt" ]; then
-        echo "Warning: CMakeLists.txt not found in lexbor directory"
-        cd - > /dev/null
-        return 1
-    fi
-
-    # Create build directory
-    mkdir -p build-linux
-    cd build-linux
-
-    echo "Configuring lexbor with CMake..."
-    if cmake \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLEXBOR_BUILD_SHARED=ON \
-        -DLEXBOR_BUILD_STATIC=ON \
-        -DLEXBOR_BUILD_TESTS=OFF \
-        -DLEXBOR_BUILD_EXAMPLES=OFF \
-        -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
-        ..; then
-
-        echo "Building lexbor..."
-        if make -j$(nproc); then
-            echo "Installing lexbor to system location (requires sudo)..."
-            sudo make install
-
-            # Update library cache
-            sudo ldconfig
-
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
-                echo "✅ lexbor built successfully"
-                cd - > /dev/null
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-
-    echo "❌ lexbor build failed"
-    cd - > /dev/null
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build utf8proc for Linux
 build_utf8proc_for_linux() {
     echo "Building utf8proc for Linux..."
@@ -988,19 +908,6 @@ else
 fi
 
 
-# Build lexbor for Linux (if used, not in config but referenced in mac script)
-if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
-    echo "lexbor already available"
-elif dpkg -l | grep -q liblexbor-dev; then
-    echo "lexbor already installed via apt"
-else
-    if ! build_lexbor_for_linux; then
-        echo "Warning: lexbor build failed"
-    else
-        echo "lexbor built successfully"
-    fi
-fi
-
 # Build ThorVG v1.0-pre11 for Linux (required for Radiant project)
 if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
     echo "ThorVG already available"
@@ -1211,7 +1118,6 @@ echo "- Tree-sitter: $([ -f "lambda/tree-sitter/libtree-sitter.a" ] && echo "✓
 echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ] && echo "✓ Built" || echo "✗ Missing")"
 
 # Check system locations and apt packages
-echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
