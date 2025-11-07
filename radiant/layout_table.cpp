@@ -63,7 +63,7 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
 
             if (collapse_decl && collapse_decl->value) {
                 CssValue* val = (CssValue*)collapse_decl->value;
-                if (val->type == CSS_VALUE_KEYWORD && val->data.keyword) {
+                if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword) {
                     if (strcmp(val->data.keyword, "collapse") == 0) {
                         table->border_collapse = true;
                         log_debug("Table border-collapse: collapse (true)");
@@ -83,27 +83,27 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
                 CssValue* val = (CssValue*)spacing_decl->value;
 
                 // border-spacing can be a single length or a list of two lengths
-                if (val->type == CSS_VALUE_LENGTH) {
+                if (val->type == CSS_VALUE_TYPE_LENGTH) {
                     // Single value applies to both horizontal and vertical
                     table->border_spacing_h = val->data.length.value;
                     table->border_spacing_v = val->data.length.value;
                     log_debug("Table border-spacing: %.2fpx (both h and v)", val->data.length.value);
-                } else if (val->type == CSS_VALUE_LIST && val->data.list.count >= 2) {
+                } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 2) {
                     // Two values: horizontal and vertical
                     CssValue* h_val = val->data.list.values[0];
                     CssValue* v_val = val->data.list.values[1];
 
-                    if (h_val && h_val->type == CSS_VALUE_LENGTH) {
+                    if (h_val && h_val->type == CSS_VALUE_TYPE_LENGTH) {
                         table->border_spacing_h = h_val->data.length.value;
                         log_debug("Table border-spacing horizontal: %.2fpx", h_val->data.length.value);
                     }
-                    if (v_val && v_val->type == CSS_VALUE_LENGTH) {
+                    if (v_val && v_val->type == CSS_VALUE_TYPE_LENGTH) {
                         table->border_spacing_v = v_val->data.length.value;
                         log_debug("Table border-spacing vertical: %.2fpx", v_val->data.length.value);
                     }
-                } else if (val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
+                } else if (val->type == CSS_VALUE_TYPE_NUMBER || val->type == CSS_VALUE_TYPE_INTEGER) {
                     // Handle numeric values (convert to length)
-                    float spacing = (val->type == CSS_VALUE_NUMBER) ?
+                    float spacing = (val->type == CSS_VALUE_TYPE_NUMBER) ?
                         val->data.number.value : (float)val->data.integer.value;
                     table->border_spacing_h = spacing;
                     table->border_spacing_v = spacing;
@@ -209,7 +209,7 @@ static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
                 dom_elem->specified_style,
                 CSS_PROPERTY_VERTICAL_ALIGN);
 
-            if (valign_decl && valign_decl->value && valign_decl->value->type == CSS_VALUE_KEYWORD) {
+            if (valign_decl && valign_decl->value && valign_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* valign_keyword = valign_decl->value->data.keyword;
 
                 // Map CSS vertical-align keywords to cell enum
@@ -811,7 +811,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (width_decl && width_decl->value) {
                     // TODO: Need Lambda CSS version of resolve_length_value
                     // For now, try to extract numeric value if it's a length
-                    if (width_decl->value->type == CSS_VALUE_LENGTH) {
+                    if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                         explicit_table_width = (int)width_decl->value->data.length.value;
 
                         // Calculate content width (subtract borders and spacing)
@@ -883,7 +883,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                             dom_elem->specified_style, CSS_PROPERTY_WIDTH);
                                         if (width_decl && width_decl->value) {
                                             // Check if it's a percentage value
-                                            if (width_decl->value->type == CSS_VALUE_PERCENTAGE && table_content_width > 0) {
+                                            if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE && table_content_width > 0) {
                                                 // Calculate percentage relative to table content width
                                                 double percentage = width_decl->value->data.percentage.value;
                                                 int css_content_width = (int)(table_content_width * percentage / 100.0);
@@ -901,7 +901,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                                                 log_debug("Cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
                                                        percentage, table_content_width, css_content_width, cell_width);
-                                            } else if (width_decl->value->type == CSS_VALUE_LENGTH) {
+                                            } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                                 // Absolute width
                                                 int css_content_width = (int)width_decl->value->data.length.value;
                                                 if (css_content_width > 0) {
@@ -994,7 +994,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     dom_elem->specified_style, CSS_PROPERTY_WIDTH);
                                 if (width_decl && width_decl->value) {
                                     // Check if it's a percentage value
-                                    if (width_decl->value->type == CSS_VALUE_PERCENTAGE && table_content_width > 0) {
+                                    if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE && table_content_width > 0) {
                                         // Calculate percentage relative to table content width
                                         double percentage = width_decl->value->data.percentage.value;
                                         int css_content_width = (int)(table_content_width * percentage / 100.0);
@@ -1012,7 +1012,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                                         log_debug("Direct row cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
                                                percentage, table_content_width, css_content_width, cell_width);
-                                    } else if (width_decl->value->type == CSS_VALUE_LENGTH) {
+                                    } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                         // Absolute width
                                         int css_content_width = (int)width_decl->value->data.length.value;
                                         if (css_content_width > 0) {
@@ -1087,7 +1087,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (dom_elem->specified_style) {
                     CssDeclaration* width_decl = style_tree_get_declaration(
                         dom_elem->specified_style, CSS_PROPERTY_WIDTH);
-                    if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_LENGTH) {
+                    if (width_decl && width_decl->value && width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                         explicit_table_width = (int)width_decl->value->data.length.value;
                         log_debug("FIXED LAYOUT - read table CSS width: %dpx", explicit_table_width);
                     }
@@ -1170,13 +1170,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     dom_elem->specified_style, CSS_PROPERTY_WIDTH);
                                 if (width_decl && width_decl->value) {
                                     // Check if it's a percentage value
-                                    if (width_decl->value->type == CSS_VALUE_PERCENTAGE) {
+                                    if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                                         // Calculate percentage relative to table content width
                                         double percentage = width_decl->value->data.percentage.value;
                                         cell_width = (int)(content_width * percentage / 100.0);
                                         log_debug("  Column %d: percentage width %.1f%% of %dpx = %dpx",
                                                col, percentage, content_width, cell_width);
-                                    } else if (width_decl->value->type == CSS_VALUE_LENGTH) {
+                                    } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                         // Absolute width (px, em, etc.)
                                         cell_width = (int)width_decl->value->data.length.value;
                                         log_debug("  Column %d: absolute width %dpx", col, cell_width);
@@ -1262,7 +1262,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (dom_elem->specified_style) {
                     CssDeclaration* height_decl = style_tree_get_declaration(
                         dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                    if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_LENGTH) {
+                    if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                         explicit_table_height = (int)height_decl->value->data.length.value;
                         log_debug("FIXED LAYOUT - read table CSS height: %dpx", explicit_table_height);
                     }
@@ -1550,7 +1550,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* height_decl = style_tree_get_declaration(
                                             dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                        if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_LENGTH) {
+                                        if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                             explicit_cell_height = (int)height_decl->value->data.length.value;
                                             log_debug("Cell has explicit CSS height: %dpx", explicit_cell_height);
                                         }
@@ -1575,7 +1575,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                             if (dom_elem->specified_style) {
                                                 CssDeclaration* child_height_decl = style_tree_get_declaration(
                                                     dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                                if (child_height_decl && child_height_decl->value && child_height_decl->value->type == CSS_VALUE_LENGTH) {
+                                                if (child_height_decl && child_height_decl->value && child_height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                                     child_css_height = (int)child_height_decl->value->data.length.value;
                                                     log_debug("Child element (type=%d) has explicit CSS height: %dpx", cc->type, child_css_height);
                                                 }
@@ -1791,7 +1791,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             if (dom_elem->specified_style) {
                                 CssDeclaration* height_decl = style_tree_get_declaration(
                                     dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_LENGTH) {
+                                if (height_decl && height_decl->value && height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                     explicit_cell_height = (int)height_decl->value->data.length.value;
                                     log_debug("Cell has explicit CSS height: %dpx", explicit_cell_height);
                                 }
@@ -1816,7 +1816,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* child_height_decl = style_tree_get_declaration(
                                             dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                        if (child_height_decl && child_height_decl->value && child_height_decl->value->type == CSS_VALUE_LENGTH) {
+                                        if (child_height_decl && child_height_decl->value && child_height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                             child_css_height = (int)child_height_decl->value->data.length.value;
                                             log_debug("Direct row child element (type=%d) has explicit CSS height: %dpx", cc->type, child_css_height);
                                         }

@@ -531,19 +531,7 @@ void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* ru
     for (int i = 0; i < rule->property_count; i++) {
         CssValue* value = rule->property_values[i];
         if (value) {
-            switch (value->type) {
-                case CSS_VALUE_ENHANCED_VAR:
-                    stylesheet->uses_custom_properties = true;
-                    break;
-                case CSS_VALUE_ENHANCED_CALC:
-                case CSS_VALUE_ENHANCED_MIN:
-                case CSS_VALUE_ENHANCED_MAX:
-                case CSS_VALUE_ENHANCED_CLAMP:
-                    // Math functions are part of core CSS now
-                    break;
-                default:
-                    break;
-            }
+
         }
     }
 }

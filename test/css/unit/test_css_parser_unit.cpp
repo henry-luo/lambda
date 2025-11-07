@@ -246,7 +246,7 @@ TEST_F(CssParserUnitTest, Declaration_Color_Name) {
     ASSERT_NE(decl, nullptr);
     EXPECT_EQ(decl->property_id, css_property_id_from_name("color"));
     ASSERT_NE(decl->value, nullptr);
-    EXPECT_EQ(decl->value->type, CSS_VALUE_KEYWORD);
+    EXPECT_EQ(decl->value->type, CSS_VALUE_TYPE_KEYWORD);
     EXPECT_FALSE(decl->important);
 }
 

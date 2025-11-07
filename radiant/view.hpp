@@ -461,7 +461,7 @@ enum {
     CSS_VALUE_LCH                  = 0x00e1,
     CSS_VALUE_OKLAB                = 0x00e2,
     CSS_VALUE_OKLCH                = 0x00e3,
-    CSS_VALUE__COLOR               = 0x00e4,  // extra _ to avoid conflict
+    CSS_VALUE_COLOR                = 0x00e4,
     CSS_VALUE_HAND                 = 0x00e5,
     CSS_VALUE_POINTER              = 0x00e6,
     CSS_VALUE_TEXT                 = 0x00e7,
@@ -478,7 +478,7 @@ enum {
     CSS_VALUE_FLOW                 = 0x00f2,
     CSS_VALUE_FLOW_ROOT            = 0x00f3,
     CSS_VALUE_TABLE                = 0x00f4,
-    CSS_VALUE_FLEX                = 0x00f5, // extra _ to avoid conflict
+    CSS_VALUE_FLEX                  = 0x00f5,
     CSS_VALUE_GRID                 = 0x00f6,
     CSS_VALUE_RUBY                 = 0x00f7,
     CSS_VALUE_LIST_ITEM            = 0x00f8,

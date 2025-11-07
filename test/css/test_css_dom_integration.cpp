@@ -2231,7 +2231,7 @@ TEST_F(DomIntegrationTest, InlineStyle_SingleProperty) {
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_EQ(color->value->type, CSS_VALUE_KEYWORD);
+    EXPECT_EQ(color->value->type, CSS_VALUE_TYPE_KEYWORD);
     EXPECT_STREQ(color->value->data.keyword, "red");
 
     // Verify inline style specificity (1,0,0,0)
@@ -2258,7 +2258,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
     CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
     ASSERT_NE(font_size, nullptr);
     ASSERT_NE(font_size->value, nullptr);
-    EXPECT_EQ(font_size->value->type, CSS_VALUE_LENGTH);
+    EXPECT_EQ(font_size->value->type, CSS_VALUE_TYPE_LENGTH);
     EXPECT_DOUBLE_EQ(font_size->value->data.length.value, 16.0);
     EXPECT_EQ(font_size->value->data.length.unit, CSS_UNIT_PX);
     EXPECT_EQ(font_size->specificity.inline_style, 1);
@@ -2266,7 +2266,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
     CssDeclaration* bg = dom_element_get_specified_value(element, CSS_PROPERTY_BACKGROUND_COLOR);
     ASSERT_NE(bg, nullptr);
     ASSERT_NE(bg->value, nullptr);
-    EXPECT_EQ(bg->value->type, CSS_VALUE_KEYWORD);
+    EXPECT_EQ(bg->value->type, CSS_VALUE_TYPE_KEYWORD);
     EXPECT_STREQ(bg->value->data.keyword, "yellow");
     EXPECT_EQ(bg->specificity.inline_style, 1);
 }
@@ -2307,7 +2307,7 @@ TEST_F(DomIntegrationTest, InlineStyle_OverridesIDSelector) {
     CssDeclaration* width = dom_element_get_specified_value(element, CSS_PROPERTY_WIDTH);
     ASSERT_NE(width, nullptr);
     ASSERT_NE(width->value, nullptr);
-    EXPECT_EQ(width->value->type, CSS_VALUE_LENGTH);
+    EXPECT_EQ(width->value->type, CSS_VALUE_TYPE_LENGTH);
     EXPECT_DOUBLE_EQ(width->value->data.length.value, 200.0);
     EXPECT_EQ(width->value->data.length.unit, CSS_UNIT_PX);
     EXPECT_EQ(width->specificity.inline_style, 1);
@@ -2379,7 +2379,7 @@ TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
     CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
     ASSERT_NE(font_size, nullptr);
     ASSERT_NE(font_size->value, nullptr);
-    EXPECT_EQ(font_size->value->type, CSS_VALUE_LENGTH);
+    EXPECT_EQ(font_size->value->type, CSS_VALUE_TYPE_LENGTH);
     EXPECT_DOUBLE_EQ(font_size->value->data.length.value, 14.0);
     EXPECT_EQ(font_size->value->data.length.unit, CSS_UNIT_PX);
 }
@@ -2442,7 +2442,7 @@ TEST_F(DomIntegrationTest, InlineStyle_ComplexSpecificity) {
     CssDeclaration* margin = dom_element_get_specified_value(element, CSS_PROPERTY_MARGIN);
     ASSERT_NE(margin, nullptr);
     ASSERT_NE(margin->value, nullptr);
-    EXPECT_EQ(margin->value->type, CSS_VALUE_LENGTH);
+    EXPECT_EQ(margin->value->type, CSS_VALUE_TYPE_LENGTH);
     EXPECT_DOUBLE_EQ(margin->value->data.length.value, 40.0);
     EXPECT_EQ(margin->value->data.length.unit, CSS_UNIT_PX);
     EXPECT_EQ(margin->specificity.inline_style, 1);
