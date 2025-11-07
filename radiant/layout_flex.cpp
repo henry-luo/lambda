@@ -117,7 +117,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     int content_based_height = 0;
 
                     // Estimate height based on flex container type and content
-                    if (flex_layout->wrap == LXB_CSS_VALUE_WRAP || flex_layout->wrap == LXB_CSS_VALUE_WRAP_REVERSE) {
+                    if (flex_layout->wrap == CSS_VALUE_WRAP || flex_layout->wrap == CSS_VALUE_WRAP_REVERSE) {
                         // For wrapping containers, estimate based on potential multi-line layout
                         content_based_height = 120; // Allow for wrapped content
                     } else {
@@ -126,7 +126,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     }
 
                     // Adjust for alignment requirements
-                    if (flex_layout->align_items == LXB_CSS_VALUE_CENTER) {
+                    if (flex_layout->align_items == CSS_VALUE_CENTER) {
                         content_based_height += 20; // Extra space for centering
                         printf("DEBUG: FLEX_HEIGHT - added centering space, height: %d\n", content_based_height);
                     }
@@ -270,7 +270,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
                   child, child->type, child->node ? child->node->name() : "NULL");
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
-            (child->position->position == LXB_CSS_VALUE_ABSOLUTE || child->position->position == LXB_CSS_VALUE_FIXED);
+            (child->position->position == CSS_VALUE_ABSOLUTE || child->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             count++;
@@ -300,8 +300,8 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
         log_debug("*** COLLECT_FLEX_ITEMS TRACE: Processing child view %p for collection", child);
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
-                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE ||
-                           child->position->position == LXB_CSS_VALUE_FIXED);
+                          (child->position->position == CSS_VALUE_ABSOLUTE ||
+                           child->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             flex->flex_items[count] = child;
@@ -582,9 +582,9 @@ bool is_main_axis_horizontal(FlexProp* flex) {
     // Consider writing mode in axis determination
     if (flex->writing_mode == WM_VERTICAL_RL || flex->writing_mode == WM_VERTICAL_LR) {
         // In vertical writing modes, row becomes vertical
-        return direction == LXB_CSS_VALUE_COLUMN || direction == LXB_CSS_VALUE_COLUMN_REVERSE;
+        return direction == CSS_VALUE_COLUMN || direction == CSS_VALUE_COLUMN_REVERSE;
     }
-    return direction == LXB_CSS_VALUE_ROW || direction == LXB_CSS_VALUE_ROW_REVERSE;
+    return direction == CSS_VALUE_ROW || direction == CSS_VALUE_ROW_REVERSE;
 }
 
 // Create flex lines based on wrapping
@@ -925,11 +925,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         if (is_main_axis_horizontal(flex_layout)) {
-            if (item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
-            if (item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO) auto_margin_count++;
         } else {
-            if (item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
-            if (item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO) auto_margin_count++;
         }
     }
 
@@ -950,18 +950,18 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         int justify = flex_layout->justify;
         printf("DEBUG: JUSTIFY_CONTENT - justify=%d, container_size=%d, total_size_with_gaps=%d\n",
                justify, container_size, total_size_with_gaps);
-        printf("DEBUG: JUSTIFY_CONTENT - LXB_CSS_VALUE_SPACE_EVENLY=%d\n", LXB_CSS_VALUE_SPACE_EVENLY);
+        printf("DEBUG: JUSTIFY_CONTENT - CSS_VALUE_SPACE_EVENLY=%d\n", CSS_VALUE_SPACE_EVENLY);
         switch (justify) {
-            case LXB_CSS_VALUE_FLEX_START:
+            case CSS_VALUE_FLEX_START:
                 current_pos = 0;
                 break;
-            case LXB_CSS_VALUE_FLEX_END:
+            case CSS_VALUE_FLEX_END:
                 current_pos = container_size - total_size_with_gaps;
                 break;
-            case LXB_CSS_VALUE_CENTER:
+            case CSS_VALUE_CENTER:
                 current_pos = (container_size - total_size_with_gaps) / 2;
                 break;
-            case LXB_CSS_VALUE_SPACE_BETWEEN:
+            case CSS_VALUE_SPACE_BETWEEN:
                 current_pos = 0;
                 if (line->item_count > 1) {
                     // ENHANCED: Space-between distributes remaining space evenly between items
@@ -974,14 +974,14 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
                     spacing = 0; // Single item: no spacing needed
                 }
                 break;
-            case LXB_CSS_VALUE_SPACE_AROUND:
+            case CSS_VALUE_SPACE_AROUND:
                 if (line->item_count > 0) {
                     int remaining_space = container_size - total_size_with_gaps;
                     spacing = remaining_space / line->item_count;
                     current_pos = spacing / 2;
                 }
                 break;
-            case LXB_CSS_VALUE_SPACE_EVENLY:
+            case CSS_VALUE_SPACE_EVENLY:
                 if (line->item_count > 0) {
                     int remaining_space = container_size - total_size_with_gaps;
                     spacing = remaining_space / (line->item_count + 1);
@@ -1004,9 +1004,9 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         // Handle auto margins
         if (auto_margin_count > 0) {
             bool left_auto = is_main_axis_horizontal(flex_layout) ?
-                item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO;
+                item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO;
             bool right_auto = is_main_axis_horizontal(flex_layout) ?
-                item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO;
+                item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO;
 
             printf("DEBUG: MAIN_ALIGN_ITEM %d - auto margins: left=%d, right=%d\n",
                    i, left_auto, right_auto);
@@ -1036,7 +1036,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             }
 
             // Add gap between items (but not after the last item or with space-between)
-            if (i < line->item_count - 1 && flex_layout->justify != LXB_CSS_VALUE_SPACE_BETWEEN) {
+            if (i < line->item_count - 1 && flex_layout->justify != CSS_VALUE_SPACE_BETWEEN) {
                 int gap = is_main_axis_horizontal(flex_layout) ?
                          flex_layout->column_gap : flex_layout->row_gap;
                 if (gap > 0) {
@@ -1073,9 +1073,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 
         // Check for auto margins in cross axis
         bool top_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO;
+            item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO;
         bool bottom_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO;
+            item->bound && item->bound->margin.bottom_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.right_type == CSS_VALUE_AUTO;
 
         if (top_auto || bottom_auto) {
             // Handle auto margins in cross axis
@@ -1406,9 +1406,9 @@ void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* 
     }
 
     if (is_main_axis_horizontal(flex_layout)) {
-        printf("DEBUG: DIRECTION_CHECK - flex_layout->direction=%d, LXB_CSS_VALUE_ROW_REVERSE=%d\n",
-               flex_layout->direction, LXB_CSS_VALUE_ROW_REVERSE);
-        if (flex_layout->direction == LXB_CSS_VALUE_ROW_REVERSE) {
+        printf("DEBUG: DIRECTION_CHECK - flex_layout->direction=%d, CSS_VALUE_ROW_REVERSE=%d\n",
+               flex_layout->direction, CSS_VALUE_ROW_REVERSE);
+        if (flex_layout->direction == CSS_VALUE_ROW_REVERSE) {
             // ROW-REVERSE: Position from right edge
             int container_width = (int)flex_layout->main_axis_size;
             int item_width = get_main_axis_size(item, flex_layout);
@@ -1423,7 +1423,7 @@ void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* 
                    position, border_offset, item->x);
         }
     } else {
-        if (flex_layout->direction == LXB_CSS_VALUE_COLUMN_REVERSE) {
+        if (flex_layout->direction == CSS_VALUE_COLUMN_REVERSE) {
             // COLUMN-REVERSE: Position from bottom edge
             int container_height = (int)flex_layout->main_axis_size;
             int item_height = get_main_axis_size(item, flex_layout);

@@ -271,14 +271,14 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         block->node->name(), content_width, content_height, block->width, block->height);
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
-        if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {}
-        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
+        if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {}
+        else if (block->scroller->overflow_x == CSS_VALUE_SCROLL ||
+            block->scroller->overflow_x == CSS_VALUE_AUTO) {
             block->scroller->has_hz_scroll = true;
         }
         if (block->scroller->has_hz_scroll ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->overflow_x == CSS_VALUE_CLIP ||
+            block->scroller->overflow_x == CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
         }
     }
@@ -288,13 +288,13 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     // handle vertical overflow and determine block->height
     if (content_height > block->height) { // vt overflow
         block->scroller->has_vt_overflow = true;
-        if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) { }
-        else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
+        if (block->scroller->overflow_y == CSS_VALUE_VISIBLE) { }
+        else if (block->scroller->overflow_y == CSS_VALUE_SCROLL || block->scroller->overflow_y == CSS_VALUE_AUTO) {
             block->scroller->has_vt_scroll = true;
         }
         if (block->scroller->has_hz_scroll ||
-            block->scroller->overflow_y == LXB_CSS_VALUE_CLIP ||
-            block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->overflow_y == CSS_VALUE_CLIP ||
+            block->scroller->overflow_y == CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
         }
     }

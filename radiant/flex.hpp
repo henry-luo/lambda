@@ -4,37 +4,37 @@
 #include "view.hpp"
 
 typedef enum {
-    DIR_ROW = LXB_CSS_VALUE_ROW,                        // 0x010c
-    DIR_ROW_REVERSE = LXB_CSS_VALUE_ROW_REVERSE,        // 0x010d
-    DIR_COLUMN = LXB_CSS_VALUE_COLUMN,                  // 0x010e
-    DIR_COLUMN_REVERSE = LXB_CSS_VALUE_COLUMN_REVERSE   // 0x010f
+    DIR_ROW = CSS_VALUE_ROW,                        // 0x010c
+    DIR_ROW_REVERSE = CSS_VALUE_ROW_REVERSE,        // 0x010d
+    DIR_COLUMN = CSS_VALUE_COLUMN,                  // 0x010e
+    DIR_COLUMN_REVERSE = CSS_VALUE_COLUMN_REVERSE   // 0x010f
 } FlexDirection;
 
 typedef enum {
-    WRAP_NOWRAP = LXB_CSS_VALUE_NOWRAP,                 // 0x0111
-    WRAP_WRAP = LXB_CSS_VALUE_WRAP,                     // 0x0112
-    WRAP_WRAP_REVERSE = LXB_CSS_VALUE_WRAP_REVERSE      // 0x0113
+    WRAP_NOWRAP = CSS_VALUE_NOWRAP,                 // 0x0111
+    WRAP_WRAP = CSS_VALUE_WRAP,                     // 0x0112
+    WRAP_WRAP_REVERSE = CSS_VALUE_WRAP_REVERSE      // 0x0113
 } FlexWrap;
 
 typedef enum {
-    JUSTIFY_START = LXB_CSS_VALUE_FLEX_START,           // 0x0005
-    JUSTIFY_END = LXB_CSS_VALUE_FLEX_END,               // 0x0006
-    JUSTIFY_CENTER = LXB_CSS_VALUE_CENTER,              // 0x0007
-    JUSTIFY_SPACE_BETWEEN = LXB_CSS_VALUE_SPACE_BETWEEN, // 0x0008
-    JUSTIFY_SPACE_AROUND = LXB_CSS_VALUE_SPACE_AROUND,  // 0x0009
-    JUSTIFY_SPACE_EVENLY = LXB_CSS_VALUE_SPACE_EVENLY   // Custom constant
+    JUSTIFY_START = CSS_VALUE_FLEX_START,           // 0x0005
+    JUSTIFY_END = CSS_VALUE_FLEX_END,               // 0x0006
+    JUSTIFY_CENTER = CSS_VALUE_CENTER,              // 0x0007
+    JUSTIFY_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN, // 0x0008
+    JUSTIFY_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,  // 0x0009
+    JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY   // Custom constant
 } JustifyContent;
 
 typedef enum {
-    ALIGN_AUTO = LXB_CSS_VALUE_AUTO,                    // 0x000c
-    ALIGN_START = LXB_CSS_VALUE_FLEX_START,             // 0x0005
-    ALIGN_END = LXB_CSS_VALUE_FLEX_END,                 // 0x0006
-    ALIGN_CENTER = LXB_CSS_VALUE_CENTER,                // 0x0007
-    ALIGN_BASELINE = LXB_CSS_VALUE_BASELINE,            // 0x000b
-    ALIGN_STRETCH = LXB_CSS_VALUE_STRETCH,              // 0x000a
-    ALIGN_SPACE_BETWEEN = LXB_CSS_VALUE_SPACE_BETWEEN,  // 0x0008
-    ALIGN_SPACE_AROUND = LXB_CSS_VALUE_SPACE_AROUND,    // 0x0009
-    ALIGN_SPACE_EVENLY = LXB_CSS_VALUE_SPACE_EVENLY     // Custom constant
+    ALIGN_AUTO = CSS_VALUE_AUTO,                    // 0x000c
+    ALIGN_START = CSS_VALUE_FLEX_START,             // 0x0005
+    ALIGN_END = CSS_VALUE_FLEX_END,                 // 0x0006
+    ALIGN_CENTER = CSS_VALUE_CENTER,                // 0x0007
+    ALIGN_BASELINE = CSS_VALUE_BASELINE,            // 0x000b
+    ALIGN_STRETCH = CSS_VALUE_STRETCH,              // 0x000a
+    ALIGN_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN,  // 0x0008
+    ALIGN_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,    // 0x0009
+    ALIGN_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY     // Custom constant
 } AlignType;
 
 // Note: Visibility, PositionType, WritingMode, TextDirection are now defined in view.hpp

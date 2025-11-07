@@ -129,7 +129,7 @@ void resolve_flexible_lengths_enhanced(FlexContainerLayout* flex_layout, FlexLin
     // Use double precision for calculations
     double total_grow_weight = 0.0;
     double free_space_d = (double)free_space;
-    
+
     // Calculate precise grow amounts
     for (int i = 0; i < line->item_count; i++) {
         if (line->items[i]->flex_grow > 0) {
@@ -147,12 +147,12 @@ void resolve_flexible_lengths_enhanced(FlexContainerLayout* flex_layout, FlexLin
 int calculate_free_space_accurate(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     int container_size = flex_layout->main_axis_size;
     int total_basis = 0;
-    
+
     // Calculate basis without gaps first
     for (int i = 0; i < line->item_count; i++) {
         total_basis += calculate_flex_basis_accurate(line->items[i], flex_layout);
     }
-    
+
     // Add gaps separately
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
     return container_size - total_basis - gap_space;
@@ -165,13 +165,13 @@ int calculate_free_space_accurate(FlexContainerLayout* flex_layout, FlexLineInfo
 
 #### 2.1 Direction-Aware Positioning
 ```cpp
-void set_main_axis_position_with_direction(ViewBlock* item, int position, 
+void set_main_axis_position_with_direction(ViewBlock* item, int position,
                                           FlexContainerLayout* flex_layout) {
     ViewBlock* container = (ViewBlock*)item->parent;
     int border_offset = get_border_offset(container, flex_layout, true);
-    
+
     if (is_main_axis_horizontal(flex_layout)) {
-        if (flex_layout->direction == LXB_CSS_VALUE_ROW_REVERSE) {
+        if (flex_layout->direction == CSS_VALUE_ROW_REVERSE) {
             // Position from right edge
             int container_width = flex_layout->main_axis_size;
             int item_width = get_main_axis_size(item, flex_layout);
@@ -181,7 +181,7 @@ void set_main_axis_position_with_direction(ViewBlock* item, int position,
             item->x = position + border_offset;
         }
     } else {
-        if (flex_layout->direction == LXB_CSS_VALUE_COLUMN_REVERSE) {
+        if (flex_layout->direction == CSS_VALUE_COLUMN_REVERSE) {
             // Position from bottom edge
             int container_height = flex_layout->main_axis_size;
             int item_height = get_main_axis_size(item, flex_layout);
@@ -197,9 +197,9 @@ void set_main_axis_position_with_direction(ViewBlock* item, int position,
 #### 2.2 Reverse-Aware Item Ordering
 ```cpp
 void position_items_with_direction(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    bool is_reverse = (flex_layout->direction == LXB_CSS_VALUE_ROW_REVERSE ||
-                      flex_layout->direction == LXB_CSS_VALUE_COLUMN_REVERSE);
-    
+    bool is_reverse = (flex_layout->direction == CSS_VALUE_ROW_REVERSE ||
+                      flex_layout->direction == CSS_VALUE_COLUMN_REVERSE);
+
     if (is_reverse) {
         // Process items in reverse order for positioning
         for (int i = line->item_count - 1; i >= 0; i--) {
@@ -220,10 +220,10 @@ void position_items_with_direction(FlexContainerLayout* flex_layout, FlexLineInf
 
 #### 3.1 Accurate Shrink Calculation
 ```cpp
-void apply_flex_shrink_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* line, 
+void apply_flex_shrink_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* line,
                                int negative_free_space) {
     double total_scaled_shrink = 0.0;
-    
+
     // Calculate total scaled shrink factor
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
@@ -232,7 +232,7 @@ void apply_flex_shrink_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* 
             total_scaled_shrink += (double)item->flex_shrink * basis;
         }
     }
-    
+
     if (total_scaled_shrink > 0) {
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
@@ -241,14 +241,14 @@ void apply_flex_shrink_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* 
                 double scaled_shrink = (double)item->flex_shrink * basis;
                 double shrink_ratio = scaled_shrink / total_scaled_shrink;
                 int shrink_amount = (int)round(shrink_ratio * negative_free_space);
-                
+
                 int current_size = get_main_axis_size(item, flex_layout);
                 int new_size = max(0, current_size - shrink_amount);
-                
+
                 // Apply minimum content size constraints
                 int min_content_size = get_min_content_size(item, flex_layout);
                 new_size = max(new_size, min_content_size);
-                
+
                 set_main_axis_size(item, new_size, flex_layout);
             }
         }
@@ -265,24 +265,24 @@ void apply_flex_shrink_enhanced(FlexContainerLayout* flex_layout, FlexLineInfo* 
 void apply_size_constraints(ViewBlock* item, FlexContainerLayout* flex_layout) {
     if (is_main_axis_horizontal(flex_layout)) {
         int current_width = item->width;
-        
+
         // Apply min-width constraint
         if (item->min_width > 0 && current_width < item->min_width) {
             item->width = item->min_width;
         }
-        
+
         // Apply max-width constraint
         if (item->max_width > 0 && current_width > item->max_width) {
             item->width = item->max_width;
         }
     } else {
         int current_height = item->height;
-        
+
         // Apply min-height constraint
         if (item->min_height > 0 && current_height < item->min_height) {
             item->height = item->min_height;
         }
-        
+
         // Apply max-height constraint
         if (item->max_height > 0 && current_height > item->max_height) {
             item->height = item->max_height;
@@ -299,14 +299,14 @@ void apply_size_constraints(ViewBlock* item, FlexContainerLayout* flex_layout) {
 ```cpp
 void measure_flex_child_content_accurate(LayoutContext* lycon, DomNode* child) {
     if (!child) return;
-    
+
     // Check cache first
     MeasurementCacheEntry* cached = get_from_measurement_cache(child);
     if (cached) return;
-    
+
     // Create isolated measurement context
     LayoutContext measure_context = create_measurement_context(lycon);
-    
+
     if (child->is_text()) {
         measure_text_content_accurate(&measure_context, child);
     } else {
@@ -315,12 +315,12 @@ void measure_flex_child_content_accurate(LayoutContext* lycon, DomNode* child) {
         if (temp_view) {
             // Run actual layout to get real dimensions
             layout_block_content(&measure_context, temp_view);
-            
+
             // Store real measurements
-            store_in_measurement_cache(child, 
+            store_in_measurement_cache(child,
                 temp_view->width, temp_view->height,
                 temp_view->content_width, temp_view->content_height);
-            
+
             cleanup_temporary_view(temp_view);
         }
     }
@@ -335,11 +335,11 @@ void measure_flex_child_content_accurate(LayoutContext* lycon, DomNode* child) {
 ```cpp
 int calculate_gap_space_accurate(FlexContainerLayout* flex_layout, int item_count, bool main_axis) {
     if (item_count <= 1) return 0;
-    
-    int gap = main_axis ? 
+
+    int gap = main_axis ?
         (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) :
         (is_main_axis_horizontal(flex_layout) ? flex_layout->row_gap : flex_layout->column_gap);
-    
+
     return gap * (item_count - 1);
 }
 ```
@@ -461,7 +461,7 @@ int calculate_gap_space_accurate(FlexContainerLayout* flex_layout, int item_coun
 
 ### 🎉 **Major Breakthroughs**
 1. **✅ Flex-Grow Precision Fixed**: Achieved perfect proportional sizing with <1px accuracy
-2. **✅ Direction Reversal Complete**: Both row-reverse and column-reverse working flawlessly  
+2. **✅ Direction Reversal Complete**: Both row-reverse and column-reverse working flawlessly
 3. **✅ Space-Between Algorithm**: Perfect distribution in navigation layouts (100% pass rate)
 4. **✅ Container Height Calculation**: Fixed vertical alignment and negative positioning issues
 5. **✅ Centering Algorithm Enhanced**: 15% improvement in justify-content: center accuracy
@@ -478,7 +478,7 @@ int calculate_gap_space_accurate(FlexContainerLayout* flex_layout, int item_coun
 
 ### 🎯 **Next Priority Actions**
 1. **Phase 3 (HIGH)**: Fix flex-shrink algorithm minimum content size handling
-2. **Phase 4 (MEDIUM)**: Implement iterative min/max constraint resolution  
+2. **Phase 4 (MEDIUM)**: Implement iterative min/max constraint resolution
 3. **Phase 6 (LOW)**: Complete gap positioning fixes for remaining 10px errors
 4. **Phase 5 (MEDIUM)**: Careful implementation of enhanced measurement system
 
@@ -537,19 +537,19 @@ This iteration successfully delivered the core algorithmic improvements needed f
 ```cpp
 void apply_justify_content_space_between(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (line->item_count <= 1) return;
-    
+
     int container_size = flex_layout->main_axis_size;
     int total_item_size = 0;
-    
+
     // Calculate total item sizes
     for (int i = 0; i < line->item_count; i++) {
         total_item_size += get_main_axis_size(line->items[i], flex_layout);
     }
-    
+
     // Calculate space between items
     int free_space = container_size - total_item_size;
     int space_between = free_space / (line->item_count - 1);
-    
+
     // Position items with space-between
     int current_position = 0;
     for (int i = 0; i < line->item_count; i++) {
@@ -566,11 +566,11 @@ void apply_justify_content_space_between(FlexContainerLayout* flex_layout, FlexL
 ```cpp
 void apply_align_items_center(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     int container_cross_size = flex_layout->cross_axis_size;
-    
+
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         int item_cross_size = get_cross_axis_size(item, flex_layout);
-        
+
         // Center item in cross axis
         int centered_position = (container_cross_size - item_cross_size) / 2;
         set_cross_axis_position(item, centered_position, flex_layout);
@@ -585,22 +585,22 @@ void apply_align_items_center(FlexContainerLayout* flex_layout, FlexLineInfo* li
 ```cpp
 int calculate_flex_container_cross_size(FlexContainerLayout* flex_layout) {
     int max_cross_size = 0;
-    
+
     for (int line_idx = 0; line_idx < flex_layout->line_count; line_idx++) {
         FlexLineInfo* line = &flex_layout->lines[line_idx];
-        
+
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
             int item_cross_size = get_cross_axis_size(item, flex_layout);
-            
+
             // Account for alignment requirements
-            if (flex_layout->align_items == LXB_CSS_VALUE_CENTER) {
+            if (flex_layout->align_items == CSS_VALUE_CENTER) {
                 // Container needs to accommodate centered items
                 max_cross_size = max(max_cross_size, item_cross_size);
             }
         }
     }
-    
+
     return max_cross_size;
 }
 ```
@@ -614,10 +614,10 @@ void resolve_complex_flex_scenarios(FlexContainerLayout* flex_layout, FlexLineIn
     // Handle flex: 1 with min-width constraints
     // Handle flex: 1 with content-based sizing
     // Handle flex: 1 in nested flex containers
-    
+
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        
+
         if (item->flex_grow > 0) {
             // Apply complex flex-grow with constraints
             apply_flex_grow_with_constraints(item, flex_layout, line);
@@ -632,17 +632,17 @@ void resolve_complex_flex_scenarios(FlexContainerLayout* flex_layout, FlexLineIn
 
 ```cpp
 void apply_gaps_with_justify_content(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
-    int gap = is_main_axis_horizontal(flex_layout) ? 
+    int gap = is_main_axis_horizontal(flex_layout) ?
               flex_layout->column_gap : flex_layout->row_gap;
-              
+
     if (gap <= 0) return;
-    
+
     // Integrate gaps with justify-content calculations
     switch (flex_layout->justify_content) {
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
+        case CSS_VALUE_SPACE_BETWEEN:
             apply_gaps_space_between(flex_layout, line, gap);
             break;
-        case LXB_CSS_VALUE_CENTER:
+        case CSS_VALUE_CENTER:
             apply_gaps_center(flex_layout, line, gap);
             break;
         // ... other justify-content values
@@ -659,7 +659,7 @@ void apply_gaps_with_justify_content(FlexContainerLayout* flex_layout, FlexLineI
 
 ### **Implementation Priority**
 1. **Week 1**: Phase 7-8 (justify-content and align-items fixes)
-2. **Week 2**: Phase 9-10 (container sizing and complex scenarios)  
+2. **Week 2**: Phase 9-10 (container sizing and complex scenarios)
 3. **Week 3**: Phase 11 + testing and validation
 
 This enhanced plan addresses the critical real-world layout issues identified in the page test suite, ensuring Radiant's flexbox implementation works for production web applications.

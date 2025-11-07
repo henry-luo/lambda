@@ -166,7 +166,6 @@ typedef enum CssValueType {
     CSS_VALUE_TIME,           // time values
     CSS_VALUE_FREQUENCY,      // frequency values
     CSS_VALUE_RESOLUTION,     // resolution values
-    CSS_VALUE_FLEX,           // flex values
     CSS_VALUE_POSITION,       // position values
     CSS_VALUE_CUSTOM_PROPERTY,// custom property references
     CSS_VALUE_LIST,           // list of values

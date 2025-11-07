@@ -109,9 +109,9 @@ int ui_context_init(UiContext* uicon, bool headless) {
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
     uicon->default_font = (FontProp){"Arial", (float)(16 * uicon->pixel_ratio), // 16px
-        LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
+        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->legacy_default_font = (FontProp){"Times", (float)(16 * uicon->pixel_ratio), // 16px
-        LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
+        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->fallback_fonts = fallback_fonts;
 
     // init ThorVG engine

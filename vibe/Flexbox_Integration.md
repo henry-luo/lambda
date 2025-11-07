@@ -140,7 +140,7 @@ void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
     switch (declr->type) {
         case LXB_CSS_PROPERTY_ASPECT_RATIO: {
             const lxb_css_property_aspect_ratio_t* aspect = declr->u.aspect_ratio;
-            if (aspect->ratio.type == LXB_CSS_VALUE_NUMBER) {
+            if (aspect->ratio.type == CSS_VALUE_NUMBER) {
                 span->aspect_ratio = aspect->ratio.value;
             }
             break;
@@ -148,7 +148,7 @@ void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
 
         case LXB_CSS_PROPERTY_MARGIN_LEFT: {
             const lxb_css_property_margin_left_t* margin = declr->u.margin_left;
-            if (margin->type == LXB_CSS_VALUE_AUTO) {
+            if (margin->type == CSS_VALUE_AUTO) {
                 span->margin_left_auto = true;
             } else {
                 span->margin_left_auto = false;
@@ -161,7 +161,7 @@ void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
 
         case LXB_CSS_PROPERTY_MIN_WIDTH: {
             const lxb_css_property_min_width_t* min_width = declr->u.min_width;
-            if (min_width->type == LXB_CSS_VALUE_PERCENTAGE) {
+            if (min_width->type == CSS_VALUE_PERCENTAGE) {
                 span->min_width = min_width->percentage.value;
                 span->min_width_is_percent = true;
             } else {

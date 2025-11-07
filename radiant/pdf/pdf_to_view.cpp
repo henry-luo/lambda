@@ -752,10 +752,10 @@ static void create_rect_view(Input* input, ViewBlock* parent,
                 border->width.left = line_width;
 
                 // Set border style to solid
-                border->top_style = LXB_CSS_VALUE_SOLID;
-                border->right_style = LXB_CSS_VALUE_SOLID;
-                border->bottom_style = LXB_CSS_VALUE_SOLID;
-                border->left_style = LXB_CSS_VALUE_SOLID;
+                border->top_style = CSS_VALUE_SOLID;
+                border->right_style = CSS_VALUE_SOLID;
+                border->bottom_style = CSS_VALUE_SOLID;
+                border->left_style = CSS_VALUE_SOLID;
 
                 bound->border = border;
 

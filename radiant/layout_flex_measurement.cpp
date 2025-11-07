@@ -364,9 +364,9 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
 
     // Create ViewBlock directly (similar to layout_block but without child processing)
     ViewBlock* block = (ViewBlock*)alloc_view(lycon,
-        display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
-        display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
-        display.inner == LXB_CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
+        display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
+        display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
+        display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
         node);
 
     if (!block) {

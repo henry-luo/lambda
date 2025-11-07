@@ -206,8 +206,8 @@ EnhancedFontBox* get_enhanced_font_box_for_node(LayoutContext* lycon, DomNode* n
         // Initialize default font
         FontProp fprop = {0};
         fprop.font_size = 16;
-        fprop.font_style = LXB_CSS_VALUE_NORMAL;
-        fprop.font_weight = LXB_CSS_VALUE_NORMAL;
+        fprop.font_style = CSS_VALUE_NORMAL;
+        fprop.font_weight = CSS_VALUE_NORMAL;
 
         setup_font(lycon->uicon, (FontBox*)&default_fbox, &fprop);
 

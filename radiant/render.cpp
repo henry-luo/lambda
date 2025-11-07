@@ -103,19 +103,19 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
             }
         }
         // render text deco
-        if (rdcon->font.style->text_deco != LXB_CSS_VALUE_NONE) {
+        if (rdcon->font.style->text_deco != CSS_VALUE_NONE) {
             float thinkness = max(rdcon->font.ft_face->underline_thickness / 64.0, 1);
             Rect rect;
             // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
-            if (rdcon->font.style->text_deco == LXB_CSS_VALUE_UNDERLINE) {
+            if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // underline drawn at baseline, with a gap of thickness
                 rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y +
                     (rdcon->font.ft_face->size->metrics.ascender / 64.0) + thinkness;
             }
-            else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_OVERLINE) {
+            else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
                 rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y;
             }
-            else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
+            else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
                 rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y + text_rect->height / 2;
             }
             rect.width = text_rect->width;  rect.height = thinkness; // corrected the variable name from h to height
@@ -153,13 +153,13 @@ static void toRoman(int num, char* result, int uppercase) {
 void formatListNumber(StrBuf* buf, int num, PropValue list_style) {
     if (num <= 0) { return; }
     switch (list_style) {
-        case LXB_CSS_VALUE_LOWER_ROMAN:
+        case CSS_VALUE_LOWER_ROMAN:
             toRoman(num, buf, 0);
             break;
-        case LXB_CSS_VALUE_UPPER_ROMAN:
+        case CSS_VALUE_UPPER_ROMAN:
             toRoman(num, buf, 1);
             break;
-        case LXB_CSS_VALUE_UPPER_ALPHA:
+        case CSS_VALUE_UPPER_ALPHA:
             if (num > 26) {
                 strcpy(result, "invalid");
             } else {
@@ -167,7 +167,7 @@ void formatListNumber(StrBuf* buf, int num, PropValue list_style) {
                 result[1] = '\0';
             }
             break;
-        case LXB_CSS_VALUE_LOWER_ALPHA:
+        case CSS_VALUE_LOWER_ALPHA:
             if (num > 26) {
                 strcpy(result, "invalid");
             } else {
@@ -182,14 +182,14 @@ void formatListNumber(StrBuf* buf, int num, PropValue list_style) {
 void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
-    if (rdcon->list.list_style_type == LXB_CSS_VALUE_DISC) {
+    if (rdcon->list.list_style_type == CSS_VALUE_DISC) {
         Rect rect;
         rect.x = rdcon->block.x + list_item->x - 15 * ratio;
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
         rect.width = rect.height = 5 * ratio;
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
-    else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
+    else if (rdcon->list.list_style_type == CSS_VALUE_DECIMAL) {
         log_debug("render list decimal");
         // StrBuf* num = strbuf_new_cap(10);
         // strbuf_append_format(num, "%d.", rdcon->list.item_index);
@@ -587,7 +587,7 @@ void render_children(RenderContext* rdcon, View* view) {
                 render_list_view(rdcon, block);
             }
             else {
-                if (block->position && block->position->position != LXB_CSS_VALUE_RELATIVE) {
+                if (block->position && block->position->position != CSS_VALUE_RELATIVE) {
                     log_debug("absolute/fixed positioned block, skip in normal rendering");
                 } else {
                     render_block_view(rdcon, block);

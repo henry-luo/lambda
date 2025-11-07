@@ -92,7 +92,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         color_str);
 
     // Add font style attributes
-    if (ctx->font.style->font_weight != LXB_CSS_VALUE_NORMAL && ctx->font.style->font_weight != 400) {
+    if (ctx->font.style->font_weight != CSS_VALUE_NORMAL && ctx->font.style->font_weight != 400) {
         if (ctx->font.style->font_weight >= 700) {
             strbuf_append_str(ctx->svg_content, " font-weight=\"bold\"");
         } else {
@@ -100,17 +100,17 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         }
     }
 
-    if (ctx->font.style->font_style == LXB_CSS_VALUE_ITALIC) {
+    if (ctx->font.style->font_style == CSS_VALUE_ITALIC) {
         strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
     }
 
     // Add text decoration
-    if (ctx->font.style->text_deco != LXB_CSS_VALUE_NONE) {
-        if (ctx->font.style->text_deco == LXB_CSS_VALUE_UNDERLINE) {
+    if (ctx->font.style->text_deco != CSS_VALUE_NONE) {
+        if (ctx->font.style->text_deco == CSS_VALUE_UNDERLINE) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"underline\"");
-        } else if (ctx->font.style->text_deco == LXB_CSS_VALUE_OVERLINE) {
+        } else if (ctx->font.style->text_deco == CSS_VALUE_OVERLINE) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"overline\"");
-        } else if (ctx->font.style->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
+        } else if (ctx->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"line-through\"");
         }
     }

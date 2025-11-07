@@ -146,154 +146,154 @@ Color convert_lambda_color(const CssValue* value) {
 Color color_name_to_rgb(PropValue color_name) {
     uint32_t c;
     switch (color_name) {
-        case LXB_CSS_VALUE_ALICEBLUE: c = 0xF0F8FF;  break;
-        case LXB_CSS_VALUE_ANTIQUEWHITE: c = 0xFAEBD7;  break;
-        case LXB_CSS_VALUE_AQUA: c = 0x00FFFF;  break;
-        case LXB_CSS_VALUE_AQUAMARINE: c = 0x7FFFD4;  break;
-        case LXB_CSS_VALUE_AZURE: c = 0xF0FFFF;  break;
-        case LXB_CSS_VALUE_BEIGE: c = 0xF5F5DC;  break;
-        case LXB_CSS_VALUE_BISQUE: c = 0xFFE4C4;  break;
-        case LXB_CSS_VALUE_BLACK: c = 0x000000;  break;
-        case LXB_CSS_VALUE_BLANCHEDALMOND: c = 0xFFEBCD;  break;
-        case LXB_CSS_VALUE_BLUE: c = 0x0000FF;  break;
-        case LXB_CSS_VALUE_BLUEVIOLET: c = 0x8A2BE2;  break;
-        case LXB_CSS_VALUE_BROWN: c = 0xA52A2A;  break;
-        case LXB_CSS_VALUE_BURLYWOOD: c = 0xDEB887;  break;
-        case LXB_CSS_VALUE_CADETBLUE: c = 0x5F9EA0;  break;
-        case LXB_CSS_VALUE_CHARTREUSE: c = 0x7FFF00;  break;
-        case LXB_CSS_VALUE_CHOCOLATE: c = 0xD2691E;  break;
-        case LXB_CSS_VALUE_CORAL: c = 0xFF7F50;  break;
-        case LXB_CSS_VALUE_CORNFLOWERBLUE: c = 0x6495ED;  break;
-        case LXB_CSS_VALUE_CORNSILK: c = 0xFFF8DC;  break;
-        case LXB_CSS_VALUE_CRIMSON: c = 0xDC143C;  break;
-        case LXB_CSS_VALUE_CYAN: c = 0x00FFFF;  break;
-        case LXB_CSS_VALUE_DARKBLUE: c = 0x00008B;  break;
-        case LXB_CSS_VALUE_DARKCYAN: c = 0x008B8B;  break;
-        case LXB_CSS_VALUE_DARKGOLDENROD: c = 0xB8860B;  break;
-        case LXB_CSS_VALUE_DARKGRAY: c = 0xA9A9A9;  break;
-        case LXB_CSS_VALUE_DARKGREEN: c = 0x006400;  break;
-        case LXB_CSS_VALUE_DARKGREY: c = 0xA9A9A9;  break;
-        case LXB_CSS_VALUE_DARKKHAKI: c = 0xBDB76B;  break;
-        case LXB_CSS_VALUE_DARKMAGENTA: c = 0x8B008B;  break;
-        case LXB_CSS_VALUE_DARKOLIVEGREEN: c = 0x556B2F;  break;
-        case LXB_CSS_VALUE_DARKORANGE: c = 0xFF8C00;  break;
-        case LXB_CSS_VALUE_DARKORCHID: c = 0x9932CC;  break;
-        case LXB_CSS_VALUE_DARKRED: c = 0x8B0000;  break;
-        case LXB_CSS_VALUE_DARKSALMON: c = 0xE9967A;  break;
-        case LXB_CSS_VALUE_DARKSEAGREEN: c = 0x8FBC8F;  break;
-        case LXB_CSS_VALUE_DARKSLATEBLUE: c = 0x483D8B;  break;
-        case LXB_CSS_VALUE_DARKSLATEGRAY: c = 0x2F4F4F;  break;
-        case LXB_CSS_VALUE_DARKSLATEGREY: c = 0x2F4F4F;  break;
-        case LXB_CSS_VALUE_DARKTURQUOISE: c = 0x00CED1;  break;
-        case LXB_CSS_VALUE_DARKVIOLET: c = 0x9400D3;  break;
-        case LXB_CSS_VALUE_DEEPPINK: c = 0xFF1493;  break;
-        case LXB_CSS_VALUE_DEEPSKYBLUE: c = 0x00BFFF;  break;
-        case LXB_CSS_VALUE_DIMGRAY: c = 0x696969;  break;
-        case LXB_CSS_VALUE_DIMGREY: c = 0x696969;  break;
-        case LXB_CSS_VALUE_DODGERBLUE: c = 0x1E90FF;  break;
-        case LXB_CSS_VALUE_FIREBRICK: c = 0xB22222;  break;
-        case LXB_CSS_VALUE_FLORALWHITE: c = 0xFFFAF0;  break;
-        case LXB_CSS_VALUE_FORESTGREEN: c = 0x228B22;  break;
-        case LXB_CSS_VALUE_FUCHSIA: c = 0xFF00FF;  break;
-        case LXB_CSS_VALUE_GAINSBORO: c = 0xDCDCDC;  break;
-        case LXB_CSS_VALUE_GHOSTWHITE: c = 0xF8F8FF;  break;
-        case LXB_CSS_VALUE_GOLD: c = 0xFFD700;  break;
-        case LXB_CSS_VALUE_GOLDENROD: c = 0xDAA520;  break;
-        case LXB_CSS_VALUE_GRAY: c = 0x808080;  break;
-        case LXB_CSS_VALUE_GREEN: c = 0x008000;  break;
-        case LXB_CSS_VALUE_GREENYELLOW: c = 0xADFF2F;  break;
-        case LXB_CSS_VALUE_GREY: c = 0x808080;  break;
-        case LXB_CSS_VALUE_HONEYDEW: c = 0xF0FFF0;  break;
-        case LXB_CSS_VALUE_HOTPINK: c = 0xFF69B4;  break;
-        case LXB_CSS_VALUE_INDIANRED: c = 0xCD5C5C;  break;
-        case LXB_CSS_VALUE_INDIGO: c = 0x4B0082;  break;
-        case LXB_CSS_VALUE_IVORY: c = 0xFFFFF0;  break;
-        case LXB_CSS_VALUE_KHAKI: c = 0xF0E68C;  break;
-        case LXB_CSS_VALUE_LAVENDER: c = 0xE6E6FA;  break;
-        case LXB_CSS_VALUE_LAVENDERBLUSH: c = 0xFFF0F5;  break;
-        case LXB_CSS_VALUE_LAWNGREEN: c = 0x7CFC00;  break;
-        case LXB_CSS_VALUE_LEMONCHIFFON: c = 0xFFFACD;  break;
-        case LXB_CSS_VALUE_LIGHTBLUE: c = 0xADD8E6;  break;
-        case LXB_CSS_VALUE_LIGHTCORAL: c = 0xF08080;  break;
-        case LXB_CSS_VALUE_LIGHTCYAN: c = 0xE0FFFF;  break;
-        case LXB_CSS_VALUE_LIGHTGOLDENRODYELLOW: c = 0xFAFAD2;  break;
-        case LXB_CSS_VALUE_LIGHTGRAY: c = 0xD3D3D3;  break;
-        case LXB_CSS_VALUE_LIGHTGREEN: c = 0x90EE90;  break;
-        case LXB_CSS_VALUE_LIGHTGREY: c = 0xD3D3D3;  break;
-        case LXB_CSS_VALUE_LIGHTPINK: c = 0xFFB6C1;  break;
-        case LXB_CSS_VALUE_LIGHTSALMON: c = 0xFFA07A;  break;
-        case LXB_CSS_VALUE_LIGHTSEAGREEN: c = 0x20B2AA;  break;
-        case LXB_CSS_VALUE_LIGHTSKYBLUE: c = 0x87CEFA;  break;
-        case LXB_CSS_VALUE_LIGHTSLATEGRAY: c = 0x778899;  break;
-        case LXB_CSS_VALUE_LIGHTSLATEGREY: c = 0x778899;  break;
-        case LXB_CSS_VALUE_LIGHTSTEELBLUE: c = 0xB0C4DE;  break;
-        case LXB_CSS_VALUE_LIGHTYELLOW: c = 0xFFFFE0;  break;
-        case LXB_CSS_VALUE_LIME: c = 0x00FF00;  break;
-        case LXB_CSS_VALUE_LIMEGREEN: c = 0x32CD32;  break;
-        case LXB_CSS_VALUE_LINEN: c = 0xFAF0E6;  break;
-        case LXB_CSS_VALUE_MAGENTA: c = 0xFF00FF;  break;
-        case LXB_CSS_VALUE_MAROON: c = 0x800000;  break;
-        case LXB_CSS_VALUE_MEDIUMAQUAMARINE: c = 0x66CDAA;  break;
-        case LXB_CSS_VALUE_MEDIUMBLUE: c = 0x0000CD;  break;
-        case LXB_CSS_VALUE_MEDIUMORCHID: c = 0xBA55D3;  break;
-        case LXB_CSS_VALUE_MEDIUMPURPLE: c = 0x9370DB;  break;
-        case LXB_CSS_VALUE_MEDIUMSEAGREEN: c = 0x3CB371;  break;
-        case LXB_CSS_VALUE_MEDIUMSLATEBLUE: c = 0x7B68EE;  break;
-        case LXB_CSS_VALUE_MEDIUMSPRINGGREEN: c = 0x00FA9A;  break;
-        case LXB_CSS_VALUE_MEDIUMTURQUOISE: c = 0x48D1CC;  break;
-        case LXB_CSS_VALUE_MEDIUMVIOLETRED: c = 0xC71585;  break;
-        case LXB_CSS_VALUE_MIDNIGHTBLUE: c = 0x191970;  break;
-        case LXB_CSS_VALUE_MINTCREAM: c = 0xF5FFFA;  break;
-        case LXB_CSS_VALUE_MISTYROSE: c = 0xFFE4E1;  break;
-        case LXB_CSS_VALUE_MOCCASIN: c = 0xFFE4B5;  break;
-        case LXB_CSS_VALUE_NAVAJOWHITE: c = 0xFFDEAD;  break;
-        case LXB_CSS_VALUE_NAVY: c = 0x000080;  break;
-        case LXB_CSS_VALUE_OLDLACE: c = 0xFDF5E6;  break;
-        case LXB_CSS_VALUE_OLIVE: c = 0x808000;  break;
-        case LXB_CSS_VALUE_OLIVEDRAB: c = 0x6B8E23;  break;
-        case LXB_CSS_VALUE_ORANGE: c = 0xFFA500;  break;
-        case LXB_CSS_VALUE_ORANGERED: c = 0xFF4500;  break;
-        case LXB_CSS_VALUE_ORCHID: c = 0xDA70D6;  break;
-        case LXB_CSS_VALUE_PALEGOLDENROD: c = 0xEEE8AA;  break;
-        case LXB_CSS_VALUE_PALEGREEN: c = 0x98FB98;  break;
-        case LXB_CSS_VALUE_PALETURQUOISE: c = 0xAFEEEE;  break;
-        case LXB_CSS_VALUE_PALEVIOLETRED: c = 0xDB7093;  break;
-        case LXB_CSS_VALUE_PAPAYAWHIP: c = 0xFFEFD5;  break;
-        case LXB_CSS_VALUE_PEACHPUFF: c = 0xFFDAB9;  break;
-        case LXB_CSS_VALUE_PERU: c = 0xCD853F;  break;
-        case LXB_CSS_VALUE_PINK: c = 0xFFC0CB;  break;
-        case LXB_CSS_VALUE_PLUM: c = 0xDDA0DD;  break;
-        case LXB_CSS_VALUE_POWDERBLUE: c = 0xB0E0E6;  break;
-        case LXB_CSS_VALUE_PURPLE: c = 0x800080;  break;
-        case LXB_CSS_VALUE_REBECCAPURPLE: c = 0x663399;  break;
-        case LXB_CSS_VALUE_RED: c = 0xFF0000;  break;
-        case LXB_CSS_VALUE_ROSYBROWN: c = 0xBC8F8F;  break;
-        case LXB_CSS_VALUE_ROYALBLUE: c = 0x4169E1;  break;
-        case LXB_CSS_VALUE_SADDLEBROWN: c = 0x8B4513;  break;
-        case LXB_CSS_VALUE_SALMON: c = 0xFA8072;  break;
-        case LXB_CSS_VALUE_SANDYBROWN: c = 0xF4A460;  break;
-        case LXB_CSS_VALUE_SEAGREEN: c = 0x2E8B57;  break;
-        case LXB_CSS_VALUE_SEASHELL: c = 0xFFF5EE;  break;
-        case LXB_CSS_VALUE_SIENNA: c = 0xA0522D;  break;
-        case LXB_CSS_VALUE_SILVER: c = 0xC0C0C0;  break;
-        case LXB_CSS_VALUE_SKYBLUE: c = 0x87CEEB;  break;
-        case LXB_CSS_VALUE_SLATEBLUE: c = 0x6A5ACD;  break;
-        case LXB_CSS_VALUE_SLATEGRAY: c = 0x708090;  break;
-        case LXB_CSS_VALUE_SLATEGREY: c = 0x708090;  break;
-        case LXB_CSS_VALUE_SNOW: c = 0xFFFAFA;  break;
-        case LXB_CSS_VALUE_SPRINGGREEN: c = 0x00FF7F;  break;
-        case LXB_CSS_VALUE_STEELBLUE: c = 0x4682B4;  break;
-        case LXB_CSS_VALUE_TAN: c = 0xD2B48C;  break;
-        case LXB_CSS_VALUE_TEAL: c = 0x008080;  break;
-        case LXB_CSS_VALUE_THISTLE: c = 0xD8BFD8;  break;
-        case LXB_CSS_VALUE_TOMATO: c = 0xFF6347;  break;
-        case LXB_CSS_VALUE_TURQUOISE: c = 0x40E0D0;  break;
-        case LXB_CSS_VALUE_VIOLET: c = 0xEE82EE;  break;
-        case LXB_CSS_VALUE_WHEAT: c = 0xF5DEB3;  break;
-        case LXB_CSS_VALUE_WHITE: c = 0xFFFFFF;  break;
-        case LXB_CSS_VALUE_WHITESMOKE: c = 0xF5F5F5;  break;
-        case LXB_CSS_VALUE_YELLOW: c = 0xFFFF00;  break;
-        case LXB_CSS_VALUE_YELLOWGREEN: c = 0x9ACD32;  break;
+        case CSS_VALUE_ALICEBLUE: c = 0xF0F8FF;  break;
+        case CSS_VALUE_ANTIQUEWHITE: c = 0xFAEBD7;  break;
+        case CSS_VALUE_AQUA: c = 0x00FFFF;  break;
+        case CSS_VALUE_AQUAMARINE: c = 0x7FFFD4;  break;
+        case CSS_VALUE_AZURE: c = 0xF0FFFF;  break;
+        case CSS_VALUE_BEIGE: c = 0xF5F5DC;  break;
+        case CSS_VALUE_BISQUE: c = 0xFFE4C4;  break;
+        case CSS_VALUE_BLACK: c = 0x000000;  break;
+        case CSS_VALUE_BLANCHEDALMOND: c = 0xFFEBCD;  break;
+        case CSS_VALUE_BLUE: c = 0x0000FF;  break;
+        case CSS_VALUE_BLUEVIOLET: c = 0x8A2BE2;  break;
+        case CSS_VALUE_BROWN: c = 0xA52A2A;  break;
+        case CSS_VALUE_BURLYWOOD: c = 0xDEB887;  break;
+        case CSS_VALUE_CADETBLUE: c = 0x5F9EA0;  break;
+        case CSS_VALUE_CHARTREUSE: c = 0x7FFF00;  break;
+        case CSS_VALUE_CHOCOLATE: c = 0xD2691E;  break;
+        case CSS_VALUE_CORAL: c = 0xFF7F50;  break;
+        case CSS_VALUE_CORNFLOWERBLUE: c = 0x6495ED;  break;
+        case CSS_VALUE_CORNSILK: c = 0xFFF8DC;  break;
+        case CSS_VALUE_CRIMSON: c = 0xDC143C;  break;
+        case CSS_VALUE_CYAN: c = 0x00FFFF;  break;
+        case CSS_VALUE_DARKBLUE: c = 0x00008B;  break;
+        case CSS_VALUE_DARKCYAN: c = 0x008B8B;  break;
+        case CSS_VALUE_DARKGOLDENROD: c = 0xB8860B;  break;
+        case CSS_VALUE_DARKGRAY: c = 0xA9A9A9;  break;
+        case CSS_VALUE_DARKGREEN: c = 0x006400;  break;
+        case CSS_VALUE_DARKGREY: c = 0xA9A9A9;  break;
+        case CSS_VALUE_DARKKHAKI: c = 0xBDB76B;  break;
+        case CSS_VALUE_DARKMAGENTA: c = 0x8B008B;  break;
+        case CSS_VALUE_DARKOLIVEGREEN: c = 0x556B2F;  break;
+        case CSS_VALUE_DARKORANGE: c = 0xFF8C00;  break;
+        case CSS_VALUE_DARKORCHID: c = 0x9932CC;  break;
+        case CSS_VALUE_DARKRED: c = 0x8B0000;  break;
+        case CSS_VALUE_DARKSALMON: c = 0xE9967A;  break;
+        case CSS_VALUE_DARKSEAGREEN: c = 0x8FBC8F;  break;
+        case CSS_VALUE_DARKSLATEBLUE: c = 0x483D8B;  break;
+        case CSS_VALUE_DARKSLATEGRAY: c = 0x2F4F4F;  break;
+        case CSS_VALUE_DARKSLATEGREY: c = 0x2F4F4F;  break;
+        case CSS_VALUE_DARKTURQUOISE: c = 0x00CED1;  break;
+        case CSS_VALUE_DARKVIOLET: c = 0x9400D3;  break;
+        case CSS_VALUE_DEEPPINK: c = 0xFF1493;  break;
+        case CSS_VALUE_DEEPSKYBLUE: c = 0x00BFFF;  break;
+        case CSS_VALUE_DIMGRAY: c = 0x696969;  break;
+        case CSS_VALUE_DIMGREY: c = 0x696969;  break;
+        case CSS_VALUE_DODGERBLUE: c = 0x1E90FF;  break;
+        case CSS_VALUE_FIREBRICK: c = 0xB22222;  break;
+        case CSS_VALUE_FLORALWHITE: c = 0xFFFAF0;  break;
+        case CSS_VALUE_FORESTGREEN: c = 0x228B22;  break;
+        case CSS_VALUE_FUCHSIA: c = 0xFF00FF;  break;
+        case CSS_VALUE_GAINSBORO: c = 0xDCDCDC;  break;
+        case CSS_VALUE_GHOSTWHITE: c = 0xF8F8FF;  break;
+        case CSS_VALUE_GOLD: c = 0xFFD700;  break;
+        case CSS_VALUE_GOLDENROD: c = 0xDAA520;  break;
+        case CSS_VALUE_GRAY: c = 0x808080;  break;
+        case CSS_VALUE_GREEN: c = 0x008000;  break;
+        case CSS_VALUE_GREENYELLOW: c = 0xADFF2F;  break;
+        case CSS_VALUE_GREY: c = 0x808080;  break;
+        case CSS_VALUE_HONEYDEW: c = 0xF0FFF0;  break;
+        case CSS_VALUE_HOTPINK: c = 0xFF69B4;  break;
+        case CSS_VALUE_INDIANRED: c = 0xCD5C5C;  break;
+        case CSS_VALUE_INDIGO: c = 0x4B0082;  break;
+        case CSS_VALUE_IVORY: c = 0xFFFFF0;  break;
+        case CSS_VALUE_KHAKI: c = 0xF0E68C;  break;
+        case CSS_VALUE_LAVENDER: c = 0xE6E6FA;  break;
+        case CSS_VALUE_LAVENDERBLUSH: c = 0xFFF0F5;  break;
+        case CSS_VALUE_LAWNGREEN: c = 0x7CFC00;  break;
+        case CSS_VALUE_LEMONCHIFFON: c = 0xFFFACD;  break;
+        case CSS_VALUE_LIGHTBLUE: c = 0xADD8E6;  break;
+        case CSS_VALUE_LIGHTCORAL: c = 0xF08080;  break;
+        case CSS_VALUE_LIGHTCYAN: c = 0xE0FFFF;  break;
+        case CSS_VALUE_LIGHTGOLDENRODYELLOW: c = 0xFAFAD2;  break;
+        case CSS_VALUE_LIGHTGRAY: c = 0xD3D3D3;  break;
+        case CSS_VALUE_LIGHTGREEN: c = 0x90EE90;  break;
+        case CSS_VALUE_LIGHTGREY: c = 0xD3D3D3;  break;
+        case CSS_VALUE_LIGHTPINK: c = 0xFFB6C1;  break;
+        case CSS_VALUE_LIGHTSALMON: c = 0xFFA07A;  break;
+        case CSS_VALUE_LIGHTSEAGREEN: c = 0x20B2AA;  break;
+        case CSS_VALUE_LIGHTSKYBLUE: c = 0x87CEFA;  break;
+        case CSS_VALUE_LIGHTSLATEGRAY: c = 0x778899;  break;
+        case CSS_VALUE_LIGHTSLATEGREY: c = 0x778899;  break;
+        case CSS_VALUE_LIGHTSTEELBLUE: c = 0xB0C4DE;  break;
+        case CSS_VALUE_LIGHTYELLOW: c = 0xFFFFE0;  break;
+        case CSS_VALUE_LIME: c = 0x00FF00;  break;
+        case CSS_VALUE_LIMEGREEN: c = 0x32CD32;  break;
+        case CSS_VALUE_LINEN: c = 0xFAF0E6;  break;
+        case CSS_VALUE_MAGENTA: c = 0xFF00FF;  break;
+        case CSS_VALUE_MAROON: c = 0x800000;  break;
+        case CSS_VALUE_MEDIUMAQUAMARINE: c = 0x66CDAA;  break;
+        case CSS_VALUE_MEDIUMBLUE: c = 0x0000CD;  break;
+        case CSS_VALUE_MEDIUMORCHID: c = 0xBA55D3;  break;
+        case CSS_VALUE_MEDIUMPURPLE: c = 0x9370DB;  break;
+        case CSS_VALUE_MEDIUMSEAGREEN: c = 0x3CB371;  break;
+        case CSS_VALUE_MEDIUMSLATEBLUE: c = 0x7B68EE;  break;
+        case CSS_VALUE_MEDIUMSPRINGGREEN: c = 0x00FA9A;  break;
+        case CSS_VALUE_MEDIUMTURQUOISE: c = 0x48D1CC;  break;
+        case CSS_VALUE_MEDIUMVIOLETRED: c = 0xC71585;  break;
+        case CSS_VALUE_MIDNIGHTBLUE: c = 0x191970;  break;
+        case CSS_VALUE_MINTCREAM: c = 0xF5FFFA;  break;
+        case CSS_VALUE_MISTYROSE: c = 0xFFE4E1;  break;
+        case CSS_VALUE_MOCCASIN: c = 0xFFE4B5;  break;
+        case CSS_VALUE_NAVAJOWHITE: c = 0xFFDEAD;  break;
+        case CSS_VALUE_NAVY: c = 0x000080;  break;
+        case CSS_VALUE_OLDLACE: c = 0xFDF5E6;  break;
+        case CSS_VALUE_OLIVE: c = 0x808000;  break;
+        case CSS_VALUE_OLIVEDRAB: c = 0x6B8E23;  break;
+        case CSS_VALUE_ORANGE: c = 0xFFA500;  break;
+        case CSS_VALUE_ORANGERED: c = 0xFF4500;  break;
+        case CSS_VALUE_ORCHID: c = 0xDA70D6;  break;
+        case CSS_VALUE_PALEGOLDENROD: c = 0xEEE8AA;  break;
+        case CSS_VALUE_PALEGREEN: c = 0x98FB98;  break;
+        case CSS_VALUE_PALETURQUOISE: c = 0xAFEEEE;  break;
+        case CSS_VALUE_PALEVIOLETRED: c = 0xDB7093;  break;
+        case CSS_VALUE_PAPAYAWHIP: c = 0xFFEFD5;  break;
+        case CSS_VALUE_PEACHPUFF: c = 0xFFDAB9;  break;
+        case CSS_VALUE_PERU: c = 0xCD853F;  break;
+        case CSS_VALUE_PINK: c = 0xFFC0CB;  break;
+        case CSS_VALUE_PLUM: c = 0xDDA0DD;  break;
+        case CSS_VALUE_POWDERBLUE: c = 0xB0E0E6;  break;
+        case CSS_VALUE_PURPLE: c = 0x800080;  break;
+        case CSS_VALUE_REBECCAPURPLE: c = 0x663399;  break;
+        case CSS_VALUE_RED: c = 0xFF0000;  break;
+        case CSS_VALUE_ROSYBROWN: c = 0xBC8F8F;  break;
+        case CSS_VALUE_ROYALBLUE: c = 0x4169E1;  break;
+        case CSS_VALUE_SADDLEBROWN: c = 0x8B4513;  break;
+        case CSS_VALUE_SALMON: c = 0xFA8072;  break;
+        case CSS_VALUE_SANDYBROWN: c = 0xF4A460;  break;
+        case CSS_VALUE_SEAGREEN: c = 0x2E8B57;  break;
+        case CSS_VALUE_SEASHELL: c = 0xFFF5EE;  break;
+        case CSS_VALUE_SIENNA: c = 0xA0522D;  break;
+        case CSS_VALUE_SILVER: c = 0xC0C0C0;  break;
+        case CSS_VALUE_SKYBLUE: c = 0x87CEEB;  break;
+        case CSS_VALUE_SLATEBLUE: c = 0x6A5ACD;  break;
+        case CSS_VALUE_SLATEGRAY: c = 0x708090;  break;
+        case CSS_VALUE_SLATEGREY: c = 0x708090;  break;
+        case CSS_VALUE_SNOW: c = 0xFFFAFA;  break;
+        case CSS_VALUE_SPRINGGREEN: c = 0x00FF7F;  break;
+        case CSS_VALUE_STEELBLUE: c = 0x4682B4;  break;
+        case CSS_VALUE_TAN: c = 0xD2B48C;  break;
+        case CSS_VALUE_TEAL: c = 0x008080;  break;
+        case CSS_VALUE_THISTLE: c = 0xD8BFD8;  break;
+        case CSS_VALUE_TOMATO: c = 0xFF6347;  break;
+        case CSS_VALUE_TURQUOISE: c = 0x40E0D0;  break;
+        case CSS_VALUE_VIOLET: c = 0xEE82EE;  break;
+        case CSS_VALUE_WHEAT: c = 0xF5DEB3;  break;
+        case CSS_VALUE_WHITE: c = 0xFFFFFF;  break;
+        case CSS_VALUE_WHITESMOKE: c = 0xF5F5F5;  break;
+        case CSS_VALUE_YELLOW: c = 0xFFFF00;  break;
+        case CSS_VALUE_YELLOWGREEN: c = 0x9ACD32;  break;
         default: c = 0x000000;  break;
     }
     uint32_t r = (c >> 16) & 0xFF;
@@ -308,7 +308,7 @@ uint32_t map_lambda_color_keyword(const char* keyword) {
     // convert keyword to enum value
     uintptr_t color_enum = css_value_by_name(keyword);
 
-    if (color_enum == LXB_CSS_VALUE__UNDEF) {
+    if (color_enum == CSS_VALUE__UNDEF) {
         // keyword not recognized
         log_debug("[CSS] Unknown color keyword: '%s', defaulting to black", keyword);
         return 0xFF000000;
@@ -338,19 +338,19 @@ float map_lambda_font_size_keyword(const char* keyword) {
 
 // map Lambda CSS font-weight keywords/numbers to Lexbor PropValue enum
 PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
-    if (!value) return LXB_CSS_VALUE_NORMAL;
+    if (!value) return CSS_VALUE_NORMAL;
 
     if (value->type == CSS_VALUE_KEYWORD) {
         const char* keyword = value->data.keyword;
-        if (!keyword) return LXB_CSS_VALUE_NORMAL;
+        if (!keyword) return CSS_VALUE_NORMAL;
 
         // map keywords to Lexbor enum values
-        if (strcasecmp(keyword, "normal") == 0) return LXB_CSS_VALUE_NORMAL;
-        if (strcasecmp(keyword, "bold") == 0) return LXB_CSS_VALUE_BOLD;
-        if (strcasecmp(keyword, "bolder") == 0) return LXB_CSS_VALUE_BOLDER;
-        if (strcasecmp(keyword, "lighter") == 0) return LXB_CSS_VALUE_LIGHTER;
+        if (strcasecmp(keyword, "normal") == 0) return CSS_VALUE_NORMAL;
+        if (strcasecmp(keyword, "bold") == 0) return CSS_VALUE_BOLD;
+        if (strcasecmp(keyword, "bolder") == 0) return CSS_VALUE_BOLDER;
+        if (strcasecmp(keyword, "lighter") == 0) return CSS_VALUE_LIGHTER;
 
-        return LXB_CSS_VALUE_NORMAL; // default
+        return CSS_VALUE_NORMAL; // default
     }
     else if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
         // numeric weights: map to closest keyword or return as-is
@@ -358,13 +358,13 @@ PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
 
         // Lexbor uses enum values for numeric weights too, but for simplicity
         // we'll map common numeric values to their keyword equivalents
-        if (weight <= 350) return LXB_CSS_VALUE_LIGHTER;
-        if (weight <= 550) return LXB_CSS_VALUE_NORMAL;  // 400
-        if (weight <= 750) return LXB_CSS_VALUE_BOLD;    // 700
-        return LXB_CSS_VALUE_BOLDER;  // 900
+        if (weight <= 350) return CSS_VALUE_LIGHTER;
+        if (weight <= 550) return CSS_VALUE_NORMAL;  // 400
+        if (weight <= 750) return CSS_VALUE_BOLD;    // 700
+        return CSS_VALUE_BOLDER;  // 900
     }
 
-    return LXB_CSS_VALUE_NORMAL; // default
+    return CSS_VALUE_NORMAL; // default
 }
 
 // ============================================================================
@@ -381,7 +381,7 @@ int32_t get_lambda_specificity(const CssDeclaration* decl) {
 
 DisplayValue resolve_display_value(void* child) {
     // Resolve display value for a DOM node
-    DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
+    DisplayValue display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
 
     DomNode* node = (DomNode*)child;
     if (node && node->is_element()) {
@@ -405,76 +405,76 @@ DisplayValue resolve_display_value(void* child) {
 
                             // Map keyword to display values
                             if (strcmp(keyword, "flex") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_FLEX;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_FLEX;
                                 return display;
                             } else if (strcmp(keyword, "inline-flex") == 0) {
-                                display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_FLEX;
+                                display.outer = CSS_VALUE_INLINE_BLOCK;
+                                display.inner = CSS_VALUE_FLEX;
                                 return display;
                             } else if (strcmp(keyword, "grid") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_GRID;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_GRID;
                                 return display;
                             } else if (strcmp(keyword, "inline-grid") == 0) {
-                                display.outer = LXB_CSS_VALUE_INLINE;
-                                display.inner = LXB_CSS_VALUE_GRID;
+                                display.outer = CSS_VALUE_INLINE;
+                                display.inner = CSS_VALUE_GRID;
                                 return display;
                             } else if (strcmp(keyword, "block") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_FLOW;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_FLOW;
                                 return display;
                             } else if (strcmp(keyword, "inline") == 0) {
-                                display.outer = LXB_CSS_VALUE_INLINE;
-                                display.inner = LXB_CSS_VALUE_FLOW;
+                                display.outer = CSS_VALUE_INLINE;
+                                display.inner = CSS_VALUE_FLOW;
                                 return display;
                             } else if (strcmp(keyword, "inline-block") == 0) {
-                                display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_FLOW;
+                                display.outer = CSS_VALUE_INLINE_BLOCK;
+                                display.inner = CSS_VALUE_FLOW;
                                 return display;
                             } else if (strcmp(keyword, "none") == 0) {
-                                display.outer = LXB_CSS_VALUE_NONE;
-                                display.inner = LXB_CSS_VALUE_NONE;
+                                display.outer = CSS_VALUE_NONE;
+                                display.inner = CSS_VALUE_NONE;
                                 return display;
                             } else if (strcmp(keyword, "table") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE;
                                 return display;
                             } else if (strcmp(keyword, "inline-table") == 0) {
-                                display.outer = LXB_CSS_VALUE_INLINE;
-                                display.inner = LXB_CSS_VALUE_TABLE;
+                                display.outer = CSS_VALUE_INLINE;
+                                display.inner = CSS_VALUE_TABLE;
                                 return display;
                             } else if (strcmp(keyword, "table-row") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_ROW;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_ROW;
                                 return display;
                             } else if (strcmp(keyword, "table-cell") == 0) {
-                                display.outer = LXB_CSS_VALUE_TABLE_CELL;
-                                display.inner = LXB_CSS_VALUE_TABLE_CELL;
+                                display.outer = CSS_VALUE_TABLE_CELL;
+                                display.inner = CSS_VALUE_TABLE_CELL;
                                 return display;
                             } else if (strcmp(keyword, "table-row-group") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_ROW_GROUP;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_ROW_GROUP;
                                 return display;
                             } else if (strcmp(keyword, "table-header-group") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_HEADER_GROUP;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_HEADER_GROUP;
                                 return display;
                             } else if (strcmp(keyword, "table-footer-group") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_FOOTER_GROUP;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_FOOTER_GROUP;
                                 return display;
                             } else if (strcmp(keyword, "table-column") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_COLUMN;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_COLUMN;
                                 return display;
                             } else if (strcmp(keyword, "table-column-group") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
                                 return display;
                             } else if (strcmp(keyword, "table-caption") == 0) {
-                                display.outer = LXB_CSS_VALUE_BLOCK;
-                                display.inner = LXB_CSS_VALUE_TABLE_CAPTION;
+                                display.outer = CSS_VALUE_BLOCK;
+                                display.inner = CSS_VALUE_TABLE_CAPTION;
                                 return display;
                             }
                         }
@@ -497,50 +497,50 @@ DisplayValue resolve_display_value(void* child) {
             strcmp(tag_name, "blockquote") == 0 || strcmp(tag_name, "details") == 0 ||
             strcmp(tag_name, "dialog") == 0 || strcmp(tag_name, "figure") == 0 ||
             strcmp(tag_name, "menu") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_FLOW;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_FLOW;
         } else if (strcmp(tag_name, "li") == 0 || strcmp(tag_name, "summary") == 0) {
-            display.outer = LXB_CSS_VALUE_LIST_ITEM;
-            display.inner = LXB_CSS_VALUE_FLOW;
+            display.outer = CSS_VALUE_LIST_ITEM;
+            display.inner = CSS_VALUE_FLOW;
         } else if (strcmp(tag_name, "img") == 0 || strcmp(tag_name, "video") == 0 ||
                     strcmp(tag_name, "input") == 0 || strcmp(tag_name, "select") == 0 ||
                     strcmp(tag_name, "textarea") == 0 || strcmp(tag_name, "button") == 0 ||
                     strcmp(tag_name, "iframe") == 0) {
-            display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+            display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
         } else if (strcmp(tag_name, "hr") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
+            display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
         } else if (strcmp(tag_name, "script") == 0 || strcmp(tag_name, "style") == 0 ||
                     strcmp(tag_name, "svg") == 0) {
-            display.outer = LXB_CSS_VALUE_NONE;
-            display.inner = LXB_CSS_VALUE_NONE;
+            display.outer = CSS_VALUE_NONE;
+            display.inner = CSS_VALUE_NONE;
         } else if (strcmp(tag_name, "table") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_TABLE;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_TABLE;
         } else if (strcmp(tag_name, "caption") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_FLOW;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_FLOW;
         } else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 ||
                     strcmp(tag_name, "tfoot") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_TABLE_ROW_GROUP;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_TABLE_ROW_GROUP;
         } else if (strcmp(tag_name, "tr") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_TABLE_ROW;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_TABLE_ROW;
         } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
-            display.outer = LXB_CSS_VALUE_TABLE_CELL;
-            display.inner = LXB_CSS_VALUE_TABLE_CELL;
+            display.outer = CSS_VALUE_TABLE_CELL;
+            display.inner = CSS_VALUE_TABLE_CELL;
         } else if (strcmp(tag_name, "colgroup") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
         } else if (strcmp(tag_name, "col") == 0) {
-            display.outer = LXB_CSS_VALUE_BLOCK;
-            display.inner = LXB_CSS_VALUE_TABLE_COLUMN;
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_TABLE_COLUMN;
         } else {
             // Default for unknown elements (inline)
-            display.outer = LXB_CSS_VALUE_INLINE;
-            display.inner = LXB_CSS_VALUE_FLOW;
+            display.outer = CSS_VALUE_INLINE;
+            display.inner = CSS_VALUE_FLOW;
         }
 
         // TODO: Check for CSS display property in child->style (DomElement)
@@ -1146,31 +1146,30 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Line height can be number (multiplier), length, percentage, or 'normal'
             if (value->type == CSS_VALUE_NUMBER) {
                 // Unitless number - multiply by font size
-                line_height->type = LXB_CSS_VALUE__NUMBER;
+                line_height->type = CSS_VALUE__NUMBER;
                 line_height->u.number.num = value->data.number.value;
                 log_debug("[CSS] Line height number: %.2f", value->data.number.value);
                 block->blk->line_height = line_height;
             } else if (value->type == CSS_VALUE_LENGTH) {
-                line_height->type = LXB_CSS_VALUE__LENGTH;
+                line_height->type = CSS_VALUE__LENGTH;
                 line_height->u.length.num = value->data.length.value;
                 line_height->u.length.is_float = true;
-                // Set unit - convert from CSS_UNIT to lxb_css_unit_t
-                line_height->u.length.unit = (lxb_css_unit_t)value->data.length.unit;
+                line_height->u.length.unit = value->data.length.unit;
                 log_debug("[CSS] Line height length: %.2f px (unit: %d)", value->data.length.value, value->data.length.unit);
                 block->blk->line_height = line_height;
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
-                line_height->type = LXB_CSS_VALUE__PERCENTAGE;
+                line_height->type = CSS_VALUE__PERCENTAGE;
                 line_height->u.percentage.num = value->data.percentage.value;
                 log_debug("[CSS] Line height percentage: %.2f%%", value->data.percentage.value);
                 block->blk->line_height = line_height;
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 if (keyword && strcasecmp(keyword, "normal") == 0) {
-                    line_height->type = LXB_CSS_VALUE_NORMAL;
+                    line_height->type = CSS_VALUE_NORMAL;
                     log_debug("[CSS] Line height keyword: normal");
                     block->blk->line_height = line_height;
                 } else if (keyword && strcasecmp(keyword, "inherit") == 0) {
-                    line_height->type = LXB_CSS_VALUE_INHERIT;
+                    line_height->type = CSS_VALUE_INHERIT;
                     log_debug("[CSS] Line height keyword: inherit");
                     block->blk->line_height = line_height;
                 }
@@ -1185,7 +1184,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_KEYWORD) {
                 PropValue align_value = css_value_by_name(value->data.keyword);
-                if (align_value != LXB_CSS_VALUE__UNDEF) {
+                if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     log_debug("[CSS] Text-align: %s -> 0x%04X", value->data.keyword, align_value);
                 }
@@ -1201,7 +1200,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 PropValue deco_value = css_value_by_name(value->data.keyword);
-                if (deco_value != LXB_CSS_VALUE__UNDEF) {
+                if (deco_value != CSS_VALUE__UNDEF) {
                     span->font->text_deco = deco_value;
                     log_debug("[CSS] Text-decoration: %s -> 0x%04X", value->data.keyword, deco_value);
                 }
@@ -1217,7 +1216,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 PropValue valign_value = css_value_by_name(value->data.keyword);
-                if (valign_value != LXB_CSS_VALUE__UNDEF) {
+                if (valign_value != CSS_VALUE__UNDEF) {
                     span->in_line->vertical_align = valign_value;
                     log_debug("[CSS] Vertical-align: %s -> 0x%04X", value->data.keyword, valign_value);
                 } else {
@@ -1244,7 +1243,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 PropValue cursor_value = css_value_by_name(value->data.keyword);
-                if (cursor_value != LXB_CSS_VALUE__UNDEF) {
+                if (cursor_value != CSS_VALUE__UNDEF) {
                     span->in_line->cursor = cursor_value;
                     log_debug("[CSS] Cursor: %s -> 0x%04X", value->data.keyword, cursor_value);
                 }
@@ -1272,7 +1271,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_width = width;
                 lycon->block.given_width = width;  // CRITICAL: Also set in LayoutContext for layout calculation
-                block->blk->given_width_type = LXB_CSS_VALUE_INITIAL; // Mark as explicitly set
+                block->blk->given_width_type = CSS_VALUE_INITIAL; // Mark as explicitly set
                 log_debug("[CSS] Width: %.2f px", width);
             } else if (value->type == CSS_VALUE_NUMBER) {
                 // unitless zero is valid for width per CSS spec
@@ -1284,7 +1283,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_width = 0.0f;
                 lycon->block.given_width = 0.0f;
-                block->blk->given_width_type = LXB_CSS_VALUE_INITIAL;
+                block->blk->given_width_type = CSS_VALUE_INITIAL;
                 log_debug("[CSS] Width: 0 (unitless zero)");
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 // Calculate percentage width based on parent width
@@ -1303,12 +1302,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_width = width;
                 lycon->block.given_width = width;
-                block->blk->given_width_type = LXB_CSS_VALUE__PERCENTAGE;
+                block->blk->given_width_type = CSS_VALUE__PERCENTAGE;
                 log_debug("[CSS] Width: %.2f%% of parent %.2f px = %.2f px", percentage, parent_width, width);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Width: auto");
-                block->blk->given_width_type = LXB_CSS_VALUE_AUTO;
+                block->blk->given_width_type = CSS_VALUE_AUTO;
                 lycon->block.given_width = -1.0f;  // -1 means auto in LayoutContext
             }
             break;
@@ -1561,7 +1560,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Margin-top: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword for margins
-                span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.top_type = CSS_VALUE_AUTO;
                 span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: auto");
             }
@@ -1594,7 +1593,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
-                span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.right_type = CSS_VALUE_AUTO;
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: auto");
             }
@@ -1627,7 +1626,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
-                span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.bottom_type = CSS_VALUE_AUTO;
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: auto");
             }
@@ -1660,7 +1659,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
-                span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.left_type = CSS_VALUE_AUTO;
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: auto");
             }
@@ -2528,7 +2527,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (value->type == CSS_VALUE_KEYWORD) {
                 // Single value - all sides get same style
                 PropValue border_style = css_value_by_name(value->data.keyword);
-                if (border_style != LXB_CSS_VALUE__UNDEF) {
+                if (border_style != CSS_VALUE__UNDEF) {
                     span->bound->border->top_style = border_style;
                     span->bound->border->right_style = border_style;
                     span->bound->border->bottom_style = border_style;

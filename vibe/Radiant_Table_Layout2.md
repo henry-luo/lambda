@@ -196,16 +196,16 @@ for (ViewBlock* row = child->first_child; row; row = row->next_sibling) {
 if (declr && declr->u.vertical_align) {
     const lxb_css_value_vertical_align_t* va = declr->u.vertical_align;
     switch (va->alignment.type) {
-        case LXB_CSS_VALUE_TOP:
+        case CSS_VALUE_TOP:
             tcell->vertical_align = ViewTableCell::CELL_VALIGN_TOP;
             break;
-        case LXB_CSS_VALUE_MIDDLE:
+        case CSS_VALUE_MIDDLE:
             tcell->vertical_align = ViewTableCell::CELL_VALIGN_MIDDLE;
             break;
-        case LXB_CSS_VALUE_BOTTOM:
+        case CSS_VALUE_BOTTOM:
             tcell->vertical_align = ViewTableCell::CELL_VALIGN_BOTTOM;
             break;
-        case LXB_CSS_VALUE_BASELINE:
+        case CSS_VALUE_BASELINE:
             tcell->vertical_align = ViewTableCell::CELL_VALIGN_BASELINE;
             break;
     }
@@ -478,7 +478,7 @@ Should enforce:
 
 2. **Percentage Detection and Calculation**:
    ```cpp
-   if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE && table_content_width > 0) {
+   if (width_decl->u.width->type == CSS_VALUE__PERCENTAGE && table_content_width > 0) {
        float percentage = width_decl->u.width->u.percentage.num;
        int css_content_width = (int)(table_content_width * percentage / 100.0f);
        cell_width = css_content_width + padding + border;  // Add padding/border for total width
@@ -488,7 +488,7 @@ Should enforce:
 3. **Applied to All Layout Modes**:
    - Auto layout (tbody rows and direct table rows)
    - Fixed layout mode
-   - Handles LXB_CSS_VALUE__PERCENTAGE type before calling resolve_length_value()
+   - Handles CSS_VALUE__PERCENTAGE type before calling resolve_length_value()
 
 **Results**:
 - **Table layout**: 100% correct - cells sized at 101px (25%), 200px (50%), 101px (25%)
@@ -574,7 +574,7 @@ Should enforce:
 **Implementation**: Lines 576-613, 645-696, 757-804, 907-922 in `layout_table.cpp`
 **Features**:
 - Table content width calculation (explicit width - borders - padding - border-spacing)
-- Percentage detection via `LXB_CSS_VALUE__PERCENTAGE` type
+- Percentage detection via `CSS_VALUE__PERCENTAGE` type
 - Percentage calculation: `(table_content_width * percentage / 100.0f)`
 - Box-sizing support: Add padding + border to percentage result (CSS content-box model)
 - Applied to both auto layout and fixed layout modes

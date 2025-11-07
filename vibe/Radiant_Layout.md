@@ -31,17 +31,17 @@ typedef struct ViewBlock {
     int x, y;                    // Absolute position
     int width, height;           // Current dimensions
     int content_width, content_height;  // Content area dimensions
-    
+
     // Layout properties
     BlockProp* blk;              // Block-specific properties
     BoundProp* bound;            // Margin, padding, border
     EmbedProp* embed;            // Flex container, etc.
-    
+
     // Hierarchy
     ViewGroup* parent;
     ViewBlock* child;
     ViewBlock* next;
-    
+
     // Flex properties
     int flex_basis;              // -1 for auto, >= 0 for fixed
     float flex_grow, flex_shrink;
@@ -60,9 +60,9 @@ typedef struct {
     int min_width, max_width;
     int min_height, max_height;
     PropValue list_style_type;
-    
+
     // Box-sizing support (CRITICAL)
-    PropValue box_sizing;        // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
+    PropValue box_sizing;        // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     int given_width, given_height;  // CSS specified width/height values
 } BlockProp;
 ```
@@ -131,7 +131,7 @@ The Radiant layout engine provides several make targets for development and test
 
 #### `make build-radiant`
 ```bash
-make build-radiant      # Build the Radiant layout engine executable 
+make build-radiant      # Build the Radiant layout engine executable
 make radiant            # Alias for build-radiant
 make build-radiant-test # Build Radiant C/C++ unit tests
 make test-radiant       # Run Radiant C/C++ unit tests
@@ -148,7 +148,7 @@ Radiant uses Lambda's custom memory pool for efficient allocation:
 BlockProp* alloc_block_prop(LayoutContext* lycon) {
     BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
     // Initialize with proper defaults
-    prop->box_sizing = LXB_CSS_VALUE_CONTENT_BOX;
+    prop->box_sizing = CSS_VALUE_CONTENT_BOX;
     prop->given_width = prop->given_height = -1;
     return prop;
 }

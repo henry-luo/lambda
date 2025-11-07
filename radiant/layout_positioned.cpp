@@ -50,7 +50,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
  * For fixed: viewport (initial containing block)
  */
 ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type) {
-    if (position_type == LXB_CSS_VALUE_FIXED) {
+    if (position_type == CSS_VALUE_FIXED) {
         // Fixed positioning uses viewport as containing block
         // For now, return the root block (will be enhanced for viewport support)
         ViewBlock* root = element;
@@ -60,14 +60,14 @@ ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type) {
         return root;
     }
 
-    if (position_type == LXB_CSS_VALUE_ABSOLUTE) {
+    if (position_type == CSS_VALUE_ABSOLUTE) {
         // Find nearest positioned ancestor
         ViewGroup* ancestor = element->parent;
         while (ancestor) {
             if (ancestor->is_block()) {
                 ViewBlock* ancestor_block = (ViewBlock*)ancestor;
                 // Check if ancestor is positioned
-                if (ancestor_block->position && ancestor_block->position->position != LXB_CSS_VALUE_STATIC) {
+                if (ancestor_block->position && ancestor_block->position->position != CSS_VALUE_STATIC) {
                     return ancestor_block;
                 }
             }
@@ -174,7 +174,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     }
     assert(content_height >= 0);
 
-    if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+    if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
         content_width = adjust_min_max_width(block, content_width);
         if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         content_height = adjust_min_max_height(block, content_height);
@@ -243,7 +243,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // Apply CSS clear property after float layout
-    if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
+    if (block->position && block->position->clear != CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
     }
@@ -271,17 +271,17 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
  */
 bool element_has_positioning(ViewBlock* block) {
     return block->position &&
-           (block->position->position == LXB_CSS_VALUE_RELATIVE ||
-            block->position->position == LXB_CSS_VALUE_ABSOLUTE ||
-            block->position->position == LXB_CSS_VALUE_FIXED);
+           (block->position->position == CSS_VALUE_RELATIVE ||
+            block->position->position == CSS_VALUE_ABSOLUTE ||
+            block->position->position == CSS_VALUE_FIXED);
 }
 /**
  * Check if an element has float properties
  */
 bool element_has_float(ViewBlock* block) {
     return block && block->position &&
-           (block->position->float_prop == 47 ||   // LXB_CSS_VALUE_LEFT
-            block->position->float_prop == 48);    // LXB_CSS_VALUE_RIGHT
+           (block->position->float_prop == 47 ||   // CSS_VALUE_LEFT
+            block->position->float_prop == 48);    // CSS_VALUE_RIGHT
 }
 
 /**
@@ -302,7 +302,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     FloatContext* float_ctx = get_current_float_context(lycon);
     if (!float_ctx) {
         // If no float context exists, create one for the current containing block
-        ViewBlock* containing_block = find_containing_block(block, 333); // LXB_CSS_VALUE_STATIC for normal flow
+        ViewBlock* containing_block = find_containing_block(block, 333); // CSS_VALUE_STATIC for normal flow
         if (!containing_block) {
             containing_block = (ViewBlock*)lycon->view; // fallback to current context
         }
@@ -396,7 +396,7 @@ void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float
            float_side, float_box->x, float_box->y, float_box->width, float_box->height);
 
     // Add to appropriate list (simplified - for now just store the first float)
-    if (float_side == 47) {  // LXB_CSS_VALUE_LEFT
+    if (float_side == 47) {  // CSS_VALUE_LEFT
         // For simplicity, just store one left float (in production would use dynamic arrays)
         if (ctx->left_count == 0) {
             ctx->left_floats = float_box;
@@ -406,7 +406,7 @@ void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float
         }
         ctx->left_count++;
         printf("DEBUG: Added left float, count now: %d\n", ctx->left_count);
-    } else if (float_side == 48) {  // LXB_CSS_VALUE_RIGHT
+    } else if (float_side == 48) {  // CSS_VALUE_RIGHT
         // For simplicity, just store one right float
         if (ctx->right_count == 0) {
             ctx->right_floats = float_box;
@@ -463,7 +463,7 @@ void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue flo
     }
 
     // Calculate initial position based on float side
-    if (float_side == 47) {  // LXB_CSS_VALUE_LEFT
+    if (float_side == 47) {  // CSS_VALUE_LEFT
         // Left float: position at left edge of content area + margin
         element->x = content_x + margin_left;
         element->y = max(ctx->current_y, content_y) + margin_top;
@@ -471,7 +471,7 @@ void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue flo
         printf("DEBUG: Positioned left float at (%d, %d) with margins (%d, %d)\n",
                element->x, element->y, margin_left, margin_top);
 
-    } else if (float_side == 48) {  // LXB_CSS_VALUE_RIGHT
+    } else if (float_side == 48) {  // CSS_VALUE_RIGHT
         // Right float: position at right edge of content area - element width - margin
         element->x = content_x + content_width - element->width - margin_right;
         element->y = max(ctx->current_y, content_y) + margin_top;
@@ -565,7 +565,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
                     if (float_bottom > line_top && float_top < line_bottom) {
                         PropValue float_side = child_block->position->float_prop;
 
-                        if (float_side == 47) {  // LXB_CSS_VALUE_LEFT
+                        if (float_side == 47) {  // CSS_VALUE_LEFT
                             // Left float: adjust left boundary to right edge of float
                             int float_right = child_block->x + child_block->width;
                             if (child_block->bound) {
@@ -575,7 +575,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
                             printf("DEBUG: Adjusted left boundary to %d for left float at (%d, %d) size (%d, %d)\n",
                                    lycon->line.left, child_block->x, child_block->y, child_block->width, child_block->height);
 
-                        } else if (float_side == 48) {  // LXB_CSS_VALUE_RIGHT
+                        } else if (float_side == 48) {  // CSS_VALUE_RIGHT
                             // Right float: adjust right boundary to left edge of float
                             int float_left = child_block->x;
                             if (child_block->bound) {
@@ -655,13 +655,13 @@ int find_clear_position(FloatContext* ctx, PropValue clear_value) {
     // In production, would iterate through float lists and find the lowest Y position
     // that satisfies the clear requirement
 
-    if (clear_value == 47) {  // LXB_CSS_VALUE_LEFT - clear left floats
+    if (clear_value == 47) {  // CSS_VALUE_LEFT - clear left floats
         // Find Y position below all left floats
         printf("DEBUG: Clearing left floats\n");
-    } else if (clear_value == 48) {  // LXB_CSS_VALUE_RIGHT - clear right floats
+    } else if (clear_value == 48) {  // CSS_VALUE_RIGHT - clear right floats
         // Find Y position below all right floats
         printf("DEBUG: Clearing right floats\n");
-    } else if (clear_value == 372) {  // LXB_CSS_VALUE_BOTH - clear both sides
+    } else if (clear_value == 372) {  // CSS_VALUE_BOTH - clear both sides
         // Find Y position below all floats
         printf("DEBUG: Clearing both left and right floats\n");
     }
@@ -673,7 +673,7 @@ int find_clear_position(FloatContext* ctx, PropValue clear_value) {
  * Apply clear property to an element
  */
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->position || block->position->clear == LXB_CSS_VALUE_NONE) {
+    if (!block->position || block->position->clear == CSS_VALUE_NONE) {
         return;
     }
 
@@ -683,7 +683,7 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
     log_debug("[CLEAR] Entry: block=%s, block=%p, block->y=%.2f", block_tag_before, (void*)block, block->y);
 
     // Get or create float context for the containing block
-    ViewBlock* containing_block = find_containing_block(block, 333); // LXB_CSS_VALUE_STATIC for normal flow
+    ViewBlock* containing_block = find_containing_block(block, 333); // CSS_VALUE_STATIC for normal flow
     if (!containing_block) {
         containing_block = (ViewBlock*)lycon->view; // fallback to current context
     }

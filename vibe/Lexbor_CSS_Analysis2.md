@@ -441,10 +441,10 @@ Layout Process:
 1. **Raw CSS values stored:**
    ```c
    // Lexbor stores:
-   font_weight->type = LXB_CSS_VALUE_BOLD  // Enum value
+   font_weight->type = CSS_VALUE_BOLD  // Enum value
 
    // But needs mapping:
-   int weight = (font_weight->type == LXB_CSS_VALUE_BOLD) ? 700 : 400;
+   int weight = (font_weight->type == CSS_VALUE_BOLD) ? 700 : 400;
    ```
 
 2. **Conversion happens at use site:**

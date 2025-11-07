@@ -250,7 +250,7 @@ Lambda CSS is a parallel CSS implementation to Lexbor for the Lambda HTML parser
 **Group 18: List Properties** (6 properties) ✅
 - `list-style-type` (ID: 205) - Keywords: disc, circle, square, decimal, none
   - Stored in `BlockProp->list_style_type` with keyword mapping (0x0220-0x0225)
-- `list-style-position` (ID: 206) - Keywords: inside, outside  
+- `list-style-position` (ID: 206) - Keywords: inside, outside
   - Stored in `BlockProp->list_style_position` PropValue
 - `list-style-image` (ID: 207) - URL values or none
   - Stored in `BlockProp->list_style_image` string with URL validation
@@ -438,7 +438,7 @@ Layout engine computes final dimensions
 ```cpp
 int map_css_keyword_to_lexbor(const char* keyword)
 // Binary search through sorted keyword_map array
-// Returns Lexbor enum value (e.g., LXB_CSS_VALUE_BLOCK = 0x00ef)
+// Returns Lexbor enum value (e.g., CSS_VALUE_BLOCK = 0x00ef)
 ```
 
 **Color Parsing**:

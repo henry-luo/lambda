@@ -123,7 +123,7 @@ void free_view(ViewTree* tree, View* view);
  * Map CSS keyword string to Lexbor enum value
  *
  * @param keyword CSS keyword string (e.g., "block", "inline", "flex")
- * @return Lexbor LXB_CSS_VALUE_* constant, or 0 if unknown
+ * @return Lexbor CSS_VALUE_* constant, or 0 if unknown
  */
 int map_css_keyword_to_lexbor(const char* keyword);
 

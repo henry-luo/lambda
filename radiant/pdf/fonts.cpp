@@ -78,29 +78,29 @@ const char* map_pdf_font_to_system(const char* pdf_font) {
  * Extract font weight from PDF font name
  *
  * @param pdf_font PDF font name
- * @return Font weight (LXB_CSS_VALUE_NORMAL or LXB_CSS_VALUE_BOLD)
+ * @return Font weight (CSS_VALUE_NORMAL or CSS_VALUE_BOLD)
  */
 PropValue get_font_weight_from_name(const char* pdf_font) {
     if (strstr(pdf_font, "Bold") || strstr(pdf_font, "Heavy") || strstr(pdf_font, "Black")) {
-        return LXB_CSS_VALUE_BOLD;
+        return CSS_VALUE_BOLD;
     }
-    return LXB_CSS_VALUE_NORMAL;
+    return CSS_VALUE_NORMAL;
 }
 
 /**
  * Extract font style from PDF font name
  *
  * @param pdf_font PDF font name
- * @return Font style (LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_ITALIC, or LXB_CSS_VALUE_OBLIQUE)
+ * @return Font style (CSS_VALUE_NORMAL, CSS_VALUE_ITALIC, or CSS_VALUE_OBLIQUE)
  */
 PropValue get_font_style_from_name(const char* pdf_font) {
     if (strstr(pdf_font, "Italic")) {
-        return LXB_CSS_VALUE_ITALIC;
+        return CSS_VALUE_ITALIC;
     }
     if (strstr(pdf_font, "Oblique")) {
-        return LXB_CSS_VALUE_OBLIQUE;
+        return CSS_VALUE_OBLIQUE;
     }
-    return LXB_CSS_VALUE_NORMAL;
+    return CSS_VALUE_NORMAL;
 }
 
 /**

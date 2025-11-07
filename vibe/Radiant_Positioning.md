@@ -85,7 +85,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // 2. Apply offset without affecting other elements
     // 3. Update visual position only
 
-    if (!block->position || block->position->position != LXB_CSS_VALUE_RELATIVE) {
+    if (!block->position || block->position->position != CSS_VALUE_RELATIVE) {
         return;
     }
 
@@ -108,7 +108,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // ... existing layout logic
 
     // After normal layout, apply relative positioning
-    if (block->position && block->position->position == LXB_CSS_VALUE_RELATIVE) {
+    if (block->position && block->position->position == CSS_VALUE_RELATIVE) {
         layout_relative_positioned(lycon, block);
     }
 }
@@ -125,7 +125,7 @@ void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block) {
     // 3. Calculate position based on offset properties
     // 4. Size element based on content or constraints
 
-    ViewBlock* containing_block = find_containing_block(block, LXB_CSS_VALUE_ABSOLUTE);
+    ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_ABSOLUTE);
     Rect cb_rect = get_containing_block_rect(containing_block, block);
 
     // Calculate position
@@ -225,7 +225,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
 **File**: `radiant/layout_clear.cpp` (new)
 ```cpp
 void apply_clear_property(LayoutContext* lycon, ViewBlock* block, FloatContext* float_ctx) {
-    if (!block->blk || block->blk->clear == LXB_CSS_VALUE_NONE) {
+    if (!block->blk || block->blk->clear == CSS_VALUE_NONE) {
         return;
     }
 

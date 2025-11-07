@@ -58,7 +58,7 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
         // case LXB_CSS_COLOR_OKLAB:
         // case LXB_CSS_COLOR_LCH:
         // case LXB_CSS_COLOR_OKLCH:
-        // case LXB_CSS_VALUE__UNDEF:
+        // case CSS_VALUE__UNDEF:
         //     break;
     }
     default:
@@ -95,42 +95,42 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
     float result = 0;
 
     switch (value->type) {
-    case LXB_CSS_VALUE__NUMBER:  // keep it as it is
+    case CSS_VALUE__NUMBER:  // keep it as it is
         log_debug("number value");
         result = value->u.length.num;
         break;
-    case LXB_CSS_VALUE__LENGTH:
+    case CSS_VALUE__LENGTH:
         log_debug("length value unit: %d", value->u.length.unit);
         result = value->u.length.num;
         switch (value->u.length.unit) {
         // absolute units
-        case LXB_CSS_UNIT_Q:  // 1Q = 1cm / 40
+        case CSS_UNIT_Q:  // 1Q = 1cm / 40
             result = value->u.length.num * (96 / 2.54 / 40) * lycon->ui_context->pixel_ratio;
             break;
-        case LXB_CSS_UNIT_CM:  // 96px / 2.54
+        case CSS_UNIT_CM:  // 96px / 2.54
             result = value->u.length.num * (96 / 2.54) * lycon->ui_context->pixel_ratio;
             break;
-        case LXB_CSS_UNIT_IN:  // 96px
+        case CSS_UNIT_IN:  // 96px
             result = value->u.length.num * 96 * lycon->ui_context->pixel_ratio;
             break;
-        case LXB_CSS_UNIT_MM:  // 1mm = 1cm / 10
+        case CSS_UNIT_MM:  // 1mm = 1cm / 10
             result = value->u.length.num * (96 / 25.4) * lycon->ui_context->pixel_ratio;
             break;
-        case LXB_CSS_UNIT_PC:  // 1pc = 12pt = 1in / 6.
+        case CSS_UNIT_PC:  // 1pc = 12pt = 1in / 6.
             result = value->u.length.num * 16 * lycon->ui_context->pixel_ratio;
             break;
-        case LXB_CSS_UNIT_PT:  // 1pt = 1in / 72
+        case CSS_UNIT_PT:  // 1pt = 1in / 72
             result = value->u.length.num * 4 / 3 * lycon->ui_context->pixel_ratio;
             break;
-        case LXB_CSS_UNIT_PX:
+        case CSS_UNIT_PX:
             result = value->u.length.num * lycon->ui_context->pixel_ratio;
             break;
 
         // relative units
-        // case LXB_CSS_UNIT_CAP:
+        // case CSS_UNIT_CAP:
         //     result = value->u.length.num * lycon->font.style.font_size;
         //     break;
-        case LXB_CSS_UNIT_REM:
+        case CSS_UNIT_REM:
             if (lycon->root_font_size < 0) {
                 log_debug("resolving font size for rem value");
                 resolve_font_size(lycon, NULL);
@@ -139,7 +139,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
             }
             result = value->u.length.num * lycon->root_font_size;
             break;
-        case LXB_CSS_UNIT_EM:
+        case CSS_UNIT_EM:
             if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
                 result = value->u.length.num * lycon->font.style->font_size;
             } else {
@@ -155,7 +155,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
             log_debug("Unknown unit: %d", value->u.length.unit);
         }
         break;
-    case LXB_CSS_VALUE__PERCENTAGE:
+    case CSS_VALUE__PERCENTAGE:
         if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
             result = value->u.percentage.num * lycon->font.style->font_size / 100;
         } else {
@@ -166,12 +166,12 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
             result = value->u.percentage.num * lycon->block.pa_block->content_width / 100;
         }
         break;
-    case LXB_CSS_VALUE_AUTO:
+    case CSS_VALUE_AUTO:
         log_info("length value: auto");
         result = 0;
         break;
     default:
-        log_warn("unknown length type: %d (LXB_CSS_VALUE_AUTO=%d)", value->type, LXB_CSS_VALUE_AUTO);
+        log_warn("unknown length type: %d (CSS_VALUE_AUTO=%d)", value->type, CSS_VALUE_AUTO);
         result = 0;
     }
     log_debug("length value: type %d, val %f", value->type, result);
@@ -184,22 +184,22 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     Margin sp;  // temporal space
     int value_cnt = 0;  bool is_margin = property == LXB_CSS_PROPERTY_MARGIN;
     log_debug("resolve_spacing_prop");
-    if (src_space->top.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->top.type != CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 1st");
         sp.top = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->top);
         value_cnt++;
     }
-    if (src_space->right.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->right.type != CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 2nd");
         sp.right = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->right);
         value_cnt++;
     }
-    if (src_space->bottom.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->bottom.type != CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 3rd");
         sp.bottom = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->bottom);
         value_cnt++;
     }
-    if (src_space->left.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->left.type != CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 4th");
         sp.left = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->left);
         value_cnt++;
@@ -266,56 +266,56 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
     // Check for NULL element
     if (!elmt) {
         log_debug("resolve_display: NULL element passed, returning default inline display");
-        return {LXB_CSS_VALUE_INLINE, LXB_CSS_VALUE_FLOW};
+        return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
     }
     // determine element 'display'
     int name = elmt->element.node.local_name;  // todo: should check ns as well
     switch (name) {
-        case LXB_TAG_BODY: case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3:
-        case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
-        case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER:
-        case LXB_TAG_UL: case LXB_TAG_OL:
-        case LXB_TAG_HEADER: case LXB_TAG_MAIN: case LXB_TAG_SECTION: case LXB_TAG_FOOTER:
-        case LXB_TAG_ARTICLE: case LXB_TAG_ASIDE: case LXB_TAG_NAV:
-        case LXB_TAG_ADDRESS: case LXB_TAG_BLOCKQUOTE:
-        case LXB_TAG_DETAILS: case LXB_TAG_DIALOG: case LXB_TAG_FIGURE:
-        case LXB_TAG_MENU:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;
+        case HTM_TAG_BODY: case HTM_TAG_H1: case HTM_TAG_H2: case HTM_TAG_H3:
+        case HTM_TAG_H4: case HTM_TAG_H5: case HTM_TAG_H6:
+        case HTM_TAG_P: case HTM_TAG_DIV: case HTM_TAG_CENTER:
+        case HTM_TAG_UL: case HTM_TAG_OL:
+        case HTM_TAG_HEADER: case HTM_TAG_MAIN: case HTM_TAG_SECTION: case HTM_TAG_FOOTER:
+        case HTM_TAG_ARTICLE: case HTM_TAG_ASIDE: case HTM_TAG_NAV:
+        case HTM_TAG_ADDRESS: case HTM_TAG_BLOCKQUOTE:
+        case HTM_TAG_DETAILS: case HTM_TAG_DIALOG: case HTM_TAG_FIGURE:
+        case HTM_TAG_MENU:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_FLOW;
             break;
-        case LXB_TAG_LI:  case LXB_TAG_SUMMARY:
-            outer_display = LXB_CSS_VALUE_LIST_ITEM;  inner_display = LXB_CSS_VALUE_FLOW;
+        case HTM_TAG_LI:  case HTM_TAG_SUMMARY:
+            outer_display = CSS_VALUE_LIST_ITEM;  inner_display = CSS_VALUE_FLOW;
             break;
-        case LXB_TAG_IMG:  case LXB_TAG_VIDEO:
-        case LXB_TAG_INPUT: case LXB_TAG_SELECT: case LXB_TAG_TEXTAREA:  case LXB_TAG_BUTTON:
-            outer_display = LXB_CSS_VALUE_INLINE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
+        case HTM_TAG_IMG:  case HTM_TAG_VIDEO:
+        case HTM_TAG_INPUT: case HTM_TAG_SELECT: case HTM_TAG_TEXTAREA:  case HTM_TAG_BUTTON:
+            outer_display = CSS_VALUE_INLINE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
             break;
-        case LXB_TAG_HR:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
+        case HTM_TAG_HR:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
             break;
-        case LXB_TAG_IFRAME:
-            outer_display = LXB_CSS_VALUE_INLINE_BLOCK; inner_display = RDT_DISPLAY_REPLACED;
+        case HTM_TAG_IFRAME:
+            outer_display = CSS_VALUE_INLINE_BLOCK; inner_display = RDT_DISPLAY_REPLACED;
             break;
-        case LXB_TAG_SCRIPT:  case LXB_TAG_STYLE:  case LXB_TAG_SVG:
-            outer_display = LXB_CSS_VALUE_NONE;  inner_display = LXB_CSS_VALUE_NONE;
+        case HTM_TAG_SCRIPT:  case HTM_TAG_STYLE:  case HTM_TAG_SVG:
+            outer_display = CSS_VALUE_NONE;  inner_display = CSS_VALUE_NONE;
             break;
         // HTML table elements default display mapping (Phase 1)
-        case LXB_TAG_TABLE:
-            log_debug("LXB_TAG_TABLE detected in resolve_display!");
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE;  break;
-        case LXB_TAG_CAPTION:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;  break;
-        case LXB_TAG_THEAD: case LXB_TAG_TBODY: case LXB_TAG_TFOOT:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_ROW_GROUP;  break;
-        case LXB_TAG_TR:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_ROW;  break;
-        case LXB_TAG_TH: case LXB_TAG_TD:
-            outer_display = LXB_CSS_VALUE_TABLE_CELL;  inner_display = LXB_CSS_VALUE_TABLE_CELL;  break;
-        case LXB_TAG_COLGROUP:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;  break;
-        case LXB_TAG_COL:
-            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_COLUMN;  break;
+        case HTM_TAG_TABLE:
+            log_debug("HTM_TAG_TABLE detected in resolve_display!");
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_TABLE;  break;
+        case HTM_TAG_CAPTION:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_FLOW;  break;
+        case HTM_TAG_THEAD: case HTM_TAG_TBODY: case HTM_TAG_TFOOT:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_TABLE_ROW_GROUP;  break;
+        case HTM_TAG_TR:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_TABLE_ROW;  break;
+        case HTM_TAG_TH: case HTM_TAG_TD:
+            outer_display = CSS_VALUE_TABLE_CELL;  inner_display = CSS_VALUE_TABLE_CELL;  break;
+        case HTM_TAG_COLGROUP:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_TABLE_COLUMN_GROUP;  break;
+        case HTM_TAG_COL:
+            outer_display = CSS_VALUE_BLOCK;  inner_display = CSS_VALUE_TABLE_COLUMN;  break;
         default:  // inline elements, like span, b, i, u, a, img, input, or custom elements
-            outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
+            outer_display = CSS_VALUE_INLINE;  inner_display = CSS_VALUE_FLOW;
     }
     // get CSS display if specified
     if (elmt->element.style != NULL) {
@@ -323,71 +323,71 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
             lxb_dom_element_style_by_id((lxb_dom_element_t*)elmt, LXB_CSS_PROPERTY_DISPLAY);
         if (display_decl) {
             log_debug("DEBUG: CSS display found - a=%d, b=%d (GRID=%d)",
-                   display_decl->u.display->a, display_decl->u.display->b, LXB_CSS_VALUE_GRID);
+                   display_decl->u.display->a, display_decl->u.display->b, CSS_VALUE_GRID);
             log_debug("display_value: %s, %s", lxb_css_value_by_id(display_decl->u.display->a)->name,
                 lxb_css_value_by_id(display_decl->u.display->b)->name);
-            if (display_decl->u.display->b == LXB_CSS_VALUE__UNDEF) {
+            if (display_decl->u.display->b == CSS_VALUE__UNDEF) {
                 // map single display value
                 log_debug("DEBUG: Mapping single display value: %d", display_decl->u.display->a);
                 switch (display_decl->u.display->a) {
-                    case LXB_CSS_VALUE_BLOCK:
-                        outer_display = LXB_CSS_VALUE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_FLOW;
+                    case CSS_VALUE_BLOCK:
+                        outer_display = CSS_VALUE_BLOCK;
+                        inner_display = CSS_VALUE_FLOW;
                         break;
-                    case LXB_CSS_VALUE_INLINE:
-                        outer_display = LXB_CSS_VALUE_INLINE;
-                        inner_display = LXB_CSS_VALUE_FLOW;
+                    case CSS_VALUE_INLINE:
+                        outer_display = CSS_VALUE_INLINE;
+                        inner_display = CSS_VALUE_FLOW;
                         break;
-                    case LXB_CSS_VALUE_INLINE_BLOCK:
-                        outer_display = LXB_CSS_VALUE_INLINE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_FLOW;
+                    case CSS_VALUE_INLINE_BLOCK:
+                        outer_display = CSS_VALUE_INLINE_BLOCK;
+                        inner_display = CSS_VALUE_FLOW;
                         break;
-                    case LXB_CSS_VALUE_FLEX:
-                        outer_display = LXB_CSS_VALUE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_FLEX;
+                    case CSS_VALUE_FLEX:
+                        outer_display = CSS_VALUE_BLOCK;
+                        inner_display = CSS_VALUE_FLEX;
                         break;
-                    case LXB_CSS_VALUE_INLINE_FLEX:
-                        outer_display = LXB_CSS_VALUE_INLINE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_FLEX;
+                    case CSS_VALUE_INLINE_FLEX:
+                        outer_display = CSS_VALUE_INLINE_BLOCK;
+                        inner_display = CSS_VALUE_FLEX;
                         break;
-                    case LXB_CSS_VALUE_GRID:
+                    case CSS_VALUE_GRID:
                         log_debug("DEBUG: GRID case matched! Setting inner=GRID\n");
-                        outer_display = LXB_CSS_VALUE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_GRID;
+                        outer_display = CSS_VALUE_BLOCK;
+                        inner_display = CSS_VALUE_GRID;
                         break;
-                    case LXB_CSS_VALUE_INLINE_GRID:
-                        outer_display = LXB_CSS_VALUE_INLINE;
-                        inner_display = LXB_CSS_VALUE_GRID;
+                    case CSS_VALUE_INLINE_GRID:
+                        outer_display = CSS_VALUE_INLINE;
+                        inner_display = CSS_VALUE_GRID;
                         break;
-                    case LXB_CSS_VALUE_TABLE:
-                        outer_display = LXB_CSS_VALUE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_TABLE;
+                    case CSS_VALUE_TABLE:
+                        outer_display = CSS_VALUE_BLOCK;
+                        inner_display = CSS_VALUE_TABLE;
                         break;
-                    case LXB_CSS_VALUE_INLINE_TABLE:
-                        outer_display = LXB_CSS_VALUE_INLINE;
-                        inner_display = LXB_CSS_VALUE_TABLE;
+                    case CSS_VALUE_INLINE_TABLE:
+                        outer_display = CSS_VALUE_INLINE;
+                        inner_display = CSS_VALUE_TABLE;
                         break;
-                    case LXB_CSS_VALUE_LIST_ITEM:
-                        outer_display = LXB_CSS_VALUE_LIST_ITEM;
-                        inner_display = LXB_CSS_VALUE_FLOW;
+                    case CSS_VALUE_LIST_ITEM:
+                        outer_display = CSS_VALUE_LIST_ITEM;
+                        inner_display = CSS_VALUE_FLOW;
                         break;
-                    case LXB_CSS_VALUE_TABLE_ROW:
-                        outer_display = LXB_CSS_VALUE_TABLE_ROW;
-                        inner_display = LXB_CSS_VALUE_TABLE_ROW;
+                    case CSS_VALUE_TABLE_ROW:
+                        outer_display = CSS_VALUE_TABLE_ROW;
+                        inner_display = CSS_VALUE_TABLE_ROW;
                         break;
-                    case LXB_CSS_VALUE_TABLE_CELL:
-                        outer_display = LXB_CSS_VALUE_TABLE_CELL;
-                        inner_display = LXB_CSS_VALUE_TABLE_CELL;
+                    case CSS_VALUE_TABLE_CELL:
+                        outer_display = CSS_VALUE_TABLE_CELL;
+                        inner_display = CSS_VALUE_TABLE_CELL;
                         break;
-                    case LXB_CSS_VALUE_NONE:
+                    case CSS_VALUE_NONE:
                         log_debug("DEBUG: NONE case matched! Setting display=none");
-                        outer_display = LXB_CSS_VALUE_NONE;
-                        inner_display = LXB_CSS_VALUE_NONE;
+                        outer_display = CSS_VALUE_NONE;
+                        inner_display = CSS_VALUE_NONE;
                         break;
                     default:  // unknown display
                         log_debug("DEBUG: Unknown display value %d, defaulting to inline flow", display_decl->u.display->a);
-                        outer_display = LXB_CSS_VALUE_INLINE;
-                        inner_display = LXB_CSS_VALUE_FLOW;
+                        outer_display = CSS_VALUE_INLINE;
+                        inner_display = CSS_VALUE_FLOW;
                 }
             } else {
                 outer_display = display_decl->u.display->a;
@@ -422,19 +422,19 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
-        case LXB_CSS_VALUE__NUMBER:
+        case CSS_VALUE__NUMBER:
             if (line_height->u.number.num >= 0) block->blk->line_height = line_height;
             break;
-        case LXB_CSS_VALUE__LENGTH:
+        case CSS_VALUE__LENGTH:
             if (line_height->u.length.num >= 0) block->blk->line_height = line_height;
             break;
-        case LXB_CSS_VALUE__PERCENTAGE:
+        case CSS_VALUE__PERCENTAGE:
             if (line_height->u.percentage.num >= 0) block->blk->line_height = line_height;
             break;
-        case LXB_CSS_VALUE_NORMAL:
+        case CSS_VALUE_NORMAL:
             block->blk->line_height = line_height;
             break;
-        case LXB_CSS_VALUE_INHERIT:
+        case CSS_VALUE_INHERIT:
             block->blk->line_height = line_height;
             break;
         }
@@ -462,7 +462,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_COLOR: {
         const lxb_css_property_color_t *color = declr->u.color;
-        log_debug("color property: %d, red: %d", color->type, LXB_CSS_VALUE_RED);
+        log_debug("color property: %d, red: %d", color->type, CSS_VALUE_RED);
         if (!span->in_line) {
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         }
@@ -723,25 +723,25 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
 
-        PropValue top_style = LXB_CSS_VALUE__UNDEF;
-        PropValue right_style = LXB_CSS_VALUE__UNDEF;
-        PropValue bottom_style = LXB_CSS_VALUE__UNDEF;
-        PropValue left_style = LXB_CSS_VALUE__UNDEF;
+        PropValue top_style = CSS_VALUE__UNDEF;
+        PropValue right_style = CSS_VALUE__UNDEF;
+        PropValue bottom_style = CSS_VALUE__UNDEF;
+        PropValue left_style = CSS_VALUE__UNDEF;
 
         int style_values = 0;
-        if (border_style->top != LXB_CSS_VALUE__UNDEF) {
+        if (border_style->top != CSS_VALUE__UNDEF) {
             top_style = border_style->top;
             style_values++;
         }
-        if (border_style->right != LXB_CSS_VALUE__UNDEF) {
+        if (border_style->right != CSS_VALUE__UNDEF) {
             right_style = border_style->right;
             style_values++;
         }
-        if (border_style->bottom != LXB_CSS_VALUE__UNDEF) {
+        if (border_style->bottom != CSS_VALUE__UNDEF) {
             bottom_style = border_style->bottom;
             style_values++;
         }
-        if (border_style->left != LXB_CSS_VALUE__UNDEF) {
+        if (border_style->left != CSS_VALUE__UNDEF) {
             left_style = border_style->left;
             style_values++;
         }
@@ -842,7 +842,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
         int tl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS,
             &top_left_radius->horizontal);
-        int tl_v = top_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
+        int tl_v = top_left_radius->vertical.type != CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, &top_left_radius->vertical) : tl_h;
 
         if (specificity > span->bound->border->top_radius.left_specificity) {
@@ -862,7 +862,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
         int tr_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS,
             &top_right_radius->horizontal);
-        int tr_v = top_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
+        int tr_v = top_right_radius->vertical.type != CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, &top_right_radius->vertical) : tr_h;
 
         if (specificity > span->bound->border->top_radius.right_specificity) {
@@ -882,7 +882,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
         int br_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS,
             &bottom_right_radius->horizontal);
-        int br_v = bottom_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
+        int br_v = bottom_right_radius->vertical.type != CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, &bottom_right_radius->vertical) : br_h;
 
         if (specificity > span->bound->border->bottom_radius.right_specificity) {
@@ -902,7 +902,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
         int bl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS,
             &bottom_left_radius->horizontal);
-        int bl_v = bottom_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
+        int bl_v = bottom_left_radius->vertical.type != CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, &bottom_left_radius->vertical) : bl_h;
 
         if (specificity > span->bound->border->bottom_radius.left_specificity) {
@@ -990,7 +990,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_box_sizing_t *box_sizing = declr->u.box_sizing;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = box_sizing->type;
-        log_debug("box-sizing property: %d (border-box=%d)", box_sizing->type, LXB_CSS_VALUE_BORDER_BOX);
+        log_debug("box-sizing property: %d (border-box=%d)", box_sizing->type, CSS_VALUE_BORDER_BOX);
         break;
     }
     case LXB_CSS_PROPERTY_MIN_WIDTH: {
@@ -1042,7 +1042,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         const lxb_css_property_position_t *position = declr->u.position;
         log_debug("DEBUG: CSS position property parsed: value=%d (STATIC=%d, RELATIVE=%d, ABSOLUTE=%d, FIXED=%d)",
-                  position->type, LXB_CSS_VALUE_STATIC, LXB_CSS_VALUE_RELATIVE, LXB_CSS_VALUE_ABSOLUTE, LXB_CSS_VALUE_FIXED);
+                  position->type, CSS_VALUE_STATIC, CSS_VALUE_RELATIVE, CSS_VALUE_ABSOLUTE, CSS_VALUE_FIXED);
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
             log_debug("DEBUG: Allocated new PositionProp for block");
@@ -1099,7 +1099,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_clear_t *clear = declr->u.clear;
         log_debug("CSS clear property parsed: value=%d (LEFT=47, RIGHT=48, BOTH=372, NONE=%d)",
-               clear->type, LXB_CSS_VALUE_NONE);
+               clear->type, CSS_VALUE_NONE);
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
         }
@@ -1113,7 +1113,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
         }
-        if (z_index->type == LXB_CSS_VALUE__NUMBER) {
+        if (z_index->type == CSS_VALUE__NUMBER) {
             block->position->z_index = (int)z_index->integer.num;
         }
         log_debug("z-index: %d", block->position->z_index);
@@ -1151,10 +1151,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_flex_flow_t *flex_flow = declr->u.flex_flow;
         alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        if (flex_flow->type_direction != LXB_CSS_VALUE__UNDEF) {
+        if (flex_flow->type_direction != CSS_VALUE__UNDEF) {
             block->embed->flex->direction = (FlexDirection)flex_flow->type_direction;
         }
-        if (flex_flow->wrap != LXB_CSS_VALUE__UNDEF) {
+        if (flex_flow->wrap != CSS_VALUE__UNDEF) {
             block->embed->flex->wrap = (FlexWrap)flex_flow->wrap;
         }
         break;
@@ -1204,27 +1204,27 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FLEX: {
         const lxb_css_property_flex_t *flex = declr->u.flex;
         // handle flex-grow
-        if (flex->grow.type != LXB_CSS_VALUE__UNDEF) {
+        if (flex->grow.type != CSS_VALUE__UNDEF) {
             span->flex_grow = flex->grow.number.num;
         }
         else {
             span->flex_grow = 1;  // Default for 'flex: auto'
         }
         // handle flex-shrink
-        if (flex->shrink.type != LXB_CSS_VALUE__UNDEF) {
+        if (flex->shrink.type != CSS_VALUE__UNDEF) {
             span->flex_shrink = flex->shrink.number.num;
         }
         else {
             span->flex_shrink = 1;  // Default for 'flex: auto'
         }
         // handle flex-basis
-        if (flex->basis.type == LXB_CSS_VALUE__LENGTH) {
+        if (flex->basis.type == CSS_VALUE__LENGTH) {
             span->flex_basis = flex->basis.u.length.num;
             span->flex_basis_is_percent = false;
-        } else if (flex->basis.type == LXB_CSS_VALUE__PERCENTAGE) {
+        } else if (flex->basis.type == CSS_VALUE__PERCENTAGE) {
             span->flex_basis = flex->basis.u.percentage.num;
             span->flex_basis_is_percent = true;
-        } else if (flex->basis.type == LXB_CSS_VALUE_AUTO ) { // || flex->none
+        } else if (flex->basis.type == CSS_VALUE_AUTO ) { // || flex->none
             span->flex_basis = -1; // auto
             span->flex_basis_is_percent = false;
         } else {
@@ -1251,13 +1251,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_FLEX_BASIS: {
         const lxb_css_property_flex_basis_t *flex_basis = declr->u.flex_basis;
-        if (flex_basis->type == LXB_CSS_VALUE__LENGTH) {
+        if (flex_basis->type == CSS_VALUE__LENGTH) {
             span->flex_basis = flex_basis->u.length.num;
             span->flex_basis_is_percent = false;
-        } else if (flex_basis->type == LXB_CSS_VALUE__PERCENTAGE) {
+        } else if (flex_basis->type == CSS_VALUE__PERCENTAGE) {
             span->flex_basis = flex_basis->u.percentage.num;
             span->flex_basis_is_percent = true;
-        } else if (flex_basis->type == LXB_CSS_VALUE_AUTO) {
+        } else if (flex_basis->type == CSS_VALUE_AUTO) {
             span->flex_basis = -1; // auto
             span->flex_basis_is_percent = false;
         } else {
@@ -1301,8 +1301,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 fprintf(stderr, "DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Applied space-evenly, block=%p\n", block);
                 if (block) {
                     alloc_flex_prop(lycon, block);
-                    block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
-                    fprintf(stderr, "DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Set flex->justify to %d\n", LXB_CSS_VALUE_SPACE_EVENLY);
+                    block->embed->flex->justify = CSS_VALUE_SPACE_EVENLY;
+                    fprintf(stderr, "DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Set flex->justify to %d\n", CSS_VALUE_SPACE_EVENLY);
                 }
             }
         }        // Handle aspect-ratio as custom property until lexbor supports it
@@ -1345,10 +1345,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 // Set justify-content to space-evenly using our custom constant
                 if (block) {
                     alloc_flex_prop(lycon, block);
-                    block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                    block->embed->flex->justify = CSS_VALUE_SPACE_EVENLY;
                     printf("DEBUG: CUSTOM_JUSTIFY_CONTENT - Set flex->justify to %d (SPACE_EVENLY)\n",
-                           LXB_CSS_VALUE_SPACE_EVENLY);
-                    log_debug("Set justify-content to SPACE_EVENLY (%d)", LXB_CSS_VALUE_SPACE_EVENLY);
+                           CSS_VALUE_SPACE_EVENLY);
+                    log_debug("Set justify-content to SPACE_EVENLY (%d)", CSS_VALUE_SPACE_EVENLY);
                 }
             }
         }
@@ -1556,9 +1556,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 const char* value_str = (const char*)custom->value.data;
                 // Parse grid-auto-flow values (can be "row", "column", "row dense", "column dense")
                 if (strstr(value_str, "row")) {
-                    block->embed->grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
+                    block->embed->grid->grid_auto_flow = CSS_VALUE_ROW;
                 } else if (strstr(value_str, "column")) {
-                    block->embed->grid->grid_auto_flow = LXB_CSS_VALUE_COLUMN;
+                    block->embed->grid->grid_auto_flow = CSS_VALUE_COLUMN;
                 }
 
                 // Check for dense packing
@@ -1654,23 +1654,23 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
 AlignType resolve_align_type(PropValue value) {
     switch (value) {
-        case LXB_CSS_VALUE_FLEX_START:
-        case LXB_CSS_VALUE_START:
+        case CSS_VALUE_FLEX_START:
+        case CSS_VALUE_START:
             return ALIGN_START;
-        case LXB_CSS_VALUE_FLEX_END:
-        case LXB_CSS_VALUE_END:
+        case CSS_VALUE_FLEX_END:
+        case CSS_VALUE_END:
             return ALIGN_END;
-        case LXB_CSS_VALUE_CENTER:
+        case CSS_VALUE_CENTER:
             return ALIGN_CENTER;
-        case LXB_CSS_VALUE_BASELINE:
+        case CSS_VALUE_BASELINE:
             return ALIGN_BASELINE;
-        case LXB_CSS_VALUE_STRETCH:
+        case CSS_VALUE_STRETCH:
             return ALIGN_STRETCH;
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
+        case CSS_VALUE_SPACE_BETWEEN:
             return ALIGN_SPACE_BETWEEN;
-        case LXB_CSS_VALUE_SPACE_AROUND:
+        case CSS_VALUE_SPACE_AROUND:
             return ALIGN_SPACE_AROUND;
-        // case LXB_CSS_VALUE_SPACE_EVENLY:
+        // case CSS_VALUE_SPACE_EVENLY:
         //     return ALIGN_SPACE_EVENLY;
         default:
             return ALIGN_START;
@@ -1681,21 +1681,21 @@ int resolve_justify_content(PropValue value) {
     // CRITICAL FIX: Return Lexbor constants directly instead of old enum values
     // This eliminates the enum conversion mismatch that was breaking justify-content
     switch (value) {
-        case LXB_CSS_VALUE_FLEX_START:
-        case LXB_CSS_VALUE_START:
-            return LXB_CSS_VALUE_FLEX_START;
-        case LXB_CSS_VALUE_FLEX_END:
-        case LXB_CSS_VALUE_END:
-            return LXB_CSS_VALUE_FLEX_END;
-        case LXB_CSS_VALUE_CENTER:
-            return LXB_CSS_VALUE_CENTER;
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
-            return LXB_CSS_VALUE_SPACE_BETWEEN;
-        case LXB_CSS_VALUE_SPACE_AROUND:
-            return LXB_CSS_VALUE_SPACE_AROUND;
-        case LXB_CSS_VALUE_SPACE_EVENLY:
-            return LXB_CSS_VALUE_SPACE_EVENLY;
+        case CSS_VALUE_FLEX_START:
+        case CSS_VALUE_START:
+            return CSS_VALUE_FLEX_START;
+        case CSS_VALUE_FLEX_END:
+        case CSS_VALUE_END:
+            return CSS_VALUE_FLEX_END;
+        case CSS_VALUE_CENTER:
+            return CSS_VALUE_CENTER;
+        case CSS_VALUE_SPACE_BETWEEN:
+            return CSS_VALUE_SPACE_BETWEEN;
+        case CSS_VALUE_SPACE_AROUND:
+            return CSS_VALUE_SPACE_AROUND;
+        case CSS_VALUE_SPACE_EVENLY:
+            return CSS_VALUE_SPACE_EVENLY;
         default:
-            return LXB_CSS_VALUE_FLEX_START;
+            return CSS_VALUE_FLEX_START;
     }
 }
