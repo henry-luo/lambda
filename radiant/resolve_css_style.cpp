@@ -574,7 +574,7 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
         if (value->type == CSS_VALUE_LENGTH) {
             // Direct length value
             lycon->font.current_font_size = resolve_length_value(lycon,
-                LXB_CSS_PROPERTY_FONT_SIZE, value);
+                CSS_PROPERTY_FONT_SIZE, value);
             log_debug("resolved font size from declaration: %.2f px", lycon->font.current_font_size);
             return;
         } else if (value->type == CSS_VALUE_KEYWORD) {
@@ -665,7 +665,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = num * lycon->root_font_size;
             break;
         case CSS_UNIT_EM:
-            if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
+            if (property == CSS_PROPERTY_FONT_SIZE) {
                 result = num * lycon->font.style->font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
@@ -721,7 +721,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     case CSS_VALUE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
-        if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
+        if (property == CSS_PROPERTY_FONT_SIZE) {
             // font-size percentage is relative to parent font size
             result = percentage * lycon->font.style->font_size / 100.0;
         } else {
@@ -1521,7 +1521,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-            resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, value, specificity, &span->bound->margin);
+            resolve_spacing_prop(lycon, CSS_PROPERTY_MARGIN, value, specificity, &span->bound->margin);
             break;
         }
 
@@ -1530,7 +1530,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-            resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, value, specificity, &span->bound->padding);
+            resolve_spacing_prop(lycon, CSS_PROPERTY_PADDING, value, specificity, &span->bound->padding);
             break;
         }
 

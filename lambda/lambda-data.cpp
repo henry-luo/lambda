@@ -705,7 +705,7 @@ Element* elmt_pooled(Pool *pool) {
     return elmt;
 }
 
-TypedItem elmt_get_typed(Element* elmt, Item key) {
+extern "C" TypedItem elmt_get_typed(Element* elmt, Item key) {
     if (!elmt || !key.item) { return null_result;}
     bool is_found;
     char *key_str = NULL;

@@ -426,6 +426,10 @@ typedef struct Input {
     StringBuf* sb;
 } Input;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 Array* array_pooled(Pool* pool);
 void array_append(Array* arr, Item itm, Pool* pool);
 Map* map_pooled(Pool* pool);
@@ -435,8 +439,13 @@ Element* elmt_pooled(Pool* pool);
 TypedItem elmt_get_typed(Element* elmt, Item key);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
+#ifdef __cplusplus
+}
+#endif
+
 // Memory pool convenience functions
 Pool* variable_mem_pool_create();
+void variable_mem_pool_destroy(Pool* pool);
 void variable_mem_pool_destroy(Pool* pool);
 
 Type* alloc_type(Pool* pool, TypeId type, size_t size);

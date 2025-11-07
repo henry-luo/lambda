@@ -54,7 +54,16 @@ void log_font_fallback_triggered(const char* requested, const char* fallback) {
 }
 
 // CSS @font-face parsing integration
-void parse_font_face_rule(LayoutContext* lycon, lxb_css_rule_t* rule) {
+void parse_font_face_rule(LayoutContext* lycon, void* rule) {
+    // Placeholder implementation - lexbor dependency removed
+    log_debug("parse_font_face_rule: lexbor support removed, skipping");
+    (void)lycon;  // suppress unused parameter warning
+    (void)rule;   // suppress unused parameter warning
+    return;
+}
+
+/* Original lexbor-dependent code - commented out:
+void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
     if (!lycon) {
         clog_error(font_log, "Invalid LayoutContext for parse_font_face_rule");
         return;
@@ -98,6 +107,7 @@ void parse_font_face_rule(LayoutContext* lycon, lxb_css_rule_t* rule) {
                   descriptor->family_name, descriptor->src_local_path, weights[i], styles[i]);
     }
 }
+*/
 
 FontFaceDescriptor* create_font_face_descriptor(LayoutContext* lycon) {
     if (!lycon) {

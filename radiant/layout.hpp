@@ -12,7 +12,8 @@ struct FloatContext;
 typedef struct StyleContext {
     struct StyleElement* parent;
     struct StyleNode* prev_node;
-    lxb_css_parser_t *css_parser;
+    // lxb_css_parser_t *css_parser;  // Removed: lexbor dependency
+    void *css_parser;  // Placeholder for future CSS parser if needed
 } StyleContext;
 
 typedef struct Blockbox {
