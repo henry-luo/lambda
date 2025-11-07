@@ -302,7 +302,7 @@ lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_spec
 }
 
 // find iframe by name and set new src using selector
-DomNodeBase* set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
+DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
     if (!document || !target_name || !new_src) {
         log_error("Invalid parameters to set_iframe_src_by_name");
         return NULL;
@@ -365,7 +365,7 @@ DomNodeBase* set_iframe_src_by_name(DomElement *document, const char *target_nam
 }
 
 // find the sub-view that matches the given node
-View* find_view(View* view, DomNodeBase* node) {
+View* find_view(View* view, DomNode* node) {
     // Compare if the view's node matches the target node directly
     if (view->node && node && view->node == node) {
         return view;
@@ -471,7 +471,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
-                DomNodeBase* elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
+                DomNode* elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     log_debug("found iframe view");

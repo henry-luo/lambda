@@ -2265,6 +2265,7 @@ project "test_lambda_domnode_gtest"
     
     files {
         "test/test_lambda_domnode_gtest.cpp",
+        "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
     }

@@ -512,7 +512,7 @@ View* View::previous_view() {
     return sibling;
 }
 
-View* alloc_view(LayoutContext* lycon, ViewType type, DomNodeBase* node) {
+View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     View* view;
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
@@ -1269,12 +1269,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
         // Add nth-of-type if there are multiple siblings with same tag
         char final_selector[512];
-        DomNodeBase* parent = block->node->parent;
+        DomNode* parent = block->node->parent;
         if (parent) {
             // Count siblings with same tag name
             int sibling_count = 0;
             int current_index = 0;
-            DomNodeBase* sibling = parent->first_child;
+            DomNode* sibling = parent->first_child;
 
             while (sibling) {
                 if (sibling->type() == DOM_NODE_ELEMENT) {
@@ -1848,12 +1848,12 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
         // Add nth-of-type if there are multiple siblings with same tag
         char final_selector[512];
-        DomNodeBase* parent = span->node->parent;
+        DomNode* parent = span->node->parent;
         if (parent) {
             // Count siblings with same tag name
             int sibling_count = 0;
             int current_index = 0;
-            DomNodeBase* sibling = parent->first_child;
+            DomNode* sibling = parent->first_child;
 
             while (sibling) {
                 if (sibling->type() == DOM_NODE_ELEMENT) {

@@ -216,7 +216,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
 
     // Process children - need to match DOM children with HTML children
     // NOTE: Both HTML and DOM trees contain text nodes, so we need to skip them in parallel
-    DomNodeBase* dom_child = dom_elem->first_child;
+    DomNode* dom_child = dom_elem->first_child;
 
     // Iterate through HTML children to find matching elements
     for (int64_t i = 0; i < html_elem->length; i++) {
@@ -595,7 +595,7 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
     }
 
     // Recursively apply to children (only element children)
-    DomNodeBase* child = root->first_child;
+    DomNode* child = root->first_child;
     while (child) {
         if (child->is_element()) {
             DomElement* child_elem = (DomElement*)child;

@@ -18,10 +18,10 @@ static int call_strview_to_int(StrView* s) {
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
-void dom_node_resolve_style(DomNodeBase* node, LayoutContext* lycon);
-void layout_table(LayoutContext* lycon, DomNodeBase* elmt, DisplayValue display);
+void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
+void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
-void layout_abs_block(LayoutContext* lycon, DomNodeBase *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -146,7 +146,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         }
         // else LXB_TAG_IMG
     } else {  // layout block child content
-        DomNodeBase *child = block->node->first_child;
+        DomNode *child = block->node->first_child;
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (block->display.inner == LXB_CSS_VALUE_FLOW) {
@@ -268,7 +268,7 @@ float adjust_border_padding_height(ViewBlock* block, float height) {
     return height;
 }
 
-void apply_element_default_style(LayoutContext* lycon, DomNodeBase* elmt, ViewBlock* block) {
+void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock* block) {
     float em_size = 0;  size_t value_len;  const char *value;
     resolve_inline_default(lycon, (ViewSpan*)block);
     uintptr_t elmt_name = elmt->tag();
@@ -412,7 +412,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 
-void layout_block_content(LayoutContext* lycon, DomNodeBase *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
+void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
     const char* tag = elmt->name();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d",
@@ -604,7 +604,7 @@ void layout_block_content(LayoutContext* lycon, DomNodeBase *elmt, ViewBlock* bl
     }
 }
 
-void layout_block(LayoutContext* lycon, DomNodeBase *elmt, DisplayValue display) {
+void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_enter();
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
     log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->name(), display.outer, display.inner);

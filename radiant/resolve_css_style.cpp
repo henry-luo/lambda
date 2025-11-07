@@ -383,7 +383,7 @@ DisplayValue resolve_display_value(void* child) {
     // Resolve display value for a DOM node
     DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
 
-    DomNodeBase* node = (DomNodeBase*)child;
+    DomNode* node = (DomNode*)child;
     if (node && node->is_element()) {
         // resolve display from CSS if available
         const char* tag_name = node->name();

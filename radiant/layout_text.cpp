@@ -6,10 +6,10 @@
 #include "../lib/log.h"
 
 // Forward declarations
-LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNodeBase* node);
-LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNodeBase* text_node);
-LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNodeBase* span) {
-    DomNodeBase* node = span->first_child;
+LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node);
+LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node);
+LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
+    DomNode* node = span->first_child;
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
@@ -102,7 +102,7 @@ void line_break(LayoutContext* lycon) {
     line_reset(lycon);
 }
 
-LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNodeBase* text_node) {
+LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     // Get text data using helper function
     const char* text = (const char*)text_node->text_data();
     if (!text) return RDT_LINE_NOT_FILLED;  // null check
@@ -129,7 +129,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNodeBase* text_node
     return RDT_NOT_SURE;
 }
 
-LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNodeBase* node) {
+LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
     do {
         if (node->is_text()) {
             LineFillStatus result = text_has_line_filled(lycon, node);
@@ -154,7 +154,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNodeBase* node) {
 
 // This function was replaced by the DomNode version above
 
-LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNodeBase* node) {
+LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* node) {
     // note: this function navigates to parenets through laid out view tree,
     // and siblings through non-processed html nodes
     log_debug("check if view has line filled");
@@ -219,7 +219,7 @@ void adjust_text_bounds(ViewText* text) {
     }
 }
 
-void layout_text(LayoutContext* lycon, DomNodeBase *text_node) {
+void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* next_ch;  ViewText* text_view = null;  TextRect* prev_rect = NULL;
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data

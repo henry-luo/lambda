@@ -227,7 +227,7 @@ void calculate_final_positions(OpenTypeShapingContext* ctx);
 
 // Integration with existing text rendering
 void enhance_font_box_with_opentype(EnhancedFontBox* font_box, OpenTypeFontInfo* ot_info);
-void render_text_with_opentype_features(LayoutContext* lycon, DomNodeBase* text_node, OpenTypeShapingContext* ctx);
+void render_text_with_opentype_features(LayoutContext* lycon, DomNode* text_node, OpenTypeShapingContext* ctx);
 int calculate_text_width_with_opentype(OpenTypeShapingContext* ctx, const uint32_t* codepoints, int count);
 
 // CSS font-feature-settings support
