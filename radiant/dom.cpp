@@ -170,22 +170,16 @@ DomNode* DomNode::first_child() {
     // Handle mark elements (now using DomElement)
     if (type == MARK_ELEMENT && dom_element) {
         // Navigate to first child through DomElement tree
-        void* first = dom_element->first_child;
+        DomNodeBase* first = dom_element->first_child;
 
         // Skip comment nodes
-        while (first && dom_node_get_type(first) == DOM_NODE_COMMENT) {
-            if (dom_node_get_type(first) == DOM_NODE_ELEMENT) {
-                first = ((DomElement*)first)->next_sibling;
-            } else if (dom_node_get_type(first) == DOM_NODE_TEXT) {
-                first = ((DomText*)first)->next_sibling;
-            } else {
-                first = ((DomComment*)first)->next_sibling;
-            }
+        while (first && first->type() == DOM_NODE_COMMENT) {
+            first = first->next_sibling;
         }
 
         if (first) {
             DomNode* child_node = nullptr;
-            DomNodeType node_type = dom_node_get_type(first);
+            DomNodeType node_type = first->type();
 
             if (node_type == DOM_NODE_ELEMENT) {
                 child_node = create_mark_element((DomElement*)first);
@@ -216,7 +210,7 @@ DomNode* DomNode::next_sibling() {
     // handle mark nodes (now using DomElement/DomText)
     if (type == MARK_ELEMENT || type == MARK_TEXT) {
         // Get next sibling from DomElement/DomText structure
-        void* next = nullptr;
+        DomNodeBase* next = nullptr;
         if (type == MARK_ELEMENT && dom_element) {
             next = dom_element->next_sibling;
         } else if (type == MARK_TEXT && dom_text) {
@@ -224,19 +218,13 @@ DomNode* DomNode::next_sibling() {
         }
 
         // Skip comment nodes
-        while (next && dom_node_get_type(next) == DOM_NODE_COMMENT) {
-            if (dom_node_get_type(next) == DOM_NODE_ELEMENT) {
-                next = ((DomElement*)next)->next_sibling;
-            } else if (dom_node_get_type(next) == DOM_NODE_TEXT) {
-                next = ((DomText*)next)->next_sibling;
-            } else {
-                next = ((DomComment*)next)->next_sibling;
-            }
+        while (next && next->type() == DOM_NODE_COMMENT) {
+            next = next->next_sibling;
         }
 
         if (next) {
             DomNode* sibling_node = nullptr;
-            DomNodeType node_type = dom_node_get_type(next);
+            DomNodeType node_type = next->type();
 
             if (node_type == DOM_NODE_ELEMENT) {
                 sibling_node = create_mark_element((DomElement*)next);

@@ -767,10 +767,10 @@ int view_pdf_in_window(const char* pdf_file) {
  */
 int view_html_in_window(const char* html_file) {
     log_info("Opening HTML file in viewer: %s", html_file);
-    
+
     // Forward declaration of refactored window_main function
     extern int window_main_with_file(const char* html_file);
-    
+
     // Use the refactored window_main with HTML file parameter
     // This leverages ALL existing infrastructure: event handling, rendering,
     // scrolling, link navigation, CSS layout, form interactions, etc.

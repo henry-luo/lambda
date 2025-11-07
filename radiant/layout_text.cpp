@@ -1,13 +1,15 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
+#include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 
 #include "../lib/log.h"
 
 // Forward declarations
-LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node);
-LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node);
-LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
-    DomNode *node = span->first_child();
+LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNodeBase* node);
+LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNodeBase* text_node);
+LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNodeBase* span) {
+    DomNodeBase* node = span->first_child;
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
@@ -100,9 +102,12 @@ void line_break(LayoutContext* lycon) {
     line_reset(lycon);
 }
 
-LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
-    unsigned char *str = text_node->text_data();
-    if (!str) return RDT_LINE_NOT_FILLED;  // null check
+LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNodeBase* text_node) {
+    // Get text data using helper function
+    const char* text = (const char*)text_node->text_data();
+    if (!text) return RDT_LINE_NOT_FILLED;  // null check
+
+    unsigned char* str = (unsigned char*)text;
     float text_width = 0.0f;
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
@@ -124,7 +129,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
     return RDT_NOT_SURE;
 }
 
-LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
+LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNodeBase* node) {
     do {
         if (node->is_text()) {
             LineFillStatus result = text_has_line_filled(lycon, node);
@@ -142,18 +147,18 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             log_debug("unknown node type");
             // skip the node
         }
-        node = node->next_sibling();
+        node = node->next_sibling;
     } while (node);
     return RDT_NOT_SURE;
 }
 
 // This function was replaced by the DomNode version above
 
-LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* node) {
+LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNodeBase* node) {
     // note: this function navigates to parenets through laid out view tree,
     // and siblings through non-processed html nodes
     log_debug("check if view has line filled");
-    node = node->next_sibling();
+    node = dom_node_next_sibling(node);
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
@@ -214,7 +219,7 @@ void adjust_text_bounds(ViewText* text) {
     }
 }
 
-void layout_text(LayoutContext* lycon, DomNode *text_node) {
+void layout_text(LayoutContext* lycon, DomNodeBase *text_node) {
     unsigned char* next_ch;  ViewText* text_view = null;  TextRect* prev_rect = NULL;
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data

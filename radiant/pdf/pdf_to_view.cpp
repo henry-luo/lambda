@@ -687,15 +687,8 @@ static void create_rect_view(Input* input, ViewBlock* parent,
         dom_elem->pool = input->pool;
     }
 
-    // Create DomNode wrapper
-    DomNode* elem_node = (DomNode*)pool_calloc(input->pool, sizeof(DomNode));
-    if (elem_node) {
-        elem_node->type = LEXBOR_ELEMENT;
-        elem_node->dom_element = dom_elem;
-        elem_node->parent = nullptr;
-    }
-
-    rect_view->node = elem_node;
+    // Directly assign DomElement as the node
+    rect_view->node = dom_elem;
 
     // Apply fill color and/or stroke color from graphics state based on paint operation
     BoundaryProp* bound = nullptr;
@@ -828,16 +821,8 @@ static void create_text_view(Input* input, ViewBlock* parent,
         dom_text->pool = input->pool;
     }
 
-    // Create DomNode wrapper
-    DomNode* text_node = (DomNode*)pool_calloc(input->pool, sizeof(DomNode));
-    if (text_node) {
-        text_node->type = MARK_TEXT;
-        text_node->dom_text = dom_text;
-        text_node->dom_element = nullptr;
-        text_node->parent = nullptr;
-    }
-
-    text_view->node = text_node;
+    // Directly assign DomText as the node
+    text_view->node = dom_text;
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {

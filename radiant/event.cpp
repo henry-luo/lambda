@@ -220,11 +220,11 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
-            const lxb_char_t *href = span->node->get_attribute("href");
+            const char* href = span->node->get_attribute("href");
             if (href) {
                 log_debug("got anchor href: %s", href);
                 evcon->new_url = (char*)href;
-                const lxb_char_t *target = span->node->get_attribute("target");
+                const char* target = span->node->get_attribute("target");
                 if (target) {
                     log_debug("got anchor target: %s", target);
                     evcon->new_target = (char*)target;
@@ -368,7 +368,18 @@ DomNode *set_iframe_src_by_name(DomElement *document, const char *target_name, c
 
 // find the sub-view that matches the given node
 View* find_view(View* view, DomNode *node) {
-    if (view->node && view->node->type == node->type && view->node->dom_element == node->dom_element) { return view; }
+    // Compare if the view's node matches the target node
+    // Since we're comparing wrapper DomNode types, we need to check if they wrap the same underlying node
+    if (view->node && node) {
+        // The DomNode wrapper points to DomElement/DomText, so we can compare those directly
+        bool matches = false;
+        if (node->type == MARK_ELEMENT && node->dom_element && view->node == node->dom_element) {
+            matches = true;
+        } else if (node->type == MARK_TEXT && node->dom_text && view->node == node->dom_text) {
+            matches = true;
+        }
+        if (matches) { return view; }
+    }
     if (view->is_group()) {
         ViewGroup* group = (ViewGroup*)view;
         View* child = group->child;
