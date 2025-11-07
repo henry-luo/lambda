@@ -1,11 +1,10 @@
-# Jubily Project Makefile
+# Lambda Project Makefile
 # Utilizes compile.sh for build operations with standard make targets
 
 # Project configuration
-PROJECT_NAME = jubily
+PROJECT_NAME = Lambda
 COMPILE_SCRIPT = ./compile.sh
 DEFAULT_CONFIG = build_lambda_config.json
-RADIANT_CONFIG = build_radiant_config.json
 
 # Build configurations
 BUILD_DIR = build
@@ -19,28 +18,6 @@ TYPESET_DIR = typeset
 LAMBDA_EXE = lambda.exe
 RADIANT_EXE = radiant.exe
 WINDOW_EXE = window.exe
-
-# Typesetting system sources
-TYPESET_SOURCES = \
-	$(TYPESET_DIR)/typeset.c \
-	$(TYPESET_DIR)/view/view_tree.c \
-	$(TYPESET_DIR)/document/document.c \
-	$(TYPESET_DIR)/document/page.c \
-	$(TYPESET_DIR)/style/font.c \
-	$(TYPESET_DIR)/style/style.c \
-	$(TYPESET_DIR)/layout/layout.c \
-	$(TYPESET_DIR)/math/math_layout.c \
-	$(TYPESET_DIR)/math/math_metrics.c \
-	$(TYPESET_DIR)/output/renderer.c \
-	$(TYPESET_DIR)/output/html_renderer.c \
-	$(TYPESET_DIR)/output/svg_renderer.c \
-	$(TYPESET_DIR)/output/pdf_renderer.c \
-	$(TYPESET_DIR)/output/tex_renderer.c \
-	$(TYPESET_DIR)/output/png_renderer.c \
-	$(TYPESET_DIR)/serialization/lambda_serializer.c \
-	$(TYPESET_DIR)/serialization/markdown_serializer.c \
-	$(TYPESET_DIR)/integration/lambda_bridge.c \
-	$(TYPESET_DIR)/integration/stylesheet.c
 
 # Unicode support is always enabled (utf8proc-based)
 # No longer using conditional compilation flags
