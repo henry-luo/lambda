@@ -51,13 +51,8 @@ struct DomNode {
     DomNode* next_sibling;   // Next sibling node (nullptr if last)
     DomNode* prev_sibling;   // Previous sibling (nullptr if first)
 
-    // Concrete methods (implementations in dom_node.cpp)
-    const char* get_name() const;
-    DomNodeType get_type() const { return node_type; }
-
-    // Simplified API - inline wrappers for cleaner code
-    inline const char* name() const { return get_name(); }
-    inline DomNodeType type() const { return get_type(); }
+    const char* name() const;
+    inline DomNodeType type() const { return node_type; }
 
     // Type checking helpers
     inline bool is_element() const { return node_type == DOM_NODE_ELEMENT; }
@@ -105,7 +100,7 @@ protected:
  * @return Node type or 0 if NULL
  */
 static inline DomNodeType dom_node_get_type(const DomNode* node) {
-    return node ? node->get_type() : (DomNodeType)0;
+    return node ? node->type() : (DomNodeType)0;
 }
 
 /**

@@ -282,7 +282,7 @@ struct View {
 
     // DOM node access helpers - forward to node's methods for backward compatibility
     // These provide syntactic compatibility with old view->node->method() patterns
-    inline const char* node_name() const { return node ? node->get_name() : "#null"; }
+    inline const char* node_name() const { return node ? node->name() : "#null"; }
     inline const char* node_tag_name() const {
         DomElement* elem = node ? node->as_element() : nullptr;
         return elem ? elem->tag_name : nullptr;
@@ -310,7 +310,7 @@ struct View {
         return node ? node->as_element() : nullptr;
     }
     inline DomNodeType node_get_type() const {
-        return node ? node->get_type() : (DomNodeType)0;
+        return node ? node->type() : (DomNodeType)0;
     }
     inline uintptr_t node_tag() const {
         DomElement* elem = node ? node->as_element() : nullptr;
