@@ -288,7 +288,7 @@ struct View {
         return elem ? elem->tag_name : nullptr;
     }
     inline const char* node_get_attribute(const char* attr_name) const {
-        return dom_node_get_attribute(node, attr_name);
+        return node ? node->get_attribute(attr_name) : nullptr;
     }
     inline unsigned char* node_text_data() const {
         DomText* text = node ? node->as_text() : nullptr;
