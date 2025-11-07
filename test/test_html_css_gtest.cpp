@@ -846,7 +846,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
             converted++;
 
             // Count children
-            int child_count = dom_element_count_children(dom_root);
+            int child_count = dom_element_count_child_elements(dom_root);
             printf("    Child count: %d\n", child_count);
         } else {
             printf("  ✗ Failed to convert to DomElement\n");
@@ -1408,12 +1408,12 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
                 has_css++;
                 printf("  ✓ %s: %d children, %zu bytes CSS\n",
                        layout_files[i],
-                       dom_element_count_children(dom_root),
+                       dom_element_count_child_elements(dom_root),
                        css.length());
             } else {
                 printf("  ✓ %s: %d children, no CSS\n",
                        layout_files[i],
-                       dom_element_count_children(dom_root));
+                       dom_element_count_child_elements(dom_root));
             }
         } else {
             printf("  ✗ Convert failed: %s\n", layout_files[i]);

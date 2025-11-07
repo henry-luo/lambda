@@ -1140,7 +1140,23 @@ int dom_element_get_child_index(DomElement* element) {
     return (sibling == element) ? index : -1;
 }
 
-int dom_element_count_children(DomElement* element) {
+int dom_element_child_count(DomElement* element) {
+    if (!element) {
+        return 0;
+    }
+
+    int count = 0;
+    DomNodeBase* child = element->first_child;
+
+    while (child) {
+        count++;
+        child = child->next_sibling;
+    }
+
+    return count;
+}
+
+int dom_element_count_child_elements(DomElement* element) {
     if (!element) {
         return 0;
     }
@@ -1213,7 +1229,7 @@ void dom_element_print_info(DomElement* element) {
     printf("  Style version: %u\n", element->style_version);
     printf("  Needs recompute: %s\n", element->needs_style_recompute ? "yes" : "no");
     printf("  Pseudo-state: 0x%08X\n", element->pseudo_state);
-    printf("  Children: %d\n", dom_element_count_children(element));
+    printf("  Children: %d\n", dom_element_count_child_elements(element));
 }
 
 void dom_element_print_styles(DomElement* element) {

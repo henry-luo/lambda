@@ -815,7 +815,7 @@ TEST_F(HtmlCssIntegrationTest, RootElementExtraction) {
     EXPECT_STREQ(get_tag_name(root), "html");  // Not "!DOCTYPE"
 
     // HTML should have children
-    int child_count = dom_element_count_children(
+    int child_count = dom_element_count_child_elements(
         lambda_element_to_dom_element(root, pool)
     );
     EXPECT_EQ(child_count, 2);  // <head> and <body>
