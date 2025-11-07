@@ -1157,11 +1157,9 @@
                         ],
                         "additional_sources": [
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp",
-                            "radiant/cmd_layout.cpp"
+                            "lambda/input/css/selector_matcher.cpp"
                         ],
-                        "binary": "test_lambda_domnode_gtest.exe",
-                        "skip": true
+                        "binary": "test_lambda_domnode_gtest.exe"
                     },
                     {
                         "source": "test_dir_gtest.cpp",
