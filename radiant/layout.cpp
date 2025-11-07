@@ -555,8 +555,8 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
 
     // Get root node based on document type
     DomNode* root_node = nullptr;
-    root_node = doc->lambda_dom_root;
-    log_debug("DEBUG: Using lambda_dom_root directly: %p", root_node);
+    root_node = doc->dom_root;
+    log_debug("DEBUG: Using dom_root directly: %p", root_node);
     if (root_node) {
         // Validate pointer before calling virtual methods
         log_debug("DEBUG: root_node->node_type = %d", root_node->node_type);

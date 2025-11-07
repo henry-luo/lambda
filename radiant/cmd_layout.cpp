@@ -66,7 +66,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent);
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
 // before it gets filtered out during DomElement tree construction
-HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, Input* input) {
+HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input) {
     if (!input || !input->root.item) {
         log_debug("No input or root available for DOCTYPE detection");
         return HTML5;
@@ -769,8 +769,8 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
-    doc->lambda_dom_root = dom_root;
-    doc->lambda_html_root = html_root;
+    doc->dom_root = dom_root;
+    doc->html_root = html_root;
     doc->html_version = detected_version;
     doc->url = html_url;
     doc->view_tree = nullptr;  // Will be created during layout
@@ -935,8 +935,8 @@ int cmd_layout(int argc, char** argv) {
 
     // Perform layout computation
     log_debug("[Layout] About to call layout_html_doc...");
-    log_debug("[Layout] lambda_html_root=%p, lambda_dom_root=%p",
-            (void*)doc->lambda_html_root, (void*)doc->lambda_dom_root);
+    log_debug("[Layout] lambda_html_root=%p, dom_root=%p",
+            (void*)doc->html_root, (void*)doc->dom_root);
 
     layout_html_doc(&ui_context, doc, false);
 

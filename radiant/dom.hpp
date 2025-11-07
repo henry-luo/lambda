@@ -65,8 +65,8 @@ typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 
 typedef struct {
     Url* url;                       // document URL
-    DomElement* lambda_dom_root;    // Lambda CSS DOM root element (DomNode*)
-    Element* lambda_html_root;      // Lambda HTML parser root (for Lambda CSS docs)
+    DomElement* dom_root;    // Lambda CSS DOM root element (DomNode*)
+    Element* html_root;      // Lambda HTML parser root (for Lambda CSS docs)
     int html_version;               // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
     ViewTree* view_tree;
     StateStore* state;
