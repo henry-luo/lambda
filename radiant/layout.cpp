@@ -21,7 +21,7 @@ void view_pool_destroy(ViewTree* tree);
 char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
 // Forward declarations
-void layout_inline(LayoutContext* lycon, DomNodeBase *elmt, DisplayValue display);
+void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
 
 bool is_space(char c) {
@@ -114,7 +114,7 @@ float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
 }
 
 // DomNode style resolution function
-void dom_node_resolve_style(DomNodeBase* node, LayoutContext* lycon) {
+void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     // unified resolution for both element types
     log_debug("resolving style for elment '%s' of type %d", node->name(), node ? (int)node->type() : -1);
 
@@ -271,7 +271,7 @@ void line_align(LayoutContext* lycon) {
     log_debug("end of line align");
 }
 
-void layout_flow_node(LayoutContext* lycon, DomNodeBase *node) {
+void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     log_debug("layout node %s, advance_y: %f", node->name(), lycon->block.advance_y);
 
     // Skip HTML comments (Lambda CSS parser creates these as elements with name "!--")
@@ -327,7 +327,7 @@ void layout_flow_node(LayoutContext* lycon, DomNodeBase *node) {
     log_debug("end flow node, block advance_y: %d", lycon->block.advance_y);
 }
 
-void layout_html_root(LayoutContext* lycon, DomNodeBase* elmt) {
+void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_debug("layout html root");
     log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? (int)elmt->type() : -1);
     //log_debug("DEBUG: About to call apply_header_style");
@@ -376,12 +376,12 @@ void layout_html_root(LayoutContext* lycon, DomNodeBase* elmt) {
     lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
 
     // layout body content - handle both Lexbor and Lambda CSS documents
-    DomNodeBase* body_node = nullptr;
+    DomNode* body_node = nullptr;
 
     if (lycon->doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - navigate DomNode tree to find body
         log_debug("Searching for body element in Lambda CSS document");
-        DomNodeBase* child = elmt->first_child;
+        DomNode* child = elmt->first_child;
         while (child) {
             if (child->is_element()) {
                 const char* tag_name = child->name();
@@ -566,7 +566,7 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     log_debug("layout_init complete");
 
     // Get root node based on document type
-    DomNodeBase* root_node = nullptr;
+    DomNode* root_node = nullptr;
 
     if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - use DomElement directly (no wrapper needed)

@@ -2769,7 +2769,7 @@ TEST_F(DomIntegrationTest, MixedTree_AllNodeTypes) {
     // Don't test it here - just verify the node structure manually.
 
     // Verify chain
-    DomNodeBase* current = div->first_child;
+    DomNode* current = div->first_child;
     EXPECT_EQ(current->type(), DOM_NODE_COMMENT);
 
     current = ((DomComment*)current)->next_sibling;
@@ -2939,7 +2939,7 @@ TEST_F(DomIntegrationTest, MixedTree_CommentsBetweenElements) {
     EXPECT_EQ(dom_element_count_child_elements(div), 3);
 
     // Verify only elements match when filtering
-    DomNodeBase* current = div->first_child;
+    DomNode* current = div->first_child;
     int element_count = 0;
     while (current) {
         if (current->is_element()) {

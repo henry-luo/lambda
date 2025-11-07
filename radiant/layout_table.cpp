@@ -27,16 +27,16 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
 // =============================================================================
 
 // Safe DOM traversal helpers
-static inline DomNodeBase* first_element_child(DomNodeBase* n) {
+static inline DomNode* first_element_child(DomNode* n) {
     if (!n) return nullptr;
-    DomNodeBase* c = n->first_child;
+    DomNode* c = n->first_child;
     while (c && !c->is_element()) c = c->next_sibling;
     return c;
 }
 
-static inline DomNodeBase* next_element_sibling(DomNodeBase* n) {
+static inline DomNode* next_element_sibling(DomNode* n) {
     if (!n) return nullptr;
-    DomNodeBase* c = n->next_sibling;
+    DomNode* c = n->next_sibling;
     while (c && !c->is_element()) c = c->next_sibling;
     return c;
 }
@@ -46,7 +46,7 @@ static inline DomNodeBase* next_element_sibling(DomNodeBase* n) {
 // =============================================================================
 
 // Parse table-specific CSS properties from DOM element
-static void resolve_table_properties(DomNodeBase* element, ViewTable* table) {
+static void resolve_table_properties(DomNode* element, ViewTable* table) {
     // Read CSS border-collapse and border-spacing properties first
     // These apply regardless of table-layout mode
 
@@ -165,7 +165,7 @@ static void resolve_table_properties(DomNodeBase* element, ViewTable* table) {
 }
 
 // Parse cell attributes (colspan, rowspan)
-static void parse_cell_attributes(DomNodeBase* cellNode, ViewTableCell* cell) {
+static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
     if (!cellNode || !cell) return;
 
     // Initialize defaults
@@ -236,12 +236,12 @@ static void parse_cell_attributes(DomNodeBase* cellNode, ViewTableCell* cell) {
 // =============================================================================
 
 // Create and initialize a table cell view
-static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNodeBase* cellNode) {
+static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode) {
     ViewTableCell* cell = (ViewTableCell*)alloc_view(lycon, RDT_VIEW_TABLE_CELL, cellNode);
     if (!cell) return nullptr;
 
     // Save current layout context
-    DomNodeBase* saved_elmt = lycon->elmt;
+    DomNode* saved_elmt = lycon->elmt;
     View* saved_view = lycon->view;
 
     // Set context for style resolution
@@ -262,7 +262,7 @@ static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNodeBase* cellN
 }
 
 // Create and initialize a table row view
-static ViewTableRow* create_table_row(LayoutContext* lycon, DomNodeBase* rowNode) {
+static ViewTableRow* create_table_row(LayoutContext* lycon, DomNode* rowNode) {
     ViewTableRow* row = (ViewTableRow*)alloc_view(lycon, RDT_VIEW_TABLE_ROW, rowNode);
     if (!row) return nullptr;
 
@@ -272,7 +272,7 @@ static ViewTableRow* create_table_row(LayoutContext* lycon, DomNodeBase* rowNode
 }
 
 // Create and initialize a table row group view
-static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNodeBase* groupNode) {
+static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNode* groupNode) {
     ViewTableRowGroup* group = (ViewTableRowGroup*)alloc_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, groupNode);
     if (!group) return nullptr;
 
@@ -282,7 +282,7 @@ static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNodeBa
 }
 
 // Build table structure from DOM
-ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
+ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     if (!tableNode || !tableNode->is_element()) {
         log_debug("ERROR: Invalid table node");
         return nullptr;
@@ -292,7 +292,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
     // Save layout context
     ViewGroup* saved_parent = lycon->parent;
     View* saved_prev = lycon->prev_view;
-    DomNodeBase* saved_elmt = lycon->elmt;
+    DomNode* saved_elmt = lycon->elmt;
 
     // Create table view
     lycon->elmt = tableNode;
@@ -307,7 +307,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
     lycon->prev_view = nullptr;
 
     // Process table children
-    for (DomNodeBase* child = first_element_child(tableNode); child; child = next_element_sibling(child)) {
+    for (DomNode* child = first_element_child(tableNode); child; child = next_element_sibling(child)) {
         // Get display property using resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue child_display = resolve_display_value(child);
 
@@ -325,7 +325,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                 Linebox cap_saved_line = lycon->line;
                 ViewGroup* cap_saved_parent = lycon->parent;
                 View* cap_saved_prev = lycon->prev_view;
-                DomNodeBase* cap_saved_elmt = lycon->elmt;
+                DomNode* cap_saved_elmt = lycon->elmt;
 
                 // Initialize block context for caption
                 // Caption takes full width of parent (table's available width)
@@ -346,7 +346,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                 log_debug("Laying out caption with width=%d", caption_width);
 
                 // Layout caption content (text, inline elements)
-                for (DomNodeBase* cc = child->first_child; cc; cc = cc->next_sibling) {
+                for (DomNode* cc = child->first_child; cc; cc = cc->next_sibling) {
                     layout_flow_node(lycon, cc);
                 }
 
@@ -384,7 +384,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                 lycon->prev_view = nullptr;
                 lycon->elmt = child;
 
-                for (DomNodeBase* rowNode = first_element_child(child); rowNode; rowNode = next_element_sibling(rowNode)) {
+                for (DomNode* rowNode = first_element_child(child); rowNode; rowNode = next_element_sibling(rowNode)) {
                     // Check for table row by CSS display property or HTML tag
                     DisplayValue row_display = resolve_display_value(rowNode);
 
@@ -401,7 +401,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                             lycon->prev_view = nullptr;
                             lycon->elmt = rowNode;
 
-                            for (DomNodeBase* cellNode = first_element_child(rowNode); cellNode; cellNode = next_element_sibling(cellNode)) {
+                            for (DomNode* cellNode = first_element_child(rowNode); cellNode; cellNode = next_element_sibling(cellNode)) {
                                 // Check for table cell by CSS display property or HTML tag
                                 DisplayValue cell_display = resolve_display_value(cellNode);
 
@@ -442,7 +442,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                                         // Initial layout for content measurement
                                         // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                                         // We'll re-layout later with correct parent width after cell dimensions are set
-                                        for (DomNodeBase* cc = cellNode->first_child; cc; cc = cc->next_sibling) {
+                                        for (DomNode* cc = cellNode->first_child; cc; cc = cc->next_sibling) {
                                             layout_flow_node(lycon, cc);
                                         }
 
@@ -479,7 +479,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                 lycon->prev_view = nullptr;
                 lycon->elmt = child;
 
-                for (DomNodeBase* cellNode = first_element_child(child); cellNode; cellNode = next_element_sibling(cellNode)) {
+                for (DomNode* cellNode = first_element_child(child); cellNode; cellNode = next_element_sibling(cellNode)) {
                     // Check for table cell by CSS display property or HTML tag
                     DisplayValue cell_display = resolve_display_value(cellNode);
 
@@ -517,7 +517,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNodeBase* tableNode) {
                             // Initial layout for content measurement
                             // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                             // We'll re-layout later with correct parent width after cell dimensions are set
-                            for (DomNodeBase* cc = cellNode->first_child; cc; cc = cc->next_sibling) {
+                            for (DomNode* cc = cellNode->first_child; cc; cc = cc->next_sibling) {
                                 layout_flow_node(lycon, cc);
                             }
 
@@ -564,7 +564,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     Linebox saved_line = lycon->line;
     ViewGroup* saved_parent = lycon->parent;
     View* saved_prev = lycon->prev_view;
-    DomNodeBase* saved_elmt = lycon->elmt;
+    DomNode* saved_elmt = lycon->elmt;
 
     // Calculate cell border and padding offsets
     // Content area starts AFTER border and padding
@@ -626,7 +626,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
 
     // Re-layout children with correct parent width
     // Child blocks without explicit width will now inherit content_width via pa_block.width
-    for (DomNodeBase* cc = tcell->node->first_child; cc; cc = cc->next_sibling) {
+    for (DomNode* cc = tcell->node->first_child; cc; cc = cc->next_sibling) {
         layout_flow_node(lycon, cc);
     }
 
@@ -2004,7 +2004,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 // =============================================================================
 
 // Main table layout entry point
-void layout_table(LayoutContext* lycon, DomNodeBase* tableNode, DisplayValue display) {
+void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
     log_debug("=== TABLE LAYOUT START ===");
     log_debug("Starting table layout");
     log_debug("Initial layout context - line.left=%d, advance_y=%d", lycon->line.left, lycon->block.advance_y);

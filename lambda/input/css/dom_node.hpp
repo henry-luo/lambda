@@ -40,22 +40,20 @@ enum DomNodeType {
 // ============================================================================
 
 /**
- * DomNodeBase - Abstract base class for all DOM nodes
- * Provides common tree structure and polymorphic operations
+ * DomNode - Base struct for all DOM nodes
+ * Provides common tree structure and node operations
+ * Note: This is a plain C++ struct, not a polymorphic class (no virtual methods)
  */
-struct DomNodeBase {
+struct DomNode {
     DomNodeType node_type;       // Node type discriminator
-    DomNodeBase* parent;         // Parent node (nullptr at root)
-    DomNodeBase* first_child;    // First child node (nullptr if no children)
-    DomNodeBase* next_sibling;   // Next sibling node (nullptr if last)
-    DomNodeBase* prev_sibling;   // Previous sibling (nullptr if first)
+    DomNode* parent;         // Parent node (nullptr at root)
+    DomNode* first_child;    // First child node (nullptr if no children)
+    DomNode* next_sibling;   // Next sibling node (nullptr if last)
+    DomNode* prev_sibling;   // Previous sibling (nullptr if first)
 
-    // Virtual destructor for proper cleanup
-    virtual ~DomNodeBase() = default;
-
-    // Pure virtual methods that must be implemented by derived classes
-    virtual const char* get_name() const = 0;
-    virtual DomNodeType get_type() const { return node_type; }
+    // Concrete methods (implementations in dom_node.cpp)
+    const char* get_name() const;
+    DomNodeType get_type() const { return node_type; }
 
     // Simplified API - inline wrappers for cleaner code
     inline const char* name() const { return get_name(); }
@@ -79,9 +77,12 @@ struct DomNodeBase {
     inline unsigned char* text_data() const;                         // Get text content for text nodes
     inline const char* get_attribute(const char* attr_name) const;   // Get attribute for element nodes
 
+    // Static helper for tag name to ID conversion
+    static uintptr_t tag_name_to_id(const char* tag_name);
+
 protected:
     // Constructor (only callable by derived classes)
-    DomNodeBase(DomNodeType type) : node_type(type), parent(nullptr), first_child(nullptr),
+    DomNode(DomNodeType type) : node_type(type), parent(nullptr), first_child(nullptr),
                                      next_sibling(nullptr), prev_sibling(nullptr) {}
 };
 
@@ -103,7 +104,7 @@ protected:
  * @param node Node pointer (DomNodeBase*)
  * @return Node type or 0 if NULL
  */
-static inline DomNodeType dom_node_get_type(const DomNodeBase* node) {
+static inline DomNodeType dom_node_get_type(const DomNode* node) {
     return node ? node->get_type() : (DomNodeType)0;
 }
 
@@ -112,7 +113,7 @@ static inline DomNodeType dom_node_get_type(const DomNodeBase* node) {
  * @param node Node pointer
  * @return true if node is DomElement
  */
-static inline bool dom_node_is_element(const DomNodeBase* node) {
+static inline bool dom_node_is_element(const DomNode* node) {
     return node ? node->is_element() : false;
 }
 
@@ -121,7 +122,7 @@ static inline bool dom_node_is_element(const DomNodeBase* node) {
  * @param node Node pointer
  * @return true if node is DomText
  */
-static inline bool dom_node_is_text(const DomNodeBase* node) {
+static inline bool dom_node_is_text(const DomNode* node) {
     return node ? node->is_text() : false;
 }
 
@@ -130,7 +131,7 @@ static inline bool dom_node_is_text(const DomNodeBase* node) {
  * @param node Node pointer
  * @return true if node is DomComment or DOCTYPE
  */
-static inline bool dom_node_is_comment(const DomNodeBase* node) {
+static inline bool dom_node_is_comment(const DomNode* node) {
     return node ? node->is_comment() : false;
 }
 
@@ -139,7 +140,7 @@ static inline bool dom_node_is_comment(const DomNodeBase* node) {
  * @param node Base node pointer
  * @return DomElement pointer or NULL if wrong type
  */
-static inline DomElement* dom_node_as_element(DomNodeBase* node) {
+static inline DomElement* dom_node_as_element(DomNode* node) {
     return node ? node->as_element() : nullptr;
 }
 
@@ -148,7 +149,7 @@ static inline DomElement* dom_node_as_element(DomNodeBase* node) {
  * @param node Base node pointer
  * @return DomText pointer or NULL if wrong type
  */
-static inline DomText* dom_node_as_text(DomNodeBase* node) {
+static inline DomText* dom_node_as_text(DomNode* node) {
     return node ? node->as_text() : nullptr;
 }
 
@@ -157,7 +158,7 @@ static inline DomText* dom_node_as_text(DomNodeBase* node) {
  * @param node Base node pointer
  * @return DomComment pointer or NULL if wrong type
  */
-static inline DomComment* dom_node_as_comment(DomNodeBase* node) {
+static inline DomComment* dom_node_as_comment(DomNode* node) {
     return node ? node->as_comment() : nullptr;
 }
 
@@ -170,35 +171,35 @@ static inline DomComment* dom_node_as_comment(DomNodeBase* node) {
  * @param node Node pointer
  * @return Node name string or "#null" if NULL
  */
-const char* dom_node_get_name(const DomNodeBase* node);
+const char* dom_node_get_name(const DomNode* node);
 
 /**
  * Get tag name from element nodes
  * @param node Node pointer (must be DOM_NODE_ELEMENT)
  * @return Tag name string or NULL if not an element
  */
-const char* dom_node_get_tag_name(DomNodeBase* node);
+const char* dom_node_get_tag_name(DomNode* node);
 
 /**
  * Get text content from text nodes
  * @param node Node pointer (must be DOM_NODE_TEXT)
  * @return Text content string or NULL if not a text node
  */
-const char* dom_node_get_text(DomNodeBase* node);
+const char* dom_node_get_text(DomNode* node);
 
 /**
  * Get comment content from comment nodes
  * @param node Node pointer (must be DOM_NODE_COMMENT)
  * @return Comment content string or NULL if not a comment
  */
-const char* dom_node_get_comment_content(DomNodeBase* node);
+const char* dom_node_get_comment_content(DomNode* node);
 
 /**
  * Get parent node
  * @param node Node pointer
  * @return Parent node or NULL if none
  */
-static inline DomNodeBase* dom_node_get_parent(const DomNodeBase* node) {
+static inline DomNode* dom_node_get_parent(const DomNode* node) {
     return node ? node->parent : nullptr;
 }
 
@@ -207,7 +208,7 @@ static inline DomNodeBase* dom_node_get_parent(const DomNodeBase* node) {
  * @param node Node pointer
  * @return First child or NULL if none
  */
-static inline DomNodeBase* dom_node_first_child(DomNodeBase* node) {
+static inline DomNode* dom_node_first_child(DomNode* node) {
     return node ? node->first_child : nullptr;
 }
 
@@ -216,7 +217,7 @@ static inline DomNodeBase* dom_node_first_child(DomNodeBase* node) {
  * @param node Node pointer
  * @return Next sibling or NULL if none
  */
-static inline DomNodeBase* dom_node_next_sibling(DomNodeBase* node) {
+static inline DomNode* dom_node_next_sibling(DomNode* node) {
     return node ? node->next_sibling : nullptr;
 }
 
@@ -225,7 +226,7 @@ static inline DomNodeBase* dom_node_next_sibling(DomNodeBase* node) {
  * @param node Node pointer
  * @return Previous sibling or NULL if none
  */
-static inline DomNodeBase* dom_node_prev_sibling(DomNodeBase* node) {
+static inline DomNode* dom_node_prev_sibling(DomNode* node) {
     return node ? node->prev_sibling : nullptr;
 }
 
@@ -234,7 +235,7 @@ static inline DomNodeBase* dom_node_prev_sibling(DomNodeBase* node) {
  * @param node Node pointer
  * @return First child or NULL if none
  */
-static inline const DomNodeBase* dom_node_first_child_const(const DomNodeBase* node) {
+static inline const DomNode* dom_node_first_child_const(const DomNode* node) {
     return node ? node->first_child : nullptr;
 }
 
@@ -243,7 +244,7 @@ static inline const DomNodeBase* dom_node_first_child_const(const DomNodeBase* n
  * @param node Node pointer
  * @return Next sibling or NULL if none
  */
-static inline const DomNodeBase* dom_node_next_sibling_const(const DomNodeBase* node) {
+static inline const DomNode* dom_node_next_sibling_const(const DomNode* node) {
     return node ? node->next_sibling : nullptr;
 }
 
@@ -257,7 +258,7 @@ static inline const DomNodeBase* dom_node_next_sibling_const(const DomNodeBase* 
  * @param child Child node to append
  * @return true on success, false on failure
  */
-bool dom_node_append_child(DomNodeBase* parent, DomNodeBase* child);
+bool dom_node_append_child(DomNode* parent, DomNode* child);
 
 /**
  * Remove a child node from its parent
@@ -265,7 +266,7 @@ bool dom_node_append_child(DomNodeBase* parent, DomNodeBase* child);
  * @param child Child node to remove
  * @return true on success, false if child not found
  */
-bool dom_node_remove_child(DomNodeBase* parent, DomNodeBase* child);
+bool dom_node_remove_child(DomNode* parent, DomNode* child);
 
 /**
  * Insert a node before a reference node
@@ -274,7 +275,7 @@ bool dom_node_remove_child(DomNodeBase* parent, DomNodeBase* child);
  * @param ref_node Reference node (insert before this)
  * @return true on success, false on failure
  */
-bool dom_node_insert_before(DomNodeBase* parent, DomNodeBase* new_node, DomNodeBase* ref_node);
+bool dom_node_insert_before(DomNode* parent, DomNode* new_node, DomNode* ref_node);
 
 // ============================================================================
 // Debugging and Utilities
@@ -285,14 +286,14 @@ bool dom_node_insert_before(DomNodeBase* parent, DomNodeBase* new_node, DomNodeB
  * @param node Node to print
  * @param indent Indentation level
  */
-void dom_node_print(const DomNodeBase* node, int indent);
+void dom_node_print(const DomNode* node, int indent);
 
 /**
  * Recursively free a DOM tree
  * Note: Nodes are pool-allocated, so this only updates structure, not memory
  * @param node Root node of tree to free
  */
-void dom_node_free_tree(DomNodeBase* node);
+void dom_node_free_tree(DomNode* node);
 
 // ============================================================================
 // Attribute Access
@@ -304,6 +305,6 @@ void dom_node_free_tree(DomNodeBase* node);
  * @param attr_name Attribute name
  * @return Attribute value or NULL if attribute not found or node is not an element
  */
-const char* dom_node_get_attribute(DomNodeBase* node, const char* attr_name);
+const char* dom_node_get_attribute(DomNode* node, const char* attr_name);
 
 #endif // DOM_NODE_HPP

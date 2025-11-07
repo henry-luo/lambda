@@ -105,7 +105,7 @@ int calculate_basic_text_width(LayoutContext* lycon, const char* text, int lengt
 }
 
 // Enhanced text layout with Unicode support
-void layout_text_enhanced(LayoutContext* lycon, DomNodeBase* text_node) {
+void layout_text_enhanced(LayoutContext* lycon, DomNode* text_node) {
     if (!lycon || !text_node) {
         log_error(text_log, "Invalid parameters for enhanced text layout");
         return;

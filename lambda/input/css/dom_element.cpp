@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <new>  // for placement new
+#include <lexbor/html/html.h>  // For LXB_TAG_* constants
 
 extern "C" {
     int strcasecmp(const char *s1, const char *s2);
@@ -22,6 +23,124 @@ extern "C" {
 #ifndef strtok_r
 extern char *strtok_r(char *str, const char *delim, char **saveptr);
 #endif
+
+// ============================================================================
+// Tag Name to ID Conversion
+// ============================================================================
+
+/**
+ * Convert HTML tag name string to Lexbor tag ID
+ * This is called once during element creation to populate the tag_id field
+ */
+uintptr_t DomNode::tag_name_to_id(const char* tag_name) {
+    if (!tag_name) return 0;
+
+    // Use case-insensitive comparison for HTML tags
+    // Map common HTML tags to their Lexbor constants
+    if (strcasecmp(tag_name, "img") == 0) return LXB_TAG_IMG;
+    if (strcasecmp(tag_name, "div") == 0) return LXB_TAG_DIV;
+    if (strcasecmp(tag_name, "span") == 0) return LXB_TAG_SPAN;
+    if (strcasecmp(tag_name, "p") == 0) return LXB_TAG_P;
+    if (strcasecmp(tag_name, "h1") == 0) return LXB_TAG_H1;
+    if (strcasecmp(tag_name, "h2") == 0) return LXB_TAG_H2;
+    if (strcasecmp(tag_name, "h3") == 0) return LXB_TAG_H3;
+    if (strcasecmp(tag_name, "h4") == 0) return LXB_TAG_H4;
+    if (strcasecmp(tag_name, "h5") == 0) return LXB_TAG_H5;
+    if (strcasecmp(tag_name, "h6") == 0) return LXB_TAG_H6;
+    if (strcasecmp(tag_name, "a") == 0) return LXB_TAG_A;
+    if (strcasecmp(tag_name, "body") == 0) return LXB_TAG_BODY;
+    if (strcasecmp(tag_name, "head") == 0) return LXB_TAG_HEAD;
+    if (strcasecmp(tag_name, "html") == 0) return LXB_TAG_HTML;
+    if (strcasecmp(tag_name, "title") == 0) return LXB_TAG_TITLE;
+    if (strcasecmp(tag_name, "meta") == 0) return LXB_TAG_META;
+    if (strcasecmp(tag_name, "link") == 0) return LXB_TAG_LINK;
+    if (strcasecmp(tag_name, "style") == 0) return LXB_TAG_STYLE;
+    if (strcasecmp(tag_name, "script") == 0) return LXB_TAG_SCRIPT;
+    if (strcasecmp(tag_name, "br") == 0) return LXB_TAG_BR;
+    if (strcasecmp(tag_name, "hr") == 0) return LXB_TAG_HR;
+    if (strcasecmp(tag_name, "ul") == 0) return LXB_TAG_UL;
+    if (strcasecmp(tag_name, "ol") == 0) return LXB_TAG_OL;
+    if (strcasecmp(tag_name, "li") == 0) return LXB_TAG_LI;
+    if (strcasecmp(tag_name, "table") == 0) return LXB_TAG_TABLE;
+    if (strcasecmp(tag_name, "tr") == 0) return LXB_TAG_TR;
+    if (strcasecmp(tag_name, "td") == 0) return LXB_TAG_TD;
+    if (strcasecmp(tag_name, "th") == 0) return LXB_TAG_TH;
+    if (strcasecmp(tag_name, "thead") == 0) return LXB_TAG_THEAD;
+    if (strcasecmp(tag_name, "tbody") == 0) return LXB_TAG_TBODY;
+    if (strcasecmp(tag_name, "tfoot") == 0) return LXB_TAG_TFOOT;
+    if (strcasecmp(tag_name, "form") == 0) return LXB_TAG_FORM;
+    if (strcasecmp(tag_name, "input") == 0) return LXB_TAG_INPUT;
+    if (strcasecmp(tag_name, "button") == 0) return LXB_TAG_BUTTON;
+    if (strcasecmp(tag_name, "select") == 0) return LXB_TAG_SELECT;
+    if (strcasecmp(tag_name, "option") == 0) return LXB_TAG_OPTION;
+    if (strcasecmp(tag_name, "textarea") == 0) return LXB_TAG_TEXTAREA;
+    if (strcasecmp(tag_name, "label") == 0) return LXB_TAG_LABEL;
+    if (strcasecmp(tag_name, "fieldset") == 0) return LXB_TAG_FIELDSET;
+    if (strcasecmp(tag_name, "legend") == 0) return LXB_TAG_LEGEND;
+    if (strcasecmp(tag_name, "iframe") == 0) return LXB_TAG_IFRAME;
+    if (strcasecmp(tag_name, "embed") == 0) return LXB_TAG_EMBED;
+    if (strcasecmp(tag_name, "object") == 0) return LXB_TAG_OBJECT;
+    if (strcasecmp(tag_name, "param") == 0) return LXB_TAG_PARAM;
+    if (strcasecmp(tag_name, "video") == 0) return LXB_TAG_VIDEO;
+    if (strcasecmp(tag_name, "audio") == 0) return LXB_TAG_AUDIO;
+    if (strcasecmp(tag_name, "source") == 0) return LXB_TAG_SOURCE;
+    if (strcasecmp(tag_name, "track") == 0) return LXB_TAG_TRACK;
+    if (strcasecmp(tag_name, "canvas") == 0) return LXB_TAG_CANVAS;
+    if (strcasecmp(tag_name, "svg") == 0) return LXB_TAG_SVG;
+    if (strcasecmp(tag_name, "lineargradient") == 0) return LXB_TAG_LINEARGRADIENT;
+    if (strcasecmp(tag_name, "radialgradient") == 0) return LXB_TAG_RADIALGRADIENT;
+    if (strcasecmp(tag_name, "animatetransform") == 0) return LXB_TAG_ANIMATETRANSFORM;
+    if (strcasecmp(tag_name, "animatemotion") == 0) return LXB_TAG_ANIMATEMOTION;
+    if (strcasecmp(tag_name, "strong") == 0) return LXB_TAG_STRONG;
+    if (strcasecmp(tag_name, "em") == 0) return LXB_TAG_EM;
+    if (strcasecmp(tag_name, "b") == 0) return LXB_TAG_B;
+    if (strcasecmp(tag_name, "i") == 0) return LXB_TAG_I;
+    if (strcasecmp(tag_name, "u") == 0) return LXB_TAG_U;
+    if (strcasecmp(tag_name, "s") == 0) return LXB_TAG_S;
+    if (strcasecmp(tag_name, "small") == 0) return LXB_TAG_SMALL;
+    if (strcasecmp(tag_name, "mark") == 0) return LXB_TAG_MARK;
+    if (strcasecmp(tag_name, "del") == 0) return LXB_TAG_DEL;
+    if (strcasecmp(tag_name, "ins") == 0) return LXB_TAG_INS;
+    if (strcasecmp(tag_name, "sub") == 0) return LXB_TAG_SUB;
+    if (strcasecmp(tag_name, "sup") == 0) return LXB_TAG_SUP;
+    if (strcasecmp(tag_name, "q") == 0) return LXB_TAG_Q;
+    if (strcasecmp(tag_name, "cite") == 0) return LXB_TAG_CITE;
+    if (strcasecmp(tag_name, "abbr") == 0) return LXB_TAG_ABBR;
+    if (strcasecmp(tag_name, "dfn") == 0) return LXB_TAG_DFN;
+    if (strcasecmp(tag_name, "time") == 0) return LXB_TAG_TIME;
+    if (strcasecmp(tag_name, "code") == 0) return LXB_TAG_CODE;
+    if (strcasecmp(tag_name, "var") == 0) return LXB_TAG_VAR;
+    if (strcasecmp(tag_name, "samp") == 0) return LXB_TAG_SAMP;
+    if (strcasecmp(tag_name, "kbd") == 0) return LXB_TAG_KBD;
+    if (strcasecmp(tag_name, "address") == 0) return LXB_TAG_ADDRESS;
+    if (strcasecmp(tag_name, "main") == 0) return LXB_TAG_MAIN;
+    if (strcasecmp(tag_name, "section") == 0) return LXB_TAG_SECTION;
+    if (strcasecmp(tag_name, "article") == 0) return LXB_TAG_ARTICLE;
+    if (strcasecmp(tag_name, "aside") == 0) return LXB_TAG_ASIDE;
+    if (strcasecmp(tag_name, "nav") == 0) return LXB_TAG_NAV;
+    if (strcasecmp(tag_name, "header") == 0) return LXB_TAG_HEADER;
+    if (strcasecmp(tag_name, "footer") == 0) return LXB_TAG_FOOTER;
+    if (strcasecmp(tag_name, "hgroup") == 0) return LXB_TAG_HGROUP;
+    if (strcasecmp(tag_name, "figure") == 0) return LXB_TAG_FIGURE;
+    if (strcasecmp(tag_name, "figcaption") == 0) return LXB_TAG_FIGCAPTION;
+    if (strcasecmp(tag_name, "details") == 0) return LXB_TAG_DETAILS;
+    if (strcasecmp(tag_name, "summary") == 0) return LXB_TAG_SUMMARY;
+    if (strcasecmp(tag_name, "dialog") == 0) return LXB_TAG_DIALOG;
+    if (strcasecmp(tag_name, "data") == 0) return LXB_TAG_DATA;
+    if (strcasecmp(tag_name, "output") == 0) return LXB_TAG_OUTPUT;
+    if (strcasecmp(tag_name, "progress") == 0) return LXB_TAG_PROGRESS;
+    if (strcasecmp(tag_name, "meter") == 0) return LXB_TAG_METER;
+    if (strcasecmp(tag_name, "menu") == 0) return LXB_TAG_MENU;
+    if (strcasecmp(tag_name, "center") == 0) return LXB_TAG_CENTER;
+    if (strcasecmp(tag_name, "pre") == 0) return LXB_TAG_PRE;
+    if (strcasecmp(tag_name, "blockquote") == 0) return LXB_TAG_BLOCKQUOTE;
+    if (strcasecmp(tag_name, "dd") == 0) return LXB_TAG_DD;
+    if (strcasecmp(tag_name, "dt") == 0) return LXB_TAG_DT;
+    if (strcasecmp(tag_name, "dl") == 0) return LXB_TAG_DL;
+
+    // For unknown tags, return 0 (similar to Lexbor's LXB_TAG__UNDEF behavior)
+    return 0;
+}
 
 // ============================================================================
 // Attribute Storage Implementation (Hybrid Array/HashMap)
@@ -329,7 +448,7 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
         return false;
     }
 
-    // NOTE: Do NOT use memset here! DomElement inherits from DomNodeBase which has virtual
+    // NOTE: Do NOT use memset here! DomElement inherits from DomNode which has virtual
     // methods, so it has a vtable pointer that must not be zeroed. pool_calloc already
     // zeroes the memory, so we just need to set specific fields.
 
@@ -346,6 +465,9 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
     strcpy(tag_copy, tag_name);
     element->tag_name = tag_copy;
     element->tag_name_ptr = (void*)tag_copy;  // Use string pointer as unique ID
+
+    // Convert tag name to Lexbor tag ID for fast comparison
+    element->tag_id = DomNode::tag_name_to_id(tag_name);
 
     // Create style trees
     element->specified_style = style_tree_create(pool);
@@ -953,10 +1075,10 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
         child->next_sibling = NULL;
     } else {
         // Find last child - need to handle mixed node types (DomElement, DomText, etc.)
-        DomNodeBase* last_child_node = parent->first_child;
+        DomNode* last_child_node = parent->first_child;
 
         while (last_child_node) {
-            DomNodeBase* next_sibling = last_child_node->next_sibling;
+            DomNode* next_sibling = last_child_node->next_sibling;
 
             if (!next_sibling) {
                 // This is the last child, append the new element after it
@@ -1074,7 +1196,7 @@ int dom_element_get_child_index(DomElement* element) {
     // According to CSS spec, :nth-child() counts only element nodes
     int index = 0;
     DomElement* parent = static_cast<DomElement*>(element->parent);
-    DomNodeBase* sibling = parent->first_child;
+    DomNode* sibling = parent->first_child;
 
     while (sibling && sibling != element) {
         // Only count element nodes for nth-child
@@ -1093,7 +1215,7 @@ int dom_element_child_count(DomElement* element) {
     }
 
     int count = 0;
-    DomNodeBase* child = element->first_child;
+    DomNode* child = element->first_child;
 
     while (child) {
         count++;
@@ -1109,7 +1231,7 @@ int dom_element_count_child_elements(DomElement* element) {
     }
 
     int count = 0;
-    DomNodeBase* child = element->first_child;
+    DomNode* child = element->first_child;
 
     while (child) {
         // Only count element children (not text or comment nodes)
@@ -1626,7 +1748,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     }
 
     // Print children
-    DomNodeBase* child = element->first_child;
+    DomNode* child = element->first_child;
     bool has_element_children = false;
 
     // Count and print children
@@ -1814,9 +1936,9 @@ extern "C" DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, Do
                         text_node->next_sibling = nullptr;
                     } else {
                         // Find last child and append
-                        DomNodeBase* last_child_node = dom_elem->first_child;
+                        DomNode* last_child_node = dom_elem->first_child;
                         while (last_child_node) {
-                            DomNodeBase* next = last_child_node->next_sibling;
+                            DomNode* next = last_child_node->next_sibling;
 
                             if (!next) {
                                 // This is the last child, append text node here

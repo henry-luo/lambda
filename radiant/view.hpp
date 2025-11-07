@@ -263,7 +263,7 @@ typedef struct ViewGroup ViewGroup;
 // view always has x, y, wd, hg; otherwise, it is a property group
 struct View {
     ViewType type;
-    DomNodeBase* node;  // DOM node (DomElement*, DomText*, or DomComment* via inheritance)
+    DomNode* node;  // DOM node (DomElement*, DomText*, or DomComment* via inheritance)
     View* next;
     ViewGroup* parent;  // corrected the type to ViewGroup
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
@@ -294,10 +294,10 @@ struct View {
         DomText* text = node ? node->as_text() : nullptr;
         return text ? (unsigned char*)text->text : nullptr;
     }
-    inline DomNodeBase* node_first_child() const {
+    inline DomNode* node_first_child() const {
         return node ? node->first_child : nullptr;
     }
-    inline DomNodeBase* node_next_sibling() const {
+    inline DomNode* node_next_sibling() const {
         return node ? node->next_sibling : nullptr;
     }
     inline bool node_is_element() const {

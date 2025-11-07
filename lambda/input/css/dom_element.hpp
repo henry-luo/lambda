@@ -27,7 +27,7 @@ extern "C" {
  * - Caches computed values for performance
  * - Supports dynamic style updates
  *
- * Note: DomNodeBase is the base class for DomElement, DomText, and DomComment,
+ * Note: DomNode is the base class for DomElement, DomText, and DomComment,
  * providing polymorphic DOM tree operations.
  */
 
@@ -35,7 +35,7 @@ extern "C" {
 typedef struct Element Element;
 typedef struct DocumentStyler DocumentStyler;
 
-// Note: DomNodeBase is defined in dom_node.hpp and included above
+// Note: DomNode is defined in dom_node.hpp and included above
 
 // ============================================================================
 // DOM Text Node
@@ -45,7 +45,7 @@ typedef struct DocumentStyler DocumentStyler;
  * DomText - Text node in DOM tree
  * Represents text content between elements
  */
-struct DomText : public DomNodeBase {
+struct DomText : public DomNode {
     // Text-specific fields
     const char* text;            // Text content
     size_t length;               // Text length
@@ -54,10 +54,7 @@ struct DomText : public DomNodeBase {
     Pool* pool;                  // Memory pool for allocations
 
     // Constructor
-    DomText() : DomNodeBase(DOM_NODE_TEXT), text(nullptr), length(0), pool(nullptr) {}
-
-    // Implement virtual methods
-    const char* get_name() const override { return "#text"; }
+    DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0), pool(nullptr) {}
 };
 
 // ============================================================================
@@ -68,7 +65,7 @@ struct DomText : public DomNodeBase {
  * DomComment - Comment, DOCTYPE, or XML declaration node
  * Represents comments (<!-- -->), DOCTYPE declarations, and XML declarations
  */
-struct DomComment : public DomNodeBase {
+struct DomComment : public DomNode {
     // Comment-specific fields
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
     const char* content;         // Full content/text
@@ -78,11 +75,8 @@ struct DomComment : public DomNodeBase {
     Pool* pool;                  // Memory pool for allocations
 
     // Constructor
-    DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNodeBase(type), tag_name(nullptr),
+    DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
                                                        content(nullptr), length(0), pool(nullptr) {}
-
-    // Implement virtual methods
-    const char* get_name() const override { return tag_name ? tag_name : "#comment"; }
 };
 
 // ============================================================================
@@ -129,7 +123,7 @@ typedef struct AttributeStorage {
  * - Version tracking for cache invalidation
  * - Parent/child relationships for inheritance
  */
-struct DomElement : public DomNodeBase {
+struct DomElement : public DomNode {
     // Basic element information
     Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
@@ -157,13 +151,10 @@ struct DomElement : public DomNodeBase {
     Pool* pool;                  // Memory pool for this element's allocations
 
     // Constructor
-    DomElement() : DomNodeBase(DOM_NODE_ELEMENT), native_element(nullptr), tag_name(nullptr),
+    DomElement() : DomNode(DOM_NODE_ELEMENT), native_element(nullptr), tag_name(nullptr),
                    tag_name_ptr(nullptr), tag_id(0), id(nullptr), class_names(nullptr), class_count(0),
                    specified_style(nullptr), computed_style(nullptr), style_version(0),
                    needs_style_recompute(false), attributes(nullptr), pseudo_state(0), pool(nullptr) {}
-
-    // Implement virtual methods
-    const char* get_name() const override { return tag_name ? tag_name : "#unnamed"; }
 
     // Document reference
     DocumentStyler* document;    // Parent document styler (should be set after construction)
@@ -679,42 +670,42 @@ const char* dom_comment_get_content(DomComment* comment_node);
 // ============================================================================
 // These must come after the derived class definitions are complete
 
-inline DomElement* DomNodeBase::as_element() {
+inline DomElement* DomNode::as_element() {
     return is_element() ? static_cast<DomElement*>(this) : nullptr;
 }
 
-inline DomText* DomNodeBase::as_text() {
+inline DomText* DomNode::as_text() {
     return is_text() ? static_cast<DomText*>(this) : nullptr;
 }
 
-inline DomComment* DomNodeBase::as_comment() {
+inline DomComment* DomNode::as_comment() {
     return is_comment() ? static_cast<DomComment*>(this) : nullptr;
 }
 
-inline const DomElement* DomNodeBase::as_element() const {
+inline const DomElement* DomNode::as_element() const {
     return is_element() ? static_cast<const DomElement*>(this) : nullptr;
 }
 
-inline const DomText* DomNodeBase::as_text() const {
+inline const DomText* DomNode::as_text() const {
     return is_text() ? static_cast<const DomText*>(this) : nullptr;
 }
 
-inline const DomComment* DomNodeBase::as_comment() const {
+inline const DomComment* DomNode::as_comment() const {
     return is_comment() ? static_cast<const DomComment*>(this) : nullptr;
 }
 
 // Convenience method implementations
-inline uintptr_t DomNodeBase::tag() const {
+inline uintptr_t DomNode::tag() const {
     const DomElement* elem = as_element();
     return elem ? elem->tag_id : 0;
 }
 
-inline unsigned char* DomNodeBase::text_data() const {
+inline unsigned char* DomNode::text_data() const {
     const DomText* text = as_text();
     return text ? (unsigned char*)text->text : nullptr;
 }
 
-inline const char* DomNodeBase::get_attribute(const char* attr_name) const {
+inline const char* DomNode::get_attribute(const char* attr_name) const {
     const DomElement* elem = as_element();
     return elem ? dom_element_get_attribute(const_cast<DomElement*>(elem), attr_name) : nullptr;
 }

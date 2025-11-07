@@ -5,26 +5,51 @@
 #include <string.h>
 
 // ============================================================================
+// DomNode Implementation
+// ============================================================================
+
+const char* DomNode::get_name() const {
+    // Dispatch based on node type
+    switch (node_type) {
+        case DOM_NODE_ELEMENT: {
+            const DomElement* elem = static_cast<const DomElement*>(this);
+            return elem->tag_name ? elem->tag_name : "#unnamed";
+        }
+        case DOM_NODE_TEXT:
+            return "#text";
+        case DOM_NODE_COMMENT:
+        case DOM_NODE_DOCTYPE: {
+            const DomComment* comment = static_cast<const DomComment*>(this);
+            return comment->tag_name ? comment->tag_name : "#comment";
+        }
+        case DOM_NODE_DOCUMENT:
+            return "#document";
+        default:
+            return "#unknown";
+    }
+}
+
+// ============================================================================
 // Tree Navigation Implementation
 // ============================================================================
 
-const char* dom_node_get_name(const DomNodeBase* node) {
+const char* dom_node_get_name(const DomNode* node) {
     return node ? node->get_name() : "#null";
 }
 
-const char* dom_node_get_tag_name(DomNodeBase* node) {
+const char* dom_node_get_tag_name(DomNode* node) {
     if (!node) return nullptr;
     DomElement* elem = node->as_element();
     return elem ? elem->tag_name : nullptr;
 }
 
-const char* dom_node_get_text(DomNodeBase* node) {
+const char* dom_node_get_text(DomNode* node) {
     if (!node) return nullptr;
     DomText* text = node->as_text();
     return text ? text->text : nullptr;
 }
 
-const char* dom_node_get_comment_content(DomNodeBase* node) {
+const char* dom_node_get_comment_content(DomNode* node) {
     if (!node) return nullptr;
     DomComment* comment = node->as_comment();
     return comment ? comment->content : nullptr;
@@ -34,7 +59,7 @@ const char* dom_node_get_comment_content(DomNodeBase* node) {
 // Tree Manipulation Implementation
 // ============================================================================
 
-bool dom_node_append_child(DomNodeBase* parent, DomNodeBase* child) {
+bool dom_node_append_child(DomNode* parent, DomNode* child) {
     if (!parent || !child) {
         log_error("dom_node_append_child: NULL parent or child");
         return false;
@@ -57,7 +82,7 @@ bool dom_node_append_child(DomNodeBase* parent, DomNodeBase* child) {
         child->next_sibling = nullptr;
     } else {
         // Find last child
-        DomNodeBase* last = parent->first_child;
+        DomNode* last = parent->first_child;
         while (last->next_sibling) {
             last = last->next_sibling;
         }
@@ -71,7 +96,7 @@ bool dom_node_append_child(DomNodeBase* parent, DomNodeBase* child) {
     return true;
 }
 
-bool dom_node_remove_child(DomNodeBase* parent, DomNodeBase* child) {
+bool dom_node_remove_child(DomNode* parent, DomNode* child) {
     if (!parent || !child) {
         return false;
     }
@@ -102,7 +127,7 @@ bool dom_node_remove_child(DomNodeBase* parent, DomNodeBase* child) {
     return true;
 }
 
-bool dom_node_insert_before(DomNodeBase* parent, DomNodeBase* new_node, DomNodeBase* ref_node) {
+bool dom_node_insert_before(DomNode* parent, DomNode* new_node, DomNode* ref_node) {
     if (!parent || !new_node) {
         return false;
     }
@@ -141,7 +166,7 @@ bool dom_node_insert_before(DomNodeBase* parent, DomNodeBase* new_node, DomNodeB
 // Debugging and Utilities Implementation
 // ============================================================================
 
-void dom_node_print(const DomNodeBase* node, int indent) {
+void dom_node_print(const DomNode* node, int indent) {
     if (!node) {
         for (int i = 0; i < indent; i++) printf("  ");
         printf("(null)\n");
@@ -185,22 +210,22 @@ void dom_node_print(const DomNodeBase* node, int indent) {
     printf(">\n");
 
     // Recursively print children
-    const DomNodeBase* child = node->first_child;
+    const DomNode* child = node->first_child;
     while (child) {
         dom_node_print(child, indent + 1);
         child = child->next_sibling;
     }
 }
 
-void dom_node_free_tree(DomNodeBase* node) {
+void dom_node_free_tree(DomNode* node) {
     if (!node) {
         return;
     }
 
     // Recursively free all children
-    DomNodeBase* child = node->first_child;
+    DomNode* child = node->first_child;
     while (child) {
-        DomNodeBase* next = child->next_sibling;
+        DomNode* next = child->next_sibling;
         dom_node_free_tree(child);
         child = next;
     }
@@ -216,7 +241,7 @@ void dom_node_free_tree(DomNodeBase* node) {
 // Attribute Access Implementation
 // ============================================================================
 
-const char* dom_node_get_attribute(DomNodeBase* node, const char* attr_name) {
+const char* dom_node_get_attribute(DomNode* node, const char* attr_name) {
     if (!node || !attr_name) {
         return nullptr;
     }

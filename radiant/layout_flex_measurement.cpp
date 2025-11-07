@@ -11,7 +11,7 @@
 static MeasurementCacheEntry measurement_cache[1000]; // Fixed size for simplicity
 static int cache_count = 0;
 
-void store_in_measurement_cache(DomNodeBase* node, int width, int height,
+void store_in_measurement_cache(DomNode* node, int width, int height,
                                int content_width, int content_height) {
     if (cache_count >= 1000) {
         log_error("Measurement cache overflow");
@@ -29,7 +29,7 @@ void store_in_measurement_cache(DomNodeBase* node, int width, int height,
               node, width, height, content_width, content_height);
 }
 
-MeasurementCacheEntry* get_from_measurement_cache(DomNodeBase* node) {
+MeasurementCacheEntry* get_from_measurement_cache(DomNode* node) {
     for (int i = 0; i < cache_count; i++) {
         if (measurement_cache[i].node == node) {
             return &measurement_cache[i];
@@ -44,7 +44,7 @@ void clear_measurement_cache() {
 }
 
 // Measure flex child content without applying final sizing
-void measure_flex_child_content(LayoutContext* lycon, DomNodeBase* child) {
+void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     if (!child) return;
 
     log_debug("Measuring flex child content for %s", child->name());
@@ -119,7 +119,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNodeBase* child) {
 
 // Helper functions for measurement
 
-ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNodeBase* child) {
+ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* child) {
     // Create truly temporary ViewBlock for measurement without affecting main layout
     log_debug("*** TEMP_VIEW TRACE: Creating temporary view for measurement of %s", child->name());
 
@@ -153,7 +153,7 @@ ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNodeBa
     return temp_view;
 }
 
-void measure_text_content(LayoutContext* lycon, DomNodeBase* text_node, int* width, int* height) {
+void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height) {
     // Measure text content dimensions
     // This would involve font metrics and text measurement
 
@@ -201,7 +201,7 @@ bool requires_content_measurement(ViewBlock* flex_container) {
     if (!flex_container || !flex_container->node) return false;
 
     // Check if any children have auto flex-basis or need intrinsic sizing
-    DomNodeBase* child = flex_container->node->first_child;
+    DomNode* child = flex_container->node->first_child;
     while (child) {
         // If child has complex content or auto sizing, measurement is needed
         if (child->first_child || child->is_text()) {
@@ -218,7 +218,7 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 
     log_debug("Measuring all flex children content");
 
-    DomNodeBase* child = flex_container->node->first_child;
+    DomNode* child = flex_container->node->first_child;
     int child_count = 0;
     const int MAX_CHILDREN = 100; // Safety limit
 
@@ -232,7 +232,7 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 }
 
 // Lightweight View creation for flex items with measured sizes
-void layout_flow_node_for_flex(LayoutContext* lycon, DomNodeBase* node) {
+void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     if (!node) return;
 
     log_debug("=== TRACE: layout_flow_node_for_flex ENTRY for %s (node=%p)", node->name(), node);
@@ -280,7 +280,7 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNodeBase* node) {
 }
 
 // Create a ViewBlock for a flex item without full content layout
-ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNodeBase* node) {
+ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
 
     // Create ViewBlock for the flex item
@@ -314,7 +314,7 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNodeBase* node) {
 }
 
 // Set up basic flex item properties without content layout
-void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNodeBase* node) {
+void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node) {
     (void)lycon; // Suppress unused parameter warning
     if (!view || !node) return;
 
@@ -333,7 +333,7 @@ void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNodeBa
 }
 
 // Create View for flex item element only (no children processing)
-void create_flex_item_view_only(LayoutContext* lycon, DomNodeBase* node) {
+void create_flex_item_view_only(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
     log_debug("Creating View for flex item element only: %s", node->name());
@@ -353,7 +353,7 @@ void create_flex_item_view_only(LayoutContext* lycon, DomNodeBase* node) {
 }
 
 // Create lightweight View for flex item element only (no child processing)
-void create_lightweight_flex_item_view(LayoutContext* lycon, DomNodeBase* node) {
+void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
     log_debug("*** TRACE: create_lightweight_flex_item_view ENTRY for %s (node=%p)", node->name(), node);

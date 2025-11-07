@@ -263,7 +263,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // This handles: text nodes, nested blocks, inline elements, images, etc.
     log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
     if (flex_item->node && flex_item->node->first_child) {
-        DomNodeBase* child = flex_item->node->first_child;
+        DomNode* child = flex_item->node->first_child;
         do {
             log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->name(), lycon->parent);
             // Use standard layout flow - this handles all HTML content types
@@ -317,7 +317,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // PASS 1: Create Views with measured sizes (combined measurement + View creation)
     log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
     int child_count = 0;
-    DomNodeBase* measure_child = block->node->first_child;
+    DomNode* measure_child = block->node->first_child;
     do {
         log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
         // Only create Views for element nodes, skip text nodes

@@ -366,7 +366,7 @@ static DomElement* traverse_and_find_first_match(SelectorMatcher* matcher,
     }
 
     // Traverse children - need to check node type since first_child is void*
-    DomNodeBase* child_node = element->first_child;
+    DomNode* child_node = element->first_child;
     while (child_node) {
         // check if this is an element node (not text or comment)
         if (child_node->is_element()) {

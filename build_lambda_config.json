@@ -1156,6 +1156,7 @@
                             "lexbor"
                         ],
                         "additional_sources": [
+                            "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp"
                         ],
