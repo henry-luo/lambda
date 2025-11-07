@@ -4,9 +4,9 @@
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/strbuf.h"
-#include "css_style.h"
-#include "css_style_node.h"
-#include "dom_node.h"  // Provides DomNodeType enum and utility functions
+#include "css_style.hpp"
+#include "css_style_node.hpp"
+#include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -666,6 +666,39 @@ void dom_comment_destroy(DomComment* comment_node);
  * @return Content string
  */
 const char* dom_comment_get_content(DomComment* comment_node);
+
+// ============================================================================
+// DOM Tree Building from Lambda Elements
+// ============================================================================
+
+/**
+ * Extract string attribute from Lambda Element
+ * Helper function to get attribute values from Lambda's Element structure
+ *
+ * @param elem Lambda Element to extract from
+ * @param attr_name Attribute name to look for
+ * @param pool Memory pool for temporary allocations
+ * @return Attribute value string, or NULL if not found or not a string
+ */
+const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
+
+/**
+ * Recursively build DomElement tree from Lambda Element tree
+ * Converts HTML parser output (Element) to CSS system format (DomElement)
+ *
+ * This function bridges Lambda's HTML parser output with the DOM/CSS system:
+ * - Extracts attributes (id, class, rowspan, colspan) from Lambda Element
+ * - Creates DomElement nodes for elements
+ * - Creates DomText nodes for text content
+ * - Recursively processes all children
+ * - Skips comments, DOCTYPE, script elements
+ *
+ * @param elem Lambda Element tree from HTML parser
+ * @param pool Memory pool for allocations
+ * @param parent Parent DomElement (or NULL for root)
+ * @return Root DomElement of the converted tree, or NULL on error
+ */
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 
 // Note: DOM node type utilities (dom_node_get_type, dom_node_is_element, etc.)
 // are now provided by dom_node.h

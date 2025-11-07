@@ -1158,7 +1158,6 @@
                         "additional_sources": [
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp",
-                            "lib/url_parser.c",
                             "radiant/cmd_layout.cpp"
                         ],
                         "binary": "test_lambda_domnode_gtest.exe",
@@ -1293,7 +1292,9 @@
                     {
                         "source": "test/css/test_css_dom_integration.cpp",
                         "name": "🌐 DOM Integration & Selector Matching Tests (GTest)",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
                         "libraries": [
                             "gtest",
                             "gtest_main",
@@ -1306,21 +1307,16 @@
                             "lambda/input/css/css_property_value_parser.cpp",
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp",
-                            "lib/mempool.c",
-                            "lib/string.c",
-                            "lib/strbuf.c",
-                            "lib/stringbuf.c",
-                            "lib/log.c",
-                            "lib/hashmap.c",
-                            "lib/arraylist.c"
+                            "lambda/input/css/selector_matcher.cpp"
                         ],
                         "binary": "test_css_dom_integration.exe"
                     },
                     {
                         "source": "test/css/test_css_style_application_gtest.cpp",
                         "name": "🎨 CSS Style Application Tests (GTest)",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
                         "libraries": [
                             "gtest",
                             "gtest_main",
@@ -1333,14 +1329,7 @@
                             "lambda/input/css/css_property_value_parser.cpp",
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp",
-                            "lib/mempool.c",
-                            "lib/string.c",
-                            "lib/strbuf.c",
-                            "lib/stringbuf.c",
-                            "lib/log.c",
-                            "lib/hashmap.c",
-                            "lib/arraylist.c"
+                            "lambda/input/css/selector_matcher.cpp"
                         ],
                         "binary": "test_css_style_application_gtest.exe"
                     },
@@ -1357,8 +1346,7 @@
                         ],
                         "additional_sources": [
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp",
-                            "lib/url_parser.c"
+                            "lambda/input/css/selector_matcher.cpp"
                         ],
                         "binary": "test_html_css_gtest.exe"
                     },
@@ -1430,16 +1418,10 @@
                     {
                         "source": "test/css/unit/test_dom_element_print.cpp",
                         "name": "🎨 DOM Element Print Tests",
-                        "dependencies": [],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
                         "additional_sources": [
-                            "lib/strbuf.c",
-                            "lib/stringbuf.c",
-                            "lib/strview.c",
-                            "lib/string.c",
-                            "lib/log.c",
-                            "lib/mempool.c",
-                            "lib/hashmap.c",
-                            "lib/arraylist.c",
                             "lib/avl_tree.c",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/css_style_node.cpp",
