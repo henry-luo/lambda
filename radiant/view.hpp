@@ -614,44 +614,40 @@ enum {
     LXB_CSS_VALUE_VERTICAL_LR          = 0x017a,
     LXB_CSS_VALUE_SIDEWAYS_RL          = 0x017b,
     LXB_CSS_VALUE_SIDEWAYS_LR          = 0x017c,
-    LXB_CSS_VALUE__LAST_ENTRY          = 0x017d
+    // List style types
+    LXB_CSS_VALUE_DISC                 = 0x017d,
+    LXB_CSS_VALUE_CIRCLE               = 0x017e,
+    LXB_CSS_VALUE_SQUARE               = 0x017f,
+    LXB_CSS_VALUE_DECIMAL              = 0x0180,
+    LXB_CSS_VALUE_LOWER_ROMAN          = 0x0181,
+    LXB_CSS_VALUE_UPPER_ROMAN          = 0x0182,
+    LXB_CSS_VALUE_LOWER_ALPHA          = 0x0183,
+    LXB_CSS_VALUE_UPPER_ALPHA          = 0x0184,
+    // Flex layout
+    LXB_CSS_VALUE_SPACE_EVENLY         = 0x0185,
+    // Background properties
+    LXB_CSS_VALUE_CONTAIN              = 0x0186,  // background-size contain
+    LXB_CSS_VALUE_COVER                = 0x0187,  // background-size cover
+    LXB_CSS_VALUE_LOCAL                = 0x0188,  // background-attachment local
+    LXB_CSS_VALUE_PADDING_BOX          = 0x0189,  // background-origin/clip padding-box
+    LXB_CSS_VALUE_MULTIPLY             = 0x018a,  // background-blend-mode multiply
+    LXB_CSS_VALUE_OVERLAY              = 0x018b,  // background-blend-mode overlay
+    LXB_CSS_VALUE_ROUND                = 0x018c,  // background-repeat round
+    LXB_CSS_VALUE_SPACE                = 0x018d,  // background-repeat space
+    // Table properties
+    LXB_CSS_VALUE_COLLAPSE_TABLE       = 0x018e,  // border-collapse collapse
+    LXB_CSS_VALUE_SEPARATE             = 0x018f,  // border-collapse separate
+    LXB_CSS_VALUE_HIDE                 = 0x0190,  // empty-cells hide
+    LXB_CSS_VALUE_SHOW                 = 0x0191,  // empty-cells show
+    // Grid layout
+    LXB_CSS_VALUE_FIT_CONTENT          = 0x0192,
+    LXB_CSS_VALUE_FR                   = 0x0193,
+    LXB_CSS_VALUE_DENSE                = 0x0194,
+    LXB_CSS_VALUE__LAST_ENTRY          = 0x0195
 };
 
 #define RDT_DISPLAY_TEXT                (LXB_CSS_VALUE__LAST_ENTRY + 10)
 #define RDT_DISPLAY_REPLACED            (LXB_CSS_VALUE__LAST_ENTRY + 11)
-
-#define LXB_CSS_VALUE_DISC              (LXB_CSS_VALUE__LAST_ENTRY + 20)
-#define LXB_CSS_VALUE_CIRCLE            (LXB_CSS_VALUE__LAST_ENTRY + 21)
-#define LXB_CSS_VALUE_SQUARE            (LXB_CSS_VALUE__LAST_ENTRY + 22)
-#define LXB_CSS_VALUE_DECIMAL           (LXB_CSS_VALUE__LAST_ENTRY + 23)
-#define LXB_CSS_VALUE_LOWER_ROMAN       (LXB_CSS_VALUE__LAST_ENTRY + 24)
-#define LXB_CSS_VALUE_UPPER_ROMAN       (LXB_CSS_VALUE__LAST_ENTRY + 25)
-#define LXB_CSS_VALUE_LOWER_ALPHA       (LXB_CSS_VALUE__LAST_ENTRY + 26)
-#define LXB_CSS_VALUE_UPPER_ALPHA       (LXB_CSS_VALUE__LAST_ENTRY + 27)
-
-// Additional CSS constants for flex layout
-#define LXB_CSS_VALUE_SPACE_EVENLY      (LXB_CSS_VALUE__LAST_ENTRY + 28)
-
-// Additional CSS constants for background properties
-#define LXB_CSS_VALUE_CONTAIN           (LXB_CSS_VALUE__LAST_ENTRY + 29)  // background-size contain
-#define LXB_CSS_VALUE_COVER             (LXB_CSS_VALUE__LAST_ENTRY + 30)  // background-size cover
-#define LXB_CSS_VALUE_LOCAL             (LXB_CSS_VALUE__LAST_ENTRY + 31)  // background-attachment local
-#define LXB_CSS_VALUE_PADDING_BOX       (LXB_CSS_VALUE__LAST_ENTRY + 32)  // background-origin/clip padding-box
-#define LXB_CSS_VALUE_MULTIPLY          (LXB_CSS_VALUE__LAST_ENTRY + 33)  // background-blend-mode multiply
-#define LXB_CSS_VALUE_OVERLAY           (LXB_CSS_VALUE__LAST_ENTRY + 34)  // background-blend-mode overlay
-#define LXB_CSS_VALUE_ROUND             (LXB_CSS_VALUE__LAST_ENTRY + 35)  // background-repeat round
-#define LXB_CSS_VALUE_SPACE             (LXB_CSS_VALUE__LAST_ENTRY + 36)  // background-repeat space
-
-// Additional CSS constants for table properties
-#define LXB_CSS_VALUE_COLLAPSE_TABLE    (LXB_CSS_VALUE__LAST_ENTRY + 37)  // border-collapse collapse
-#define LXB_CSS_VALUE_SEPARATE          (LXB_CSS_VALUE__LAST_ENTRY + 38)  // border-collapse separate
-#define LXB_CSS_VALUE_HIDE              (LXB_CSS_VALUE__LAST_ENTRY + 39)  // empty-cells hide
-#define LXB_CSS_VALUE_SHOW              (LXB_CSS_VALUE__LAST_ENTRY + 40)  // empty-cells show
-
-// Additional CSS constants for grid layout
-#define LXB_CSS_VALUE_FIT_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 41)
-#define LXB_CSS_VALUE_FR                (LXB_CSS_VALUE__LAST_ENTRY + 42)
-#define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 43)
 
 // CSS unit type (replacing lexbor's lxb_css_unit_t)
 typedef enum {
