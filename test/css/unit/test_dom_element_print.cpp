@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 extern "C" {
-#include "../../../lambda/input/css/dom_element.h"
+#include "../../../lambda/input/css/dom_element.hpp"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/log.h"

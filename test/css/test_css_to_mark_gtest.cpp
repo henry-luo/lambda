@@ -7,10 +7,10 @@
 #include <chrono>
 #include <algorithm>
 #include <cctype>
-#include "../../lambda/input/css/css_tokenizer.h"
-#include "../../lambda/input/css/css_property_value_parser.h"
-#include "../../lambda/input/css/css_parser.h"
-#include "../../lambda/input/css/css_style.h"
+#include "../../lambda/input/css/css_tokenizer.hpp"
+#include "../../lambda/input/css/css_property_value_parser.hpp"
+#include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/input.h"
 #include "../../lambda/format/format.h"
 #include "../../lambda/lambda-data.hpp"

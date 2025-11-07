@@ -51,7 +51,7 @@ static void resolve_table_properties(DomNodeBase* element, ViewTable* table) {
     // These apply regardless of table-layout mode
 
     // Handle both Lexbor and Lambda CSS elements for border properties
-    if (element->type() == MARK_ELEMENT && element->as_element()) {
+    if (element->type() == DOM_NODE_ELEMENT && element->as_element()) {
         // Lambda CSS path - read border-collapse and border-spacing
         DomElement* dom_elem = element->as_element();
 
@@ -129,7 +129,7 @@ static void resolve_table_properties(DomNodeBase* element, ViewTable* table) {
     bool has_explicit_width = false;
     bool has_explicit_height = false;
 
-    if (element->type() == MARK_ELEMENT && element->as_element()) {
+    if (element->type() == DOM_NODE_ELEMENT && element->as_element()) {
         // Lambda CSS path
         DomElement* dom_elem = element->as_element();
 
@@ -176,7 +176,7 @@ static void parse_cell_attributes(DomNodeBase* cellNode, ViewTableCell* cell) {
     cell->vertical_align = ViewTableCell::CELL_VALIGN_TOP;
     if (!cellNode->is_element()) return;
 
-    if (cellNode->type() == MARK_ELEMENT && cellNode->as_element()) {
+    if (cellNode->type() == DOM_NODE_ELEMENT && cellNode->as_element()) {
         // Lambda CSS path
         DomElement* dom_elem = cellNode->as_element();
         log_debug("Lambda CSS: parse_cell_attributes for element type=%d", cellNode->type());
@@ -646,7 +646,7 @@ static int measure_cell_min_width(ViewTableCell* cell) {
 
     // STEP 1: Check for explicit CSS width first
     if (cell->node) {
-        if (cell->node->type() == MARK_ELEMENT && cell->node->as_element()) {
+        if (cell->node->type() == DOM_NODE_ELEMENT && cell->node->as_element()) {
             DomElement* dom_elem = cell->node->as_element();
             if (dom_elem->specified_style) {
                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -803,7 +803,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int table_content_width = 0; // Width available for cells
 
     if (table->node) {
-        if (table->node->type() == MARK_ELEMENT && table->node->as_element()) {
+        if (table->node->type() == DOM_NODE_ELEMENT && table->node->as_element()) {
             DomElement* dom_elem = table->node->as_element();
             if (dom_elem->specified_style) {
                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -876,7 +876,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // Try to get explicit width from CSS first
                             int cell_width = 0;
                             if (tcell->node) {
-                                if (tcell->node->type() == MARK_ELEMENT && tcell->node->as_element()) {
+                                if (tcell->node->type() == DOM_NODE_ELEMENT && tcell->node->as_element()) {
                                     DomElement* dom_elem = tcell->node->as_element();
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* width_decl = style_tree_get_declaration(
@@ -987,7 +987,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Try to get explicit width from CSS first
                     int cell_width = 0;
                     if (tcell->node) {
-                        if (tcell->node->type() == MARK_ELEMENT && tcell->node->as_element()) {
+                        if (tcell->node->type() == DOM_NODE_ELEMENT && tcell->node->as_element()) {
                             DomElement* dom_elem = tcell->node->as_element();
                             if (dom_elem->specified_style) {
                                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1082,7 +1082,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // Try to read width directly from table element's CSS
         if (table->node) {
-            if (table->node->type() == MARK_ELEMENT && table->node->as_element()) {
+            if (table->node->type() == DOM_NODE_ELEMENT && table->node->as_element()) {
                 DomElement* dom_elem = table->node->as_element();
                 if (dom_elem->specified_style) {
                     CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1163,7 +1163,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Try to get explicit width from CSS
                     int cell_width = 0;
                     if (cell->node) {
-                        if (cell->node->type() == MARK_ELEMENT && cell->node->as_element()) {
+                        if (cell->node->type() == DOM_NODE_ELEMENT && cell->node->as_element()) {
                             DomElement* dom_elem = cell->node->as_element();
                             if (dom_elem->specified_style) {
                                 CssDeclaration* width_decl = style_tree_get_declaration(
@@ -1257,7 +1257,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // If table has height: 300px, distribute that height across rows
         int explicit_table_height = 0;
         if (table->node) {
-            if (table->node->type() == MARK_ELEMENT && table->node->as_element()) {
+            if (table->node->type() == DOM_NODE_ELEMENT && table->node->as_element()) {
                 DomElement* dom_elem = table->node->as_element();
                 if (dom_elem->specified_style) {
                     CssDeclaration* height_decl = style_tree_get_declaration(
@@ -1545,7 +1545,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // STEP 1: Check for explicit CSS height property first
                             int explicit_cell_height = 0;
                             if (tcell->node) {
-                                if (tcell->node->type() == MARK_ELEMENT && tcell->node->as_element()) {
+                                if (tcell->node->type() == DOM_NODE_ELEMENT && tcell->node->as_element()) {
                                     DomElement* dom_elem = tcell->node->as_element();
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* height_decl = style_tree_get_declaration(
@@ -1570,7 +1570,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     // Check if child has explicit CSS height
                                     int child_css_height = 0;
                                     if (block->node) {
-                                        if (block->node->type() == MARK_ELEMENT && block->node->as_element()) {
+                                        if (block->node->type() == DOM_NODE_ELEMENT && block->node->as_element()) {
                                             DomElement* dom_elem = block->node->as_element();
                                             if (dom_elem->specified_style) {
                                                 CssDeclaration* child_height_decl = style_tree_get_declaration(
@@ -1786,7 +1786,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // STEP 1: Check for explicit CSS height property first
                     int explicit_cell_height = 0;
                     if (tcell->node) {
-                        if (tcell->node->type() == MARK_ELEMENT && tcell->node->as_element()) {
+                        if (tcell->node->type() == DOM_NODE_ELEMENT && tcell->node->as_element()) {
                             DomElement* dom_elem = tcell->node->as_element();
                             if (dom_elem->specified_style) {
                                 CssDeclaration* height_decl = style_tree_get_declaration(
@@ -1811,7 +1811,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // Check if child has explicit CSS height
                             int child_css_height = 0;
                             if (block->node) {
-                                if (block->node->type() == MARK_ELEMENT && block->node->as_element()) {
+                                if (block->node->type() == DOM_NODE_ELEMENT && block->node->as_element()) {
                                     DomElement* dom_elem = block->node->as_element();
                                     if (dom_elem->specified_style) {
                                         CssDeclaration* child_height_decl = style_tree_get_declaration(

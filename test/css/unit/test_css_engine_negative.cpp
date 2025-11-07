@@ -21,10 +21,10 @@
 #include "../helpers/css_test_helpers.hpp"
 
 extern "C" {
-#include "lambda/input/css/css_engine.h"
-#include "lambda/input/css/css_parser.h"
-#include "lambda/input/css/css_style.h"
-#include "lambda/input/css/css_tokenizer.h"
+#include "lambda/input/css/css_engine.hpp"
+#include "lambda/input/css/css_parser.hpp"
+#include "lambda/input/css/css_style.hpp"
+#include "lambda/input/css/css_tokenizer.hpp"
 }
 
 using namespace CssTestHelpers;
