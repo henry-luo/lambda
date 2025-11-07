@@ -726,12 +726,6 @@
                     "link": "static"
                 },
                 {
-                    "name": "lexbor",
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/liblexbor_static.a",
-                    "link": "static"
-                },
-                {
                     "name": "pthread",
                     "include": "",
                     "lib": "-lpthread",
@@ -1151,8 +1145,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "rpmalloc",
-                            "lexbor"
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lambda/input/css/dom_node.cpp",
