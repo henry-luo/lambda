@@ -59,15 +59,15 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
     float height;
     if (line_height) {
         switch (line_height->type) {
-        case LXB_CSS_VALUE__NUMBER:
+        case CSS_VALUE__NUMBER:
             height = line_height->u.number.num * fbox->style->font_size;
             log_debug("property number: %lf", line_height->u.number.num);
             return height;
-        case LXB_CSS_VALUE__LENGTH:
+        case CSS_VALUE__LENGTH:
             height = line_height->u.length.num;  // px
             log_debug("property unit: %d", line_height->u.length.unit);
             return height;
-        case LXB_CSS_VALUE__PERCENTAGE:
+        case CSS_VALUE__PERCENTAGE:
             height = line_height->u.percentage.num / 100.0 * fbox->style->font_size;
             log_debug("property percentage: %lf", line_height->u.percentage.num);
             return height;
@@ -103,7 +103,7 @@ float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     while (pa && !pa->is_block()) { pa = pa->parent; }
     if (pa) {
         ViewBlock* pa_block = (ViewBlock*)pa;
-        if (pa_block->blk && pa_block->blk->line_height && pa_block->blk->line_height->type != LXB_CSS_VALUE_INHERIT) {
+        if (pa_block->blk && pa_block->blk->line_height && pa_block->blk->line_height->type != CSS_VALUE_INHERIT) {
             return calc_line_height(&lycon->font, pa_block->blk->line_height);
         }
         block = pa_block;
@@ -135,25 +135,25 @@ float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, flo
     log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f",
         align, item_height, line_height, baseline_pos, item_baseline);
     switch (align) {
-    case LXB_CSS_VALUE_BASELINE:
+    case CSS_VALUE_BASELINE:
         return baseline_pos - item_baseline;
-    case LXB_CSS_VALUE_TOP:
+    case CSS_VALUE_TOP:
         return 0;
-    case LXB_CSS_VALUE_MIDDLE:
+    case CSS_VALUE_MIDDLE:
         return (line_height - item_height) / 2;
-    case LXB_CSS_VALUE_BOTTOM:
+    case CSS_VALUE_BOTTOM:
         log_debug("bottom-aligned-text: line %d", line_height);
         return line_height - item_height;
-    case LXB_CSS_VALUE_TEXT_TOP:
+    case CSS_VALUE_TEXT_TOP:
         // align with the top of the parent's font
         return baseline_pos - lycon->block.init_ascender;
-    case LXB_CSS_VALUE_TEXT_BOTTOM:
+    case CSS_VALUE_TEXT_BOTTOM:
         // align with the bottom of the parent's font
         return baseline_pos + lycon->block.init_descender - item_height;
-    case LXB_CSS_VALUE_SUB:
+    case CSS_VALUE_SUB:
         // Subscript position (approximately 0.3em lower)
         return baseline_pos - item_baseline + 0.3 * line_height;
-    case LXB_CSS_VALUE_SUPER:
+    case CSS_VALUE_SUPER:
         // Superscript position (approximately 0.3em higher)
         return baseline_pos - item_baseline - 0.3 * line_height;
     default:
@@ -253,15 +253,15 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
 void line_align(LayoutContext* lycon) {
     // align the views in the line
     log_debug("line align");
-    if (lycon->block.text_align != LXB_CSS_VALUE_LEFT) {
+    if (lycon->block.text_align != CSS_VALUE_LEFT) {
         View* view = lycon->line.start_view;
         if (view) {
             float line_width = lycon->line.advance_x -lycon->line.left;
             float offset = 0;
-            if (lycon->block.text_align == LXB_CSS_VALUE_CENTER) {
+            if (lycon->block.text_align == CSS_VALUE_CENTER) {
                 offset = (lycon->block.content_width - line_width) / 2;
             }
-            else if (lycon->block.text_align == LXB_CSS_VALUE_RIGHT) {
+            else if (lycon->block.text_align == CSS_VALUE_RIGHT) {
                 offset = lycon->block.content_width - line_width;
             }
             if (offset <= 0) return;  // no need to adjust the views
@@ -287,7 +287,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("processing element: %s, with display: outer=%d, inner=%d", node->name(), display.outer, display.inner);
         if (strcmp(node->name(), "table") == 0) {
             log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
-                   display.outer, display.inner, LXB_CSS_VALUE_TABLE);
+                   display.outer, display.inner, CSS_VALUE_TABLE);
         }
         if (strcmp(node->name(), "tbody") == 0) {
             printf("DEBUG: TBODY in layout_flow_node - outer=%d, inner=%d\n", display.outer, display.inner);
@@ -295,13 +295,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                    ((View*)lycon->view)->x, ((View*)lycon->view)->y);
         }
         switch (display.outer) {
-        case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:  case LXB_CSS_VALUE_LIST_ITEM:
+        case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
             layout_block(lycon, node, display);
             break;
-        case LXB_CSS_VALUE_INLINE:
+        case CSS_VALUE_INLINE:
             layout_inline(lycon, node, display);
             break;
-        case LXB_CSS_VALUE_NONE:
+        case CSS_VALUE_NONE:
             log_debug("skipping element of display: none");
             break;
         default:
@@ -343,7 +343,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // This matches browser behavior where HTML element fits content, not viewport
     lycon->block.content_height = 0;  // Will be calculated based on content
     lycon->block.advance_y = 0;  lycon->block.line_height = -1;
-    lycon->block.text_align = LXB_CSS_VALUE_LEFT;
+    lycon->block.text_align = CSS_VALUE_LEFT;
     line_init(lycon, 0, lycon->block.content_width);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
@@ -353,8 +353,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->elmt = elmt;
     // default html styles
     html->scroller = alloc_scroll_prop(lycon);
-    html->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
-    html->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
+    html->scroller->overflow_x = CSS_VALUE_AUTO;
+    html->scroller->overflow_y = CSS_VALUE_AUTO;
     lycon->block.given_width = lycon->ui_context->window_width;
     lycon->block.given_height = -1;  // -1 means auto-size to content, instead of setting to viewport height
     html->position = alloc_position_prop(lycon);
@@ -395,12 +395,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     if (body_node) {
         log_debug("Laying out body element: %p", (void*)body_node);
         layout_block(lycon, body_node,
-            (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});
+            (DisplayValue){.outer = CSS_VALUE_BLOCK, .inner = CSS_VALUE_FLOW});
     } else {
         log_debug("No body element found in DOM tree");
     }
 
-    finalize_block_flow(lycon, html, LXB_CSS_VALUE_BLOCK);
+    finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 }
 
 // Function to determine HTML version from DOCTYPE and compat mode

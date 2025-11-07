@@ -233,10 +233,10 @@ int measure_cell_min_width(ViewTableCell* cell) {
 // layout_table.cpp:224-240
 DisplayValue child_display = resolve_display(child->as_element());
 
-if (tag == LXB_TAG_CAPTION || child_display.inner == LXB_CSS_VALUE_TABLE_CAPTION) {
+if (tag == HTM_TAG_CAPTION || child_display.inner == CSS_VALUE_TABLE_CAPTION) {
     // Caption handled
 }
-else if (tag == LXB_TAG_THEAD || child_display.inner == LXB_CSS_VALUE_TABLE_ROW_GROUP) {
+else if (tag == HTM_TAG_THEAD || child_display.inner == CSS_VALUE_TABLE_ROW_GROUP) {
     // Row group handled
 }
 // ... BUT: display: table on <div> NOT checked in layout.cpp!
@@ -261,11 +261,11 @@ The `layout_flow_node()` function in `layout.cpp` doesn't check for `display: ta
 ```cpp
 // layout.cpp (assumed structure)
 void layout_flow_node(LayoutContext* lycon, DomNode* node) {
-    if (node->tag() == LXB_TAG_TABLE) {
+    if (node->tag() == HTM_TAG_TABLE) {
         layout_table(lycon, node, display);
     }
-    // MISSING: Check display.inner == LXB_CSS_VALUE_TABLE
-    else if (display.outer == LXB_CSS_VALUE_BLOCK) {
+    // MISSING: Check display.inner == CSS_VALUE_TABLE
+    else if (display.outer == CSS_VALUE_BLOCK) {
         layout_block(lycon, node, display);
     }
 }
@@ -278,12 +278,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode* node) {
     DisplayValue display = resolve_display(node->as_element());
 
     // Check CSS display property BEFORE tag name
-    if (display.inner == LXB_CSS_VALUE_TABLE || node->tag() == LXB_TAG_TABLE) {
+    if (display.inner == CSS_VALUE_TABLE || node->tag() == HTM_TAG_TABLE) {
         layout_table(lycon, node, display);
         return;
     }
 
-    if (display.inner == LXB_CSS_VALUE_TABLE_CELL || node->tag() == LXB_TAG_TD || node->tag() == LXB_TAG_TH) {
+    if (display.inner == CSS_VALUE_TABLE_CELL || node->tag() == HTM_TAG_TD || node->tag() == HTM_TAG_TH) {
         // Handle table-cell (may need special block context)
         layout_table_cell_as_block(lycon, node, display);
         return;
@@ -371,7 +371,7 @@ ViewBlock* caption = nullptr;
 int caption_height = 0;
 
 for (ViewBlock* child = table->first_child; child; child = child->next_sibling) {
-    if (child->node && child->node->tag() == LXB_TAG_CAPTION) {
+    if (child->node && child->node->tag() == HTM_TAG_CAPTION) {
         caption = child;
         if (caption->height > 0) {
             caption_height = caption->height + 8; // Add margin
@@ -394,7 +394,7 @@ Radiant: Caption (16, 16, 299×0) - HEIGHT IS ZERO!
 ### Solution
 ```cpp
 // In build_table_tree()
-if (tag == LXB_TAG_CAPTION) {
+if (tag == HTM_TAG_CAPTION) {
     ViewBlock* caption = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
     if (caption) {
         // Set up layout context for caption

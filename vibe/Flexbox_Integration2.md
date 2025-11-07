@@ -51,12 +51,12 @@ The current flex layout integrates with the existing block flow system through `
 
 ```cpp
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
-    if (display.inner == LXB_CSS_VALUE_FLEX) {
+    if (display.inner == CSS_VALUE_FLEX) {
         // Current single-pass approach:
         // 1. Process DOM children into View objects via layout_flow_node()
         // 2. Run flex algorithm on already-sized children
         // 3. No content measurement before flex sizing decisions
-        
+
         init_flex_container(lycon, block);
         do {
             layout_flow_node(lycon, child);  // ← Creates final View objects
@@ -78,27 +78,27 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 #### 1.1 Enhanced Integration Flow
 ```cpp
 // Enhanced multi-pass flex layout integration
-else if (display.inner == LXB_CSS_VALUE_FLEX) {
+else if (display.inner == CSS_VALUE_FLEX) {
     FlexContainerLayout* pa_flex = lycon->flex_container;
     init_flex_container(lycon, block);
-    
+
     // PASS 1: Content measurement (new)
     DomNode* child = block->node->first_child();
     do {
         measure_flex_child_content(lycon, child);  // New function
         child = child->next_sibling();
     } while (child);
-    
+
     // PASS 2: Create View objects with measured sizes
     child = block->node->first_child();
     do {
         layout_flow_node_for_flex(lycon, child);  // Enhanced function
         child = child->next_sibling();
     } while (child);
-    
+
     // PASS 3: Apply flex algorithm with nested content support
     layout_flex_container_with_nested_content(lycon, block);
-    
+
     cleanup_flex_container(lycon);
     lycon->flex_container = pa_flex;
 }
@@ -112,12 +112,12 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // - Measured content sizes stored in flex items
     // - Min-content and max-content widths calculated
     // - Intrinsic aspect ratios determined
-    
+
     // Pass 2: Flex Algorithm
     // - Run flex algorithm with measured content sizes
     // - Distribute available space using flex-grow/shrink
     // - Apply justify-content and align-items
-    
+
     // Pass 3: Final Content Layout
     // - Layout flex item contents with final determined sizes
     // - Handle text flow and inline content properly
@@ -134,10 +134,10 @@ void measure_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     LayoutContext measure_ctx = *lycon;
     measure_ctx.block.width = INT_MAX;  // Allow natural width
     measure_ctx.block.height = INT_MAX; // Allow natural height
-    
+
     // Layout content to measure natural sizes
     layout_flex_item_content(&measure_ctx, flex_item);
-    
+
     // Store measured sizes for flex algorithm
     flex_item->measured_min_width = calculate_min_content_width(flex_item);
     flex_item->measured_max_width = calculate_max_content_width(flex_item);
@@ -156,17 +156,17 @@ void resolve_flexible_lengths_v2(FlexContainerLayout* flex_layout, FlexLineInfo*
         int hypothetical_size = calculate_hypothetical_main_size(item, flex_layout);
         set_main_axis_size(item, hypothetical_size, flex_layout);
     }
-    
+
     // Step 2: Collect flex items and calculate free space
     int total_hypothetical_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         total_hypothetical_size += get_main_axis_size(line->items[i], flex_layout);
     }
-    
+
     // Include gaps in free space calculation
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
     int free_space = flex_layout->main_axis_size - total_hypothetical_size - gap_space;
-    
+
     // Step 3: Distribute free space
     if (free_space != 0) {
         distribute_free_space_v2(flex_layout, line, free_space);
@@ -184,48 +184,48 @@ void handle_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     // Detect auto margins on main and cross axes
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        
+
         // Main axis auto margins
-        bool main_start_auto = is_main_axis_horizontal(flex_layout) ? 
+        bool main_start_auto = is_main_axis_horizontal(flex_layout) ?
             item->margin_left_auto : item->margin_top_auto;
-        bool main_end_auto = is_main_axis_horizontal(flex_layout) ? 
+        bool main_end_auto = is_main_axis_horizontal(flex_layout) ?
             item->margin_right_auto : item->margin_bottom_auto;
-            
+
         if (main_start_auto || main_end_auto) {
             apply_main_axis_auto_margins(flex_layout, line, item, i);
         }
-        
+
         // Cross axis auto margins
-        bool cross_start_auto = is_main_axis_horizontal(flex_layout) ? 
+        bool cross_start_auto = is_main_axis_horizontal(flex_layout) ?
             item->margin_top_auto : item->margin_left_auto;
-        bool cross_end_auto = is_main_axis_horizontal(flex_layout) ? 
+        bool cross_end_auto = is_main_axis_horizontal(flex_layout) ?
             item->margin_bottom_auto : item->margin_right_auto;
-            
+
         if (cross_start_auto || cross_end_auto) {
             apply_cross_axis_auto_margins(flex_layout, item);
         }
     }
 }
 
-void apply_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line, 
+void apply_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInfo* line,
                                  ViewBlock* item, int item_index) {
     // Calculate available space for auto margins
     int container_size = flex_layout->main_axis_size;
     int total_item_sizes = 0;
     int total_gaps = calculate_gap_space(flex_layout, line->item_count, true);
-    
+
     for (int i = 0; i < line->item_count; i++) {
         total_item_sizes += get_main_axis_size(line->items[i], flex_layout);
     }
-    
+
     int available_space = container_size - total_item_sizes - total_gaps;
-    
+
     // Distribute available space among auto margins
-    bool start_auto = is_main_axis_horizontal(flex_layout) ? 
+    bool start_auto = is_main_axis_horizontal(flex_layout) ?
         item->margin_left_auto : item->margin_top_auto;
-    bool end_auto = is_main_axis_horizontal(flex_layout) ? 
+    bool end_auto = is_main_axis_horizontal(flex_layout) ?
         item->margin_right_auto : item->margin_bottom_auto;
-    
+
     if (start_auto && end_auto) {
         // Center item: distribute space equally
         int margin_size = available_space / 2;
@@ -250,65 +250,65 @@ void align_items_main_axis_v2(FlexContainerLayout* flex_layout, FlexLineInfo* li
         handle_auto_margins(flex_layout, line);
         return;
     }
-    
+
     // Calculate positioning based on justify-content
     int container_size = flex_layout->main_axis_size;
     int total_item_size = calculate_total_item_size(line, flex_layout);
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
     int available_space = container_size - total_item_size - gap_space;
-    
+
     int current_pos = 0;
     int item_spacing = 0;
-    
+
     switch (flex_layout->justify) {
-        case LXB_CSS_VALUE_FLEX_START:
+        case CSS_VALUE_FLEX_START:
             current_pos = 0;
             break;
-            
-        case LXB_CSS_VALUE_FLEX_END:
+
+        case CSS_VALUE_FLEX_END:
             current_pos = available_space;
             break;
-            
-        case LXB_CSS_VALUE_CENTER:
+
+        case CSS_VALUE_CENTER:
             current_pos = available_space / 2;
             break;
-            
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
+
+        case CSS_VALUE_SPACE_BETWEEN:
             current_pos = 0;
             if (line->item_count > 1) {
                 item_spacing = available_space / (line->item_count - 1);
             }
             break;
-            
-        case LXB_CSS_VALUE_SPACE_AROUND:
+
+        case CSS_VALUE_SPACE_AROUND:
             if (line->item_count > 0) {
                 item_spacing = available_space / line->item_count;
                 current_pos = item_spacing / 2;
             }
             break;
-            
-        case LXB_CSS_VALUE_SPACE_EVENLY:
+
+        case CSS_VALUE_SPACE_EVENLY:
             if (line->item_count > 0) {
                 item_spacing = available_space / (line->item_count + 1);
                 current_pos = item_spacing;
             }
             break;
     }
-    
+
     // Position items with proper spacing
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         set_main_axis_position(item, current_pos, flex_layout);
-        
+
         // Advance position
         current_pos += get_main_axis_size(item, flex_layout);
-        
+
         // Add justify-content spacing
         if (i < line->item_count - 1) {
             current_pos += item_spacing;
-            
+
             // Add gap
-            int gap = is_main_axis_horizontal(flex_layout) ? 
+            int gap = is_main_axis_horizontal(flex_layout) ?
                 flex_layout->column_gap : flex_layout->row_gap;
             current_pos += gap;
         }
@@ -325,24 +325,24 @@ void align_items_main_axis_v2(FlexContainerLayout* flex_layout, FlexLineInfo* li
 void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item) {
     // Save parent context
     LayoutContext saved_context = *lycon;
-    
+
     // Set up flex item as a proper containing block
     lycon->parent = (ViewGroup*)flex_item;
     lycon->prev_view = NULL;
-    
+
     // Calculate content area dimensions accounting for box model
     int content_width = flex_item->width;
     int content_height = flex_item->height;
     int content_x_offset = 0;
     int content_y_offset = 0;
-    
+
     if (flex_item->bound) {
         // Account for padding and border in content area
         content_width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
         content_height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
         content_x_offset = flex_item->bound->padding.left;
         content_y_offset = flex_item->bound->padding.top;
-        
+
         if (flex_item->bound->border) {
             content_width -= (flex_item->bound->border->width.left + flex_item->bound->border->width.right);
             content_height -= (flex_item->bound->border->width.top + flex_item->bound->border->width.bottom);
@@ -350,25 +350,25 @@ void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item) {
             content_y_offset += flex_item->bound->border->width.top;
         }
     }
-    
+
     // Set up block formatting context for nested content
     lycon->block.width = content_width;
     lycon->block.height = content_height;
     lycon->block.advance_y = content_y_offset;
     lycon->block.max_width = 0;
-    
+
     // Inherit text alignment and other block properties from flex item
     if (flex_item->blk) {
         lycon->block.text_align = flex_item->blk->text_align;
         lycon->block.line_height = flex_item->blk->line_height;
     }
-    
+
     // Set up line formatting context for inline content
     lycon->line.left = content_x_offset;
     lycon->line.right = content_x_offset + content_width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
+    lycon->line.vertical_align = CSS_VALUE_BASELINE;
     line_init(lycon);
-    
+
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
     if (flex_item->node && flex_item->node->first_child()) {
@@ -378,17 +378,17 @@ void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item) {
             layout_flow_node(lycon, child);
             child = child->next_sibling();
         } while (child);
-        
+
         // Finalize any pending line content
         if (!lycon->line.is_line_start) {
             line_break(lycon);
         }
     }
-    
+
     // Update flex item content dimensions for intrinsic sizing
     flex_item->content_width = lycon->block.max_width;
     flex_item->content_height = lycon->block.advance_y - content_y_offset;
-    
+
     // Restore parent context
     *lycon = saved_context;
 }
@@ -401,39 +401,39 @@ void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item) {
 **File**: `/radiant/resolve_style.cpp` (Enhanced)
 ```cpp
 // Enhanced flex property resolution
-void resolve_flex_properties_v2(LayoutContext* lycon, ViewBlock* block, 
+void resolve_flex_properties_v2(LayoutContext* lycon, ViewBlock* block,
                                const lxb_css_declaration_t* declr, uint32_t specificity) {
     switch (declr->type) {
         case LXB_CSS_PROPERTY_FLEX_GROW: {
             const lxb_css_property_flex_grow_t* grow = declr->u.flex_grow;
-            if (grow->type == LXB_CSS_VALUE_NUMBER) {
+            if (grow->type == CSS_VALUE_NUMBER) {
                 block->flex_grow = grow->number.value;
             }
             break;
         }
-        
+
         case LXB_CSS_PROPERTY_FLEX_SHRINK: {
             const lxb_css_property_flex_shrink_t* shrink = declr->u.flex_shrink;
-            if (shrink->type == LXB_CSS_VALUE_NUMBER) {
+            if (shrink->type == CSS_VALUE_NUMBER) {
                 block->flex_shrink = shrink->number.value;
             }
             break;
         }
-        
+
         case LXB_CSS_PROPERTY_FLEX_BASIS: {
             const lxb_css_property_flex_basis_t* basis = declr->u.flex_basis;
-            if (basis->type == LXB_CSS_VALUE_AUTO) {
+            if (basis->type == CSS_VALUE_AUTO) {
                 block->flex_basis = -1; // auto
-            } else if (basis->type == LXB_CSS_VALUE_LENGTH) {
+            } else if (basis->type == CSS_VALUE_LENGTH) {
                 block->flex_basis = resolve_length_value(lycon, &basis->length);
                 block->flex_basis_is_percent = false;
-            } else if (basis->type == LXB_CSS_VALUE_PERCENTAGE) {
+            } else if (basis->type == CSS_VALUE_PERCENTAGE) {
                 block->flex_basis = basis->percentage.value;
                 block->flex_basis_is_percent = true;
             }
             break;
         }
-        
+
         case LXB_CSS_PROPERTY_MARGIN_LEFT:
         case LXB_CSS_PROPERTY_MARGIN_RIGHT:
         case LXB_CSS_PROPERTY_MARGIN_TOP:
@@ -448,12 +448,12 @@ void resolve_flex_properties_v2(LayoutContext* lycon, ViewBlock* block,
 void resolve_margin_property(ViewBlock* block, const lxb_css_declaration_t* declr) {
     bool is_auto = false;
     int margin_value = 0;
-    
+
     // Check if margin is auto
     switch (declr->type) {
         case LXB_CSS_PROPERTY_MARGIN_LEFT: {
             const lxb_css_property_margin_left_t* margin = declr->u.margin_left;
-            is_auto = (margin->type == LXB_CSS_VALUE_AUTO);
+            is_auto = (margin->type == CSS_VALUE_AUTO);
             if (!is_auto) {
                 margin_value = resolve_length_value(lycon, &margin->length);
             }
@@ -476,7 +476,7 @@ class FlexLayoutTester:
     def __init__(self):
         self.test_cases = [
             "flex_grow_distribution",
-            "justify_content_space_evenly", 
+            "justify_content_space_evenly",
             "auto_margins_centering",
             "nested_flex_containers",
             "text_positioning_in_flex",
@@ -484,26 +484,26 @@ class FlexLayoutTester:
             "baseline_alignment",
             "aspect_ratio_constraints"
         ]
-    
+
     def run_advanced_tests(self):
         results = {}
         for test_case in self.test_cases:
             result = self.run_single_test(test_case)
             results[test_case] = result
-            
+
         return self.analyze_results(results)
-    
+
     def validate_flex_grow(self, container, expected_sizes):
         # Validate that flex-grow distributes space correctly
         items = self.get_flex_items(container)
         actual_sizes = [item.width for item in items]
-        
+
         tolerance = 2.0  # 2px tolerance
         for i, (actual, expected) in enumerate(zip(actual_sizes, expected_sizes)):
             diff = abs(actual - expected)
             if diff > tolerance:
                 return False, f"Item {i}: expected {expected}px, got {actual}px (diff: {diff}px)"
-        
+
         return True, "All flex-grow sizes within tolerance"
 ```
 

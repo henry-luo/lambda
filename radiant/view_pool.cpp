@@ -11,413 +11,413 @@ extern "C" {
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
 static const css_data lxb_css_value_data[] = {
-    {"_undef", 6, LXB_CSS_VALUE__UNDEF},
-    {"initial", 7, LXB_CSS_VALUE_INITIAL},
-    {"inherit", 7, LXB_CSS_VALUE_INHERIT},
-    {"unset", 5, LXB_CSS_VALUE_UNSET},
-    {"revert", 6, LXB_CSS_VALUE_REVERT},
-    {"flex-start", 10, LXB_CSS_VALUE_FLEX_START},
-    {"flex-end", 8, LXB_CSS_VALUE_FLEX_END},
-    {"center", 6, LXB_CSS_VALUE_CENTER},
-    {"space-between", 13, LXB_CSS_VALUE_SPACE_BETWEEN},
-    {"space-around", 12, LXB_CSS_VALUE_SPACE_AROUND},
-    {"stretch", 7, LXB_CSS_VALUE_STRETCH},
-    {"baseline", 8, LXB_CSS_VALUE_BASELINE},
-    {"auto", 4, LXB_CSS_VALUE_AUTO},
-    {"text-bottom", 11, LXB_CSS_VALUE_TEXT_BOTTOM},
-    {"alphabetic", 10, LXB_CSS_VALUE_ALPHABETIC},
-    {"ideographic", 11, LXB_CSS_VALUE_IDEOGRAPHIC},
-    {"middle", 6, LXB_CSS_VALUE_MIDDLE},
-    {"central", 7, LXB_CSS_VALUE_CENTRAL},
-    {"mathematical", 12, LXB_CSS_VALUE_MATHEMATICAL},
-    {"text-top", 8, LXB_CSS_VALUE_TEXT_TOP},
-    {"_length", 7, LXB_CSS_VALUE__LENGTH},
-    {"_percentage", 11, LXB_CSS_VALUE__PERCENTAGE},
-    {"sub", 3, LXB_CSS_VALUE_SUB},
-    {"super", 5, LXB_CSS_VALUE_SUPER},
-    {"top", 3, LXB_CSS_VALUE_TOP},
-    {"bottom", 6, LXB_CSS_VALUE_BOTTOM},
-    {"first", 5, LXB_CSS_VALUE_FIRST},
-    {"last", 4, LXB_CSS_VALUE_LAST},
-    {"thin", 4, LXB_CSS_VALUE_THIN},
-    {"medium", 6, LXB_CSS_VALUE_MEDIUM},
-    {"thick", 5, LXB_CSS_VALUE_THICK},
-    {"none", 4, LXB_CSS_VALUE_NONE},
-    {"hidden", 6, LXB_CSS_VALUE_HIDDEN},
-    {"dotted", 6, LXB_CSS_VALUE_DOTTED},
-    {"dashed", 6, LXB_CSS_VALUE_DASHED},
-    {"solid", 5, LXB_CSS_VALUE_SOLID},
-    {"double", 6, LXB_CSS_VALUE_DOUBLE},
-    {"groove", 6, LXB_CSS_VALUE_GROOVE},
-    {"ridge", 5, LXB_CSS_VALUE_RIDGE},
-    {"inset", 5, LXB_CSS_VALUE_INSET},
-    {"outset", 6, LXB_CSS_VALUE_OUTSET},
-    {"content-box", 11, LXB_CSS_VALUE_CONTENT_BOX},
-    {"border-box", 10, LXB_CSS_VALUE_BORDER_BOX},
-    {"inline-start", 12, LXB_CSS_VALUE_INLINE_START},
-    {"inline-end", 10, LXB_CSS_VALUE_INLINE_END},
-    {"block-start", 11, LXB_CSS_VALUE_BLOCK_START},
-    {"block-end", 9, LXB_CSS_VALUE_BLOCK_END},
-    {"left", 4, LXB_CSS_VALUE_LEFT},
-    {"right", 5, LXB_CSS_VALUE_RIGHT},
-    {"currentcolor", 12, LXB_CSS_VALUE_CURRENTCOLOR},
-    {"transparent", 11, LXB_CSS_VALUE_TRANSPARENT},
-    {"hex", 3, LXB_CSS_VALUE_HEX},
-    {"aliceblue", 9, LXB_CSS_VALUE_ALICEBLUE},
-    {"antiquewhite", 12, LXB_CSS_VALUE_ANTIQUEWHITE},
-    {"aqua", 4, LXB_CSS_VALUE_AQUA},
-    {"aquamarine", 10, LXB_CSS_VALUE_AQUAMARINE},
-    {"azure", 5, LXB_CSS_VALUE_AZURE},
-    {"beige", 5, LXB_CSS_VALUE_BEIGE},
-    {"bisque", 6, LXB_CSS_VALUE_BISQUE},
-    {"black", 5, LXB_CSS_VALUE_BLACK},
-    {"blanchedalmond", 14, LXB_CSS_VALUE_BLANCHEDALMOND},
-    {"blue", 4, LXB_CSS_VALUE_BLUE},
-    {"blueviolet", 10, LXB_CSS_VALUE_BLUEVIOLET},
-    {"brown", 5, LXB_CSS_VALUE_BROWN},
-    {"burlywood", 9, LXB_CSS_VALUE_BURLYWOOD},
-    {"cadetblue", 9, LXB_CSS_VALUE_CADETBLUE},
-    {"chartreuse", 10, LXB_CSS_VALUE_CHARTREUSE},
-    {"chocolate", 9, LXB_CSS_VALUE_CHOCOLATE},
-    {"coral", 5, LXB_CSS_VALUE_CORAL},
-    {"cornflowerblue", 14, LXB_CSS_VALUE_CORNFLOWERBLUE},
-    {"cornsilk", 8, LXB_CSS_VALUE_CORNSILK},
-    {"crimson", 7, LXB_CSS_VALUE_CRIMSON},
-    {"cyan", 4, LXB_CSS_VALUE_CYAN},
-    {"darkblue", 8, LXB_CSS_VALUE_DARKBLUE},
-    {"darkcyan", 8, LXB_CSS_VALUE_DARKCYAN},
-    {"darkgoldenrod", 13, LXB_CSS_VALUE_DARKGOLDENROD},
-    {"darkgray", 8, LXB_CSS_VALUE_DARKGRAY},
-    {"darkgreen", 9, LXB_CSS_VALUE_DARKGREEN},
-    {"darkgrey", 8, LXB_CSS_VALUE_DARKGREY},
-    {"darkkhaki", 9, LXB_CSS_VALUE_DARKKHAKI},
-    {"darkmagenta", 11, LXB_CSS_VALUE_DARKMAGENTA},
-    {"darkolivegreen", 14, LXB_CSS_VALUE_DARKOLIVEGREEN},
-    {"darkorange", 10, LXB_CSS_VALUE_DARKORANGE},
-    {"darkorchid", 10, LXB_CSS_VALUE_DARKORCHID},
-    {"darkred", 7, LXB_CSS_VALUE_DARKRED},
-    {"darksalmon", 10, LXB_CSS_VALUE_DARKSALMON},
-    {"darkseagreen", 12, LXB_CSS_VALUE_DARKSEAGREEN},
-    {"darkslateblue", 13, LXB_CSS_VALUE_DARKSLATEBLUE},
-    {"darkslategray", 13, LXB_CSS_VALUE_DARKSLATEGRAY},
-    {"darkslategrey", 13, LXB_CSS_VALUE_DARKSLATEGREY},
-    {"darkturquoise", 13, LXB_CSS_VALUE_DARKTURQUOISE},
-    {"darkviolet", 10, LXB_CSS_VALUE_DARKVIOLET},
-    {"deeppink", 8, LXB_CSS_VALUE_DEEPPINK},
-    {"deepskyblue", 11, LXB_CSS_VALUE_DEEPSKYBLUE},
-    {"dimgray", 7, LXB_CSS_VALUE_DIMGRAY},
-    {"dimgrey", 7, LXB_CSS_VALUE_DIMGREY},
-    {"dodgerblue", 10, LXB_CSS_VALUE_DODGERBLUE},
-    {"firebrick", 9, LXB_CSS_VALUE_FIREBRICK},
-    {"floralwhite", 11, LXB_CSS_VALUE_FLORALWHITE},
-    {"forestgreen", 11, LXB_CSS_VALUE_FORESTGREEN},
-    {"fuchsia", 7, LXB_CSS_VALUE_FUCHSIA},
-    {"gainsboro", 9, LXB_CSS_VALUE_GAINSBORO},
-    {"ghostwhite", 10, LXB_CSS_VALUE_GHOSTWHITE},
-    {"gold", 4, LXB_CSS_VALUE_GOLD},
-    {"goldenrod", 9, LXB_CSS_VALUE_GOLDENROD},
-    {"gray", 4, LXB_CSS_VALUE_GRAY},
-    {"green", 5, LXB_CSS_VALUE_GREEN},
-    {"greenyellow", 11, LXB_CSS_VALUE_GREENYELLOW},
-    {"grey", 4, LXB_CSS_VALUE_GREY},
-    {"honeydew", 8, LXB_CSS_VALUE_HONEYDEW},
-    {"hotpink", 7, LXB_CSS_VALUE_HOTPINK},
-    {"indianred", 9, LXB_CSS_VALUE_INDIANRED},
-    {"indigo", 6, LXB_CSS_VALUE_INDIGO},
-    {"ivory", 5, LXB_CSS_VALUE_IVORY},
-    {"khaki", 5, LXB_CSS_VALUE_KHAKI},
-    {"lavender", 8, LXB_CSS_VALUE_LAVENDER},
-    {"lavenderblush", 13, LXB_CSS_VALUE_LAVENDERBLUSH},
-    {"lawngreen", 9, LXB_CSS_VALUE_LAWNGREEN},
-    {"lemonchiffon", 12, LXB_CSS_VALUE_LEMONCHIFFON},
-    {"lightblue", 9, LXB_CSS_VALUE_LIGHTBLUE},
-    {"lightcoral", 10, LXB_CSS_VALUE_LIGHTCORAL},
-    {"lightcyan", 9, LXB_CSS_VALUE_LIGHTCYAN},
-    {"lightgoldenrodyellow", 20, LXB_CSS_VALUE_LIGHTGOLDENRODYELLOW},
-    {"lightgray", 9, LXB_CSS_VALUE_LIGHTGRAY},
-    {"lightgreen", 10, LXB_CSS_VALUE_LIGHTGREEN},
-    {"lightgrey", 9, LXB_CSS_VALUE_LIGHTGREY},
-    {"lightpink", 9, LXB_CSS_VALUE_LIGHTPINK},
-    {"lightsalmon", 11, LXB_CSS_VALUE_LIGHTSALMON},
-    {"lightseagreen", 13, LXB_CSS_VALUE_LIGHTSEAGREEN},
-    {"lightskyblue", 12, LXB_CSS_VALUE_LIGHTSKYBLUE},
-    {"lightslategray", 14, LXB_CSS_VALUE_LIGHTSLATEGRAY},
-    {"lightslategrey", 14, LXB_CSS_VALUE_LIGHTSLATEGREY},
-    {"lightsteelblue", 14, LXB_CSS_VALUE_LIGHTSTEELBLUE},
-    {"lightyellow", 11, LXB_CSS_VALUE_LIGHTYELLOW},
-    {"lime", 4, LXB_CSS_VALUE_LIME},
-    {"limegreen", 9, LXB_CSS_VALUE_LIMEGREEN},
-    {"linen", 5, LXB_CSS_VALUE_LINEN},
-    {"magenta", 7, LXB_CSS_VALUE_MAGENTA},
-    {"maroon", 6, LXB_CSS_VALUE_MAROON},
-    {"mediumaquamarine", 16, LXB_CSS_VALUE_MEDIUMAQUAMARINE},
-    {"mediumblue", 10, LXB_CSS_VALUE_MEDIUMBLUE},
-    {"mediumorchid", 12, LXB_CSS_VALUE_MEDIUMORCHID},
-    {"mediumpurple", 12, LXB_CSS_VALUE_MEDIUMPURPLE},
-    {"mediumseagreen", 14, LXB_CSS_VALUE_MEDIUMSEAGREEN},
-    {"mediumslateblue", 15, LXB_CSS_VALUE_MEDIUMSLATEBLUE},
-    {"mediumspringgreen", 17, LXB_CSS_VALUE_MEDIUMSPRINGGREEN},
-    {"mediumturquoise", 15, LXB_CSS_VALUE_MEDIUMTURQUOISE},
-    {"mediumvioletred", 15, LXB_CSS_VALUE_MEDIUMVIOLETRED},
-    {"midnightblue", 12, LXB_CSS_VALUE_MIDNIGHTBLUE},
-    {"mintcream", 9, LXB_CSS_VALUE_MINTCREAM},
-    {"mistyrose", 9, LXB_CSS_VALUE_MISTYROSE},
-    {"moccasin", 8, LXB_CSS_VALUE_MOCCASIN},
-    {"navajowhite", 11, LXB_CSS_VALUE_NAVAJOWHITE},
-    {"navy", 4, LXB_CSS_VALUE_NAVY},
-    {"oldlace", 7, LXB_CSS_VALUE_OLDLACE},
-    {"olive", 5, LXB_CSS_VALUE_OLIVE},
-    {"olivedrab", 9, LXB_CSS_VALUE_OLIVEDRAB},
-    {"orange", 6, LXB_CSS_VALUE_ORANGE},
-    {"orangered", 9, LXB_CSS_VALUE_ORANGERED},
-    {"orchid", 6, LXB_CSS_VALUE_ORCHID},
-    {"palegoldenrod", 13, LXB_CSS_VALUE_PALEGOLDENROD},
-    {"palegreen", 9, LXB_CSS_VALUE_PALEGREEN},
-    {"paleturquoise", 13, LXB_CSS_VALUE_PALETURQUOISE},
-    {"palevioletred", 13, LXB_CSS_VALUE_PALEVIOLETRED},
-    {"papayawhip", 10, LXB_CSS_VALUE_PAPAYAWHIP},
-    {"peachpuff", 9, LXB_CSS_VALUE_PEACHPUFF},
-    {"peru", 4, LXB_CSS_VALUE_PERU},
-    {"pink", 4, LXB_CSS_VALUE_PINK},
-    {"plum", 4, LXB_CSS_VALUE_PLUM},
-    {"powderblue", 10, LXB_CSS_VALUE_POWDERBLUE},
-    {"purple", 6, LXB_CSS_VALUE_PURPLE},
-    {"rebeccapurple", 13, LXB_CSS_VALUE_REBECCAPURPLE},
-    {"red", 3, LXB_CSS_VALUE_RED},
-    {"rosybrown", 9, LXB_CSS_VALUE_ROSYBROWN},
-    {"royalblue", 9, LXB_CSS_VALUE_ROYALBLUE},
-    {"saddlebrown", 11, LXB_CSS_VALUE_SADDLEBROWN},
-    {"salmon", 6, LXB_CSS_VALUE_SALMON},
-    {"sandybrown", 10, LXB_CSS_VALUE_SANDYBROWN},
-    {"seagreen", 8, LXB_CSS_VALUE_SEAGREEN},
-    {"seashell", 8, LXB_CSS_VALUE_SEASHELL},
-    {"sienna", 6, LXB_CSS_VALUE_SIENNA},
-    {"silver", 6, LXB_CSS_VALUE_SILVER},
-    {"skyblue", 7, LXB_CSS_VALUE_SKYBLUE},
-    {"slateblue", 9, LXB_CSS_VALUE_SLATEBLUE},
-    {"slategray", 9, LXB_CSS_VALUE_SLATEGRAY},
-    {"slategrey", 9, LXB_CSS_VALUE_SLATEGREY},
-    {"snow", 4, LXB_CSS_VALUE_SNOW},
-    {"springgreen", 11, LXB_CSS_VALUE_SPRINGGREEN},
-    {"steelblue", 9, LXB_CSS_VALUE_STEELBLUE},
-    {"tan", 3, LXB_CSS_VALUE_TAN},
-    {"teal", 4, LXB_CSS_VALUE_TEAL},
-    {"thistle", 7, LXB_CSS_VALUE_THISTLE},
-    {"tomato", 6, LXB_CSS_VALUE_TOMATO},
-    {"turquoise", 9, LXB_CSS_VALUE_TURQUOISE},
-    {"violet", 6, LXB_CSS_VALUE_VIOLET},
-    {"wheat", 5, LXB_CSS_VALUE_WHEAT},
-    {"white", 5, LXB_CSS_VALUE_WHITE},
-    {"whitesmoke", 10, LXB_CSS_VALUE_WHITESMOKE},
-    {"yellow", 6, LXB_CSS_VALUE_YELLOW},
-    {"yellowgreen", 11, LXB_CSS_VALUE_YELLOWGREEN},
-    {"Canvas", 6, LXB_CSS_VALUE_CANVAS},
-    {"CanvasText", 10, LXB_CSS_VALUE_CANVASTEXT},
-    {"LinkText", 8, LXB_CSS_VALUE_LINKTEXT},
-    {"VisitedText", 11, LXB_CSS_VALUE_VISITEDTEXT},
-    {"ActiveText", 10, LXB_CSS_VALUE_ACTIVETEXT},
-    {"ButtonFace", 10, LXB_CSS_VALUE_BUTTONFACE},
-    {"ButtonText", 10, LXB_CSS_VALUE_BUTTONTEXT},
-    {"ButtonBorder", 12, LXB_CSS_VALUE_BUTTONBORDER},
-    {"Field", 5, LXB_CSS_VALUE_FIELD},
-    {"FieldText", 9, LXB_CSS_VALUE_FIELDTEXT},
-    {"Highlight", 9, LXB_CSS_VALUE_HIGHLIGHT},
-    {"HighlightText", 13, LXB_CSS_VALUE_HIGHLIGHTTEXT},
-    {"SelectedItem", 12, LXB_CSS_VALUE_SELECTEDITEM},
-    {"SelectedItemText", 16, LXB_CSS_VALUE_SELECTEDITEMTEXT},
-    {"Mark", 4, LXB_CSS_VALUE_MARK},
-    {"MarkText", 8, LXB_CSS_VALUE_MARKTEXT},
-    {"GrayText", 8, LXB_CSS_VALUE_GRAYTEXT},
-    {"AccentColor", 11, LXB_CSS_VALUE_ACCENTCOLOR},
-    {"AccentColorText", 15, LXB_CSS_VALUE_ACCENTCOLORTEXT},
-    {"rgb", 3, LXB_CSS_VALUE_RGB},
-    {"rgba", 4, LXB_CSS_VALUE_RGBA},
-    {"hsl", 3, LXB_CSS_VALUE_HSL},
-    {"hsla", 4, LXB_CSS_VALUE_HSLA},
-    {"hwb", 3, LXB_CSS_VALUE_HWB},
-    {"lab", 3, LXB_CSS_VALUE_LAB},
-    {"lch", 3, LXB_CSS_VALUE_LCH},
-    {"oklab", 5, LXB_CSS_VALUE_OKLAB},
-    {"oklch", 5, LXB_CSS_VALUE_OKLCH},
-    {"color", 5, LXB_CSS_VALUE_COLOR},
-    {"hand", 4, LXB_CSS_VALUE_HAND},
-    {"pointer", 7, LXB_CSS_VALUE_POINTER},
-    {"text", 4, LXB_CSS_VALUE_TEXT},
-    {"wait", 4, LXB_CSS_VALUE_WAIT},
-    {"progress", 8, LXB_CSS_VALUE_PROGRESS},
-    {"grab", 4, LXB_CSS_VALUE_GRAB},
-    {"grabbing", 8, LXB_CSS_VALUE_GRABBING},
-    {"move", 4, LXB_CSS_VALUE_MOVE},
-    {"ltr", 3, LXB_CSS_VALUE_LTR},
-    {"rtl", 3, LXB_CSS_VALUE_RTL},
-    {"block", 5, LXB_CSS_VALUE_BLOCK},
-    {"inline", 6, LXB_CSS_VALUE_INLINE},
-    {"run-in", 6, LXB_CSS_VALUE_RUN_IN},
-    {"flow", 4, LXB_CSS_VALUE_FLOW},
-    {"flow-root", 9, LXB_CSS_VALUE_FLOW_ROOT},
-    {"table", 5, LXB_CSS_VALUE_TABLE},
-    {"flex", 4, LXB_CSS_VALUE_FLEX},
-    {"grid", 4, LXB_CSS_VALUE_GRID},
-    {"ruby", 4, LXB_CSS_VALUE_RUBY},
-    {"list-item", 9, LXB_CSS_VALUE_LIST_ITEM},
-    {"table-row-group", 15, LXB_CSS_VALUE_TABLE_ROW_GROUP},
-    {"table-header-group", 18, LXB_CSS_VALUE_TABLE_HEADER_GROUP},
-    {"table-footer-group", 18, LXB_CSS_VALUE_TABLE_FOOTER_GROUP},
-    {"table-row", 9, LXB_CSS_VALUE_TABLE_ROW},
-    {"table-cell", 10, LXB_CSS_VALUE_TABLE_CELL},
-    {"table-column-group", 18, LXB_CSS_VALUE_TABLE_COLUMN_GROUP},
-    {"table-column", 12, LXB_CSS_VALUE_TABLE_COLUMN},
-    {"table-caption", 13, LXB_CSS_VALUE_TABLE_CAPTION},
-    {"ruby-base", 9, LXB_CSS_VALUE_RUBY_BASE},
-    {"ruby-text", 9, LXB_CSS_VALUE_RUBY_TEXT},
-    {"ruby-base-container", 19, LXB_CSS_VALUE_RUBY_BASE_CONTAINER},
-    {"ruby-text-container", 19, LXB_CSS_VALUE_RUBY_TEXT_CONTAINER},
-    {"contents", 8, LXB_CSS_VALUE_CONTENTS},
-    {"inline-block", 12, LXB_CSS_VALUE_INLINE_BLOCK},
-    {"inline-table", 12, LXB_CSS_VALUE_INLINE_TABLE},
-    {"inline-flex", 11, LXB_CSS_VALUE_INLINE_FLEX},
-    {"inline-grid", 11, LXB_CSS_VALUE_INLINE_GRID},
-    {"hanging", 7, LXB_CSS_VALUE_HANGING},
-    {"content", 7, LXB_CSS_VALUE_CONTENT},
-    {"row", 3, LXB_CSS_VALUE_ROW},
-    {"row-reverse", 11, LXB_CSS_VALUE_ROW_REVERSE},
-    {"column", 6, LXB_CSS_VALUE_COLUMN},
-    {"column-reverse", 14, LXB_CSS_VALUE_COLUMN_REVERSE},
-    {"_number", 7, LXB_CSS_VALUE__NUMBER},
-    {"nowrap", 6, LXB_CSS_VALUE_NOWRAP},
-    {"wrap", 4, LXB_CSS_VALUE_WRAP},
-    {"wrap-reverse", 12, LXB_CSS_VALUE_WRAP_REVERSE},
-    {"snap-block", 10, LXB_CSS_VALUE_SNAP_BLOCK},
-    {"start", 5, LXB_CSS_VALUE_START},
-    {"end", 3, LXB_CSS_VALUE_END},
-    {"near", 4, LXB_CSS_VALUE_NEAR},
-    {"snap-inline", 11, LXB_CSS_VALUE_SNAP_INLINE},
-    {"_integer", 8, LXB_CSS_VALUE__INTEGER},
-    {"region", 6, LXB_CSS_VALUE_REGION},
-    {"page", 4, LXB_CSS_VALUE_PAGE},
-    {"serif", 5, LXB_CSS_VALUE_SERIF},
-    {"sans-serif", 10, LXB_CSS_VALUE_SANS_SERIF},
-    {"cursive", 7, LXB_CSS_VALUE_CURSIVE},
-    {"fantasy", 7, LXB_CSS_VALUE_FANTASY},
-    {"monospace", 9, LXB_CSS_VALUE_MONOSPACE},
-    {"system-ui", 9, LXB_CSS_VALUE_SYSTEM_UI},
-    {"emoji", 5, LXB_CSS_VALUE_EMOJI},
-    {"math", 4, LXB_CSS_VALUE_MATH},
-    {"fangsong", 8, LXB_CSS_VALUE_FANGSONG},
-    {"ui-serif", 8, LXB_CSS_VALUE_UI_SERIF},
-    {"ui-sans-serif", 13, LXB_CSS_VALUE_UI_SANS_SERIF},
-    {"ui-monospace", 12, LXB_CSS_VALUE_UI_MONOSPACE},
-    {"ui-rounded", 10, LXB_CSS_VALUE_UI_ROUNDED},
-    {"xx-small", 8, LXB_CSS_VALUE_XX_SMALL},
-    {"x-small", 7, LXB_CSS_VALUE_X_SMALL},
-    {"small", 5, LXB_CSS_VALUE_SMALL},
-    {"large", 5, LXB_CSS_VALUE_LARGE},
-    {"x-large", 7, LXB_CSS_VALUE_X_LARGE},
-    {"xx-large", 8, LXB_CSS_VALUE_XX_LARGE},
-    {"xxx-large", 9, LXB_CSS_VALUE_XXX_LARGE},
-    {"larger", 6, LXB_CSS_VALUE_LARGER},
-    {"smaller", 7, LXB_CSS_VALUE_SMALLER},
-    {"normal", 6, LXB_CSS_VALUE_NORMAL},
-    {"ultra-condensed", 15, LXB_CSS_VALUE_ULTRA_CONDENSED},
-    {"extra-condensed", 15, LXB_CSS_VALUE_EXTRA_CONDENSED},
-    {"condensed", 9, LXB_CSS_VALUE_CONDENSED},
-    {"semi-condensed", 14, LXB_CSS_VALUE_SEMI_CONDENSED},
-    {"semi-expanded", 13, LXB_CSS_VALUE_SEMI_EXPANDED},
-    {"expanded", 8, LXB_CSS_VALUE_EXPANDED},
-    {"extra-expanded", 14, LXB_CSS_VALUE_EXTRA_EXPANDED},
-    {"ultra-expanded", 14, LXB_CSS_VALUE_ULTRA_EXPANDED},
-    {"italic", 6, LXB_CSS_VALUE_ITALIC},
-    {"oblique", 7, LXB_CSS_VALUE_OBLIQUE},
-    {"bold", 4, LXB_CSS_VALUE_BOLD},
-    {"bolder", 6, LXB_CSS_VALUE_BOLDER},
-    {"lighter", 7, LXB_CSS_VALUE_LIGHTER},
-    {"force-end", 9, LXB_CSS_VALUE_FORCE_END},
-    {"allow-end", 9, LXB_CSS_VALUE_ALLOW_END},
-    {"min-content", 11, LXB_CSS_VALUE_MIN_CONTENT},
-    {"max-content", 11, LXB_CSS_VALUE_MAX_CONTENT},
-    {"_angle", 6, LXB_CSS_VALUE__ANGLE},
-    {"manual", 6, LXB_CSS_VALUE_MANUAL},
-    {"loose", 5, LXB_CSS_VALUE_LOOSE},
-    {"strict", 6, LXB_CSS_VALUE_STRICT},
-    {"anywhere", 8, LXB_CSS_VALUE_ANYWHERE},
-    {"visible", 7, LXB_CSS_VALUE_VISIBLE},
-    {"clip", 4, LXB_CSS_VALUE_CLIP},
-    {"scroll", 6, LXB_CSS_VALUE_SCROLL},
-    {"break-word", 10, LXB_CSS_VALUE_BREAK_WORD},
-    {"static", 6, LXB_CSS_VALUE_STATIC},
-    {"relative", 8, LXB_CSS_VALUE_RELATIVE},
-    {"absolute", 8, LXB_CSS_VALUE_ABSOLUTE},
-    {"sticky", 6, LXB_CSS_VALUE_STICKY},
-    {"fixed", 5, LXB_CSS_VALUE_FIXED},
-    {"justify", 7, LXB_CSS_VALUE_JUSTIFY},
-    {"match-parent", 12, LXB_CSS_VALUE_MATCH_PARENT},
-    {"justify-all", 11, LXB_CSS_VALUE_JUSTIFY_ALL},
-    {"all", 3, LXB_CSS_VALUE_ALL},
-    {"digits", 6, LXB_CSS_VALUE_DIGITS},
-    {"underline", 9, LXB_CSS_VALUE_UNDERLINE},
-    {"overline", 8, LXB_CSS_VALUE_OVERLINE},
-    {"line-through", 12, LXB_CSS_VALUE_LINE_THROUGH},
-    {"blink", 5, LXB_CSS_VALUE_BLINK},
-    {"wavy", 4, LXB_CSS_VALUE_WAVY},
-    {"each-line", 9, LXB_CSS_VALUE_EACH_LINE},
-    {"inter-word", 10, LXB_CSS_VALUE_INTER_WORD},
-    {"inter-character", 15, LXB_CSS_VALUE_INTER_CHARACTER},
-    {"mixed", 5, LXB_CSS_VALUE_MIXED},
-    {"upright", 7, LXB_CSS_VALUE_UPRIGHT},
-    {"sideways", 8, LXB_CSS_VALUE_SIDEWAYS},
-    {"ellipsis", 8, LXB_CSS_VALUE_ELLIPSIS},
-    {"capitalize", 10, LXB_CSS_VALUE_CAPITALIZE},
-    {"uppercase", 9, LXB_CSS_VALUE_UPPERCASE},
-    {"lowercase", 9, LXB_CSS_VALUE_LOWERCASE},
-    {"full-width", 10, LXB_CSS_VALUE_FULL_WIDTH},
-    {"full-size-kana", 14, LXB_CSS_VALUE_FULL_SIZE_KANA},
-    {"embed", 5, LXB_CSS_VALUE_EMBED},
-    {"isolate", 7, LXB_CSS_VALUE_ISOLATE},
-    {"bidi-override", 13, LXB_CSS_VALUE_BIDI_OVERRIDE},
-    {"isolate-override", 16, LXB_CSS_VALUE_ISOLATE_OVERRIDE},
-    {"plaintext", 9, LXB_CSS_VALUE_PLAINTEXT},
-    {"collapse", 8, LXB_CSS_VALUE_COLLAPSE},
-    {"pre", 3, LXB_CSS_VALUE_PRE},
-    {"pre-wrap", 8, LXB_CSS_VALUE_PRE_WRAP},
-    {"break-spaces", 12, LXB_CSS_VALUE_BREAK_SPACES},
-    {"pre-line", 8, LXB_CSS_VALUE_PRE_LINE},
-    {"keep-all", 8, LXB_CSS_VALUE_KEEP_ALL},
-    {"break-all", 9, LXB_CSS_VALUE_BREAK_ALL},
-    {"both", 4, LXB_CSS_VALUE_BOTH},
-    {"minimum", 7, LXB_CSS_VALUE_MINIMUM},
-    {"maximum", 7, LXB_CSS_VALUE_MAXIMUM},
-    {"clear", 5, LXB_CSS_VALUE_CLEAR},
-    {"horizontal-tb", 13, LXB_CSS_VALUE_HORIZONTAL_TB},
-    {"vertical-rl", 11, LXB_CSS_VALUE_VERTICAL_RL},
-    {"vertical-lr", 11, LXB_CSS_VALUE_VERTICAL_LR},
-    {"sideways-rl", 11, LXB_CSS_VALUE_SIDEWAYS_RL},
-    {"sideways-lr", 11, LXB_CSS_VALUE_SIDEWAYS_LR},
+    {"_undef", 6, CSS_VALUE__UNDEF},
+    {"initial", 7, CSS_VALUE_INITIAL},
+    {"inherit", 7, CSS_VALUE_INHERIT},
+    {"unset", 5, CSS_VALUE_UNSET},
+    {"revert", 6, CSS_VALUE_REVERT},
+    {"flex-start", 10, CSS_VALUE_FLEX_START},
+    {"flex-end", 8, CSS_VALUE_FLEX_END},
+    {"center", 6, CSS_VALUE_CENTER},
+    {"space-between", 13, CSS_VALUE_SPACE_BETWEEN},
+    {"space-around", 12, CSS_VALUE_SPACE_AROUND},
+    {"stretch", 7, CSS_VALUE_STRETCH},
+    {"baseline", 8, CSS_VALUE_BASELINE},
+    {"auto", 4, CSS_VALUE_AUTO},
+    {"text-bottom", 11, CSS_VALUE_TEXT_BOTTOM},
+    {"alphabetic", 10, CSS_VALUE_ALPHABETIC},
+    {"ideographic", 11, CSS_VALUE_IDEOGRAPHIC},
+    {"middle", 6, CSS_VALUE_MIDDLE},
+    {"central", 7, CSS_VALUE_CENTRAL},
+    {"mathematical", 12, CSS_VALUE_MATHEMATICAL},
+    {"text-top", 8, CSS_VALUE_TEXT_TOP},
+    {"_length", 7, CSS_VALUE__LENGTH},
+    {"_percentage", 11, CSS_VALUE__PERCENTAGE},
+    {"sub", 3, CSS_VALUE_SUB},
+    {"super", 5, CSS_VALUE_SUPER},
+    {"top", 3, CSS_VALUE_TOP},
+    {"bottom", 6, CSS_VALUE_BOTTOM},
+    {"first", 5, CSS_VALUE_FIRST},
+    {"last", 4, CSS_VALUE_LAST},
+    {"thin", 4, CSS_VALUE_THIN},
+    {"medium", 6, CSS_VALUE_MEDIUM},
+    {"thick", 5, CSS_VALUE_THICK},
+    {"none", 4, CSS_VALUE_NONE},
+    {"hidden", 6, CSS_VALUE_HIDDEN},
+    {"dotted", 6, CSS_VALUE_DOTTED},
+    {"dashed", 6, CSS_VALUE_DASHED},
+    {"solid", 5, CSS_VALUE_SOLID},
+    {"double", 6, CSS_VALUE_DOUBLE},
+    {"groove", 6, CSS_VALUE_GROOVE},
+    {"ridge", 5, CSS_VALUE_RIDGE},
+    {"inset", 5, CSS_VALUE_INSET},
+    {"outset", 6, CSS_VALUE_OUTSET},
+    {"content-box", 11, CSS_VALUE_CONTENT_BOX},
+    {"border-box", 10, CSS_VALUE_BORDER_BOX},
+    {"inline-start", 12, CSS_VALUE_INLINE_START},
+    {"inline-end", 10, CSS_VALUE_INLINE_END},
+    {"block-start", 11, CSS_VALUE_BLOCK_START},
+    {"block-end", 9, CSS_VALUE_BLOCK_END},
+    {"left", 4, CSS_VALUE_LEFT},
+    {"right", 5, CSS_VALUE_RIGHT},
+    {"currentcolor", 12, CSS_VALUE_CURRENTCOLOR},
+    {"transparent", 11, CSS_VALUE_TRANSPARENT},
+    {"hex", 3, CSS_VALUE_HEX},
+    {"aliceblue", 9, CSS_VALUE_ALICEBLUE},
+    {"antiquewhite", 12, CSS_VALUE_ANTIQUEWHITE},
+    {"aqua", 4, CSS_VALUE_AQUA},
+    {"aquamarine", 10, CSS_VALUE_AQUAMARINE},
+    {"azure", 5, CSS_VALUE_AZURE},
+    {"beige", 5, CSS_VALUE_BEIGE},
+    {"bisque", 6, CSS_VALUE_BISQUE},
+    {"black", 5, CSS_VALUE_BLACK},
+    {"blanchedalmond", 14, CSS_VALUE_BLANCHEDALMOND},
+    {"blue", 4, CSS_VALUE_BLUE},
+    {"blueviolet", 10, CSS_VALUE_BLUEVIOLET},
+    {"brown", 5, CSS_VALUE_BROWN},
+    {"burlywood", 9, CSS_VALUE_BURLYWOOD},
+    {"cadetblue", 9, CSS_VALUE_CADETBLUE},
+    {"chartreuse", 10, CSS_VALUE_CHARTREUSE},
+    {"chocolate", 9, CSS_VALUE_CHOCOLATE},
+    {"coral", 5, CSS_VALUE_CORAL},
+    {"cornflowerblue", 14, CSS_VALUE_CORNFLOWERBLUE},
+    {"cornsilk", 8, CSS_VALUE_CORNSILK},
+    {"crimson", 7, CSS_VALUE_CRIMSON},
+    {"cyan", 4, CSS_VALUE_CYAN},
+    {"darkblue", 8, CSS_VALUE_DARKBLUE},
+    {"darkcyan", 8, CSS_VALUE_DARKCYAN},
+    {"darkgoldenrod", 13, CSS_VALUE_DARKGOLDENROD},
+    {"darkgray", 8, CSS_VALUE_DARKGRAY},
+    {"darkgreen", 9, CSS_VALUE_DARKGREEN},
+    {"darkgrey", 8, CSS_VALUE_DARKGREY},
+    {"darkkhaki", 9, CSS_VALUE_DARKKHAKI},
+    {"darkmagenta", 11, CSS_VALUE_DARKMAGENTA},
+    {"darkolivegreen", 14, CSS_VALUE_DARKOLIVEGREEN},
+    {"darkorange", 10, CSS_VALUE_DARKORANGE},
+    {"darkorchid", 10, CSS_VALUE_DARKORCHID},
+    {"darkred", 7, CSS_VALUE_DARKRED},
+    {"darksalmon", 10, CSS_VALUE_DARKSALMON},
+    {"darkseagreen", 12, CSS_VALUE_DARKSEAGREEN},
+    {"darkslateblue", 13, CSS_VALUE_DARKSLATEBLUE},
+    {"darkslategray", 13, CSS_VALUE_DARKSLATEGRAY},
+    {"darkslategrey", 13, CSS_VALUE_DARKSLATEGREY},
+    {"darkturquoise", 13, CSS_VALUE_DARKTURQUOISE},
+    {"darkviolet", 10, CSS_VALUE_DARKVIOLET},
+    {"deeppink", 8, CSS_VALUE_DEEPPINK},
+    {"deepskyblue", 11, CSS_VALUE_DEEPSKYBLUE},
+    {"dimgray", 7, CSS_VALUE_DIMGRAY},
+    {"dimgrey", 7, CSS_VALUE_DIMGREY},
+    {"dodgerblue", 10, CSS_VALUE_DODGERBLUE},
+    {"firebrick", 9, CSS_VALUE_FIREBRICK},
+    {"floralwhite", 11, CSS_VALUE_FLORALWHITE},
+    {"forestgreen", 11, CSS_VALUE_FORESTGREEN},
+    {"fuchsia", 7, CSS_VALUE_FUCHSIA},
+    {"gainsboro", 9, CSS_VALUE_GAINSBORO},
+    {"ghostwhite", 10, CSS_VALUE_GHOSTWHITE},
+    {"gold", 4, CSS_VALUE_GOLD},
+    {"goldenrod", 9, CSS_VALUE_GOLDENROD},
+    {"gray", 4, CSS_VALUE_GRAY},
+    {"green", 5, CSS_VALUE_GREEN},
+    {"greenyellow", 11, CSS_VALUE_GREENYELLOW},
+    {"grey", 4, CSS_VALUE_GREY},
+    {"honeydew", 8, CSS_VALUE_HONEYDEW},
+    {"hotpink", 7, CSS_VALUE_HOTPINK},
+    {"indianred", 9, CSS_VALUE_INDIANRED},
+    {"indigo", 6, CSS_VALUE_INDIGO},
+    {"ivory", 5, CSS_VALUE_IVORY},
+    {"khaki", 5, CSS_VALUE_KHAKI},
+    {"lavender", 8, CSS_VALUE_LAVENDER},
+    {"lavenderblush", 13, CSS_VALUE_LAVENDERBLUSH},
+    {"lawngreen", 9, CSS_VALUE_LAWNGREEN},
+    {"lemonchiffon", 12, CSS_VALUE_LEMONCHIFFON},
+    {"lightblue", 9, CSS_VALUE_LIGHTBLUE},
+    {"lightcoral", 10, CSS_VALUE_LIGHTCORAL},
+    {"lightcyan", 9, CSS_VALUE_LIGHTCYAN},
+    {"lightgoldenrodyellow", 20, CSS_VALUE_LIGHTGOLDENRODYELLOW},
+    {"lightgray", 9, CSS_VALUE_LIGHTGRAY},
+    {"lightgreen", 10, CSS_VALUE_LIGHTGREEN},
+    {"lightgrey", 9, CSS_VALUE_LIGHTGREY},
+    {"lightpink", 9, CSS_VALUE_LIGHTPINK},
+    {"lightsalmon", 11, CSS_VALUE_LIGHTSALMON},
+    {"lightseagreen", 13, CSS_VALUE_LIGHTSEAGREEN},
+    {"lightskyblue", 12, CSS_VALUE_LIGHTSKYBLUE},
+    {"lightslategray", 14, CSS_VALUE_LIGHTSLATEGRAY},
+    {"lightslategrey", 14, CSS_VALUE_LIGHTSLATEGREY},
+    {"lightsteelblue", 14, CSS_VALUE_LIGHTSTEELBLUE},
+    {"lightyellow", 11, CSS_VALUE_LIGHTYELLOW},
+    {"lime", 4, CSS_VALUE_LIME},
+    {"limegreen", 9, CSS_VALUE_LIMEGREEN},
+    {"linen", 5, CSS_VALUE_LINEN},
+    {"magenta", 7, CSS_VALUE_MAGENTA},
+    {"maroon", 6, CSS_VALUE_MAROON},
+    {"mediumaquamarine", 16, CSS_VALUE_MEDIUMAQUAMARINE},
+    {"mediumblue", 10, CSS_VALUE_MEDIUMBLUE},
+    {"mediumorchid", 12, CSS_VALUE_MEDIUMORCHID},
+    {"mediumpurple", 12, CSS_VALUE_MEDIUMPURPLE},
+    {"mediumseagreen", 14, CSS_VALUE_MEDIUMSEAGREEN},
+    {"mediumslateblue", 15, CSS_VALUE_MEDIUMSLATEBLUE},
+    {"mediumspringgreen", 17, CSS_VALUE_MEDIUMSPRINGGREEN},
+    {"mediumturquoise", 15, CSS_VALUE_MEDIUMTURQUOISE},
+    {"mediumvioletred", 15, CSS_VALUE_MEDIUMVIOLETRED},
+    {"midnightblue", 12, CSS_VALUE_MIDNIGHTBLUE},
+    {"mintcream", 9, CSS_VALUE_MINTCREAM},
+    {"mistyrose", 9, CSS_VALUE_MISTYROSE},
+    {"moccasin", 8, CSS_VALUE_MOCCASIN},
+    {"navajowhite", 11, CSS_VALUE_NAVAJOWHITE},
+    {"navy", 4, CSS_VALUE_NAVY},
+    {"oldlace", 7, CSS_VALUE_OLDLACE},
+    {"olive", 5, CSS_VALUE_OLIVE},
+    {"olivedrab", 9, CSS_VALUE_OLIVEDRAB},
+    {"orange", 6, CSS_VALUE_ORANGE},
+    {"orangered", 9, CSS_VALUE_ORANGERED},
+    {"orchid", 6, CSS_VALUE_ORCHID},
+    {"palegoldenrod", 13, CSS_VALUE_PALEGOLDENROD},
+    {"palegreen", 9, CSS_VALUE_PALEGREEN},
+    {"paleturquoise", 13, CSS_VALUE_PALETURQUOISE},
+    {"palevioletred", 13, CSS_VALUE_PALEVIOLETRED},
+    {"papayawhip", 10, CSS_VALUE_PAPAYAWHIP},
+    {"peachpuff", 9, CSS_VALUE_PEACHPUFF},
+    {"peru", 4, CSS_VALUE_PERU},
+    {"pink", 4, CSS_VALUE_PINK},
+    {"plum", 4, CSS_VALUE_PLUM},
+    {"powderblue", 10, CSS_VALUE_POWDERBLUE},
+    {"purple", 6, CSS_VALUE_PURPLE},
+    {"rebeccapurple", 13, CSS_VALUE_REBECCAPURPLE},
+    {"red", 3, CSS_VALUE_RED},
+    {"rosybrown", 9, CSS_VALUE_ROSYBROWN},
+    {"royalblue", 9, CSS_VALUE_ROYALBLUE},
+    {"saddlebrown", 11, CSS_VALUE_SADDLEBROWN},
+    {"salmon", 6, CSS_VALUE_SALMON},
+    {"sandybrown", 10, CSS_VALUE_SANDYBROWN},
+    {"seagreen", 8, CSS_VALUE_SEAGREEN},
+    {"seashell", 8, CSS_VALUE_SEASHELL},
+    {"sienna", 6, CSS_VALUE_SIENNA},
+    {"silver", 6, CSS_VALUE_SILVER},
+    {"skyblue", 7, CSS_VALUE_SKYBLUE},
+    {"slateblue", 9, CSS_VALUE_SLATEBLUE},
+    {"slategray", 9, CSS_VALUE_SLATEGRAY},
+    {"slategrey", 9, CSS_VALUE_SLATEGREY},
+    {"snow", 4, CSS_VALUE_SNOW},
+    {"springgreen", 11, CSS_VALUE_SPRINGGREEN},
+    {"steelblue", 9, CSS_VALUE_STEELBLUE},
+    {"tan", 3, CSS_VALUE_TAN},
+    {"teal", 4, CSS_VALUE_TEAL},
+    {"thistle", 7, CSS_VALUE_THISTLE},
+    {"tomato", 6, CSS_VALUE_TOMATO},
+    {"turquoise", 9, CSS_VALUE_TURQUOISE},
+    {"violet", 6, CSS_VALUE_VIOLET},
+    {"wheat", 5, CSS_VALUE_WHEAT},
+    {"white", 5, CSS_VALUE_WHITE},
+    {"whitesmoke", 10, CSS_VALUE_WHITESMOKE},
+    {"yellow", 6, CSS_VALUE_YELLOW},
+    {"yellowgreen", 11, CSS_VALUE_YELLOWGREEN},
+    {"Canvas", 6, CSS_VALUE_CANVAS},
+    {"CanvasText", 10, CSS_VALUE_CANVASTEXT},
+    {"LinkText", 8, CSS_VALUE_LINKTEXT},
+    {"VisitedText", 11, CSS_VALUE_VISITEDTEXT},
+    {"ActiveText", 10, CSS_VALUE_ACTIVETEXT},
+    {"ButtonFace", 10, CSS_VALUE_BUTTONFACE},
+    {"ButtonText", 10, CSS_VALUE_BUTTONTEXT},
+    {"ButtonBorder", 12, CSS_VALUE_BUTTONBORDER},
+    {"Field", 5, CSS_VALUE_FIELD},
+    {"FieldText", 9, CSS_VALUE_FIELDTEXT},
+    {"Highlight", 9, CSS_VALUE_HIGHLIGHT},
+    {"HighlightText", 13, CSS_VALUE_HIGHLIGHTTEXT},
+    {"SelectedItem", 12, CSS_VALUE_SELECTEDITEM},
+    {"SelectedItemText", 16, CSS_VALUE_SELECTEDITEMTEXT},
+    {"Mark", 4, CSS_VALUE_MARK},
+    {"MarkText", 8, CSS_VALUE_MARKTEXT},
+    {"GrayText", 8, CSS_VALUE_GRAYTEXT},
+    {"AccentColor", 11, CSS_VALUE_ACCENTCOLOR},
+    {"AccentColorText", 15, CSS_VALUE_ACCENTCOLORTEXT},
+    {"rgb", 3, CSS_VALUE_RGB},
+    {"rgba", 4, CSS_VALUE_RGBA},
+    {"hsl", 3, CSS_VALUE_HSL},
+    {"hsla", 4, CSS_VALUE_HSLA},
+    {"hwb", 3, CSS_VALUE_HWB},
+    {"lab", 3, CSS_VALUE_LAB},
+    {"lch", 3, CSS_VALUE_LCH},
+    {"oklab", 5, CSS_VALUE_OKLAB},
+    {"oklch", 5, CSS_VALUE_OKLCH},
+    {"color", 5, CSS_VALUE__COLOR},
+    {"hand", 4, CSS_VALUE_HAND},
+    {"pointer", 7, CSS_VALUE_POINTER},
+    {"text", 4, CSS_VALUE_TEXT},
+    {"wait", 4, CSS_VALUE_WAIT},
+    {"progress", 8, CSS_VALUE_PROGRESS},
+    {"grab", 4, CSS_VALUE_GRAB},
+    {"grabbing", 8, CSS_VALUE_GRABBING},
+    {"move", 4, CSS_VALUE_MOVE},
+    {"ltr", 3, CSS_VALUE_LTR},
+    {"rtl", 3, CSS_VALUE_RTL},
+    {"block", 5, CSS_VALUE_BLOCK},
+    {"inline", 6, CSS_VALUE_INLINE},
+    {"run-in", 6, CSS_VALUE_RUN_IN},
+    {"flow", 4, CSS_VALUE_FLOW},
+    {"flow-root", 9, CSS_VALUE_FLOW_ROOT},
+    {"table", 5, CSS_VALUE_TABLE},
+    {"flex", 4, CSS_VALUE_FLEX},
+    {"grid", 4, CSS_VALUE_GRID},
+    {"ruby", 4, CSS_VALUE_RUBY},
+    {"list-item", 9, CSS_VALUE_LIST_ITEM},
+    {"table-row-group", 15, CSS_VALUE_TABLE_ROW_GROUP},
+    {"table-header-group", 18, CSS_VALUE_TABLE_HEADER_GROUP},
+    {"table-footer-group", 18, CSS_VALUE_TABLE_FOOTER_GROUP},
+    {"table-row", 9, CSS_VALUE_TABLE_ROW},
+    {"table-cell", 10, CSS_VALUE_TABLE_CELL},
+    {"table-column-group", 18, CSS_VALUE_TABLE_COLUMN_GROUP},
+    {"table-column", 12, CSS_VALUE_TABLE_COLUMN},
+    {"table-caption", 13, CSS_VALUE_TABLE_CAPTION},
+    {"ruby-base", 9, CSS_VALUE_RUBY_BASE},
+    {"ruby-text", 9, CSS_VALUE_RUBY_TEXT},
+    {"ruby-base-container", 19, CSS_VALUE_RUBY_BASE_CONTAINER},
+    {"ruby-text-container", 19, CSS_VALUE_RUBY_TEXT_CONTAINER},
+    {"contents", 8, CSS_VALUE_CONTENTS},
+    {"inline-block", 12, CSS_VALUE_INLINE_BLOCK},
+    {"inline-table", 12, CSS_VALUE_INLINE_TABLE},
+    {"inline-flex", 11, CSS_VALUE_INLINE_FLEX},
+    {"inline-grid", 11, CSS_VALUE_INLINE_GRID},
+    {"hanging", 7, CSS_VALUE_HANGING},
+    {"content", 7, CSS_VALUE_CONTENT},
+    {"row", 3, CSS_VALUE_ROW},
+    {"row-reverse", 11, CSS_VALUE_ROW_REVERSE},
+    {"column", 6, CSS_VALUE_COLUMN},
+    {"column-reverse", 14, CSS_VALUE_COLUMN_REVERSE},
+    {"_number", 7, CSS_VALUE__NUMBER},
+    {"nowrap", 6, CSS_VALUE_NOWRAP},
+    {"wrap", 4, CSS_VALUE_WRAP},
+    {"wrap-reverse", 12, CSS_VALUE_WRAP_REVERSE},
+    {"snap-block", 10, CSS_VALUE_SNAP_BLOCK},
+    {"start", 5, CSS_VALUE_START},
+    {"end", 3, CSS_VALUE_END},
+    {"near", 4, CSS_VALUE_NEAR},
+    {"snap-inline", 11, CSS_VALUE_SNAP_INLINE},
+    {"_integer", 8, CSS_VALUE__INTEGER},
+    {"region", 6, CSS_VALUE_REGION},
+    {"page", 4, CSS_VALUE_PAGE},
+    {"serif", 5, CSS_VALUE_SERIF},
+    {"sans-serif", 10, CSS_VALUE_SANS_SERIF},
+    {"cursive", 7, CSS_VALUE_CURSIVE},
+    {"fantasy", 7, CSS_VALUE_FANTASY},
+    {"monospace", 9, CSS_VALUE_MONOSPACE},
+    {"system-ui", 9, CSS_VALUE_SYSTEM_UI},
+    {"emoji", 5, CSS_VALUE_EMOJI},
+    {"math", 4, CSS_VALUE_MATH},
+    {"fangsong", 8, CSS_VALUE_FANGSONG},
+    {"ui-serif", 8, CSS_VALUE_UI_SERIF},
+    {"ui-sans-serif", 13, CSS_VALUE_UI_SANS_SERIF},
+    {"ui-monospace", 12, CSS_VALUE_UI_MONOSPACE},
+    {"ui-rounded", 10, CSS_VALUE_UI_ROUNDED},
+    {"xx-small", 8, CSS_VALUE_XX_SMALL},
+    {"x-small", 7, CSS_VALUE_X_SMALL},
+    {"small", 5, CSS_VALUE_SMALL},
+    {"large", 5, CSS_VALUE_LARGE},
+    {"x-large", 7, CSS_VALUE_X_LARGE},
+    {"xx-large", 8, CSS_VALUE_XX_LARGE},
+    {"xxx-large", 9, CSS_VALUE_XXX_LARGE},
+    {"larger", 6, CSS_VALUE_LARGER},
+    {"smaller", 7, CSS_VALUE_SMALLER},
+    {"normal", 6, CSS_VALUE_NORMAL},
+    {"ultra-condensed", 15, CSS_VALUE_ULTRA_CONDENSED},
+    {"extra-condensed", 15, CSS_VALUE_EXTRA_CONDENSED},
+    {"condensed", 9, CSS_VALUE_CONDENSED},
+    {"semi-condensed", 14, CSS_VALUE_SEMI_CONDENSED},
+    {"semi-expanded", 13, CSS_VALUE_SEMI_EXPANDED},
+    {"expanded", 8, CSS_VALUE_EXPANDED},
+    {"extra-expanded", 14, CSS_VALUE_EXTRA_EXPANDED},
+    {"ultra-expanded", 14, CSS_VALUE_ULTRA_EXPANDED},
+    {"italic", 6, CSS_VALUE_ITALIC},
+    {"oblique", 7, CSS_VALUE_OBLIQUE},
+    {"bold", 4, CSS_VALUE_BOLD},
+    {"bolder", 6, CSS_VALUE_BOLDER},
+    {"lighter", 7, CSS_VALUE_LIGHTER},
+    {"force-end", 9, CSS_VALUE_FORCE_END},
+    {"allow-end", 9, CSS_VALUE_ALLOW_END},
+    {"min-content", 11, CSS_VALUE_MIN_CONTENT},
+    {"max-content", 11, CSS_VALUE_MAX_CONTENT},
+    {"_angle", 6, CSS_VALUE__ANGLE},
+    {"manual", 6, CSS_VALUE_MANUAL},
+    {"loose", 5, CSS_VALUE_LOOSE},
+    {"strict", 6, CSS_VALUE_STRICT},
+    {"anywhere", 8, CSS_VALUE_ANYWHERE},
+    {"visible", 7, CSS_VALUE_VISIBLE},
+    {"clip", 4, CSS_VALUE_CLIP},
+    {"scroll", 6, CSS_VALUE_SCROLL},
+    {"break-word", 10, CSS_VALUE_BREAK_WORD},
+    {"static", 6, CSS_VALUE_STATIC},
+    {"relative", 8, CSS_VALUE_RELATIVE},
+    {"absolute", 8, CSS_VALUE_ABSOLUTE},
+    {"sticky", 6, CSS_VALUE_STICKY},
+    {"fixed", 5, CSS_VALUE_FIXED},
+    {"justify", 7, CSS_VALUE_JUSTIFY},
+    {"match-parent", 12, CSS_VALUE_MATCH_PARENT},
+    {"justify-all", 11, CSS_VALUE_JUSTIFY_ALL},
+    {"all", 3, CSS_VALUE_ALL},
+    {"digits", 6, CSS_VALUE_DIGITS},
+    {"underline", 9, CSS_VALUE_UNDERLINE},
+    {"overline", 8, CSS_VALUE_OVERLINE},
+    {"line-through", 12, CSS_VALUE_LINE_THROUGH},
+    {"blink", 5, CSS_VALUE_BLINK},
+    {"wavy", 4, CSS_VALUE_WAVY},
+    {"each-line", 9, CSS_VALUE_EACH_LINE},
+    {"inter-word", 10, CSS_VALUE_INTER_WORD},
+    {"inter-character", 15, CSS_VALUE_INTER_CHARACTER},
+    {"mixed", 5, CSS_VALUE_MIXED},
+    {"upright", 7, CSS_VALUE_UPRIGHT},
+    {"sideways", 8, CSS_VALUE_SIDEWAYS},
+    {"ellipsis", 8, CSS_VALUE_ELLIPSIS},
+    {"capitalize", 10, CSS_VALUE_CAPITALIZE},
+    {"uppercase", 9, CSS_VALUE_UPPERCASE},
+    {"lowercase", 9, CSS_VALUE_LOWERCASE},
+    {"full-width", 10, CSS_VALUE_FULL_WIDTH},
+    {"full-size-kana", 14, CSS_VALUE_FULL_SIZE_KANA},
+    {"embed", 5, CSS_VALUE_EMBED},
+    {"isolate", 7, CSS_VALUE_ISOLATE},
+    {"bidi-override", 13, CSS_VALUE_BIDI_OVERRIDE},
+    {"isolate-override", 16, CSS_VALUE_ISOLATE_OVERRIDE},
+    {"plaintext", 9, CSS_VALUE_PLAINTEXT},
+    {"collapse", 8, CSS_VALUE_COLLAPSE},
+    {"pre", 3, CSS_VALUE_PRE},
+    {"pre-wrap", 8, CSS_VALUE_PRE_WRAP},
+    {"break-spaces", 12, CSS_VALUE_BREAK_SPACES},
+    {"pre-line", 8, CSS_VALUE_PRE_LINE},
+    {"keep-all", 8, CSS_VALUE_KEEP_ALL},
+    {"break-all", 9, CSS_VALUE_BREAK_ALL},
+    {"both", 4, CSS_VALUE_BOTH},
+    {"minimum", 7, CSS_VALUE_MINIMUM},
+    {"maximum", 7, CSS_VALUE_MAXIMUM},
+    {"clear", 5, CSS_VALUE_CLEAR},
+    {"horizontal-tb", 13, CSS_VALUE_HORIZONTAL_TB},
+    {"vertical-rl", 11, CSS_VALUE_VERTICAL_RL},
+    {"vertical-lr", 11, CSS_VALUE_VERTICAL_LR},
+    {"sideways-rl", 11, CSS_VALUE_SIDEWAYS_RL},
+    {"sideways-lr", 11, CSS_VALUE_SIDEWAYS_LR},
     // Custom values added from Lambda CSS resolve
-    {"contain", 7, LXB_CSS_VALUE_CONTAIN},
-    {"cover", 5, LXB_CSS_VALUE_COVER},
-    {"local", 5, LXB_CSS_VALUE_LOCAL},
-    {"padding-box", 11, LXB_CSS_VALUE_PADDING_BOX},
-    {"multiply", 8, LXB_CSS_VALUE_MULTIPLY},
-    {"overlay", 7, LXB_CSS_VALUE_OVERLAY},
-    {"round", 5, LXB_CSS_VALUE_ROUND},
-    {"space", 5, LXB_CSS_VALUE_SPACE},
-    {"collapse-table", 14, LXB_CSS_VALUE_COLLAPSE_TABLE},  // Use different name to avoid conflict with LXB_CSS_VALUE_COLLAPSE
-    {"separate", 8, LXB_CSS_VALUE_SEPARATE},
-    {"hide", 4, LXB_CSS_VALUE_HIDE},
-    {"show", 4, LXB_CSS_VALUE_SHOW},
-    {"fit-content", 11, LXB_CSS_VALUE_FIT_CONTENT},
-    {"fr", 2, LXB_CSS_VALUE_FR},
-    {"dense", 5, LXB_CSS_VALUE_DENSE}
+    {"contain", 7, CSS_VALUE_CONTAIN},
+    {"cover", 5, CSS_VALUE_COVER},
+    {"local", 5, CSS_VALUE_LOCAL},
+    {"padding-box", 11, CSS_VALUE_PADDING_BOX},
+    {"multiply", 8, CSS_VALUE_MULTIPLY},
+    {"overlay", 7, CSS_VALUE_OVERLAY},
+    {"round", 5, CSS_VALUE_ROUND},
+    {"space", 5, CSS_VALUE_SPACE},
+    {"collapse-table", 14, CSS_VALUE_COLLAPSE_TABLE},  // Use different name to avoid conflict with CSS_VALUE_COLLAPSE
+    {"separate", 8, CSS_VALUE_SEPARATE},
+    {"hide", 4, CSS_VALUE_HIDE},
+    {"show", 4, CSS_VALUE_SHOW},
+    {"fit-content", 11, CSS_VALUE_FIT_CONTENT},
+    {"fr", 2, CSS_VALUE_FR},
+    {"dense", 5, CSS_VALUE_DENSE}
 };
 
 const css_data* css_value_by_id(PropValue id) {
     // Support both standard and custom value IDs
-    if (id < LXB_CSS_VALUE__LAST_ENTRY) {
+    if (id < CSS_VALUE__LAST_ENTRY) {
         return &lxb_css_value_data[id];
     }
-    // For custom values beyond LXB_CSS_VALUE__LAST_ENTRY, calculate index
-    if (id >= LXB_CSS_VALUE_CONTAIN && id <= LXB_CSS_VALUE_DENSE) {
-        size_t custom_index = LXB_CSS_VALUE__LAST_ENTRY + (id - LXB_CSS_VALUE_CONTAIN);
+    // For custom values beyond CSS_VALUE__LAST_ENTRY, calculate index
+    if (id >= CSS_VALUE_CONTAIN && id <= CSS_VALUE_DENSE) {
+        size_t custom_index = CSS_VALUE__LAST_ENTRY + (id - CSS_VALUE_CONTAIN);
         if (custom_index < sizeof(lxb_css_value_data) / sizeof(lxb_css_value_data[0])) {
             return &lxb_css_value_data[custom_index];
         }
@@ -447,9 +447,9 @@ static int css_keyword_compare(const void *a, const void *b, void *udata) {
 }
 
 // Look up CSS value by name (case-insensitive)
-// Returns the LXB_CSS_VALUE enum, or LXB_CSS_VALUE__UNDEF if not found
+// Returns the LXB_CSS_VALUE enum, or CSS_VALUE__UNDEF if not found
 PropValue css_value_by_name(const char* name) {
-    if (!name) return LXB_CSS_VALUE__UNDEF;
+    if (!name) return CSS_VALUE__UNDEF;
 
     static HashMap* keyword_cache = NULL;
     static const size_t table_size = sizeof(lxb_css_value_data) / sizeof(lxb_css_value_data[0]);
@@ -485,7 +485,7 @@ PropValue css_value_by_name(const char* name) {
         }
     }
 
-    return LXB_CSS_VALUE__UNDEF;
+    return CSS_VALUE__UNDEF;
 }
 
 // Helper function to get view type name for JSON
@@ -687,7 +687,7 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
 
 ScrollProp* alloc_scroll_prop(LayoutContext* lycon) {
     ScrollProp* prop = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-    prop->overflow_x = prop->overflow_y = LXB_CSS_VALUE_VISIBLE;   // initial value
+    prop->overflow_x = prop->overflow_y = CSS_VALUE_VISIBLE;   // initial value
     prop->pane = (ScrollPane*)pool_calloc(lycon->doc->view_tree->pool, sizeof(ScrollPane));
     return prop;
 }
@@ -697,7 +697,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->line_height = null;
     prop->text_align = lycon->block.text_align;  // inherit from parent
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
-    prop->box_sizing = LXB_CSS_VALUE_CONTENT_BOX;  // default to content-box
+    prop->box_sizing = CSS_VALUE_CONTENT_BOX;  // default to content-box
     prop->given_width = prop->given_height = -1;  // -1 for not specified
     return prop;
 }
@@ -722,12 +722,12 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
 PositionProp* alloc_position_prop(LayoutContext* lycon) {
     PositionProp* prop = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
     // set defaults using actual Lexbor constants
-    prop->position = LXB_CSS_VALUE_STATIC;  // default position
+    prop->position = CSS_VALUE_STATIC;  // default position
     prop->top = prop->right = prop->bottom = prop->left = 0;  // default offsets
     prop->z_index = 0;  // default z-index
     prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
-    prop->clear = LXB_CSS_VALUE_NONE;  // default clear
-    prop->float_prop = LXB_CSS_VALUE_NONE;  // default float
+    prop->clear = CSS_VALUE_NONE;  // default clear
+    prop->float_prop = CSS_VALUE_NONE;  // default float
     return prop;
 }
 
@@ -756,11 +756,11 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embed->grid) {
         GridProp* grid = (GridProp*)alloc_prop(lycon, sizeof(GridProp));
         // Set default values using enum names that align with Lexbor constants
-        grid->justify_content = LXB_CSS_VALUE_START;
-        grid->align_content = LXB_CSS_VALUE_START;
-        grid->justify_items = LXB_CSS_VALUE_STRETCH;
-        grid->align_items = LXB_CSS_VALUE_STRETCH;
-        grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
+        grid->justify_content = CSS_VALUE_START;
+        grid->align_content = CSS_VALUE_START;
+        grid->justify_items = CSS_VALUE_STRETCH;
+        grid->align_items = CSS_VALUE_STRETCH;
+        grid->grid_auto_flow = CSS_VALUE_ROW;
         // Initialize gaps
         grid->row_gap = 0;
         grid->column_gap = 0;
@@ -791,9 +791,9 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         if (span->in_line->cursor) {
             char* cursor;
             switch (span->in_line->cursor) {
-            case LXB_CSS_VALUE_POINTER:
+            case CSS_VALUE_POINTER:
                 cursor = "pointer";  break;
-            case LXB_CSS_VALUE_TEXT:
+            case CSS_VALUE_TEXT:
                 cursor = "text";  break;
             default:
                 cursor = (char*)css_value_by_id(span->in_line->cursor)->name;
@@ -871,7 +871,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         if (block->blk->given_height >= 0) {
             strbuf_append_format(buf, "given-hg:%.1f, ", block->blk->given_height);
         }
-        if (block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+        if (block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             strbuf_append_str(buf, "box-sizing:border-box");
         } else {
             strbuf_append_str(buf, "box-sizing:content-box");
@@ -903,9 +903,9 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         }
         strbuf_append_format(buf, "wrap:%s ", wrap_str);
 
-        // justify-content (handle custom value LXB_CSS_VALUE_SPACE_EVENLY = 0x0199)
+        // justify-content (handle custom value CSS_VALUE_SPACE_EVENLY = 0x0199)
         const char* justify_str = "flex-start";
-        if (block->embed->flex->justify == LXB_CSS_VALUE_SPACE_EVENLY) {
+        if (block->embed->flex->justify == CSS_VALUE_SPACE_EVENLY) {
             justify_str = "space-evenly";
         } else {
             const css_data* justify_value = css_value_by_id(block->embed->flex->justify);
@@ -917,7 +917,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 
         // align-items (handle custom value for space-evenly)
         const char* align_items_str = "stretch";
-        if (block->embed->flex->align_items == LXB_CSS_VALUE_SPACE_EVENLY) {
+        if (block->embed->flex->align_items == CSS_VALUE_SPACE_EVENLY) {
             align_items_str = "space-evenly";
         } else {
             const css_data* align_items_value = css_value_by_id(block->embed->flex->align_items);
@@ -929,7 +929,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 
         // align-content (handle custom value for space-evenly)
         const char* align_content_str = "stretch";
-        if (block->embed->flex->align_content == LXB_CSS_VALUE_SPACE_EVENLY) {
+        if (block->embed->flex->align_content == CSS_VALUE_SPACE_EVENLY) {
             align_content_str = "space-evenly";
         } else {
             const css_data* align_content_value = css_value_by_id(block->embed->flex->align_content);
@@ -1352,7 +1352,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_format(buf, "\"max_height\": %.1f,\n", block->blk->given_max_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"box_sizing\": \"%s\",\n",
-            block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
+            block->blk->box_sizing == CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
 
         if (block->blk->given_width >= 0) {
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1390,10 +1390,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         }
         strbuf_append_format(buf, "\"wrap\": \"%s\",\n", wrap_str);
 
-        // justify-content (handle custom value LXB_CSS_VALUE_SPACE_EVENLY = 0x0199)
+        // justify-content (handle custom value CSS_VALUE_SPACE_EVENLY = 0x0199)
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* justify_str = "flex-start";
-        if (block->embed->flex->justify == LXB_CSS_VALUE_SPACE_EVENLY) {
+        if (block->embed->flex->justify == CSS_VALUE_SPACE_EVENLY) {
             justify_str = "space-evenly";
         } else {
             const css_data* justify_value = css_value_by_id(block->embed->flex->justify);
@@ -1406,7 +1406,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         // align-items (handle custom value for space-evenly)
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* align_items_str = "stretch";
-        if (block->embed->flex->align_items == LXB_CSS_VALUE_SPACE_EVENLY) {
+        if (block->embed->flex->align_items == CSS_VALUE_SPACE_EVENLY) {
             align_items_str = "space-evenly";
         } else {
             const css_data* align_items_value = css_value_by_id(block->embed->flex->align_items);
@@ -1419,7 +1419,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         // align-content (handle custom value for space-evenly)
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* align_content_str = "stretch";
-        if (block->embed->flex->align_content == LXB_CSS_VALUE_SPACE_EVENLY) {
+        if (block->embed->flex->align_content == CSS_VALUE_SPACE_EVENLY) {
             align_content_str = "space-evenly";
         } else {
             const css_data* align_content_value = css_value_by_id(block->embed->flex->align_content);
@@ -1893,8 +1893,8 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         if (span->in_line->cursor) {
             const char* cursor = "default";
             switch (span->in_line->cursor) {
-                case LXB_CSS_VALUE_POINTER: cursor = "pointer"; break;
-                case LXB_CSS_VALUE_TEXT: cursor = "text"; break;
+                case CSS_VALUE_POINTER: cursor = "pointer"; break;
+                case CSS_VALUE_TEXT: cursor = "text"; break;
                 default: cursor = (const char*)css_value_by_id(span->in_line->cursor)->name; break;
             }
             strbuf_append_str(buf, ",\n");

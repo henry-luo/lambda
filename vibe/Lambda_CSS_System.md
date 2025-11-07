@@ -874,7 +874,7 @@ layout_html_doc(doc, &root_node, lycon)
 ### Key Design Requirements
 
 **Enum Value Mapping**:
-Radiant layout code extensively uses Lexbor CSS enum values (`LXB_CSS_VALUE_*`) throughout. Lambda CSS must map its keyword enum values to Lexbor constants for compatibility.
+Radiant layout code extensively uses Lexbor CSS enum values (`CSS_VALUE_*`) throughout. Lambda CSS must map its keyword enum values to Lexbor constants for compatibility.
 
 **Solution**: Align Lambda CSS keyword enums with Lexbor values
 
@@ -882,17 +882,17 @@ Radiant layout code extensively uses Lexbor CSS enum values (`LXB_CSS_VALUE_*`) 
 // In lambda/input/css/css_style.h
 // CSS keyword values aligned with Lexbor for compatibility
 typedef enum CssKeywordValue {
-    // Display values - aligned with LXB_CSS_VALUE_*
-    CSS_VALUE_BLOCK = 44,         // = LXB_CSS_VALUE_BLOCK
-    CSS_VALUE_INLINE = 211,       // = LXB_CSS_VALUE_INLINE
-    CSS_VALUE_FLEX = 184,         // = LXB_CSS_VALUE_FLEX
-    CSS_VALUE_GRID = 196,         // = LXB_CSS_VALUE_GRID
-    CSS_VALUE_NONE = 265,         // = LXB_CSS_VALUE_NONE
+    // Display values - aligned with CSS_VALUE_*
+    CSS_VALUE_BLOCK = 44,         // = CSS_VALUE_BLOCK
+    CSS_VALUE_INLINE = 211,       // = CSS_VALUE_INLINE
+    CSS_VALUE_FLEX = 184,         // = CSS_VALUE_FLEX
+    CSS_VALUE_GRID = 196,         // = CSS_VALUE_GRID
+    CSS_VALUE_NONE = 265,         // = CSS_VALUE_NONE
 
     // Position values
-    CSS_VALUE_STATIC = 362,       // = LXB_CSS_VALUE_STATIC
-    CSS_VALUE_RELATIVE = 317,     // = LXB_CSS_VALUE_RELATIVE
-    CSS_VALUE_ABSOLUTE = 6,       // = LXB_CSS_VALUE_ABSOLUTE
+    CSS_VALUE_STATIC = 362,       // = CSS_VALUE_STATIC
+    CSS_VALUE_RELATIVE = 317,     // = CSS_VALUE_RELATIVE
+    CSS_VALUE_ABSOLUTE = 6,       // = CSS_VALUE_ABSOLUTE
 
     // Complete mapping for all CSS keywords
 } CssKeywordValue;

@@ -20,11 +20,11 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         memcpy(grid, container->embed->grid, sizeof(GridProp));
     } else {
         // Set default values using enum names that align with Lexbor constants
-        grid->justify_content = LXB_CSS_VALUE_START;
-        grid->align_content = LXB_CSS_VALUE_START;
-        grid->justify_items = LXB_CSS_VALUE_STRETCH;
-        grid->align_items = LXB_CSS_VALUE_STRETCH;
-        grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
+        grid->justify_content = CSS_VALUE_START;
+        grid->align_content = CSS_VALUE_START;
+        grid->justify_items = CSS_VALUE_STRETCH;
+        grid->align_items = CSS_VALUE_STRETCH;
+        grid->grid_auto_flow = CSS_VALUE_ROW;
         // Initialize gaps
         grid->row_gap = 0;
         grid->column_gap = 0;
@@ -224,8 +224,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     while (child) {
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
-                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE ||
-                           child->position->position == LXB_CSS_VALUE_FIXED);
+                          (child->position->position == CSS_VALUE_ABSOLUTE ||
+                           child->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             count++;
@@ -251,8 +251,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     while (child) {
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
-                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE ||
-                           child->position->position == LXB_CSS_VALUE_FIXED);
+                          (child->position->position == CSS_VALUE_ABSOLUTE ||
+                           child->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             grid_layout->grid_items[count] = child;
@@ -265,8 +265,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
                 child->grid_row_end = 0;      // auto
                 child->grid_column_start = 0; // auto
                 child->grid_column_end = 0;   // auto
-                child->justify_self = LXB_CSS_VALUE_AUTO;
-                child->align_self_grid = LXB_CSS_VALUE_AUTO;
+                child->justify_self = CSS_VALUE_AUTO;
+                child->align_self_grid = CSS_VALUE_AUTO;
                 child->is_grid_auto_placed = true;
             }
 
@@ -384,7 +384,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
 
     printf("DEBUG: Grid dimensions for auto-placement: %dx%d (cols x rows)\n", max_columns, max_rows);
 
-    if (grid_layout->grid_auto_flow == LXB_CSS_VALUE_ROW) {
+    if (grid_layout->grid_auto_flow == CSS_VALUE_ROW) {
         // Place items row by row (default behavior)
         placement->row_start = current_row;
         placement->row_end = current_row + 1;
@@ -499,8 +499,8 @@ bool is_grid_item(ViewBlock* block) {
 
     ViewBlock* parent = (ViewBlock*)block->parent;
     bool is_absolute = block->position &&
-                      (block->position->position == LXB_CSS_VALUE_ABSOLUTE ||
-                       block->position->position == LXB_CSS_VALUE_FIXED);
+                      (block->position->position == CSS_VALUE_ABSOLUTE ||
+                       block->position->position == CSS_VALUE_FIXED);
     bool is_hidden = block->visibility == VIS_HIDDEN;
     return parent->embed && parent->embed->grid && !is_absolute && !is_hidden;
 }

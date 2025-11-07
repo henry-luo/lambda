@@ -128,7 +128,7 @@ struct DomElement : public DomNode {
     Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
     void* tag_name_ptr;          // Tag name pointer from name_pool (for fast comparison)
-    uintptr_t tag_id;            // Tag ID for fast comparison (e.g., LXB_TAG_DIV)
+    uintptr_t tag_id;            // Tag ID for fast comparison (e.g., HTM_TAG_DIV)
     const char* id;              // Element ID attribute (cached)
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes

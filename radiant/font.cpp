@@ -117,16 +117,16 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
 FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
     StrBuf* name;
     name = strbuf_create(font_name);
-    log_debug("load_styled_font: font_name='%s', font_weight=%d, LXB_CSS_VALUE_BOLD=%d",
-              font_name, font_style->font_weight, LXB_CSS_VALUE_BOLD);
-    if (font_style->font_weight == LXB_CSS_VALUE_BOLD) {
-        if (font_style->font_style == LXB_CSS_VALUE_ITALIC) {
+    log_debug("load_styled_font: font_name='%s', font_weight=%d, CSS_VALUE_BOLD=%d",
+              font_name, font_style->font_weight, CSS_VALUE_BOLD);
+    if (font_style->font_weight == CSS_VALUE_BOLD) {
+        if (font_style->font_style == CSS_VALUE_ITALIC) {
             strbuf_append_str(name, ":bolditalic");
         } else {
             strbuf_append_str(name, ":bold");
         }
     }
-    else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) {
+    else if (font_style->font_style == CSS_VALUE_ITALIC) {
         strbuf_append_str(name, ":italic");
     }
     FT_Face face = load_font_face(uicon, name->str, font_style->font_size);

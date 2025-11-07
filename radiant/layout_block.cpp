@@ -41,7 +41,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
     }
 
     log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
-    if (display == LXB_CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
+    if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
         block->width = min(flow_width, block->width);
         log_debug("inline-block final width set to: %f", block->width);
     }
@@ -52,16 +52,16 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
             block->scroller = alloc_scroll_prop(lycon);
         }
         block->scroller->has_hz_overflow = true;
-        if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {
+        if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {
             lycon->block.pa_block->max_width = max(lycon->block.pa_block->max_width, flow_width);
         }
-        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
+        else if (block->scroller->overflow_x == CSS_VALUE_SCROLL ||
+            block->scroller->overflow_x == CSS_VALUE_AUTO) {
             block->scroller->has_hz_scroll = true;
         }
         if (block->scroller->has_hz_scroll ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->overflow_x == CSS_VALUE_CLIP ||
+            block->scroller->overflow_x == CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
             block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
             block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
@@ -76,15 +76,15 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
                 block->scroller = alloc_scroll_prop(lycon);
             }
             block->scroller->has_vt_overflow = true;
-            if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) {
+            if (block->scroller->overflow_y == CSS_VALUE_VISIBLE) {
                 lycon->block.pa_block->max_height = max(lycon->block.pa_block->max_height, block->y + flow_height);
             }
-            else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
+            else if (block->scroller->overflow_y == CSS_VALUE_SCROLL || block->scroller->overflow_y == CSS_VALUE_AUTO) {
                 block->scroller->has_vt_scroll = true;
             }
             if (block->scroller->has_hz_scroll ||
-                block->scroller->overflow_y == LXB_CSS_VALUE_CLIP ||
-                block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
+                block->scroller->overflow_y == CSS_VALUE_CLIP ||
+                block->scroller->overflow_y == CSS_VALUE_HIDDEN) {
                 block->scroller->has_clip = true;
                 block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
                 block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
@@ -141,15 +141,15 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("layout block inner content");
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
         uintptr_t elmt_name = block->node->tag();
-        if (elmt_name == LXB_TAG_IFRAME) {
+        if (elmt_name == HTM_TAG_IFRAME) {
             layout_iframe(lycon, block, block->display);
         }
-        // else LXB_TAG_IMG
+        // else HTM_TAG_IMG
     } else {  // layout block child content
         DomNode *child = block->node->first_child;
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
-            if (block->display.inner == LXB_CSS_VALUE_FLOW) {
+            if (block->display.inner == CSS_VALUE_FLOW) {
                 // inline content flow
                 do {
                     layout_flow_node(lycon, child);
@@ -158,12 +158,12 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 // handle last line
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
-            else if (block->display.inner == LXB_CSS_VALUE_FLEX) {
+            else if (block->display.inner == CSS_VALUE_FLEX) {
                 log_debug("Setting up flex container for %s", block->node->name());
                 layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node->name());
             }
-            else if (block->display.inner == LXB_CSS_VALUE_GRID) {
+            else if (block->display.inner == CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s", block->node->name());
                 GridContainerLayout* pa_grid = lycon->grid_container;
                 init_grid_container(lycon, block);
@@ -191,7 +191,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 lycon->grid_container = pa_grid;
                 log_debug("Finished layout_grid_container");
             }
-            else if (block->display.inner == LXB_CSS_VALUE_TABLE) {
+            else if (block->display.inner == CSS_VALUE_TABLE) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
                         block->display.outer, block->display.inner, block->node->name());
                 layout_table(lycon, block->node, block->display);
@@ -273,7 +273,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
     resolve_inline_default(lycon, (ViewSpan*)block);
     uintptr_t elmt_name = elmt->tag();
     switch (elmt_name) {
-    case LXB_TAG_BODY: {
+    case HTM_TAG_BODY: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         // margin: 8px
         block->bound->margin.top = block->bound->margin.right =
@@ -282,37 +282,37 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
             block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
         break;
     }
-    case LXB_TAG_H1:
+    case HTM_TAG_H1:
         em_size = 2;  // 2em
         goto HEADING_PROP;
-    case LXB_TAG_H2:
+    case HTM_TAG_H2:
         em_size = 1.5;  // 1.5em
         goto HEADING_PROP;
-    case LXB_TAG_H3:
+    case HTM_TAG_H3:
         em_size = 1.17;  // 1.17em
         goto HEADING_PROP;
-    case LXB_TAG_H4:
+    case HTM_TAG_H4:
         em_size = 1;  // 1em
         goto HEADING_PROP;
-    case LXB_TAG_H5:
+    case HTM_TAG_H5:
         em_size = 0.83;  // 0.83em
         goto HEADING_PROP;
-    case LXB_TAG_H6:
+    case HTM_TAG_H6:
         em_size = 0.67;  // 0.67em
         HEADING_PROP:
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_size = lycon->font.style->font_size * em_size;
-        block->font->font_weight = LXB_CSS_VALUE_BOLD;
+        block->font->font_weight = CSS_VALUE_BOLD;
         break;
-    case LXB_TAG_P:
+    case HTM_TAG_P:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         // margin: 1em 0;
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
-    case LXB_TAG_UL:  case LXB_TAG_OL:
+    case HTM_TAG_UL:  case HTM_TAG_OL:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->list_style_type = elmt_name == LXB_TAG_UL ? LXB_CSS_VALUE_DISC : LXB_CSS_VALUE_DECIMAL;
+        block->blk->list_style_type = elmt_name == HTM_TAG_UL ? CSS_VALUE_DISC : CSS_VALUE_DECIMAL;
         if (!block->bound) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
@@ -322,11 +322,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         block->bound->padding.left_specificity = -1;
         break;
-    case LXB_TAG_CENTER:
+    case HTM_TAG_CENTER:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = LXB_CSS_VALUE_CENTER;
+        block->blk->text_align = CSS_VALUE_CENTER;
         break;
-    case LXB_TAG_IMG:  // get html width and height (before the css styles)
+    case HTM_TAG_IMG:  // get html width and height (before the css styles)
         value = elmt->get_attribute("width");
         if (value) {
             value_len = strlen(value);
@@ -344,7 +344,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
             // else height attr ignored
         }
         break;
-    case LXB_TAG_IFRAME:
+    case HTM_TAG_IFRAME:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // todo: inset border style
@@ -353,13 +353,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
-        block->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
-        block->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
+        block->scroller->overflow_x = CSS_VALUE_AUTO;
+        block->scroller->overflow_y = CSS_VALUE_AUTO;
         // default iframe size to 300 x 200
         lycon->block.given_width = 300 * lycon->ui_context->pixel_ratio;
         lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;
         break;
-    case LXB_TAG_HR:
+    case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // 1px top border
@@ -399,7 +399,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
     // setup line height
-    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
+    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== CSS_VALUE_INHERIT) {  // inherit from parent
         lycon->block.line_height = inherit_line_height(lycon, block);
     } else {
         lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
@@ -419,7 +419,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         tag, block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
 
     uintptr_t elmt_name = elmt->tag();
-    if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
+    if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
         const char *value;
         value = elmt->get_attribute("src");
         if (value) {
@@ -480,13 +480,13 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         elmt->name(), lycon->block.given_width, lycon->block.given_height, (void*)block->blk,
         block->blk ? block->blk->given_width_type : -1);
     bool cond1 = (lycon->block.given_width >= 0);
-    bool cond2 = (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO);
-    if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO)) {
+    bool cond2 = (!block->blk || block->blk->given_width_type != CSS_VALUE_AUTO);
+    if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != CSS_VALUE_AUTO)) {
         content_width = max(lycon->block.given_width, 0);
         log_debug("Using given_width: content_width=%.2f", content_width);
         content_width = adjust_min_max_width(block, content_width);
         log_debug("After adjust_min_max_width: content_width=%.2f", content_width);
-        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
             log_debug("After adjust_border_padding (border-box): content_width=%.2f", content_width);
         }
@@ -495,11 +495,11 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         log_debug("Deriving from parent: pa_block.content_width=%.2f", pa_block->content_width);
         if (block->bound) {
             content_width = pa_block->content_width
-                - (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
-                - (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
+                - (block->bound->margin.left_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
+                - (block->bound->margin.right_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
         }
         else { content_width = pa_block->content_width; }
-        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             content_width = adjust_min_max_width(block, content_width);
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         } else {
@@ -515,7 +515,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     if (lycon->block.given_height >= 0) {
         content_height = max(lycon->block.given_height, 0);
         content_height = adjust_min_max_height(block, content_height);
-        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         }
     }
@@ -524,7 +524,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
             content_height = pa_block->content_height - block->bound->margin.top - block->bound->margin.bottom;
         }
         else { content_height = pa_block->content_height; }
-        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+        if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             content_height = adjust_min_max_height(block, content_height);
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         } else {
@@ -545,11 +545,11 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
-        if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO && block->bound->margin.right_type == LXB_CSS_VALUE_AUTO)  {
+        if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO)  {
             block->bound->margin.left = block->bound->margin.right = max((pa_block->content_width - block->width) / 2, 0);
         } else {
-            if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO) block->bound->margin.left = 0;
-            if (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO) block->bound->margin.right = 0;
+            if (block->bound->margin.left_type == CSS_VALUE_AUTO) block->bound->margin.left = 0;
+            if (block->bound->margin.right_type == CSS_VALUE_AUTO) block->bound->margin.right = 0;
         }
         log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
         float y_before_margin = block->y;
@@ -598,7 +598,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     }
 
     // apply CSS clear property after float layout
-    if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
+    if (block->position && block->position->clear != CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
     }
@@ -606,14 +606,14 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_enter();
-    // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
+    // display: CSS_VALUE_BLOCK, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_LIST_ITEM
     log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->name(), display.outer, display.inner);
 
     // Check if this block is a flex item
     ViewBlock* parent_block = (ViewBlock*)lycon->parent;
-    bool is_flex_item = (parent_block && parent_block->display.inner == LXB_CSS_VALUE_FLEX);
+    bool is_flex_item = (parent_block && parent_block->display.inner == CSS_VALUE_FLEX);
 
-    if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
+    if (display.outer != CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
     // save parent context
@@ -626,9 +626,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)alloc_view(lycon,
-        display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
-        display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
-        display.inner == LXB_CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
+        display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
+        display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
+        display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
         elmt);
     block->display = display;
 
@@ -638,7 +638,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
 
-    if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED)) {
+    if (block->position && (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED)) {
         layout_abs_block(lycon, elmt, block, &pa_block, &pa_line);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
         lycon->prev_view = (View*)block;
@@ -650,7 +650,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
         // flow the block in parent context
-        if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
+        if (display.outer == CSS_VALUE_INLINE_BLOCK) {
             if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
             if (lycon->line.advance_x + block->width > lycon->line.right) {
                 line_break(lycon);
@@ -684,12 +684,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             log_debug("inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d",
                 block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
             // update baseline
-            if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
+            if (block->in_line && block->in_line->vertical_align != CSS_VALUE_BASELINE) {
                 float block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
-                if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_TOP) {
+                if (block->in_line->vertical_align == CSS_VALUE_TEXT_TOP) {
                     lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
                 }
-                else if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_BOTTOM) {
+                else if (block->in_line->vertical_align == CSS_VALUE_TEXT_BOTTOM) {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
                 }
                 else {
@@ -761,7 +761,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
 
         // apply CSS relative positioning after normal layout
-        if (block->position && block->position->position == LXB_CSS_VALUE_RELATIVE) {
+        if (block->position && block->position->position == CSS_VALUE_RELATIVE) {
             log_debug("Applying relative positioning");
             layout_relative_positioned(lycon, block);
         }

@@ -506,8 +506,8 @@ UnicodeRenderContext* create_unicode_render_context(UiContext* uicon, EnhancedFo
     ctx->pixel_ratio = uicon->pixel_ratio;
     ctx->subpixel_positioning = false; // Disabled by default
     ctx->font_hinting = true; // Enabled by default
-    ctx->text_direction = LXB_CSS_VALUE_LTR; // Default to LTR
-    ctx->writing_mode = LXB_CSS_VALUE_HORIZONTAL_TB; // Default to horizontal
+    ctx->text_direction = CSS_VALUE_LTR; // Default to LTR
+    ctx->writing_mode = CSS_VALUE_HORIZONTAL_TB; // Default to horizontal
     ctx->language = strdup("en"); // Default to English
 
     // Initialize caches

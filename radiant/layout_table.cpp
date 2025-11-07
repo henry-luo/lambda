@@ -316,7 +316,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
         log_debug("Processing table child - tag=%s, display.outer=%d, display.inner=%d",
                child->name(), child_display.outer, child_display.inner);
 
-        if (tag == LXB_TAG_CAPTION || child_display.inner == LXB_CSS_VALUE_TABLE_CAPTION) {
+        if (tag == HTM_TAG_CAPTION || child_display.inner == CSS_VALUE_TABLE_CAPTION) {
             // Create caption as block
             ViewBlock* caption = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
             if (caption) {
@@ -370,10 +370,10 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 lycon->elmt = cap_saved_elmt;
             }
         }
-        else if (tag == LXB_TAG_THEAD || tag == LXB_TAG_TBODY || tag == LXB_TAG_TFOOT ||
-                 child_display.inner == LXB_CSS_VALUE_TABLE_ROW_GROUP ||
-                 child_display.inner == LXB_CSS_VALUE_TABLE_HEADER_GROUP ||
-                 child_display.inner == LXB_CSS_VALUE_TABLE_FOOTER_GROUP) {
+        else if (tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT ||
+                 child_display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
+                 child_display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
+                 child_display.inner == CSS_VALUE_TABLE_FOOTER_GROUP) {
             // Create row group
             ViewTableRowGroup* group = create_table_row_group(lycon, child);
             if (group) {
@@ -391,7 +391,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                     log_debug("Processing row candidate - tag=%s, display.outer=%d, display.inner=%d",
                            rowNode->name(), row_display.outer, row_display.inner);
 
-                    if (rowNode->tag() == LXB_TAG_TR || row_display.inner == LXB_CSS_VALUE_TABLE_ROW) {
+                    if (rowNode->tag() == HTM_TAG_TR || row_display.inner == CSS_VALUE_TABLE_ROW) {
                         ViewTableRow* row = create_table_row(lycon, rowNode);
                         if (row) {
                             // Process cells in row
@@ -409,10 +409,10 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                        cellNode->name(), cell_display.outer, cell_display.inner);
 
                                 uintptr_t ctag = cellNode->tag();
-                                log_debug("Cell check: ctag=%lu, LXB_TAG_TD=%lu, inner_display=%d, TABLE_CELL=%d",
-                                       ctag, LXB_TAG_TD, cell_display.inner, LXB_CSS_VALUE_TABLE_CELL);
-                                if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH ||
-                                    cell_display.inner == LXB_CSS_VALUE_TABLE_CELL) {
+                                log_debug("Cell check: ctag=%lu, HTM_TAG_TD=%lu, inner_display=%d, TABLE_CELL=%d",
+                                       ctag, HTM_TAG_TD, cell_display.inner, CSS_VALUE_TABLE_CELL);
+                                if (ctag == HTM_TAG_TD || ctag == HTM_TAG_TH ||
+                                    cell_display.inner == CSS_VALUE_TABLE_CELL) {
                                     log_debug("Creating table cell via create_table_cell");
                                     ViewTableCell* cell = create_table_cell(lycon, cellNode);
                                     if (cell) {
@@ -468,7 +468,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 lycon->elmt = tableNode;
             }
         }
-        else if (tag == LXB_TAG_TR || child_display.inner == LXB_CSS_VALUE_TABLE_ROW) {
+        else if (tag == HTM_TAG_TR || child_display.inner == CSS_VALUE_TABLE_ROW) {
             // Direct table row - process without implicit tbody for now
             ViewTableRow* row = create_table_row(lycon, child);
             if (row) {
@@ -487,8 +487,8 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                            cellNode->name(), cell_display.outer, cell_display.inner);
 
                     uintptr_t ctag = cellNode->tag();
-                    if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH ||
-                        cell_display.inner == LXB_CSS_VALUE_TABLE_CELL) {
+                    if (ctag == HTM_TAG_TD || ctag == HTM_TAG_TH ||
+                        cell_display.inner == CSS_VALUE_TABLE_CELL) {
                         ViewTableCell* cell = create_table_cell(lycon, cellNode);
                         if (cell) {
                             // Layout cell content
@@ -747,7 +747,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Find and position caption
     for (ViewBlock* child = table->first_child; child; child = child->next_sibling) {
-        if (child->node && child->node->tag() == LXB_TAG_CAPTION) {
+        if (child->node && child->node->tag() == HTM_TAG_CAPTION) {
             caption = child;
             // Caption should have proper dimensions from content layout
             if (caption->height > 0) {
@@ -2036,7 +2036,7 @@ void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display
     // relative to its parent. Adding parent position would double-apply body margins.
     // Let's trust the existing block layout positioning.
     ViewBlock* parent = (ViewBlock*)table->parent;
-    if (parent && parent->node && parent->node->tag() == LXB_TAG_BODY) {
+    if (parent && parent->node && parent->node->tag() == HTM_TAG_BODY) {
         log_debug("Parent body found at position: (%d,%d), but not adding to table position",
                parent->x, parent->y);
         log_debug("Block layout should already position table correctly relative to body");

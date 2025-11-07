@@ -42,13 +42,13 @@ typedef struct GridContainerLayout {
     int column_gap;
 
     // Grid alignment properties
-    PropValue justify_content;    // LXB_CSS_VALUE_START, etc.
-    PropValue align_content;      // LXB_CSS_VALUE_START, etc.
-    PropValue justify_items;      // LXB_CSS_VALUE_STRETCH, etc.
-    PropValue align_items;        // LXB_CSS_VALUE_STRETCH, etc.
+    PropValue justify_content;    // CSS_VALUE_START, etc.
+    PropValue align_content;      // CSS_VALUE_START, etc.
+    PropValue justify_items;      // CSS_VALUE_STRETCH, etc.
+    PropValue align_items;        // CSS_VALUE_STRETCH, etc.
 
     // Grid auto properties
-    PropValue grid_auto_flow;     // LXB_CSS_VALUE_ROW, LXB_CSS_VALUE_COLUMN
+    PropValue grid_auto_flow;     // CSS_VALUE_ROW, CSS_VALUE_COLUMN
     GridTrackList* grid_auto_rows;
     GridTrackList* grid_auto_columns;
 
@@ -252,7 +252,7 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     lycon->block.max_width = 0;
     lycon->line.left = 0;
     lycon->line.right = grid_item->width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
+    lycon->line.vertical_align = CSS_VALUE_BASELINE;
     line_init(lycon);
 
     // Layout child content
@@ -352,11 +352,11 @@ void init_grid_container(ViewBlock* container) {
     container->embed->grid_container = grid;
 
     // Set default values using enum names that align with Lexbor constants
-    grid->justify_content = LXB_CSS_VALUE_START;
-    grid->align_content = LXB_CSS_VALUE_START;
-    grid->justify_items = LXB_CSS_VALUE_STRETCH;
-    grid->align_items = LXB_CSS_VALUE_STRETCH;
-    grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
+    grid->justify_content = CSS_VALUE_START;
+    grid->align_content = CSS_VALUE_START;
+    grid->justify_items = CSS_VALUE_STRETCH;
+    grid->align_items = CSS_VALUE_STRETCH;
+    grid->grid_auto_flow = CSS_VALUE_ROW;
 
     // Initialize gaps
     grid->row_gap = 0;
@@ -384,14 +384,14 @@ void layout_block(LayoutContext* lycon, DomNode* node, DisplayValue display) {
     // ... existing code ...
 
     // Check for grid container
-    if (display.inner == LXB_CSS_VALUE_GRID) {
+    if (display.inner == CSS_VALUE_GRID) {
         log_debug("Dispatching to grid layout\n");
         layout_grid_container(lycon, block);
         return;
     }
 
     // Check for flex container (existing)
-    if (display.inner == LXB_CSS_VALUE_FLEX) {
+    if (display.inner == CSS_VALUE_FLEX) {
         log_debug("Dispatching to flex layout\n");
         layout_flex_container(lycon, block);
         return;
@@ -538,7 +538,7 @@ void optimize_grid_layout(GridContainerLayout* grid) {
 ### ✅ Phase 4: CSS Integration and Property Resolution
 - **Files**: `/radiant/resolve_style.cpp` (updated), `/radiant/view.hpp` (updated), `/radiant/view_pool.cpp` (updated)
 - **Features**: Complete CSS Grid property support
-  - CSS Grid constants (`LXB_CSS_VALUE_GRID`, `LXB_CSS_VALUE_FR`, etc.)
+  - CSS Grid constants (`CSS_VALUE_GRID`, `CSS_VALUE_FR`, etc.)
   - Grid container properties (`grid-template-rows/columns`, `grid-template-areas`)
   - Grid item properties (`grid-row-start/end`, `grid-column-start/end`, `grid-area`)
   - Gap properties (`row-gap`, `column-gap`)

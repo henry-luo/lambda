@@ -9,22 +9,22 @@ typedef struct {
     int justify;                // flex-start, center, space-between, etc.
     int align_items;            // flex-start, center, stretch, etc.
     int align_content;          // For multi-line flex containers
-    
+
     // Gap support (CRITICAL)
     int row_gap, column_gap;    // Gap between flex items
-    
+
     // Calculated dimensions
     int main_axis_size;         // Container main axis size
     int cross_axis_size;        // Container cross axis size
-    
+
     // Flex lines for wrapping
     FlexLineInfo* lines;
     int line_count;
-    
+
     // Flex items
     ViewBlock** flex_items;
     int item_count;
-    
+
     bool needs_reflow;
 } FlexContainerLayout;
 ```
@@ -60,7 +60,7 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
         return basis;
     } else if (item->flex_basis_is_percent) {
         // percentage basis
-        int container_size = is_main_axis_horizontal(flex_layout) ? 
+        int container_size = is_main_axis_horizontal(flex_layout) ?
                            flex_layout->main_axis_size : flex_layout->cross_axis_size;
         return (container_size * item->flex_basis) / 100;
     } else {
@@ -82,11 +82,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         set_main_axis_size(item, basis, flex_layout);
         total_basis_size += basis;
     }
-    
+
     // Add gap space
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
     total_basis_size += gap_space;
-    
+
     // Calculate and distribute free space
     int free_space = container_main_size - total_basis_size;
     // ... flex-grow/shrink distribution logic
@@ -99,17 +99,17 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     // Apply justify-content
     switch (justify) {
-        case LXB_CSS_VALUE_FLEX_START:
+        case CSS_VALUE_FLEX_START:
             current_pos = 0;
             break;
-        case LXB_CSS_VALUE_CENTER:
+        case CSS_VALUE_CENTER:
             current_pos = (container_size - total_size_with_gaps) / 2;
             break;
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
+        case CSS_VALUE_SPACE_BETWEEN:
             spacing = (container_size - total_item_size - gap_space) / (line->item_count - 1);
             break;
     }
-    
+
     // Position each item with gaps
     for (int i = 0; i < line->item_count; i++) {
         set_main_axis_position(item, current_pos, flex_layout);
@@ -130,7 +130,7 @@ void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* 
     // CRITICAL: Account for container border offset
     ViewBlock* container = (ViewBlock*)item->parent;
     int border_offset = 0;
-    
+
     if (container && container->bound && container->bound->border) {
         if (is_main_axis_horizontal(flex_layout)) {
             border_offset = container->bound->border->width.left;
@@ -138,7 +138,7 @@ void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* 
             border_offset = container->bound->border->width.top;
         }
     }
-    
+
     if (is_main_axis_horizontal(flex_layout)) {
         item->x = position + border_offset;
     } else {
@@ -183,4 +183,3 @@ int get_border_box_width(ViewBlock* item) {
 
 **Problem**: Flex containers and lines need proper cleanup
 **Solution**: Implement `cleanup_flex_container()` with proper memory deallocation
-

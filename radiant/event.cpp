@@ -24,7 +24,7 @@ void target_children(EventContext* evcon, View* view) {
             ViewBlock* block = (ViewBlock*)view;
             log_debug("target view block:%s, x:%f, y:%f, wd:%f, hg:%f",
                 block->node->name(), block->x, block->y, block->width, block->height);
-            if (block->position && block->position->position != LXB_CSS_VALUE_STATIC) {
+            if (block->position && block->position->position != CSS_VALUE_STATIC) {
                 log_debug("skip absolute/fixed positioned block");
             } else {
                 target_block_view(evcon, block);
@@ -200,9 +200,9 @@ ArrayList* build_view_stack(EventContext* evcon, View* view) {
 
 void fire_text_event(EventContext* evcon, ViewText* text) {
     log_debug("fire text event");
-    if (evcon->new_cursor == LXB_CSS_VALUE_AUTO) {
+    if (evcon->new_cursor == CSS_VALUE_AUTO) {
         log_debug("set text cursor");
-        evcon->new_cursor = LXB_CSS_VALUE_TEXT;
+        evcon->new_cursor = CSS_VALUE_TEXT;
     }
     else {
         log_debug("cursor already set as %d", evcon->new_cursor);
@@ -216,7 +216,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     }
     uintptr_t name = span->node->tag();
     log_debug("fired at view %s", span->node->name());
-    if (name == LXB_TAG_A) {
+    if (name == HTM_TAG_A) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
@@ -286,7 +286,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     evcon->event = *event;
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, &uicon->default_font);
-    evcon->new_cursor = LXB_CSS_VALUE_AUTO;
+    evcon->new_cursor = CSS_VALUE_AUTO;
     if (!uicon->document->state) {
         uicon->document->state = (StateStore*)calloc(1, sizeof(StateStore));
     }
@@ -420,8 +420,8 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
             int cursor_type;
             switch (evcon.new_cursor) {
-            case LXB_CSS_VALUE_TEXT: cursor_type = GLFW_IBEAM_CURSOR; break;
-            case LXB_CSS_VALUE_POINTER: cursor_type = GLFW_HAND_CURSOR; break;
+            case CSS_VALUE_TEXT: cursor_type = GLFW_IBEAM_CURSOR; break;
+            case CSS_VALUE_POINTER: cursor_type = GLFW_HAND_CURSOR; break;
             default: cursor_type = GLFW_ARROW_CURSOR; break;
             }
             GLFWcursor* cursor = glfwCreateStandardCursor(cursor_type);

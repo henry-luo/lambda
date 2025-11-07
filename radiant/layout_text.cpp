@@ -41,7 +41,7 @@ void line_reset(LayoutContext* lycon) {
 void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.left = left;  lycon->line.right = right;
     line_reset(lycon);
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;  // vertical-align does not inherit
+    lycon->line.vertical_align = CSS_VALUE_BASELINE;  // vertical-align does not inherit
 }
 
 void line_break(LayoutContext* lycon) {
@@ -137,8 +137,8 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
         }
         else if (node->is_element()) {
             PropValue outer_display = resolve_display_value(node).outer;
-            if (outer_display == LXB_CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
-            else if (outer_display == LXB_CSS_VALUE_INLINE) {
+            if (outer_display == CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
+            else if (outer_display == CSS_VALUE_INLINE) {
                 LineFillStatus result = span_has_line_filled(lycon, node);
                 if (result) { return result; }
             }
@@ -252,15 +252,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     rect->height = font_height;  // should text->height be lycon->block.line_height or font_height?
 
     // lead_y applies to baseline aligned text; not other vertical aligns
-    if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
+    if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         rect->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }
-    else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
+    else if (lycon->line.vertical_align == CSS_VALUE_BOTTOM) {
         log_debug("bottom-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         rect->y = lycon->block.advance_y + lycon->block.line_height - font_height;
     }
-    else if (lycon->line.vertical_align == LXB_CSS_VALUE_TOP) {
+    else if (lycon->line.vertical_align == CSS_VALUE_TOP) {
         log_debug("top-aligned-text");
         rect->y = lycon->block.advance_y;
     }

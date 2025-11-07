@@ -62,7 +62,7 @@ ViewBlock (flex container) -> ViewBlock[] (flex items) -> direct layout manipula
 // Enhanced ViewBlock for flex containers
 typedef struct ViewBlock : ViewSpan {
     // ... existing fields ...
-    
+
     // Flex container properties (when display: flex)
     FlexContainerLayout* flex_layout;  // NULL for non-flex blocks
 } ViewBlock;
@@ -75,19 +75,19 @@ typedef struct FlexContainerLayout {
     JustifyContent justify_content;
     AlignItems align_items;
     AlignContent align_content;
-    
+
     // Gap properties
     int row_gap;
     int column_gap;
-    
+
     // Layout state
     FlexLine* lines;
     int line_count;
-    
+
     // Computed dimensions
     int main_size;
     int cross_size;
-    
+
     // Writing mode support
     WritingMode writing_mode;
     TextDirection text_direction;
@@ -101,16 +101,16 @@ typedef struct FlexItemLayout {
     float flex_shrink;
     AlignSelf align_self;
     int order;
-    
+
     // Computed values
     int main_size;
     int cross_size;
     int resolved_flex_basis;
-    
+
     // Layout state
     bool is_frozen;
     float target_main_size;
-    
+
     // Aspect ratio and constraints
     float aspect_ratio;
     int baseline_offset;
@@ -127,28 +127,28 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // Phase 1: Initialize flex context
     FlexLayoutContext flex_ctx;
     init_flex_context(&flex_ctx, lycon, container);
-    
+
     // Phase 2: Collect and prepare flex items
     collect_flex_items(&flex_ctx);
-    
+
     // Phase 3: Determine main and cross sizes
     determine_flex_container_sizes(&flex_ctx);
-    
+
     // Phase 4: Resolve flex item sizes
     resolve_flex_item_sizes(&flex_ctx);
-    
+
     // Phase 5: Create flex lines
     create_flex_lines(&flex_ctx);
-    
+
     // Phase 6: Resolve flexible lengths
     resolve_flexible_lengths(&flex_ctx);
-    
+
     // Phase 7: Main axis alignment
     align_main_axis(&flex_ctx);
-    
+
     // Phase 8: Cross axis alignment
     align_cross_axis(&flex_ctx);
-    
+
     // Phase 9: Finalize layout
     finalize_flex_layout(&flex_ctx);
 }
@@ -170,17 +170,17 @@ typedef struct FlexLayoutContext {
     ViewBlock* container;
     ViewBlock** items;
     int item_count;
-    
+
     // Computed container properties
     int main_size;
     int cross_size;
     bool is_row_direction;
     bool is_reverse_direction;
-    
+
     // Line management
     FlexLine* lines;
     int line_count;
-    
+
     // Writing mode support
     WritingMode writing_mode;
     TextDirection text_direction;
@@ -199,7 +199,7 @@ typedef struct FlexLayoutContext {
 void collect_flex_items(FlexLayoutContext* flex_ctx) {
     ViewBlock* container = flex_ctx->container;
     View* child = container->child;
-    
+
     // Count and validate flex items
     int count = 0;
     while (child) {
@@ -208,11 +208,11 @@ void collect_flex_items(FlexLayoutContext* flex_ctx) {
         }
         child = child->next;
     }
-    
+
     // Allocate and populate items array
     flex_ctx->items = allocate_flex_items(flex_ctx->base_context, count);
     flex_ctx->item_count = count;
-    
+
     // Initialize flex item properties
     child = container->child;
     int index = 0;
@@ -223,7 +223,7 @@ void collect_flex_items(FlexLayoutContext* flex_ctx) {
         }
         child = child->next;
     }
-    
+
     // Sort by order property
     sort_flex_items_by_order(flex_ctx);
 }
@@ -234,10 +234,10 @@ void collect_flex_items(FlexLayoutContext* flex_ctx) {
 void resolve_flexible_lengths(FlexLayoutContext* flex_ctx) {
     for (int line_idx = 0; line_idx < flex_ctx->line_count; line_idx++) {
         FlexLine* line = &flex_ctx->lines[line_idx];
-        
+
         // Calculate free space
         int free_space = calculate_free_space(flex_ctx, line);
-        
+
         if (free_space > 0) {
             // Distribute free space using flex-grow
             distribute_free_space(flex_ctx, line, free_space);
@@ -245,7 +245,7 @@ void resolve_flexible_lengths(FlexLayoutContext* flex_ctx) {
             // Shrink items using flex-shrink
             shrink_flex_items(flex_ctx, line, -free_space);
         }
-        
+
         // Apply min/max constraints
         apply_flex_constraints(flex_ctx, line);
     }
@@ -257,10 +257,10 @@ void resolve_flexible_lengths(FlexLayoutContext* flex_ctx) {
 void align_main_axis(FlexLayoutContext* flex_ctx) {
     for (int line_idx = 0; line_idx < flex_ctx->line_count; line_idx++) {
         FlexLine* line = &flex_ctx->lines[line_idx];
-        
+
         // Handle auto margins first
         resolve_auto_margins_main_axis(flex_ctx, line);
-        
+
         // Apply justify-content
         apply_justify_content(flex_ctx, line);
     }
@@ -272,7 +272,7 @@ void align_cross_axis(FlexLayoutContext* flex_ctx) {
         FlexLine* line = &flex_ctx->lines[line_idx];
         align_items_in_line(flex_ctx, line);
     }
-    
+
     // Align lines within container (align-content)
     if (flex_ctx->line_count > 1) {
         align_flex_lines(flex_ctx);
@@ -291,11 +291,11 @@ typedef struct LogicalDimensions {
     int block_start;      // logical start position
 } LogicalDimensions;
 
-void resolve_logical_dimensions(FlexLayoutContext* flex_ctx, 
+void resolve_logical_dimensions(FlexLayoutContext* flex_ctx,
                                ViewBlock* item,
                                LogicalDimensions* logical) {
     WritingMode wm = flex_ctx->writing_mode;
-    
+
     switch (wm) {
         case WM_HORIZONTAL_TB:
             logical->inline_size = item->width;
@@ -303,7 +303,7 @@ void resolve_logical_dimensions(FlexLayoutContext* flex_ctx,
             logical->inline_start = item->x;
             logical->block_start = item->y;
             break;
-            
+
         case WM_VERTICAL_RL:
         case WM_VERTICAL_LR:
             logical->inline_size = item->height;
@@ -336,10 +336,10 @@ void apply_text_direction(FlexLayoutContext* flex_ctx) {
 FlexLayoutContext* create_flex_context(LayoutContext* lycon, ViewBlock* container) {
     FlexLayoutContext* flex_ctx = (FlexLayoutContext*)alloc_prop(lycon, sizeof(FlexLayoutContext));
     memset(flex_ctx, 0, sizeof(FlexLayoutContext));
-    
+
     flex_ctx->base_context = lycon;
     flex_ctx->container = container;
-    
+
     return flex_ctx;
 }
 ```
@@ -351,7 +351,7 @@ typedef struct FlexLayoutCache {
     int container_height;
     int item_count;
     uint32_t properties_hash;
-    
+
     // Cached results
     FlexLine* cached_lines;
     int cached_line_count;
@@ -371,10 +371,10 @@ void batch_update_item_positions(FlexLayoutContext* flex_ctx) {
     // Update all item positions in a single pass
     for (int line_idx = 0; line_idx < flex_ctx->line_count; line_idx++) {
         FlexLine* line = &flex_ctx->lines[line_idx];
-        
+
         for (int item_idx = 0; item_idx < line->item_count; item_idx++) {
             ViewBlock* item = line->items[item_idx];
-            
+
             // Apply computed position directly to view
             apply_flex_position(flex_ctx, item, line_idx, item_idx);
         }
@@ -395,7 +395,7 @@ typedef struct LayoutContextBase {
     ViewBlock* container;
     ViewBlock** items;
     int item_count;
-    
+
     WritingMode writing_mode;
     TextDirection text_direction;
 } LayoutContextBase;
@@ -435,7 +435,7 @@ void apply_size_constraints(LayoutContextBase* ctx);
 
 ```cpp
 // Grid container detection in layout_block()
-if (display.inner == LXB_CSS_VALUE_GRID) {
+if (display.inner == CSS_VALUE_GRID) {
     layout_grid_container(lycon, block, display);
 }
 
@@ -443,13 +443,13 @@ if (display.inner == LXB_CSS_VALUE_GRID) {
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container, DisplayValue display) {
     GridLayoutContext grid_ctx;
     init_grid_context(&grid_ctx, lycon, container);
-    
+
     // Grid-specific algorithm phases
     parse_grid_template(&grid_ctx);
     place_grid_items(&grid_ctx);
     resolve_grid_sizes(&grid_ctx);
     align_grid_content(&grid_ctx);
-    
+
     finalize_grid_layout(&grid_ctx);
 }
 ```

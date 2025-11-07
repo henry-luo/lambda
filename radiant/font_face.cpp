@@ -84,8 +84,8 @@ void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
         "./test/layout/font/LiberationSans-BoldItalic.ttf"
     };
 
-    PropValue weights[] = {LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_BOLD, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_BOLD};
-    PropValue styles[] = {LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_ITALIC, LXB_CSS_VALUE_ITALIC};
+    PropValue weights[] = {CSS_VALUE_NORMAL, CSS_VALUE_BOLD, CSS_VALUE_NORMAL, CSS_VALUE_BOLD};
+    PropValue styles[] = {CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_ITALIC, CSS_VALUE_ITALIC};
 
     for (int i = 0; i < 4; i++) {
         FontFaceDescriptor* descriptor = create_font_face_descriptor(lycon);
@@ -98,7 +98,7 @@ void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
         descriptor->src_local_path = strdup(liberation_sans_fonts[i]);
         descriptor->font_style = styles[i];
         descriptor->font_weight = weights[i];
-        descriptor->font_display = LXB_CSS_VALUE_AUTO;
+        descriptor->font_display = CSS_VALUE_AUTO;
         descriptor->is_loaded = false;
 
         register_font_face(lycon->ui_context, descriptor);
@@ -122,9 +122,9 @@ FontFaceDescriptor* create_font_face_descriptor(LayoutContext* lycon) {
     }
 
     memset(descriptor, 0, sizeof(FontFaceDescriptor));
-    descriptor->font_style = LXB_CSS_VALUE_NORMAL;
-    descriptor->font_weight = LXB_CSS_VALUE_NORMAL;
-    descriptor->font_display = LXB_CSS_VALUE_AUTO;
+    descriptor->font_style = CSS_VALUE_NORMAL;
+    descriptor->font_weight = CSS_VALUE_NORMAL;
+    descriptor->font_display = CSS_VALUE_AUTO;
     descriptor->is_loaded = false;
     descriptor->loaded_face = NULL;
     descriptor->char_width_cache = NULL;

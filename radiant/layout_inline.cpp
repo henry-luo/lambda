@@ -43,23 +43,23 @@ void compute_span_bounding_box(ViewSpan* span) {
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
     uintptr_t elmt_name = span->node->tag();
     switch (elmt_name) {
-    case LXB_TAG_B:
+    case HTM_TAG_B:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->font_weight = LXB_CSS_VALUE_BOLD;
+        span->font->font_weight = CSS_VALUE_BOLD;
         break;
-    case LXB_TAG_I:
+    case HTM_TAG_I:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->font_style = LXB_CSS_VALUE_ITALIC;
+        span->font->font_style = CSS_VALUE_ITALIC;
         break;
-    case LXB_TAG_U:
+    case HTM_TAG_U:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
+        span->font->text_deco = CSS_VALUE_UNDERLINE;
         break;
-    case LXB_TAG_S:
+    case HTM_TAG_S:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->text_deco = LXB_CSS_VALUE_LINE_THROUGH;
+        span->font->text_deco = CSS_VALUE_LINE_THROUGH;
         break;
-    case LXB_TAG_FONT: {
+    case HTM_TAG_FONT: {
         // parse font style
         // Get color attribute using DomNode interface
         const char* color_attr = span->node->get_attribute("color");
@@ -68,13 +68,13 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
         }
         break;
     }
-    case LXB_TAG_A: {
+    case HTM_TAG_A: {
         // anchor style
         if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
-        span->in_line->cursor = LXB_CSS_VALUE_POINTER;
-        span->in_line->color = color_name_to_rgb(LXB_CSS_VALUE_BLUE);
+        span->in_line->cursor = CSS_VALUE_POINTER;
+        span->in_line->color = color_name_to_rgb(CSS_VALUE_BLUE);
         span->font = alloc_font_prop(lycon);
-        span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
+        span->font->text_deco = CSS_VALUE_UNDERLINE;
         break;
     }
     }
@@ -82,7 +82,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->name());
-    if (elmt->tag() == LXB_TAG_BR) {
+    if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = alloc_view(lycon, RDT_VIEW_BR, elmt);
         br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
