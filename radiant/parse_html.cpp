@@ -4,18 +4,12 @@
 #include "../lib/file.h"
 #include "../lib/url.h"
 
-char* read_text_doc(lxb_url_t *url) {
-    if (!url) {
+char* read_text_doc(Url *url) {
+    if (!url || !url->pathname || !url->pathname->chars) {
         return NULL;
     }
 
-    // Get the path string from lexbor URL
-    const lexbor_str_t* path_str = lxb_url_path_str(url);
-    if (!path_str || !path_str->data) {
-        return NULL;
-    }
-
-    return read_text_file((const char*)path_str->data);
+    return read_text_file(url->pathname->chars);
 }
 
 static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
@@ -75,5 +69,7 @@ void parse_html_doc(Document* doc) {
     // }
     // free(output);
 
-    doc->dom_tree = document;
+    // Note: lambda_dom_root should be set by Lambda CSS parser, not lexbor
+    // This function is deprecated - use Lambda CSS parser instead
+    doc->lambda_dom_root = nullptr;
 }

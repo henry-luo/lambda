@@ -244,7 +244,7 @@ TEST_F(CssStyleApplicationTest, Baseline803_UniversalAndClassSelectors) {
 
     // Create DOM: <body><div class="box"></div></body>
     DomElement* body = dom_element_create(pool, "body", nullptr);
-    DomElement* div_box = dom_element_create(pool, "div", body);
+    DomElement* div_box = dom_element_create(pool, "div", nullptr);
     dom_element_add_class(div_box, "box");
     dom_element_append_child(body, div_box);
 
@@ -378,10 +378,10 @@ TEST_F(CssStyleApplicationTest, MultipleElements_UniversalSelectorAffectsAll) {
 
     // Create multiple elements
     DomElement* html = dom_element_create(pool, "html", nullptr);
-    DomElement* body = dom_element_create(pool, "body", html);
-    DomElement* div1 = dom_element_create(pool, "div", body);
-    DomElement* div2 = dom_element_create(pool, "div", body);
-    DomElement* span = dom_element_create(pool, "span", div1);
+    DomElement* body = dom_element_create(pool, "body", nullptr);
+    DomElement* div1 = dom_element_create(pool, "div", nullptr);
+    DomElement* div2 = dom_element_create(pool, "div", nullptr);
+    DomElement* span = dom_element_create(pool, "span", nullptr);
 
     dom_element_append_child(html, body);
     dom_element_append_child(body, div1);
