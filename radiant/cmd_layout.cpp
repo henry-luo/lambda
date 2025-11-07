@@ -50,7 +50,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio, DocumentType doc_type);
+void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio);
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
@@ -769,7 +769,6 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
-    doc->doc_type = DOC_TYPE_LAMBDA_CSS;
     doc->lambda_dom_root = dom_root;
     doc->lambda_html_root = html_root;
     doc->html_version = detected_version;
@@ -936,7 +935,6 @@ int cmd_layout(int argc, char** argv) {
 
     // Perform layout computation
     log_debug("[Layout] About to call layout_html_doc...");
-    log_debug("[Layout] doc=%p, doc_type=%d", (void*)doc, doc->doc_type);
     log_debug("[Layout] lambda_html_root=%p, lambda_dom_root=%p",
             (void*)doc->lambda_html_root, (void*)doc->lambda_dom_root);
 
@@ -957,7 +955,7 @@ int cmd_layout(int argc, char** argv) {
     // It writes to /tmp/view_tree.json which is what the test framework expects
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("[Layout] Calling print_view_tree for complete layout output...");
-        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, 1.0f, doc->doc_type);
+        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, 1.0f);
         log_debug("[Layout] Layout tree written to /tmp/view_tree.json");
     } else {
         log_warn("No view tree available to output");

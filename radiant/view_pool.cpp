@@ -8,7 +8,7 @@ extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/hashmap.h"
 }
-void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent, DocumentType doc_type);
+void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
 static const css_data lxb_css_value_data[] = {
     {"_undef", 6, LXB_CSS_VALUE__UNDEF},
@@ -784,7 +784,7 @@ void view_pool_destroy(ViewTree* tree) {
     tree->pool = NULL;
 }
 
-void print_inline_props(ViewSpan* span, StrBuf* buf, int indent, DocumentType doc_type) {
+void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->in_line) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
@@ -811,21 +811,13 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent, DocumentType do
     if (span->font) {
         strbuf_append_char_n(buf, ' ', indent);
 
-        // Handle font_weight differently for Lambda CSS vs Lexbor
-        const char* weight_str;
+        // Font weight is a numeric value (400, 700, etc.)
         char weight_buf[16];
-        if (doc_type == DOC_TYPE_LAMBDA_CSS) {
-            // For Lambda CSS, font_weight is a numeric value (400, 700, etc.)
-            snprintf(weight_buf, sizeof(weight_buf), "%d", span->font->font_weight);
-            weight_str = weight_buf;
-        } else {
-            // For Lexbor, font_weight is an enum that can be looked up
-            weight_str = (const char*)css_value_by_id(span->font->font_weight)->name;
-        }
+        snprintf(weight_buf, sizeof(weight_buf), "%d", span->font->font_weight);
 
         strbuf_append_format(buf, "{font:{family:'%s', size:%d, style:%s, weight:%s, decoration:%s}}\n",
             span->font->family, span->font->font_size, css_value_by_id(span->font->font_style)->name,
-            weight_str, css_value_by_id(span->font->text_deco)->name);
+            weight_buf, css_value_by_id(span->font->text_deco)->name);
     }
     if (span->bound) {
         strbuf_append_char_n(buf, ' ', indent);
@@ -1018,32 +1010,32 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     }
 }
 
-void print_block(ViewBlock* block, StrBuf* buf, int indent, DocumentType doc_type) {
+void print_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
         block->name(), block->node->name(),
         (float)block->x, (float)block->y, (float)block->width, (float)block->height);
     print_block_props(block, buf, indent + 2);
-    print_inline_props((ViewSpan*)block, buf, indent+2, doc_type);
-    print_view_group((ViewGroup*)block, buf, indent+2, doc_type);
+    print_inline_props((ViewSpan*)block, buf, indent+2);
+    print_view_group((ViewGroup*)block, buf, indent+2);
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "]\n");
 }
 
-void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent, DocumentType doc_type) {
+void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     View* view = view_group->child;
     if (view) {
         do {
             if (view->is_block()) {
-                print_block((ViewBlock*)view, buf, indent, doc_type);
+                print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewSpan* span = (ViewSpan*)view;
                 strbuf_append_format(buf, "[view-inline:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
                     span->node->name(), (float)span->x, (float)span->y, (float)span->width, (float)span->height);
-                print_inline_props(span, buf, indent + 2, doc_type);
-                print_view_group((ViewGroup*)view, buf, indent + 2, doc_type);
+                print_inline_props(span, buf, indent + 2);
+                print_view_group((ViewGroup*)view, buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_str(buf, "]\n");
             }
@@ -1101,9 +1093,9 @@ void write_string_to_file(const char *filename, const char *text) {
     fclose(file); // Close file
 }
 
-void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio, DocumentType doc_type) {
+void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio) {
     StrBuf* buf = strbuf_new_cap(1024);
-    print_block((ViewBlock*)view_root, buf, 0, doc_type);
+    print_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
     log_debug("%s", buf->str);
     log_debug("=================\n");
