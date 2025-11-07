@@ -1,8 +1,8 @@
 #ifndef CSS_ENGINE_H
 #define CSS_ENGINE_H
 
-#include "css_parser.h"
-#include "css_style.h"
+#include "css_parser.hpp"
+#include "css_style.hpp"
 #include "../../../lib/mempool.h"
 
 #ifdef __cplusplus

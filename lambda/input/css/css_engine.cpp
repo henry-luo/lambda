@@ -1,7 +1,7 @@
-#include "css_engine.h"
-#include "css_property_value_parser.h"
-#include "css_parser.h"
-#include "css_style_node.h"
+#include "css_engine.hpp"
+#include "css_property_value_parser.hpp"
+#include "css_parser.hpp"
+#include "css_style_node.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -24,9 +24,9 @@ static void css_style_node_init(CssStyleNode* node, const char* element_name, Po
     memset(node, 0, sizeof(CssStyleNode));
     // CssStyleNode represents a single property, not an element
     // Element name is not stored in style nodes
-    node->property_id = 0;
-    node->winning_declaration = NULL;
-    node->losing_declarations = NULL;
+    node->property_id = static_cast<CssPropertyId>(0);
+    node->winning_declaration = nullptr;
+    node->losing_declarations = nullptr;
     node->losing_count = 0;
     node->losing_capacity = 0;
     node->has_custom_property = false;

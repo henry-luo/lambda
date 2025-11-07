@@ -1,7 +1,7 @@
 #include "dom.hpp"
 
 extern "C" {
-#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/element_reader.h"
 }
 

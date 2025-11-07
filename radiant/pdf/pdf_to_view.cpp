@@ -6,7 +6,7 @@
 #include "pages.hpp"
 #include "../../lib/log.h"
 #include "../../lambda/input/input.h"
-#include "../../lambda/input/css/dom_element.h"
+#include "../../lambda/input/css/dom_element.hpp"
 #include <string.h>
 
 // PDF stream decompression

@@ -9,7 +9,7 @@
 #include FT_TRUETYPE_TABLES_H
 
 extern "C" {
-#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/lambda-data.hpp"
 }
 

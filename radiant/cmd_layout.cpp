@@ -22,12 +22,12 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
-#include "../lambda/input/css/css_engine.h"
-#include "../lambda/input/css/css_style_node.h"
-#include "../lambda/input/css/dom_element.h"
-#include "../lambda/input/css/selector_matcher.h"
-#include "../lambda/input/css/document_styler.h"
-#include "../lambda/input/css/css_formatter.h"
+#include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/document_styler.hpp"
+#include "../lambda/input/css/css_formatter.hpp"
 }
 
 #include "../lambda/input/input.h"

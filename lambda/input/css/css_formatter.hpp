@@ -1,8 +1,8 @@
 #ifndef CSS_FORMATTER_H
 #define CSS_FORMATTER_H
 
-#include "css_parser.h"
-#include "css_style.h"
+#include "css_parser.hpp"
+#include "css_style.hpp"
 #include "../../../lib/mempool.h"
 #include "../../../lib/stringbuf.h"
 
