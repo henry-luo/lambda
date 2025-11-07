@@ -32,7 +32,7 @@ Document* show_html_doc(Url* base, char* doc_url) {
     Document* doc = load_html_doc(base, doc_url);
     ui_context.document = doc;
     // layout html doc
-    if (doc->lambda_dom_root) {
+    if (doc->dom_root) {
         layout_html_doc(&ui_context, doc, false);
     }
     // render html doc
@@ -44,7 +44,7 @@ Document* show_html_doc(Url* base, char* doc_url) {
 }
 
 void reflow_html_doc(Document* doc) {
-    if (!doc || !doc->lambda_dom_root) {
+    if (!doc || !doc->dom_root) {
         log_debug("No document to reflow");
         return;
     }

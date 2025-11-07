@@ -232,6 +232,6 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
 // HTML version detection functions
 int detect_html_version_lambda_css(Document* doc);
-HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, Input* input);
+HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input);
 
 #endif // LAYOUT_HPP

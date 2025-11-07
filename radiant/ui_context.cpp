@@ -134,7 +134,7 @@ void free_document(Document* doc) {
         free(doc->view_tree);
     }
 
-    // Note: lambda_dom_root is pool-allocated and will be freed with the pool
+    // Note: dom_root is pool-allocated and will be freed with the pool
     // No need to explicitly free it here
     if (doc->url) {
         url_destroy(doc->url);

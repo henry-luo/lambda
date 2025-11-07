@@ -386,7 +386,7 @@ View* find_view(View* view, DomNode* node) {
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("Handling event %d", event->type);
-    if (!doc || !doc->lambda_html_root) {
+    if (!doc || !doc->html_root) {
         log_error("No document to handle event");
         return;
     }
@@ -471,7 +471,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
-                DomNode* elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
+                DomNode* elmt = set_iframe_src_by_name(doc->dom_root, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     log_debug("found iframe view");
@@ -487,7 +487,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                         Document* old_doc = block->embed->doc;
                         Document* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url);
-                        if (new_doc && new_doc->lambda_html_root) {
+                        if (new_doc && new_doc->html_root) {
                             layout_html_doc(evcon.ui_context, new_doc, false);
                             if (new_doc->view_tree && new_doc->view_tree->root) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;

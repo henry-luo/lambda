@@ -69,7 +69,7 @@ void parse_html_doc(Document* doc) {
     // }
     // free(output);
 
-    // Note: lambda_dom_root should be set by Lambda CSS parser, not lexbor
+    // Note: dom_root should be set by Lambda CSS parser, not lexbor
     // This function is deprecated - use Lambda CSS parser instead
-    doc->lambda_dom_root = nullptr;
+    doc->dom_root = nullptr;
 }

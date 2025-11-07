@@ -176,7 +176,7 @@ int render_html_to_png(const char* html_file, const char* png_file) {
     ui_context.document = doc;
 
     // Layout the document
-    if (doc->lambda_dom_root) {
+    if (doc->dom_root) {
         layout_html_doc(&ui_context, doc, false);
     }
 
@@ -229,7 +229,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     ui_context.document = doc;
 
     // Layout the document
-    if (doc->lambda_dom_root) {
+    if (doc->dom_root) {
         layout_html_doc(&ui_context, doc, false);
     }
 
