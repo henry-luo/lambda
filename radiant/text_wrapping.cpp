@@ -416,13 +416,15 @@ void wrap_text_in_layout_context(LayoutContext* lycon, void* text_node, int max_
     if (!lycon || !text_node || max_width <= 0) return;
 
     // Verify this is actually a text node
-    if (!dom_node_is_text(text_node)) {
+    DomNode* node = (DomNode*)text_node;
+    if (!node->is_text()) {
         log_warn("wrap_text_in_layout_context: node is not a text node");
         return;
     }
 
     // Get text content from text node
-    const char* text = dom_node_get_text(text_node);
+    DomText* text_node_typed = node->as_text();
+    const char* text = text_node_typed ? text_node_typed->text : nullptr;
     if (!text) return;
 
     int text_length = strlen(text);

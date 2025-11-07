@@ -2667,10 +2667,9 @@ TEST_F(DomIntegrationTest, NodeType_IsText) {
     DomText* text = dom_text_create(pool, "text");
     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "content");
 
-    EXPECT_FALSE(dom_node_is_text(element));
-    EXPECT_TRUE(dom_node_is_text(text));
-    EXPECT_FALSE(dom_node_is_text(comment));
-    EXPECT_FALSE(dom_node_is_text(nullptr));
+    EXPECT_FALSE(element->is_text());
+    EXPECT_TRUE(text->is_text());
+    EXPECT_FALSE(comment->is_text());
 }
 
 TEST_F(DomIntegrationTest, NodeType_IsComment) {
@@ -2679,11 +2678,10 @@ TEST_F(DomIntegrationTest, NodeType_IsComment) {
     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "content");
     DomComment* doctype = dom_comment_create(pool, DOM_NODE_DOCTYPE, "!DOCTYPE", "html");
 
-    EXPECT_FALSE(dom_node_is_comment(element));
-    EXPECT_FALSE(dom_node_is_comment(text));
-    EXPECT_TRUE(dom_node_is_comment(comment));
-    EXPECT_TRUE(dom_node_is_comment(doctype));  // DOCTYPE also returns true
-    EXPECT_FALSE(dom_node_is_comment(nullptr));
+    EXPECT_FALSE(element->is_comment());
+    EXPECT_FALSE(text->is_comment());
+    EXPECT_TRUE(comment->is_comment());
+    EXPECT_TRUE(doctype->is_comment());  // DOCTYPE also returns true
 }
 
 // ============================================================================

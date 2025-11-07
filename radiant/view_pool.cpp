@@ -542,7 +542,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
                 ViewTableCell* cell = (ViewTableCell*)view;
 
                 // Read colspan attribute
-                const char* colspan_str = dom_node_get_attribute(node, "colspan");
+                const char* colspan_str = node->get_attribute("colspan");
                 if (colspan_str && *colspan_str) {
                     int colspan = atoi(colspan_str);
                     cell->col_span = (colspan > 0) ? colspan : 1;
@@ -550,7 +550,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
                     cell->col_span = 1;
                 }
                 // Read rowspan attribute
-                const char* rowspan_str = dom_node_get_attribute(node, "rowspan");
+                const char* rowspan_str = node->get_attribute("rowspan");
                 if (rowspan_str && *rowspan_str) {
                     int rowspan = atoi(rowspan_str);
                     cell->row_span = (rowspan > 0) ? rowspan : 1;

@@ -30,59 +30,33 @@ const char* DomNode::name() const {
 }
 
 // ============================================================================
-// Tree Navigation Implementation
-// ============================================================================
-
-const char* dom_node_get_name(const DomNode* node) {
-    return node ? node->name() : "#null";
-}
-
-const char* dom_node_get_tag_name(DomNode* node) {
-    if (!node) return nullptr;
-    DomElement* elem = node->as_element();
-    return elem ? elem->tag_name : nullptr;
-}
-
-const char* dom_node_get_text(DomNode* node) {
-    if (!node) return nullptr;
-    DomText* text = node->as_text();
-    return text ? text->text : nullptr;
-}
-
-const char* dom_node_get_comment_content(DomNode* node) {
-    if (!node) return nullptr;
-    DomComment* comment = node->as_comment();
-    return comment ? comment->content : nullptr;
-}
-
-// ============================================================================
 // Tree Manipulation Implementation
 // ============================================================================
 
-bool dom_node_append_child(DomNode* parent, DomNode* child) {
-    if (!parent || !child) {
-        log_error("dom_node_append_child: NULL parent or child");
+bool DomNode::append_child(DomNode* child) {
+    if (!child) {
+        log_error("DomNode::append_child: NULL child");
         return false;
     }
 
     // Only elements can have children
-    if (!parent->is_element()) {
-        log_error("dom_node_append_child: Parent is not an element");
+    if (!this->is_element()) {
+        log_error("DomNode::append_child: Parent is not an element");
         return false;
     }
 
     // Set parent relationship
-    child->parent = parent;
+    child->parent = this;
 
     // Add to parent's child list
-    if (!parent->first_child) {
+    if (!this->first_child) {
         // First child
-        parent->first_child = child;
+        this->first_child = child;
         child->prev_sibling = nullptr;
         child->next_sibling = nullptr;
     } else {
         // Find last child
-        DomNode* last = parent->first_child;
+        DomNode* last = this->first_child;
         while (last->next_sibling) {
             last = last->next_sibling;
         }
@@ -96,14 +70,14 @@ bool dom_node_append_child(DomNode* parent, DomNode* child) {
     return true;
 }
 
-bool dom_node_remove_child(DomNode* parent, DomNode* child) {
-    if (!parent || !child) {
+bool DomNode::remove_child(DomNode* child) {
+    if (!child) {
         return false;
     }
 
     // Verify parent relationship
-    if (child->parent != parent) {
-        log_error("dom_node_remove_child: Child does not belong to parent");
+    if (child->parent != this) {
+        log_error("DomNode::remove_child: Child does not belong to this parent");
         return false;
     }
 
@@ -112,7 +86,7 @@ bool dom_node_remove_child(DomNode* parent, DomNode* child) {
         child->prev_sibling->next_sibling = child->next_sibling;
     } else {
         // Child was first child
-        parent->first_child = child->next_sibling;
+        this->first_child = child->next_sibling;
     }
 
     if (child->next_sibling) {
@@ -127,24 +101,24 @@ bool dom_node_remove_child(DomNode* parent, DomNode* child) {
     return true;
 }
 
-bool dom_node_insert_before(DomNode* parent, DomNode* new_node, DomNode* ref_node) {
-    if (!parent || !new_node) {
+bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
+    if (!new_node) {
         return false;
     }
 
     // If no reference node, append at end
     if (!ref_node) {
-        return dom_node_append_child(parent, new_node);
+        return this->append_child(new_node);
     }
 
-    // Verify reference node is a child of parent
-    if (ref_node->parent != parent) {
-        log_error("dom_node_insert_before: Reference node is not a child of parent");
+    // Verify reference node is a child of this parent
+    if (ref_node->parent != this) {
+        log_error("DomNode::insert_before: Reference node is not a child of this parent");
         return false;
     }
 
     // Set parent relationship
-    new_node->parent = parent;
+    new_node->parent = this;
 
     // Insert before reference node
     new_node->next_sibling = ref_node;
@@ -154,7 +128,7 @@ bool dom_node_insert_before(DomNode* parent, DomNode* new_node, DomNode* ref_nod
         ref_node->prev_sibling->next_sibling = new_node;
     } else {
         // Reference node was first child
-        parent->first_child = new_node;
+        this->first_child = new_node;
     }
 
     ref_node->prev_sibling = new_node;
@@ -163,24 +137,18 @@ bool dom_node_insert_before(DomNode* parent, DomNode* new_node, DomNode* ref_nod
 }
 
 // ============================================================================
-// Debugging and Utilities Implementation
+// Utility Methods Implementation
 // ============================================================================
 
-void dom_node_print(const DomNode* node, int indent) {
-    if (!node) {
-        for (int i = 0; i < indent; i++) printf("  ");
-        printf("(null)\n");
-        return;
-    }
-
+void DomNode::print(int indent) const {
     for (int i = 0; i < indent; i++) printf("  ");
 
-    const char* name = node->name();
-    printf("<%s", name);
+    const char* node_name = this->name();
+    printf("<%s", node_name);
 
     // Print additional info for elements
-    if (node->is_element()) {
-        const DomElement* elem = node->as_element();
+    if (this->is_element()) {
+        const DomElement* elem = this->as_element();
         if (elem->id) {
             printf(" id=\"%s\"", elem->id);
         }
@@ -192,8 +160,8 @@ void dom_node_print(const DomNode* node, int indent) {
             }
             printf("\"");
         }
-    } else if (node->is_text()) {
-        const DomText* text = node->as_text();
+    } else if (this->is_text()) {
+        const DomText* text = this->as_text();
         if (text->text && text->length > 0) {
             // Print truncated text content
             printf(" \"");
@@ -210,47 +178,25 @@ void dom_node_print(const DomNode* node, int indent) {
     printf(">\n");
 
     // Recursively print children
-    const DomNode* child = node->first_child;
+    const DomNode* child = this->first_child;
     while (child) {
-        dom_node_print(child, indent + 1);
+        child->print(indent + 1);
         child = child->next_sibling;
     }
 }
 
-void dom_node_free_tree(DomNode* node) {
-    if (!node) {
-        return;
-    }
-
+void DomNode::free_tree() {
     // Recursively free all children
-    DomNode* child = node->first_child;
+    DomNode* child = this->first_child;
     while (child) {
         DomNode* next = child->next_sibling;
-        dom_node_free_tree(child);
+        child->free_tree();
         child = next;
     }
 
     // Clear relationships
-    node->parent = nullptr;
-    node->first_child = nullptr;
-    node->next_sibling = nullptr;
-    node->prev_sibling = nullptr;
-}
-
-// ============================================================================
-// Attribute Access Implementation
-// ============================================================================
-
-const char* dom_node_get_attribute(DomNode* node, const char* attr_name) {
-    if (!node || !attr_name) {
-        return nullptr;
-    }
-
-    // Only elements have attributes
-    DomElement* elem = node->as_element();
-    if (!elem) {
-        return nullptr;
-    }
-
-    return dom_element_get_attribute(elem, attr_name);
+    this->parent = nullptr;
+    this->first_child = nullptr;
+    this->next_sibling = nullptr;
+    this->prev_sibling = nullptr;
 }

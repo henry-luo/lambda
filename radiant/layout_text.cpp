@@ -158,7 +158,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* n
     // note: this function navigates to parenets through laid out view tree,
     // and siblings through non-processed html nodes
     log_debug("check if view has line filled");
-    node = dom_node_next_sibling(node);
+    node = node->next_sibling;
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
