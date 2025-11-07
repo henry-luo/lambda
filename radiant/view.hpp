@@ -1,5 +1,7 @@
 #pragma once
 #include "dom.hpp"
+#include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -261,7 +263,7 @@ typedef struct ViewGroup ViewGroup;
 // view always has x, y, wd, hg; otherwise, it is a property group
 struct View {
     ViewType type;
-    DomNode *node;  // DOM node abstraction instead of direct lexbor dependency
+    DomNodeBase* node;  // DOM node (DomElement*, DomText*, or DomComment* via inheritance)
     View* next;
     ViewGroup* parent;  // corrected the type to ViewGroup
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
@@ -277,6 +279,43 @@ struct View {
 
     View* previous_view();
     const char* name();
+
+    // DOM node access helpers - forward to node's methods for backward compatibility
+    // These provide syntactic compatibility with old view->node->method() patterns
+    inline const char* node_name() const { return node ? node->get_name() : "#null"; }
+    inline const char* node_tag_name() const {
+        DomElement* elem = node ? node->as_element() : nullptr;
+        return elem ? elem->tag_name : nullptr;
+    }
+    inline const char* node_get_attribute(const char* attr_name) const {
+        return dom_node_get_attribute(node, attr_name);
+    }
+    inline unsigned char* node_text_data() const {
+        DomText* text = node ? node->as_text() : nullptr;
+        return text ? (unsigned char*)text->text : nullptr;
+    }
+    inline DomNodeBase* node_first_child() const {
+        return node ? node->first_child : nullptr;
+    }
+    inline DomNodeBase* node_next_sibling() const {
+        return node ? node->next_sibling : nullptr;
+    }
+    inline bool node_is_element() const {
+        return node ? node->is_element() : false;
+    }
+    inline bool node_is_text() const {
+        return node ? node->is_text() : false;
+    }
+    inline DomElement* node_as_element() const {
+        return node ? node->as_element() : nullptr;
+    }
+    inline DomNodeType node_get_type() const {
+        return node ? node->get_type() : (DomNodeType)0;
+    }
+    inline uintptr_t node_tag() const {
+        DomElement* elem = node ? node->as_element() : nullptr;
+        return elem ? elem->tag_id : 0;
+    }
 };
 
 typedef struct FontBox {

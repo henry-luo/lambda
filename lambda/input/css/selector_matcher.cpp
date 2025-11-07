@@ -366,18 +366,17 @@ static DomElement* traverse_and_find_first_match(SelectorMatcher* matcher,
     }
 
     // Traverse children - need to check node type since first_child is void*
-    void* child_node = element->first_child;
+    DomNodeBase* child_node = element->first_child;
     while (child_node) {
         // check if this is an element node (not text or comment)
-        if (dom_node_is_element(child_node)) {
-            DomElement* child = (DomElement*)child_node;
+        if (child_node->is_element()) {
+            DomElement* child = child_node->as_element();
             DomElement* found = traverse_and_find_first_match(matcher, selector, child);
             if (found) return found;
             child_node = child->next_sibling;
         } else {
             // skip text/comment nodes - get their next sibling
-            DomText* text_node = (DomText*)child_node;
-            child_node = text_node->next_sibling;
+            child_node = child_node->next_sibling;
         }
     }
 

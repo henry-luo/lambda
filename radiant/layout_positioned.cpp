@@ -201,7 +201,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         block->x, block->y, block->width, block->height, lycon->block.content_width, lycon->block.content_height, cb_x, cb_y, cb_width, cb_height);
 }
 
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
+void layout_abs_block(LayoutContext* lycon, DomNodeBase *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
     log_debug("layout_abs_block");
     log_enter();
     const char* tag_init = elmt->name();

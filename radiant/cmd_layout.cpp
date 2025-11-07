@@ -238,7 +238,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
 
     // Process children - need to match DOM children with HTML children
     // NOTE: Both HTML and DOM trees contain text nodes, so we need to skip them in parallel
-    void* dom_child = dom_elem->first_child;
+    DomNodeBase* dom_child = dom_elem->first_child;
 
     // Iterate through HTML children to find matching elements
     for (int64_t i = 0; i < html_elem->length; i++) {
@@ -254,14 +254,8 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             }
 
             // Skip non-element DOM nodes (text, comments) until we find an element
-            while (dom_child && !dom_node_is_element(dom_child)) {
-                if (dom_node_is_text(dom_child)) {
-                    dom_child = ((DomText*)dom_child)->next_sibling;
-                } else if (dom_node_is_comment(dom_child)) {
-                    dom_child = ((DomComment*)dom_child)->next_sibling;
-                } else {
-                    dom_child = nullptr;
-                }
+            while (dom_child && !dom_child->is_element()) {
+                dom_child = dom_child->next_sibling;
             }
 
             if (!dom_child) {
@@ -278,8 +272,8 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
             dom_child = dom_child_elem->next_sibling;
         } else if (child_type_id == LMD_TYPE_STRING) {
             // HTML text node - skip corresponding DOM text node
-            if (dom_child && dom_node_is_text(dom_child)) {
-                dom_child = ((DomText*)dom_child)->next_sibling;
+            if (dom_child && dom_child->is_text()) {
+                dom_child = dom_child->next_sibling;
             }
         }
         // Skip other non-element HTML children (comments, etc.)
@@ -611,27 +605,13 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
                         text_node->next_sibling = nullptr;
                     } else {
                         // Find last child and append
-                        void* last_child_node = dom_elem->first_child;
+                        DomNodeBase* last_child_node = dom_elem->first_child;
                         while (last_child_node) {
-                            void* next = nullptr;
-                            DomNodeType type = dom_node_get_type(last_child_node);
-                            if (type == DOM_NODE_ELEMENT) {
-                                next = ((DomElement*)last_child_node)->next_sibling;
-                            } else if (type == DOM_NODE_TEXT) {
-                                next = ((DomText*)last_child_node)->next_sibling;
-                            } else if (type == DOM_NODE_COMMENT || type == DOM_NODE_DOCTYPE) {
-                                next = ((DomComment*)last_child_node)->next_sibling;
-                            }
+                            DomNodeBase* next = last_child_node->next_sibling;
 
                             if (!next) {
                                 // This is the last child, append text node here
-                                if (type == DOM_NODE_ELEMENT) {
-                                    ((DomElement*)last_child_node)->next_sibling = text_node;
-                                } else if (type == DOM_NODE_TEXT) {
-                                    ((DomText*)last_child_node)->next_sibling = text_node;
-                                } else if (type == DOM_NODE_COMMENT || type == DOM_NODE_DOCTYPE) {
-                                    ((DomComment*)last_child_node)->next_sibling = text_node;
-                                }
+                                last_child_node->next_sibling = text_node;
                                 text_node->prev_sibling = last_child_node;
                                 text_node->next_sibling = nullptr;
                                 break;
@@ -782,21 +762,13 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
     }
 
     // Recursively apply to children (only element children)
-    void* child = root->first_child;
+    DomNodeBase* child = root->first_child;
     while (child) {
-        if (dom_node_is_element(child)) {
+        if (child->is_element()) {
             DomElement* child_elem = (DomElement*)child;
             apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool);
-            child = child_elem->next_sibling;
-        } else if (dom_node_is_text(child)) {
-            DomText* text_node = (DomText*)child;
-            child = text_node->next_sibling;
-        } else if (dom_node_is_comment(child)) {
-            DomComment* comment_node = (DomComment*)child;
-            child = comment_node->next_sibling;
-        } else {
-            break; // Unknown node type
         }
+        child = child->next_sibling;
     }
 }
 

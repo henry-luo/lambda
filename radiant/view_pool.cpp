@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "grid.hpp"
+#include "../lambda/input/css/dom_node.hpp"
 #include <time.h>
 
 extern "C" {
@@ -511,7 +512,7 @@ View* View::previous_view() {
     return sibling;
 }
 
-View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
+View* alloc_view(LayoutContext* lycon, ViewType type, DomNodeBase* node) {
     View* view;
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
@@ -541,17 +542,17 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
                 ViewTableCell* cell = (ViewTableCell*)view;
 
                 // Read colspan attribute
-                const lxb_char_t* colspan_str = node->get_attribute("colspan");
+                const char* colspan_str = dom_node_get_attribute(node, "colspan");
                 if (colspan_str && *colspan_str) {
-                    int colspan = atoi((const char*)colspan_str);
+                    int colspan = atoi(colspan_str);
                     cell->col_span = (colspan > 0) ? colspan : 1;
                 } else {
                     cell->col_span = 1;
                 }
                 // Read rowspan attribute
-                const lxb_char_t* rowspan_str = node->get_attribute("rowspan");
+                const char* rowspan_str = dom_node_get_attribute(node, "rowspan");
                 if (rowspan_str && *rowspan_str) {
-                    int rowspan = atoi((const char*)rowspan_str);
+                    int rowspan = atoi(rowspan_str);
                     cell->row_span = (rowspan > 0) ? rowspan : 1;
                 } else {
                     cell->row_span = 1;
@@ -580,7 +581,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     // COMPREHENSIVE VIEW ALLOCATION TRACING
     fprintf(stderr, "[DOM DEBUG] alloc_view - created view %p, type=%d, node=%p", view, type, (void*)node);
     if (node) {
-        fprintf(stderr, ", node_type=%d\n", node->type);
+        fprintf(stderr, ", node_type=%d\n", node->type());
     } else {
         fprintf(stderr, ", node=NULL\n");
     }
@@ -1255,12 +1256,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
     // Generate enhanced CSS selector with nth-of-type support (matches browser behavior)
     if (block->node) {
-        size_t class_len;
-        const lxb_char_t* class_attr = block->node->get_attribute("class", &class_len);
+        const char* class_attr = block->node->get_attribute("class");
 
         // Start with tag name and class
         char base_selector[256];
-        if (class_attr && class_len > 0) {
+        if (class_attr) {
+            size_t class_len = strlen(class_attr);
             snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
         } else {
             snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
@@ -1268,15 +1269,15 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
         // Add nth-of-type if there are multiple siblings with same tag
         char final_selector[512];
-        DomNode* parent = block->node->parent;
+        DomNodeBase* parent = block->node->parent;
         if (parent) {
             // Count siblings with same tag name
             int sibling_count = 0;
             int current_index = 0;
-            DomNode* sibling = parent->first_child();
+            DomNodeBase* sibling = parent->first_child;
 
             while (sibling) {
-                if (sibling->type == LEXBOR_ELEMENT || sibling->type == MARK_ELEMENT) {
+                if (sibling->type() == DOM_NODE_ELEMENT) {
                     const char* sibling_tag = sibling->name();
                     if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
                         sibling_count++;
@@ -1285,7 +1286,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
                         }
                     }
                 }
-                sibling = sibling->next_sibling();
+                sibling = sibling->next_sibling;
             }
 
             // Add nth-of-type if multiple siblings exist
@@ -1308,13 +1309,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"classes\": [");
     if (block->node) {
-        size_t class_len;
-        const lxb_char_t* class_attr = block->node->get_attribute("class", &class_len);
-        if (class_attr && class_len > 0) {
+        const char* class_attr = block->node->get_attribute("class");
+        if (class_attr) {
+            size_t class_len = strlen(class_attr);
             // Output class names as array
             // For now, assume single class (TODO: split on whitespace for multiple classes)
             strbuf_append_char(buf, '\"');
-            strbuf_append_str_n(buf, (const char*)class_attr, class_len);
+            strbuf_append_str_n(buf, class_attr, class_len);
             strbuf_append_char(buf, '\"');
         }
     }
@@ -1834,12 +1835,12 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     strbuf_append_str(buf, "\"selector\": ");
 
     if (span->node) {
-        size_t class_len;
-        const lxb_char_t* class_attr = span->node->get_attribute("class", &class_len);
+        const char* class_attr = span->node->get_attribute("class");
 
         // Start with tag name and class
         char base_selector[256];
-        if (class_attr && class_len > 0) {
+        if (class_attr) {
+            size_t class_len = strlen(class_attr);
             snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
         } else {
             snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
@@ -1847,15 +1848,15 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
         // Add nth-of-type if there are multiple siblings with same tag
         char final_selector[512];
-        DomNode* parent = span->node->parent;
+        DomNodeBase* parent = span->node->parent;
         if (parent) {
             // Count siblings with same tag name
             int sibling_count = 0;
             int current_index = 0;
-            DomNode* sibling = parent->first_child();
+            DomNodeBase* sibling = parent->first_child;
 
             while (sibling) {
-                if (sibling->type == LEXBOR_ELEMENT || sibling->type == MARK_ELEMENT) {
+                if (sibling->type() == DOM_NODE_ELEMENT) {
                     const char* sibling_tag = sibling->name();
                     if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
                         sibling_count++;
@@ -1864,7 +1865,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
                         }
                     }
                 }
-                sibling = sibling->next_sibling();
+                sibling = sibling->next_sibling;
             }
 
             // Add nth-of-type if multiple siblings exist

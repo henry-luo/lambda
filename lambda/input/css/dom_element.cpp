@@ -11,6 +11,7 @@
 #include "../../lambda.h"
 #include <string.h>
 #include <stdio.h>
+#include <new>  // for placement new
 
 // Forward declarations for Lambda types (to avoid full include dependency)
 // These match the structures in lambda-data.hpp but simplified for C
@@ -360,10 +361,14 @@ DomElement* dom_element_create(Pool* pool, const char* tag_name, Element* native
         return NULL;
     }
 
-    DomElement* element = (DomElement*)pool_calloc(pool, sizeof(DomElement));
-    if (!element) {
+    // Allocate raw memory from pool
+    void* mem = pool_calloc(pool, sizeof(DomElement));
+    if (!mem) {
         return NULL;
     }
+
+    // Use placement new to construct DomElement with proper vtable initialization
+    DomElement* element = new (mem) DomElement();
 
     if (!dom_element_init(element, pool, tag_name, native_element)) {
         return NULL;
@@ -377,7 +382,9 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
         return false;
     }
 
-    memset(element, 0, sizeof(DomElement));
+    // NOTE: Do NOT use memset here! DomElement inherits from DomNodeBase which has virtual
+    // methods, so it has a vtable pointer that must not be zeroed. pool_calloc already
+    // zeroes the memory, so we just need to set specific fields.
 
     element->node_type = DOM_NODE_ELEMENT;
     element->pool = pool;
@@ -999,30 +1006,14 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
         child->next_sibling = NULL;
     } else {
         // Find last child - need to handle mixed node types (DomElement, DomText, etc.)
-        void* last_child_node = parent->first_child;
+        DomNodeBase* last_child_node = parent->first_child;
 
         while (last_child_node) {
-            void* next_sibling = NULL;
-
-            // Get next_sibling based on the actual node type
-            DomNodeType node_type = dom_node_get_type(last_child_node);
-            if (node_type == DOM_NODE_ELEMENT) {
-                next_sibling = ((DomElement*)last_child_node)->next_sibling;
-            } else if (node_type == DOM_NODE_TEXT) {
-                next_sibling = ((DomText*)last_child_node)->next_sibling;
-            } else if (node_type == DOM_NODE_COMMENT || node_type == DOM_NODE_DOCTYPE) {
-                next_sibling = ((DomComment*)last_child_node)->next_sibling;
-            }
+            DomNodeBase* next_sibling = last_child_node->next_sibling;
 
             if (!next_sibling) {
                 // This is the last child, append the new element after it
-                if (node_type == DOM_NODE_ELEMENT) {
-                    ((DomElement*)last_child_node)->next_sibling = child;
-                } else if (node_type == DOM_NODE_TEXT) {
-                    ((DomText*)last_child_node)->next_sibling = child;
-                } else if (node_type == DOM_NODE_COMMENT || node_type == DOM_NODE_DOCTYPE) {
-                    ((DomComment*)last_child_node)->next_sibling = child;
-                }
+                last_child_node->next_sibling = child;
                 child->prev_sibling = last_child_node;
                 child->next_sibling = NULL;
                 break;
@@ -1040,32 +1031,16 @@ bool dom_element_remove_child(DomElement* parent, DomElement* child) {
         return false;
     }
 
-    // Update sibling links - need to handle void* pointers properly
+    // Update sibling links - polymorphic base class handles this
     if (child->prev_sibling) {
-        // Get the type of previous sibling to access its next_sibling correctly
-        DomNodeType prev_type = dom_node_get_type(child->prev_sibling);
-        if (prev_type == DOM_NODE_ELEMENT) {
-            ((DomElement*)child->prev_sibling)->next_sibling = child->next_sibling;
-        } else if (prev_type == DOM_NODE_TEXT) {
-            ((DomText*)child->prev_sibling)->next_sibling = child->next_sibling;
-        } else if (prev_type == DOM_NODE_COMMENT || prev_type == DOM_NODE_DOCTYPE) {
-            ((DomComment*)child->prev_sibling)->next_sibling = child->next_sibling;
-        }
+        child->prev_sibling->next_sibling = child->next_sibling;
     } else {
         // Child was first child
         parent->first_child = child->next_sibling;
     }
 
     if (child->next_sibling) {
-        // Get the type of next sibling to access its prev_sibling correctly
-        DomNodeType next_type = dom_node_get_type(child->next_sibling);
-        if (next_type == DOM_NODE_ELEMENT) {
-            ((DomElement*)child->next_sibling)->prev_sibling = child->prev_sibling;
-        } else if (next_type == DOM_NODE_TEXT) {
-            ((DomText*)child->next_sibling)->prev_sibling = child->prev_sibling;
-        } else if (next_type == DOM_NODE_COMMENT || next_type == DOM_NODE_DOCTYPE) {
-            ((DomComment*)child->next_sibling)->prev_sibling = child->prev_sibling;
-        }
+        child->next_sibling->prev_sibling = child->prev_sibling;
     }
 
     // Clear child's parent relationship
@@ -1099,15 +1074,7 @@ bool dom_element_insert_before(DomElement* parent, DomElement* new_child, DomEle
     new_child->prev_sibling = reference_child->prev_sibling;
 
     if (reference_child->prev_sibling) {
-        // Get the type of previous sibling to access its next_sibling correctly
-        DomNodeType prev_type = dom_node_get_type(reference_child->prev_sibling);
-        if (prev_type == DOM_NODE_ELEMENT) {
-            ((DomElement*)reference_child->prev_sibling)->next_sibling = new_child;
-        } else if (prev_type == DOM_NODE_TEXT) {
-            ((DomText*)reference_child->prev_sibling)->next_sibling = new_child;
-        } else if (prev_type == DOM_NODE_COMMENT || prev_type == DOM_NODE_DOCTYPE) {
-            ((DomComment*)reference_child->prev_sibling)->next_sibling = new_child;
-        }
+        reference_child->prev_sibling->next_sibling = new_child;
     } else {
         // Reference child was first child
         parent->first_child = new_child;
@@ -1160,21 +1127,14 @@ int dom_element_get_child_index(DomElement* element) {
     // According to CSS spec, :nth-child() counts only element nodes
     int index = 0;
     DomElement* parent = static_cast<DomElement*>(element->parent);
-    void* sibling = parent->first_child;
+    DomNodeBase* sibling = parent->first_child;
 
     while (sibling && sibling != element) {
         // Only count element nodes for nth-child
-        if (dom_node_get_type(sibling) == DOM_NODE_ELEMENT) {
+        if (sibling->is_element()) {
             index++;
         }
-        // Get next sibling based on node type
-        if (dom_node_get_type(sibling) == DOM_NODE_ELEMENT) {
-            sibling = ((DomElement*)sibling)->next_sibling;
-        } else if (dom_node_get_type(sibling) == DOM_NODE_TEXT) {
-            sibling = ((DomText*)sibling)->next_sibling;
-        } else {
-            sibling = ((DomComment*)sibling)->next_sibling;
-        }
+        sibling = sibling->next_sibling;
     }
 
     return (sibling == element) ? index : -1;
@@ -1358,10 +1318,13 @@ DomText* dom_text_create(Pool* pool, const char* text) {
         return NULL;
     }
 
-    DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
-    if (!text_node) {
+    // Allocate raw memory and use placement new for proper vtable initialization
+    void* mem = pool_calloc(pool, sizeof(DomText));
+    if (!mem) {
         return NULL;
     }
+
+    DomText* text_node = new (mem) DomText();
 
     text_node->node_type = DOM_NODE_TEXT;
     text_node->length = strlen(text);
@@ -1420,10 +1383,13 @@ DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* ta
         return NULL;
     }
 
-    DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
-    if (!comment_node) {
+    // Allocate raw memory and use placement new for proper vtable initialization
+    void* mem = pool_calloc(pool, sizeof(DomComment));
+    if (!mem) {
         return NULL;
     }
+
+    DomComment* comment_node = new (mem) DomComment(node_type);
 
     comment_node->node_type = node_type;
 
@@ -1662,20 +1628,17 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
     }
 
     // Print children
-    void* child = element->first_child;
+    DomNodeBase* child = element->first_child;
     bool has_element_children = false;
 
     // Count and print children
     while (child) {
-        DomNodeType child_type = dom_node_get_type(child);
-
-        if (child_type == DOM_NODE_ELEMENT) {
+        if (child->is_element()) {
             // Recursively print child elements with newline before each child
             has_element_children = true;
             strbuf_append_char(buf, '\n');
             dom_element_print((DomElement*)child, buf, indent + 2);
-            child = ((DomElement*)child)->next_sibling;
-        } else if (child_type == DOM_NODE_TEXT) {
+        } else if (child->is_text()) {
             // Print text nodes (skip whitespace-only text nodes)
             DomText* text_node = (DomText*)child;
 
@@ -1698,8 +1661,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                     strbuf_append_str(buf, "\"");
                 }
             }
-            child = text_node->next_sibling;
-        } else if (child_type == DOM_NODE_COMMENT || child_type == DOM_NODE_DOCTYPE) {
+        } else if (child->is_comment()) {
             // Print comment/DOCTYPE nodes
             DomComment* comment_node = (DomComment*)child;
             strbuf_append_char(buf, '\n');
@@ -1709,11 +1671,10 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
                 strbuf_append_str(buf, comment_node->content);
             }
             strbuf_append_str(buf, " -->");
-            child = comment_node->next_sibling;
-        } else {
-            // Unknown node type, skip
-            break;
         }
+
+        // Move to next sibling
+        child = child->next_sibling;
     }
 
     // Print closing tag

@@ -425,8 +425,8 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
 
                     // ENHANCED: Calculate more accurate text width based on font size
                     // In a real implementation, this would measure actual text
-                    if (item->node && item->node->first_child() && item->node->first_child()->is_text()) {
-                        const char* text = (const char*)item->node->first_child()->text_data();
+                    if (item->node && item->node->first_child && item->node->first_child->is_text()) {
+                        const char* text = (const char*)item->node->first_child->text_data();
                         if (text) {
                             int text_length = strlen(text);
 

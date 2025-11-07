@@ -62,17 +62,17 @@ typedef struct TextWrapConfig {
     WordBreakValue word_break;          // CSS word-break property
     OverflowWrapValue overflow_wrap;    // CSS overflow-wrap property
     TextJustifyValue text_justify;      // CSS text-justify property
-    
+
     // Container constraints
     int max_width;                      // Maximum line width
     int max_height;                     // Maximum container height
     bool allow_overflow;                // Allow text to overflow
-    
+
     // Hyphenation settings
     bool hyphenation_enabled;           // Enable hyphenation
     char* hyphen_character;             // Hyphen character (default: "-")
     int min_word_length;                // Minimum word length for hyphenation
-    
+
     // Performance settings
     bool break_cache_enabled;           // Enable break opportunity caching
     struct hashmap* break_cache;        // Break opportunity cache
@@ -106,18 +106,18 @@ typedef struct WrappedTextLine {
     int text_length;                    // Length of text
     int start_position;                 // Start position in original text
     int end_position;                   // End position in original text
-    
+
     // Line metrics
     TextLineMetrics metrics;            // Line typography metrics
     LineBreakResult break_info;         // How this line was broken
-    
+
     // Justification information
     bool is_justified;                  // Whether line is justified
     int* word_positions;                // Word start positions
     int* word_widths;                   // Individual word widths
     int word_count;                     // Number of words in line
     float* word_spacing;                // Spacing between words
-    
+
     // Memory management
     bool owns_text;                     // Whether this struct owns the text
     uint64_t cache_timestamp;           // Cache invalidation timestamp
@@ -127,28 +127,28 @@ typedef struct WrappedTextLine {
 typedef struct TextWrapContext {
     TextWrapConfig config;              // Wrapping configuration
     UnicodeRenderContext* render_ctx;   // Unicode rendering context
-    
+
     // Text content
     const char* text;                   // Original text content
     int text_length;                    // Total text length
     uint32_t* codepoints;               // Unicode codepoints
     int codepoint_count;                // Number of codepoints
-    
+
     // Break opportunities
     BreakInfo* break_opportunities;     // Array of break opportunities
     int break_count;                    // Number of break opportunities
     int break_capacity;                 // Capacity of break array
-    
+
     // Line results
     WrappedTextLine* lines;             // Array of wrapped lines
     int line_count;                     // Number of lines
     int line_capacity;                  // Capacity of lines array
-    
+
     // Performance counters
     int break_cache_hits;               // Break cache hit count
     int break_cache_misses;             // Break cache miss count
     int total_break_calculations;       // Total break calculations
-    
+
     // Memory management
     bool owns_codepoints;               // Whether context owns codepoints array
     bool owns_break_opportunities;      // Whether context owns break array
@@ -253,8 +253,8 @@ TextDirection detect_text_direction(const uint32_t* codepoints, int count);
 // === Integration Functions ===
 
 // Integration with existing layout system
-void wrap_text_in_layout_context(LayoutContext* lycon, DomNode* text_node, int max_width);
-void apply_css_text_properties(TextWrapConfig* config, DomNode* node);
+void wrap_text_in_layout_context(LayoutContext* lycon, void* text_node, int max_width);
+void apply_css_text_properties(TextWrapConfig* config, void* node);
 void update_layout_with_wrapped_text(LayoutContext* lycon, TextWrapContext* wrap_ctx);
 
 // Performance optimization

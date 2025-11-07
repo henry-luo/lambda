@@ -1,4 +1,6 @@
 #include "layout.hpp"
+#include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 
 // ============================================================================
 // Value Conversion Functions
@@ -377,16 +379,17 @@ int32_t get_lambda_specificity(const CssDeclaration* decl) {
     return specificity;
 }
 
-DisplayValue resolve_display_value(DomNode* child) {
+DisplayValue resolve_display_value(void* child) {
     // Resolve display value for a DOM node
     DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
 
-    if (child && child->type == MARK_ELEMENT) {
+    DomNodeBase* node = (DomNodeBase*)child;
+    if (node && node->is_element()) {
         // resolve display from CSS if available
-        const char* tag_name = child->name();
+        const char* tag_name = node->name();
 
         // first, try to get display from CSS
-        DomElement* dom_elem = (DomElement*)child->dom_element;
+        DomElement* dom_elem = node->as_element();
         if (dom_elem && dom_elem->specified_style) {
             StyleTree* style_tree = dom_elem->specified_style;
             if (style_tree->tree) {

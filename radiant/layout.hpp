@@ -84,7 +84,7 @@ typedef struct LayoutContext {
     ViewGroup* parent;
     View* prev_view;
     View* view;  // current view
-    DomNode *elmt;  // current dom element, used before the view is created
+    DomNodeBase* elmt;  // current dom element, used before the view is created
 
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
@@ -111,7 +111,7 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
 PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
-View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
+View* alloc_view(LayoutContext* lycon, ViewType type, DomNodeBase* node);
 void free_view(ViewTree* tree, View* view);
 
 // ============================================================================
@@ -192,17 +192,17 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 // Process single Lambda CSS property declaration
 // Called for each property in DomElement->specified_style
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
-DisplayValue resolve_display_value(DomNode* child); // Unified function for both Lexbor and Lambda CSS
+DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
 int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
-void layout_flow_node(LayoutContext* lycon, DomNode *node);
-void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
-void layout_text(LayoutContext* lycon, DomNode *text_node);
-void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
+void layout_flow_node(LayoutContext* lycon, DomNodeBase* node);
+void layout_block(LayoutContext* lycon, DomNodeBase* elmt, DisplayValue display);
+void layout_text(LayoutContext* lycon, DomNodeBase* text_node);
+void layout_inline(LayoutContext* lycon, DomNodeBase* elmt, DisplayValue display);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
-void layout_html_root(LayoutContext* lycon, DomNode *elmt);
+void layout_html_root(LayoutContext* lycon, DomNodeBase* elmt);
 
 // CSS Positioning functions
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
@@ -214,7 +214,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, flo
 void view_vertical_align(LayoutContext* lycon, View* view);
 
 // DomNode style resolution
-void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
+void dom_node_resolve_style(DomNodeBase* node, LayoutContext* lycon);
 
 float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_height);
 float inherit_line_height(LayoutContext* lycon, ViewBlock* block);
