@@ -154,34 +154,28 @@ typedef struct CssFunction {
 
 // CSS Value Types for final computed values
 typedef enum CssValueType {
-    CSS_VALUE_KEYWORD,        // keywords (auto, inherit, etc.)
-    CSS_VALUE_LENGTH,         // length values with units
-    CSS_VALUE_PERCENTAGE,     // percentage values
-    CSS_VALUE_NUMBER,         // numeric values
-    CSS_VALUE_INTEGER,        // integer values
-    CSS_VALUE_COLOR,          // color values
-    CSS_VALUE_STRING,         // string values
-    CSS_VALUE_URL,            // URL values
-    CSS_VALUE_ANGLE,          // angle values
-    CSS_VALUE_TIME,           // time values
-    CSS_VALUE_FREQUENCY,      // frequency values
-    CSS_VALUE_RESOLUTION,     // resolution values
-    CSS_VALUE_POSITION,       // position values
-    CSS_VALUE_CUSTOM_PROPERTY,// custom property references
-    CSS_VALUE_LIST,           // list of values
-    CSS_VALUE_FUNCTION,       // function values
-    CSS_VALUE_VAR,            // var() function
-    CSS_VALUE_ENV,            // env() function
-    CSS_VALUE_ATTR,           // attr() function
-    CSS_VALUE_ENHANCED_VAR,   // enhanced var() function
-    CSS_VALUE_ENHANCED_CALC,  // enhanced calc() function
-    CSS_VALUE_ENHANCED_MIN,   // enhanced min() function
-    CSS_VALUE_ENHANCED_MAX,   // enhanced max() function
-    CSS_VALUE_ENHANCED_CLAMP, // enhanced clamp() function
-    CSS_VALUE_COLOR_MIX,      // color-mix() function
-    CSS_VALUE_CALC,           // calc() expressions
-    CSS_VALUE_LENGTH_PERCENTAGE, // length or percentage values
-    CSS_VALUE_NUMBER_PERCENTAGE  // number or percentage values
+    CSS_VALUE_TYPE_KEYWORD,        // keywords (auto, inherit, etc.)
+    CSS_VALUE_TYPE_LENGTH,         // length values with units
+    CSS_VALUE_TYPE_PERCENTAGE,     // percentage values
+    CSS_VALUE_TYPE_NUMBER,         // numeric values
+    CSS_VALUE_TYPE_INTEGER,        // integer values
+    CSS_VALUE_TYPE_COLOR,          // color values
+    CSS_VALUE_TYPE_STRING,         // string values
+    CSS_VALUE_TYPE_URL,            // URL values
+    CSS_VALUE_TYPE_ANGLE,          // angle values
+    CSS_VALUE_TYPE_TIME,           // time values
+    CSS_VALUE_TYPE_FREQUENCY,      // frequency values
+    CSS_VALUE_TYPE_LIST,           // list of values
+    CSS_VALUE_TYPE_FUNCTION,       // function values
+    CSS_VALUE_TYPE_VAR,            // var() function
+    CSS_VALUE_TYPE_ENV,            // env() function
+    CSS_VALUE_TYPE_ATTR,           // attr() function
+    CSS_VALUE_TYPE_COLOR_MIX,      // color-mix() function
+    CSS_VALUE_TYPE_CALC,           // calc() expressions
+    CSS_VALUE_LENGTH_PERCENTAGE,   // length or percentage values
+    CSS_VALUE_NUMBER_PERCENTAGE,   // number or percentage values
+    CSS_VALUE_TYPE_CUSTOM,         // custom property references
+    CSS_VALUE_TYPE_UNKNOWN         // unknown or invalid value
 } CssValueType;
 
 // ============================================================================
@@ -1242,16 +1236,16 @@ typedef CssValue CSSPropertyValue;
 typedef CssValueType CSSPropertyType;
 
 // Legacy enum aliases for property types
-#define CSS_PROP_TYPE_KEYWORD CSS_VALUE_KEYWORD
-#define CSS_PROP_TYPE_LENGTH CSS_VALUE_LENGTH
-#define CSS_PROP_TYPE_PERCENTAGE CSS_VALUE_PERCENTAGE
-#define CSS_PROP_TYPE_COLOR CSS_VALUE_COLOR
-#define CSS_PROP_TYPE_NUMBER CSS_VALUE_NUMBER
-#define CSS_PROP_TYPE_STRING CSS_VALUE_STRING
-#define CSS_PROP_TYPE_URL CSS_VALUE_URL
-#define CSS_PROP_TYPE_CALC CSS_VALUE_CALC
-#define CSS_PROP_TYPE_CUSTOM CSS_VALUE_CUSTOM
-#define CSS_PROP_TYPE_UNKNOWN CSS_VALUE_UNKNOWN
+#define CSS_PROP_TYPE_KEYWORD CSS_VALUE_TYPE_KEYWORD
+#define CSS_PROP_TYPE_LENGTH CSS_VALUE_TYPE_LENGTH
+#define CSS_PROP_TYPE_PERCENTAGE CSS_VALUE_TYPE_PERCENTAGE
+#define CSS_PROP_TYPE_COLOR CSS_VALUE_TYPE_COLOR
+#define CSS_PROP_TYPE_NUMBER CSS_VALUE_TYPE_NUMBER
+#define CSS_PROP_TYPE_STRING CSS_VALUE_TYPE_STRING
+#define CSS_PROP_TYPE_URL CSS_VALUE_TYPE_URL
+#define CSS_PROP_TYPE_CALC CSS_VALUE_TYPE_CALC
+#define CSS_PROP_TYPE_CUSTOM CSS_VALUE_TYPE_CUSTOM
+#define CSS_PROP_TYPE_UNKNOWN CSS_VALUE_TYPE_UNKNOWN
 
 // Legacy property ID aliases
 #define CSS_PROP_COLOR CSS_PROPERTY_COLOR

@@ -108,7 +108,7 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_KEYWORD;
+    value->type = CSS_VALUE_TYPE_KEYWORD;
 
     // Strip quotes from keyword (font names can be quoted)
     size_t len = strlen(keyword);
@@ -140,7 +140,7 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_NUMBER;
+    value->type = CSS_VALUE_TYPE_NUMBER;
     value->data.number.value = number;
 
     return value;
@@ -227,7 +227,7 @@ CssValue* css_value_create_length_from_string(Pool* pool, double number, const c
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_LENGTH;
+    value->type = CSS_VALUE_TYPE_LENGTH;
     value->data.length.value = number;
     value->data.length.unit = css_unit_from_string(unit);
 
@@ -240,7 +240,7 @@ CssValue* css_value_create_string(Pool* pool, const char* string) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_STRING;
+    value->type = CSS_VALUE_TYPE_STRING;
 
     // Strip quotes from string values (both single and double quotes)
     size_t len = strlen(string);
@@ -266,7 +266,7 @@ CssValue* css_value_create_string(Pool* pool, const char* string) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_URL;
+    value->type = CSS_VALUE_TYPE_URL;
     value->data.url = pool_strdup(pool, url);
 
     return value;
@@ -278,7 +278,7 @@ CssValue* css_value_create_color_hex(Pool* pool, const char* hex) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color_hex = pool_strdup(pool, hex);
 
     return value;
@@ -290,7 +290,7 @@ CssValue* css_value_create_unicode_range(Pool* pool, const char* range) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_STRING;
+    value->type = CSS_VALUE_TYPE_STRING;
     value->data.unicode_range = pool_strdup(pool, range);
 
     return value;
@@ -302,7 +302,7 @@ CssValue* css_value_create_percentage(Pool* pool, double percentage) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_PERCENTAGE;
+    value->type = CSS_VALUE_TYPE_PERCENTAGE;
     value->data.percentage.value = percentage;
 
     return value;
@@ -386,7 +386,7 @@ static CssValue* css_parse_function_value(CssPropertyValueParser* parser,
         if (var_ref) {
             CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
             if (value) {
-                value->type = CSS_VALUE_VAR;
+                value->type = CSS_VALUE_TYPE_VAR;
                 value->data.var_ref = var_ref;
             }
             return value;
@@ -398,7 +398,7 @@ static CssValue* css_parse_function_value(CssPropertyValueParser* parser,
         if (env_ref) {
             CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
             if (value) {
-                value->type = CSS_VALUE_ENV;
+                value->type = CSS_VALUE_TYPE_ENV;
                 value->data.env_ref = env_ref;
             }
             return value;
@@ -410,7 +410,7 @@ static CssValue* css_parse_function_value(CssPropertyValueParser* parser,
         if (attr_ref) {
             CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
             if (value) {
-                value->type = CSS_VALUE_ATTR;
+                value->type = CSS_VALUE_TYPE_ATTR;
                 value->data.attr_ref = attr_ref;
             }
             return value;
@@ -443,7 +443,7 @@ static CssValue* css_parse_function_value(CssPropertyValueParser* parser,
             if (color_mix) {
                 CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
                 if (value) {
-                    value->type = CSS_VALUE_COLOR_MIX;
+                    value->type = CSS_VALUE_TYPE_COLOR_MIX;
                     value->data.color_mix = color_mix;
                 }
                 return value;
@@ -492,7 +492,7 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
         return NULL;
     }
 
-    value->type = CSS_VALUE_FUNCTION;
+    value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function.name = pool_strdup(parser->pool, function_name);
     value->data.function.args = NULL;
     value->data.function.arg_count = 0;
@@ -549,7 +549,7 @@ CssValue* css_parse_calc_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_CALC;
+    value->type = CSS_VALUE_TYPE_CALC;
     value->data.calc_expression = calc_node;
 
     return value;
@@ -710,34 +710,34 @@ const char** css_property_value_parser_get_errors(CssPropertyValueParser* parser
 
 // Type checking utilities
 bool css_value_is_length(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_LENGTH ||
+    return value && (value->type == CSS_VALUE_TYPE_LENGTH ||
                      value->type == CSS_VALUE_LENGTH_PERCENTAGE);
 }
 
 bool css_value_is_percentage(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_PERCENTAGE ||
+    return value && (value->type == CSS_VALUE_TYPE_PERCENTAGE ||
                      value->type == CSS_VALUE_LENGTH_PERCENTAGE ||
                      value->type == CSS_VALUE_NUMBER_PERCENTAGE);
 }
 
 bool css_value_is_number(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_NUMBER ||
-                     value->type == CSS_VALUE_INTEGER ||
+    return value && (value->type == CSS_VALUE_TYPE_NUMBER ||
+                     value->type == CSS_VALUE_TYPE_INTEGER ||
                      value->type == CSS_VALUE_NUMBER_PERCENTAGE);
 }
 
 bool css_value_is_color(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_COLOR ||
-                     value->type == CSS_VALUE_COLOR_MIX);
+    return value && (value->type == CSS_VALUE_TYPE_COLOR ||
+                     value->type == CSS_VALUE_TYPE_COLOR_MIX);
 }
 
 bool css_value_is_keyword(const CssValue* value, const char* keyword) {
-    return value && value->type == CSS_VALUE_KEYWORD &&
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
            value->data.keyword && strcmp(value->data.keyword, keyword) == 0;
 }
 
 bool css_value_is_function(const CssValue* value, const char* function_name) {
-    return value && value->type == CSS_VALUE_FUNCTION &&
+    return value && value->type == CSS_VALUE_TYPE_FUNCTION &&
            value->data.function.name && strcmp(value->data.function.name, function_name) == 0;
 }
 
@@ -772,7 +772,7 @@ CssValue* css_value_list_create(Pool* pool, bool comma_separated) {
     CssValue* list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!list) return NULL;
 
-    list->type = CSS_VALUE_LIST;
+    list->type = CSS_VALUE_TYPE_LIST;
     list->data.list.comma_separated = comma_separated;
     list->data.list.count = 0;
 
@@ -790,7 +790,7 @@ void css_value_list_add(CssValue* list, CssValue* value) {
     // Add value to list with dynamic array handling
     // Note: This version doesn't expand the array, it just adds up to initial capacity
     // Full implementation would require storing pool reference or using reallocation strategy
-    if (!list || !value || list->type != CSS_VALUE_LIST) return;
+    if (!list || !value || list->type != CSS_VALUE_TYPE_LIST) return;
 
     // Check if there's space (assuming initial capacity was sufficient)
     // In a production implementation, we'd need to expand the array here
@@ -813,7 +813,7 @@ CssValue* css_parse_min_max_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_FUNCTION;
+    value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function.name = (op_type == 0) ? "min" : "max";
     value->data.function.arg_count = 0;
     value->data.function.args = NULL;
@@ -830,7 +830,7 @@ CssValue* css_parse_clamp_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_FUNCTION;
+    value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function.name = "clamp";
     value->data.function.arg_count = 0;
     value->data.function.args = NULL;
@@ -848,7 +848,7 @@ CssValue* css_parse_math_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_FUNCTION;
+    value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function.name = "math";
     value->data.function.args = NULL;
     value->data.function.arg_count = 0;
@@ -866,7 +866,7 @@ CssValue* css_parse_math_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_RGB;
 
     // For now, create a default red color - full implementation would parse tokens
@@ -886,7 +886,7 @@ CssValue* css_parse_hsl_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_HSL;
 
     // Default to red hue - full implementation would parse tokens
@@ -906,7 +906,7 @@ CssValue* css_parse_hwb_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_HWB;
 
     // Default HWB values - full implementation would parse tokens
@@ -926,7 +926,7 @@ CssValue* css_parse_lab_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_LAB;
 
     // Default LAB values - full implementation would parse tokens
@@ -946,7 +946,7 @@ CssValue* css_parse_lch_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_LCH;
 
     // Default LCH values - full implementation would parse tokens
@@ -966,7 +966,7 @@ CssValue* css_parse_oklab_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_OKLAB;
 
     // Default OKLAB values - full implementation would parse tokens
@@ -986,7 +986,7 @@ CssValue* css_parse_oklch_function(CssPropertyValueParser* parser,
     CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_COLOR;
+    value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_OKLCH;
 
     // Default OKLCH values - full implementation would parse tokens
@@ -1008,7 +1008,7 @@ CssValue* css_value_create_length(Pool* pool, double value, CssUnit unit) {
     CssValue* css_value = (CssValue*)pool_alloc(pool, sizeof(CssValue));
     if (!css_value) return NULL;
 
-    css_value->type = CSS_VALUE_LENGTH;
+    css_value->type = CSS_VALUE_TYPE_LENGTH;
     css_value->data.length.value = value;
     css_value->data.length.unit = unit;
 

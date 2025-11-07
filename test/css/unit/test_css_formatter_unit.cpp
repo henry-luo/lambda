@@ -57,14 +57,14 @@ protected:
     // Helper to create a simple value for testing
     CssValue* CreateKeywordValue(const char* keyword) {
         CssValue* value = (CssValue*)pool_alloc(pool.get(), sizeof(CssValue));
-        value->type = CSS_VALUE_KEYWORD;
+        value->type = CSS_VALUE_TYPE_KEYWORD;
         value->data.keyword = keyword;
         return value;
     }
 
     CssValue* CreateLengthValue(double length, CssUnit unit = CSS_UNIT_PX) {
         CssValue* value = (CssValue*)pool_alloc(pool.get(), sizeof(CssValue));
-        value->type = CSS_VALUE_LENGTH;
+        value->type = CSS_VALUE_TYPE_LENGTH;
         value->data.length.value = length;
         value->data.length.unit = unit;
         return value;
@@ -72,7 +72,7 @@ protected:
 
     CssValue* CreateNumberValue(double number) {
         CssValue* value = (CssValue*)pool_alloc(pool.get(), sizeof(CssValue));
-        value->type = CSS_VALUE_NUMBER;
+        value->type = CSS_VALUE_TYPE_NUMBER;
         value->data.number.value = number;
         return value;
     }
@@ -259,7 +259,7 @@ TEST_F(CssFormatterUnitTest, FormatValue_NullValue) {
     auto formatter = CreateFormatter();
 
     css_format_value(formatter, nullptr);
-    
+
     // When value is null, formatter should handle gracefully
     // We check that formatter is still valid, not the output
     EXPECT_NE(formatter, nullptr);
@@ -564,8 +564,8 @@ TEST_F(CssFormatterUnitTest, Integration_ComplexStylesheet) {
     // Should contain actual CSS content from the parsed rules
     EXPECT_GT(strlen(formatted), 0);
     // Look for CSS selectors or properties that should be present
-    EXPECT_TRUE(strstr(formatted, "body") != nullptr || 
-                strstr(formatted, "h1") != nullptr || 
+    EXPECT_TRUE(strstr(formatted, "body") != nullptr ||
+                strstr(formatted, "h1") != nullptr ||
                 strstr(formatted, "container") != nullptr ||
                 strstr(formatted, "margin") != nullptr ||
                 strstr(formatted, "padding") != nullptr ||

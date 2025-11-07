@@ -464,15 +464,15 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         case CSS_PROPERTY_FONT_SIZE: {
             // Font-size must be non-negative
             // Per CSS spec: Negative values are not allowed
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (value->data.length.value < 0) {
                     return false; // Negative font-size is invalid
                 }
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 if (value->data.percentage.value < 0) {
                     return false; // Negative percentage is invalid
                 }
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Unitless values are generally invalid for font-size (except 0 in some contexts)
                 // For safety, reject negative numbers
                 if (value->data.number.value < 0) {
@@ -489,15 +489,15 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         case CSS_PROPERTY_MAX_WIDTH:
         case CSS_PROPERTY_MAX_HEIGHT: {
             // Width and height must be non-negative (per CSS spec)
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (value->data.length.value < 0) {
                     return false;
                 }
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 if (value->data.percentage.value < 0) {
                     return false;
                 }
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 if (value->data.number.value < 0) {
                     return false;
                 }
@@ -511,11 +511,11 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
         case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
             // Border widths must be non-negative
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (value->data.length.value < 0) {
                     return false;
                 }
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 if (value->data.number.value < 0) {
                     return false;
                 }
@@ -573,34 +573,34 @@ CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool)
     if (endptr != value && *endptr != '\0') {
         // Successfully parsed a number, check unit
         if (strcmp(endptr, "px") == 0) {
-            prop->value->type = CSS_VALUE_LENGTH;
+            prop->value->type = CSS_VALUE_TYPE_LENGTH;
             prop->value->data.length.value = num_value;
             prop->value->data.length.unit = CSS_UNIT_PX;
             return prop;
         } else if (strcmp(endptr, "em") == 0) {
-            prop->value->type = CSS_VALUE_LENGTH;
+            prop->value->type = CSS_VALUE_TYPE_LENGTH;
             prop->value->data.length.value = num_value;
             prop->value->data.length.unit = CSS_UNIT_EM;
             return prop;
         } else if (strcmp(endptr, "rem") == 0) {
-            prop->value->type = CSS_VALUE_LENGTH;
+            prop->value->type = CSS_VALUE_TYPE_LENGTH;
             prop->value->data.length.value = num_value;
             prop->value->data.length.unit = CSS_UNIT_REM;
             return prop;
         } else if (strcmp(endptr, "%") == 0) {
-            prop->value->type = CSS_VALUE_PERCENTAGE;
+            prop->value->type = CSS_VALUE_TYPE_PERCENTAGE;
             prop->value->data.percentage.value = num_value;
             return prop;
         }
     } else if (endptr != value && *endptr == '\0') {
         // Plain number without unit
-        prop->value->type = CSS_VALUE_NUMBER;
+        prop->value->type = CSS_VALUE_TYPE_NUMBER;
         prop->value->data.number.value = num_value;
         return prop;
     }
 
     // Fallback: store as keyword
-    prop->value->type = CSS_VALUE_KEYWORD;
+    prop->value->type = CSS_VALUE_TYPE_KEYWORD;
     prop->value->data.keyword = pool_strdup(pool, value);
 
     return prop;

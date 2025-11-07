@@ -123,27 +123,27 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
     // Don't reset buffer - append to existing content
 
     switch (value->type) {
-        case CSS_VALUE_KEYWORD:
+        case CSS_VALUE_TYPE_KEYWORD:
             if (value->data.keyword) {
                 stringbuf_append_str(formatter->output, value->data.keyword);
             }
             break;
 
-        case CSS_VALUE_LENGTH:
+        case CSS_VALUE_TYPE_LENGTH:
             // Format number with unit
             stringbuf_append_format(formatter->output, "%.2f", value->data.length.value);
             stringbuf_append_str(formatter->output, unit_to_string(value->data.length.unit));
             break;
 
-        case CSS_VALUE_NUMBER:
+        case CSS_VALUE_TYPE_NUMBER:
             stringbuf_append_format(formatter->output, "%.2f", value->data.number.value);
             break;
 
-        case CSS_VALUE_PERCENTAGE:
+        case CSS_VALUE_TYPE_PERCENTAGE:
             stringbuf_append_format(formatter->output, "%.2f%%", value->data.percentage.value);
             break;
 
-        case CSS_VALUE_COLOR:
+        case CSS_VALUE_TYPE_COLOR:
             // Format color based on type
             if (value->data.color.type == CSS_COLOR_KEYWORD && value->data.color.data.keyword) {
                 stringbuf_append_str(formatter->output, value->data.color.data.keyword);
@@ -181,7 +181,7 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
             }
             break;
 
-        case CSS_VALUE_STRING:
+        case CSS_VALUE_TYPE_STRING:
             if (value->data.string) {
                 stringbuf_append_str(formatter->output, "\"");
                 stringbuf_append_str(formatter->output, value->data.string);
@@ -189,7 +189,7 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
             }
             break;
 
-        case CSS_VALUE_URL:
+        case CSS_VALUE_TYPE_URL:
             stringbuf_append_str(formatter->output, "url(");
             if (formatter->options.quote_urls) {
                 stringbuf_append_str(formatter->output, "\"");
@@ -203,7 +203,7 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
             stringbuf_append_str(formatter->output, ")");
             break;
 
-        case CSS_VALUE_FUNCTION:
+        case CSS_VALUE_TYPE_FUNCTION:
             if (value->data.function.name) {
                 stringbuf_append_str(formatter->output, value->data.function.name);
                 stringbuf_append_str(formatter->output, "(");
@@ -228,7 +228,7 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
             }
             break;
 
-        case CSS_VALUE_LIST:
+        case CSS_VALUE_TYPE_LIST:
             // Format value list (space-separated or comma-separated)
             if (value->data.list.values) {
                 for (size_t i = 0; i < value->data.list.count; i++) {

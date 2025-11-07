@@ -885,7 +885,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
             // Determine value type from token
             if (tokens[i].type == CSS_TOKEN_IDENT) {
-                value->type = CSS_VALUE_KEYWORD;
+                value->type = CSS_VALUE_TYPE_KEYWORD;
                 const char* token_val = NULL;
                 if (tokens[i].value) {
                     token_val = tokens[i].value;
@@ -918,7 +918,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 }
             } else if (tokens[i].type == CSS_TOKEN_STRING) {
                 // Handle string tokens (e.g., "«", "»" for content property)
-                value->type = CSS_VALUE_STRING;
+                value->type = CSS_VALUE_TYPE_STRING;
                 const char* str_val = tokens[i].value;
                 if (!str_val && tokens[i].start && tokens[i].length > 0) {
                     char* temp_str = (char*)pool_calloc(pool, tokens[i].length + 1);
@@ -930,17 +930,17 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 }
                 value->data.string = str_val ? pool_strdup(pool, str_val) : "";
             } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
-                value->type = CSS_VALUE_NUMBER;
+                value->type = CSS_VALUE_TYPE_NUMBER;
                 value->data.number.value = tokens[i].data.number_value;
             } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
-                value->type = CSS_VALUE_LENGTH;
+                value->type = CSS_VALUE_TYPE_LENGTH;
                 value->data.length.value = tokens[i].data.dimension.value;
                 value->data.length.unit = tokens[i].data.dimension.unit;
             } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
-                value->type = CSS_VALUE_PERCENTAGE;
+                value->type = CSS_VALUE_TYPE_PERCENTAGE;
                 value->data.percentage.value = tokens[i].data.number_value;
             } else if (tokens[i].type == CSS_TOKEN_HASH) {
-                value->type = CSS_VALUE_COLOR;
+                value->type = CSS_VALUE_TYPE_COLOR;
                 value->data.color.type = CSS_COLOR_RGB;
 
                 const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
@@ -996,7 +996,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                     value->data.color.data.rgba.a = 255;
                 }
             } else {
-                value->type = CSS_VALUE_KEYWORD;
+                value->type = CSS_VALUE_TYPE_KEYWORD;
                 if (tokens[i].value) {
                     value->data.keyword = pool_strdup(pool, tokens[i].value);
                 } else if (tokens[i].start && tokens[i].length > 0) {
@@ -1017,7 +1017,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
         if (!list_value) return NULL;
 
-        list_value->type = CSS_VALUE_LIST;
+        list_value->type = CSS_VALUE_TYPE_LIST;
         list_value->data.list.count = value_count;
 
         // Allocate array of pointers to CssValue
@@ -1033,7 +1033,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             list_value->data.list.values[list_idx++] = value;
 
             if (tokens[i].type == CSS_TOKEN_IDENT) {
-                value->type = CSS_VALUE_KEYWORD;
+                value->type = CSS_VALUE_TYPE_KEYWORD;
                 const char* token_val = NULL;
                 if (tokens[i].value) {
                     token_val = tokens[i].value;
@@ -1066,7 +1066,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 }
             } else if (tokens[i].type == CSS_TOKEN_STRING) {
                 // Handle string tokens (e.g., "«", "»" for content property)
-                value->type = CSS_VALUE_STRING;
+                value->type = CSS_VALUE_TYPE_STRING;
                 const char* str_val = tokens[i].value;
                 if (!str_val && tokens[i].start && tokens[i].length > 0) {
                     char* temp_str = (char*)pool_calloc(pool, tokens[i].length + 1);
@@ -1078,17 +1078,17 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 }
                 value->data.string = str_val ? pool_strdup(pool, str_val) : "";
             } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
-                value->type = CSS_VALUE_NUMBER;
+                value->type = CSS_VALUE_TYPE_NUMBER;
                 value->data.number.value = tokens[i].data.number_value;
             } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
-                value->type = CSS_VALUE_LENGTH;
+                value->type = CSS_VALUE_TYPE_LENGTH;
                 value->data.length.value = tokens[i].data.dimension.value;
                 value->data.length.unit = tokens[i].data.dimension.unit;
             } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
-                value->type = CSS_VALUE_PERCENTAGE;
+                value->type = CSS_VALUE_TYPE_PERCENTAGE;
                 value->data.percentage.value = tokens[i].data.number_value;
             } else if (tokens[i].type == CSS_TOKEN_HASH) {
-                value->type = CSS_VALUE_COLOR;
+                value->type = CSS_VALUE_TYPE_COLOR;
                 value->data.color.type = CSS_COLOR_RGB;
 
                 const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
@@ -1144,7 +1144,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                     value->data.color.data.rgba.a = 255;
                 }
             } else {
-                value->type = CSS_VALUE_KEYWORD;
+                value->type = CSS_VALUE_TYPE_KEYWORD;
                 if (tokens[i].value) {
                     value->data.keyword = pool_strdup(pool, tokens[i].value);
                 } else if (tokens[i].start && tokens[i].length > 0) {
@@ -1165,7 +1165,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     if (decl->value) {
         log_debug("[CSS Parse] Declaration for property ID %d: value type = %d",
                decl->property_id, decl->value->type);
-        if (decl->value->type == CSS_VALUE_LENGTH) {
+        if (decl->value->type == CSS_VALUE_TYPE_LENGTH) {
             log_debug("[CSS Parse]   Length value = %.2f", decl->value->data.length.value);
         }
     }
@@ -1176,9 +1176,9 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         float value_to_check = 0;
 
         // Check if this is a length or number value
-        if (decl->value->type == CSS_VALUE_LENGTH) {
+        if (decl->value->type == CSS_VALUE_TYPE_LENGTH) {
             value_to_check = decl->value->data.length.value;
-        } else if (decl->value->type == CSS_VALUE_NUMBER) {
+        } else if (decl->value->type == CSS_VALUE_TYPE_NUMBER) {
             value_to_check = decl->value->data.number.value;
         } else {
             // Not a numeric value, skip validation

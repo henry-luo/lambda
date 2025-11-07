@@ -239,7 +239,7 @@ static const css_data lxb_css_value_data[] = {
     {"lch", 3, CSS_VALUE_LCH},
     {"oklab", 5, CSS_VALUE_OKLAB},
     {"oklch", 5, CSS_VALUE_OKLCH},
-    {"color", 5, CSS_VALUE__COLOR},
+    {"color", 5, CSS_VALUE_COLOR},
     {"hand", 4, CSS_VALUE_HAND},
     {"pointer", 7, CSS_VALUE_POINTER},
     {"text", 4, CSS_VALUE_TEXT},

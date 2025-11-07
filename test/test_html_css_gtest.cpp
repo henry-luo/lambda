@@ -523,7 +523,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
     CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     decl->property_id = CSS_PROPERTY_COLOR;
     decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    decl->value->type = CSS_VALUE_KEYWORD;
+    decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     decl->value->data.keyword = pool_strdup(pool, "blue");
     decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class selector
     decl->origin = CSS_ORIGIN_AUTHOR;
@@ -549,7 +549,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
     CssDeclaration* stylesheet_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     stylesheet_decl->property_id = CSS_PROPERTY_COLOR;
     stylesheet_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    stylesheet_decl->value->type = CSS_VALUE_KEYWORD;
+    stylesheet_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     stylesheet_decl->value->data.keyword = pool_strdup(pool, "blue");
     stylesheet_decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class
     stylesheet_decl->origin = CSS_ORIGIN_AUTHOR;
@@ -573,7 +573,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     CssDeclaration* class_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     class_decl->property_id = CSS_PROPERTY_COLOR;
     class_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    class_decl->value->type = CSS_VALUE_KEYWORD;
+    class_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     class_decl->value->data.keyword = pool_strdup(pool, "blue");
     class_decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class
     class_decl->origin = CSS_ORIGIN_AUTHOR;
@@ -584,7 +584,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     CssDeclaration* id_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     id_decl->property_id = CSS_PROPERTY_COLOR;
     id_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    id_decl->value->type = CSS_VALUE_KEYWORD;
+    id_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     id_decl->value->data.keyword = pool_strdup(pool, "green");
     id_decl->specificity = css_specificity_create(0, 1, 0, 0, false);  // ID
     id_decl->origin = CSS_ORIGIN_AUTHOR;
@@ -630,7 +630,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     ASSERT_NE(decl->value, nullptr);
 
-    decl->value->type = CSS_VALUE_KEYWORD;
+    decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     decl->value->data.keyword = pool_strdup(pool, "blue");
     decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class selector
     decl->origin = CSS_ORIGIN_AUTHOR;
@@ -1459,7 +1459,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
         CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
         decl->property_id = prop_id;
         decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-        decl->value->type = CSS_VALUE_KEYWORD;
+        decl->value->type = CSS_VALUE_TYPE_KEYWORD;
         decl->value->data.keyword = pool_strdup(pool, "value");
         decl->specificity = css_specificity_create(0, 0, 1, 0, false);
         decl->origin = CSS_ORIGIN_AUTHOR;
@@ -1483,7 +1483,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     CssDeclaration* elem_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     elem_decl->property_id = CSS_PROPERTY_COLOR;
     elem_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    elem_decl->value->type = CSS_VALUE_KEYWORD;
+    elem_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     elem_decl->value->data.keyword = pool_strdup(pool, "black");
     elem_decl->specificity = css_specificity_create(0, 0, 0, 1, false);
     elem_decl->origin = CSS_ORIGIN_AUTHOR;
@@ -1494,7 +1494,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     CssDeclaration* class_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     class_decl->property_id = CSS_PROPERTY_COLOR;
     class_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    class_decl->value->type = CSS_VALUE_KEYWORD;
+    class_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
     class_decl->value->data.keyword = pool_strdup(pool, "blue");
     class_decl->specificity = css_specificity_create(0, 0, 1, 0, false);
     class_decl->origin = CSS_ORIGIN_AUTHOR;

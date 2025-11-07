@@ -10,7 +10,7 @@ float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon, C
     if (!value) return 0.0f;
 
     switch (value->type) {
-        case CSS_VALUE_LENGTH: {
+        case CSS_VALUE_TYPE_LENGTH: {
             float num = value->data.length.value;
 
             switch (value->data.length.unit) {
@@ -62,13 +62,13 @@ float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon, C
             }
         }
 
-        case CSS_VALUE_PERCENTAGE: {
+        case CSS_VALUE_TYPE_PERCENTAGE: {
             // percentage resolution depends on property context
             // for now, return raw percentage (needs parent context)
             return (float)value->data.percentage.value;
         }
 
-        case CSS_VALUE_NUMBER: {
+        case CSS_VALUE_TYPE_NUMBER: {
             // unitless number, treat as pixels for most properties
             return (float)value->data.number.value;
         }
@@ -88,7 +88,7 @@ Color convert_lambda_color(const CssValue* value) {
     if (!value) return result;
 
     switch (value->type) {
-        case CSS_VALUE_COLOR: {
+        case CSS_VALUE_TYPE_COLOR: {
             // Access color data from CssValue anonymous struct
             switch (value->data.color.type) {
                 case CSS_COLOR_RGB:
@@ -109,7 +109,7 @@ Color convert_lambda_color(const CssValue* value) {
             break;
         }
 
-        case CSS_VALUE_KEYWORD: {
+        case CSS_VALUE_TYPE_KEYWORD: {
             // map color keyword to RGB
             // TODO: implement color keyword lookup table
             const char* keyword = value->data.keyword;
@@ -340,7 +340,7 @@ float map_lambda_font_size_keyword(const char* keyword) {
 PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
     if (!value) return CSS_VALUE_NORMAL;
 
-    if (value->type == CSS_VALUE_KEYWORD) {
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const char* keyword = value->data.keyword;
         if (!keyword) return CSS_VALUE_NORMAL;
 
@@ -352,7 +352,7 @@ PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
 
         return CSS_VALUE_NORMAL; // default
     }
-    else if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+    else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
         // numeric weights: map to closest keyword or return as-is
         int weight = (int)value->data.number.value;
 
@@ -400,7 +400,7 @@ DisplayValue resolve_display_value(void* child) {
                     StyleNode* style_node = (StyleNode*)node->declaration;
                     if (style_node && style_node->winning_decl) {
                         CssDeclaration* decl = style_node->winning_decl;
-                        if (decl->value && decl->value->type == CSS_VALUE_KEYWORD) {
+                        if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             const char* keyword = decl->value->data.keyword;
 
                             // Map keyword to display values
@@ -571,13 +571,13 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
         // resolve font size from declaration
         const CssValue* value = decl->value;
 
-        if (value->type == CSS_VALUE_LENGTH) {
+        if (value->type == CSS_VALUE_TYPE_LENGTH) {
             // Direct length value
             lycon->font.current_font_size = resolve_length_value(lycon,
                 CSS_PROPERTY_FONT_SIZE, value);
             log_debug("resolved font size from declaration: %.2f px", lycon->font.current_font_size);
             return;
-        } else if (value->type == CSS_VALUE_KEYWORD) {
+        } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
             // Keyword font size
             float size = map_lambda_font_size_keyword(value->data.keyword);
             if (size > 0) {
@@ -613,19 +613,19 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
 
     float result = 0.0f;
     switch (value->type) {
-    case CSS_VALUE_NUMBER:
+    case CSS_VALUE_TYPE_NUMBER:
         // unitless number - treat as pixels for most properties
         log_debug("number value: %.2f", value->data.number.value);
         result = (float)value->data.number.value;
         break;
 
-    case CSS_VALUE_INTEGER:
+    case CSS_VALUE_TYPE_INTEGER:
         // integer value - treat as pixels
         log_debug("integer value: %d", value->data.integer.value);
         result = (float)value->data.integer.value;
         break;
 
-    case CSS_VALUE_LENGTH: {
+    case CSS_VALUE_TYPE_LENGTH: {
         double num = value->data.length.value;
         CssUnit unit = value->data.length.unit;
         log_debug("length value: %.2f, unit: %d", num, unit);
@@ -719,7 +719,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         }
         break;
     }
-    case CSS_VALUE_PERCENTAGE: {
+    case CSS_VALUE_TYPE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
         if (property == CSS_PROPERTY_FONT_SIZE) {
             // font-size percentage is relative to parent font size
@@ -738,7 +738,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         }
         break;
     }
-    case CSS_VALUE_KEYWORD: {
+    case CSS_VALUE_TYPE_KEYWORD: {
         // todo: handle special keywords like 'auto'
         const char* keyword = value->data.keyword;
         if (keyword && strcasecmp(keyword, "auto") == 0) {
@@ -765,7 +765,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     Margin sp;  // temporal space
     int value_cnt = 1;  bool is_margin = property == CSS_PROPERTY_MARGIN;
     log_debug("resolve_spacing_prop with specificity %d", specificity);
-    if (src_space->type == CSS_VALUE_LIST) {
+    if (src_space->type == CSS_VALUE_TYPE_LIST) {
         // Multi-value margin
         value_cnt = src_space->data.list.count;
         CssValue** values = src_space->data.list.values;
@@ -773,22 +773,22 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         case 4:
             log_debug("resolving 4th spacing");
             sp.left = resolve_length_value(lycon, property, values[3]);
-            sp.left_type = values[3]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[3]->data.keyword) : 0;
+            sp.left_type = values[3]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[3]->data.keyword) : 0;
             // intended fall through
         case 3:
             log_debug("resolving 3rd spacing");
             sp.bottom = resolve_length_value(lycon, property, values[2]);
-            sp.bottom_type = values[2]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[2]->data.keyword) : 0;
+            sp.bottom_type = values[2]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[2]->data.keyword) : 0;
             // intended fall through
         case 2:
             log_debug("resolving 2nd spacing");
             sp.right = resolve_length_value(lycon, property, values[1]);
-            sp.right_type = values[1]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[1]->data.keyword) : 0;
+            sp.right_type = values[1]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[1]->data.keyword) : 0;
             // intended fall through
         case 1:
             log_debug("resolving 1st spacing");
             sp.top = resolve_length_value(lycon, property, values[0]);
-            sp.top_type = values[0]->type == CSS_VALUE_KEYWORD ? css_value_by_name(values[0]->data.keyword) : 0;
+            sp.top_type = values[0]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[0]->data.keyword) : 0;
             break;
         default:
             log_warn("unexpected spacing value count: %d", value_cnt);
@@ -981,11 +981,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             Color color_val = {0};
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Map keyword to color (e.g., "red", "blue")
                 color_val.c = map_lambda_color_keyword(value->data.keyword);
                 log_debug("[CSS] Color keyword: %s -> 0x%08X", value->data.keyword, color_val.c);
-            } else if (value->type == CSS_VALUE_COLOR) {
+            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 // Direct RGBA color value from color struct
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color_val.r = value->data.color.data.rgba.r;
@@ -1012,7 +1012,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             float font_size = 0.0f;
             bool valid = false;
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Special handling for em units: em is relative to parent font size for font-size property
                 if (value->data.length.unit == CSS_UNIT_EM) {
                     float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
@@ -1029,7 +1029,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 } else {
                     log_debug("[CSS] Font size: %.2f px invalid (must be >= 0), ignoring", font_size);
                 }
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // Percentage of parent font size
                 float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
                 font_size = parent_size * (value->data.percentage.value / 100.0f);
@@ -1040,14 +1040,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 } else {
                     log_debug("[CSS] Font size: %.2f px invalid (must be >= 0), ignoring", font_size);
                 }
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Named font sizes: small, medium, large, etc.
                 font_size = map_lambda_font_size_keyword(value->data.keyword);
                 log_debug("[CSS] Font size keyword: %s -> %.2f px", value->data.keyword, font_size);
                 if (font_size > 0) {
                     valid = true;
                 }
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Per CSS spec, unitless zero is valid and treated as 0px
                 // Other unitless numbers are invalid for font-size
                 font_size = value->data.number.value;
@@ -1079,10 +1079,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             PropValue lexbor_weight = map_lambda_font_weight_to_lexbor(value);
             span->font->font_weight = lexbor_weight;
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 log_debug("[CSS] Font weight keyword: '%s' -> Lexbor enum: %d",
                          value->data.keyword, lexbor_weight);
-            } else if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
                 log_debug("[CSS] Font weight number: %d -> Lexbor enum: %d",
                          (int)value->data.number.value, lexbor_weight);
             }
@@ -1094,16 +1094,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->font) {
                 span->font = alloc_font_prop(lycon);
             }
-            if (value->type == CSS_VALUE_STRING) {
+            if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
                 span->font->family = (char*)value->data.string;
             }
-            else if (value->type == CSS_VALUE_KEYWORD) {
+            else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Keyword font family - check if generic or specific
                 span->font->family = (char*)value->data.keyword;
                 log_debug("[CSS] Set span->font->family = '%s'", span->font->family);
             }
-            else if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
+            else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Arial, sans-serif")
                 // Use the first available font family
                 for (size_t i = 0; i < value->data.list.count; i++) {
@@ -1111,10 +1111,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     if (!item) continue;
                     const char* family = NULL;
                     log_debug("[CSS] Font family list item type: %d", item->type);
-                    if (item->type == CSS_VALUE_STRING && item->data.string) {
+                    if (item->type == CSS_VALUE_TYPE_STRING && item->data.string) {
                         family = item->data.string;
                         log_debug("[CSS] Font family STRING value: '%s'", family);
-                    } else if (item->type == CSS_VALUE_KEYWORD && item->data.keyword) {
+                    } else if (item->type == CSS_VALUE_TYPE_KEYWORD && item->data.keyword) {
                         // Check if it's a generic font family keyword
                         family = item->data.keyword;
                     }
@@ -1144,25 +1144,25 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             // Line height can be number (multiplier), length, percentage, or 'normal'
-            if (value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Unitless number - multiply by font size
                 line_height->type = CSS_VALUE__NUMBER;
                 line_height->u.number.num = value->data.number.value;
                 log_debug("[CSS] Line height number: %.2f", value->data.number.value);
                 block->blk->line_height = line_height;
-            } else if (value->type == CSS_VALUE_LENGTH) {
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 line_height->type = CSS_VALUE__LENGTH;
                 line_height->u.length.num = value->data.length.value;
                 line_height->u.length.is_float = true;
                 line_height->u.length.unit = value->data.length.unit;
                 log_debug("[CSS] Line height length: %.2f px (unit: %d)", value->data.length.value, value->data.length.unit);
                 block->blk->line_height = line_height;
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 line_height->type = CSS_VALUE__PERCENTAGE;
                 line_height->u.percentage.num = value->data.percentage.value;
                 log_debug("[CSS] Line height percentage: %.2f%%", value->data.percentage.value);
                 block->blk->line_height = line_height;
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 if (keyword && strcasecmp(keyword, "normal") == 0) {
                     line_height->type = CSS_VALUE_NORMAL;
@@ -1182,7 +1182,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing text-align property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue align_value = css_value_by_name(value->data.keyword);
                 if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
@@ -1198,7 +1198,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->font = alloc_font_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue deco_value = css_value_by_name(value->data.keyword);
                 if (deco_value != CSS_VALUE__UNDEF) {
                     span->font->text_deco = deco_value;
@@ -1214,7 +1214,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue valign_value = css_value_by_name(value->data.keyword);
                 if (valign_value != CSS_VALUE__UNDEF) {
                     span->in_line->vertical_align = valign_value;
@@ -1222,11 +1222,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 } else {
                     log_debug("[CSS] Vertical-align: unknown keyword '%s'", value->data.keyword);
                 }
-            } else if (value->type == CSS_VALUE_LENGTH) {
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Length values for vertical-align (e.g., 10px, -5px)
                 // Store as offset - will need to extend PropValue to support length offsets
                 log_debug("[CSS] Vertical-align length: %.2f px (not yet fully supported)", value->data.length.value);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // Percentage values relative to line-height
                 log_debug("[CSS] Vertical-align percentage: %.2f%% (not yet fully supported)", value->data.percentage.value);
             } else {
@@ -1241,7 +1241,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue cursor_value = css_value_by_name(value->data.keyword);
                 if (cursor_value != CSS_VALUE__UNDEF) {
                     span->in_line->cursor = cursor_value;
@@ -1262,7 +1262,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk = alloc_block_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 // per CSS spec, negative values for width are invalid and should be ignored
                 if (width < 0.0f) {
@@ -1273,7 +1273,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 lycon->block.given_width = width;  // CRITICAL: Also set in LayoutContext for layout calculation
                 block->blk->given_width_type = CSS_VALUE_INITIAL; // Mark as explicitly set
                 log_debug("[CSS] Width: %.2f px", width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for width per CSS spec
                 float width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1285,7 +1285,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 lycon->block.given_width = 0.0f;
                 block->blk->given_width_type = CSS_VALUE_INITIAL;
                 log_debug("[CSS] Width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // Calculate percentage width based on parent width
                 float percentage = value->data.percentage.value;
                 // per CSS spec, negative percentages for width are invalid
@@ -1304,7 +1304,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 lycon->block.given_width = width;
                 block->blk->given_width_type = CSS_VALUE__PERCENTAGE;
                 log_debug("[CSS] Width: %.2f%% of parent %.2f px = %.2f px", percentage, parent_width, width);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Width: auto");
                 block->blk->given_width_type = CSS_VALUE_AUTO;
@@ -1320,7 +1320,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk = alloc_block_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 log_debug("[CSS] Height before conversion: %.2f, unit: %d", value->data.length.value, value->data.length.unit);
                 float height = convert_lambda_length_to_px(value, lycon, prop_id);
                 log_debug("[CSS] Height after conversion: %.2f px", height);
@@ -1332,7 +1332,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk->given_height = height;
                 lycon->block.given_height = height;  // CRITICAL: Also set in LayoutContext for layout calculation
                 log_debug("[CSS] Height: %.2f px", height);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for height per CSS spec
                 float height = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1343,7 +1343,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk->given_height = 0.0f;
                 lycon->block.given_height = 0.0f;
                 log_debug("[CSS] Height: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 // per CSS spec, negative percentages for height are invalid
                 if (percentage < 0.0f) {
@@ -1351,7 +1351,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     break;
                 }
                 log_debug("[CSS] Height: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Height: auto");
                 block->blk->given_height = -1.0f; // -1 means auto
@@ -1367,7 +1367,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk = alloc_block_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float min_width = convert_lambda_length_to_px(value, lycon, prop_id);
                 // per CSS spec, negative values for min-width are invalid and should be ignored
                 if (min_width < 0.0f) {
@@ -1376,7 +1376,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_min_width = min_width;
                 log_debug("[CSS] Min-width: %.2f px", min_width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for min-width per CSS spec
                 float min_width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1386,7 +1386,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_min_width = 0.0f;
                 log_debug("[CSS] Min-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
                     log_debug("[CSS] Min-width: %.2f%% (negative, ignored per CSS spec)", percentage);
@@ -1404,7 +1404,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk = alloc_block_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float max_width = convert_lambda_length_to_px(value, lycon, prop_id);
                 // per CSS spec, negative values for max-width are invalid and should be ignored
                 if (max_width < 0.0f) {
@@ -1413,7 +1413,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_max_width = max_width;
                 log_debug("[CSS] Max-width: %.2f px", max_width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for max-width per CSS spec
                 float max_width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1423,14 +1423,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_max_width = 0.0f;
                 log_debug("[CSS] Max-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
                     log_debug("[CSS] Max-width: %.2f%% (negative, ignored per CSS spec)", percentage);
                     break;
                 }
                 log_debug("[CSS] Max-width: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
                 block->blk->given_max_width = -1.0f; // -1 means none/unlimited
                 log_debug("[CSS] Max-width: none");
             }
@@ -1444,7 +1444,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk = alloc_block_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float min_height = convert_lambda_length_to_px(value, lycon, prop_id);
                 // per CSS spec, negative values for min-height are invalid and should be ignored
                 if (min_height < 0.0f) {
@@ -1453,7 +1453,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_min_height = min_height;
                 log_debug("[CSS] Min-height: %.2f px", min_height);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for min-height per CSS spec
                 float min_height = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1463,7 +1463,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_min_height = 0.0f;
                 log_debug("[CSS] Min-height: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
                     log_debug("[CSS] Min-height: %.2f%% (negative, ignored per CSS spec)", percentage);
@@ -1481,7 +1481,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->blk = alloc_block_prop(lycon);
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float max_height = convert_lambda_length_to_px(value, lycon, prop_id);
                 // per CSS spec, negative values for max-height are invalid and should be ignored
                 if (max_height < 0.0f) {
@@ -1490,7 +1490,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_max_height = max_height;
                 log_debug("[CSS] Max-height: %.2f px", max_height);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for max-height per CSS spec
                 float max_height = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1500,14 +1500,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 block->blk->given_max_height = 0.0f;
                 log_debug("[CSS] Max-height: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 if (percentage < 0.0f) {
                     log_debug("[CSS] Max-height: %.2f%% (negative, ignored per CSS spec)", percentage);
                     break;
                 }
                 log_debug("[CSS] Max-height: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
                 block->blk->given_max_height = -1.0f; // -1 means none/unlimited
                 log_debug("[CSS] Max-height: none");
             }
@@ -1544,21 +1544,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.top = margin;
                 span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float margin = (float)value->data.number.value;
                 span->bound->margin.top = margin;
                 span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword for margins
                 span->bound->margin.top_type = CSS_VALUE_AUTO;
                 span->bound->margin.top_specificity = specificity;
@@ -1578,21 +1578,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.right = margin;
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float margin = (float)value->data.number.value;
                 span->bound->margin.right = margin;
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 span->bound->margin.right_type = CSS_VALUE_AUTO;
                 span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: auto");
@@ -1611,21 +1611,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.bottom = margin;
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float margin = (float)value->data.number.value;
                 span->bound->margin.bottom = margin;
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 span->bound->margin.bottom_type = CSS_VALUE_AUTO;
                 span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: auto");
@@ -1644,21 +1644,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.left = margin;
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float margin = (float)value->data.number.value;
                 span->bound->margin.left = margin;
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 span->bound->margin.left_type = CSS_VALUE_AUTO;
                 span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: auto");
@@ -1677,12 +1677,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.top = padding;
                 span->bound->padding.top_specificity = specificity;
                 log_debug("[CSS] Padding-top: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for padding per CSS spec
                 float padding = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1693,7 +1693,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.top = 0.0f;
                 span->bound->padding.top_specificity = specificity;
                 log_debug("[CSS] Padding-top: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.top_specificity = specificity;
                 log_debug("[CSS] Padding-top: %.2f%% (percentage)", percentage);
@@ -1712,12 +1712,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.right = padding;
                 span->bound->padding.right_specificity = specificity;
                 log_debug("[CSS] Padding-right: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for padding per CSS spec
                 float padding = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1728,7 +1728,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.right = 0.0f;
                 span->bound->padding.right_specificity = specificity;
                 log_debug("[CSS] Padding-right: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.right_specificity = specificity;
                 log_debug("[CSS] Padding-right: %.2f%% (percentage)", percentage);
@@ -1747,12 +1747,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.bottom = padding;
                 span->bound->padding.bottom_specificity = specificity;
                 log_debug("[CSS] Padding-bottom: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for padding per CSS spec
                 float padding = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1763,7 +1763,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.bottom = 0.0f;
                 span->bound->padding.bottom_specificity = specificity;
                 log_debug("[CSS] Padding-bottom: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.bottom_specificity = specificity;
                 log_debug("[CSS] Padding-bottom: %.2f%% (percentage)", percentage);
@@ -1782,12 +1782,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower or equal specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.left = padding;
                 span->bound->padding.left_specificity = specificity;
                 log_debug("[CSS] Padding-left: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for padding per CSS spec
                 float padding = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1798,7 +1798,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->padding.left = 0.0f;
                 span->bound->padding.left_specificity = specificity;
                 log_debug("[CSS] Padding-left: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 span->bound->padding.left_specificity = specificity;
                 log_debug("[CSS] Padding-left: %.2f%% (percentage)", percentage);
@@ -1818,12 +1818,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             Color bg_color = {0};
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Map keyword to color (e.g., "red", "lightgray")
                 const char* kw = value->data.keyword ? value->data.keyword : "(null)";
                 bg_color.c = map_lambda_color_keyword(value->data.keyword);
                 log_debug("[CSS] Background color keyword: '%s' -> 0x%08X", kw, bg_color.c);
-            } else if (value->type == CSS_VALUE_COLOR) {
+            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 // Direct RGBA color value
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     bg_color.r = value->data.color.data.rgba.r;
@@ -1855,7 +1855,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: scroll, fixed, local
                 log_debug("[CSS] background-attachment: %s", value->data.keyword);
                 // TODO: Store attachment value when BackgroundProp is extended
@@ -1872,7 +1872,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
                 log_debug("[CSS] background-origin: %s", value->data.keyword);
                 // TODO: Store origin value when BackgroundProp is extended
@@ -1889,7 +1889,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
                 log_debug("[CSS] background-clip: %s", value->data.keyword);
                 // TODO: Store clip value when BackgroundProp is extended
@@ -1906,15 +1906,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float pos_x = convert_lambda_length_to_px(value, lycon, prop_id);
                 log_debug("[CSS] background-position-x: %.2fpx", pos_x);
                 // TODO: Store position-x when BackgroundProp is extended
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float pos_x_percent = value->data.percentage.value;
                 log_debug("[CSS] background-position-x: %.2f%%", pos_x_percent);
                 // TODO: Store position-x percentage when BackgroundProp is extended
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: left, center, right
                 log_debug("[CSS] background-position-x: %s", value->data.keyword);
                 // TODO: Store position-x keyword when BackgroundProp is extended
@@ -1931,15 +1931,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float pos_y = convert_lambda_length_to_px(value, lycon, prop_id);
                 log_debug("[CSS] background-position-y: %.2fpx", pos_y);
                 // TODO: Store position-y when BackgroundProp is extended
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float pos_y_percent = value->data.percentage.value;
                 log_debug("[CSS] background-position-y: %.2f%%", pos_y_percent);
                 // TODO: Store position-y percentage when BackgroundProp is extended
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: top, center, bottom
                 log_debug("[CSS] background-position-y: %s", value->data.keyword);
                 // TODO: Store position-y keyword when BackgroundProp is extended
@@ -1956,7 +1956,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: normal, multiply, screen, overlay, darken, lighten, etc.
                 log_debug("[CSS] background-blend-mode: %s", value->data.keyword);
                 // TODO: Store blend mode when BackgroundProp is extended
@@ -1978,12 +1978,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.top = width;
                 span->bound->border->width.top_specificity = specificity;
                 log_debug("[CSS] Border-top-width: %.2f px", width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for border-width per CSS spec
                 float width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -1994,7 +1994,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.top = 0.0f;
                 span->bound->border->width.top_specificity = specificity;
                 log_debug("[CSS] Border-top-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Keywords: thin (1px), medium (3px), thick (5px)
                 const char* keyword = value->data.keyword;
                 float width = 3.0f; // default to medium
@@ -2021,12 +2021,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.right = width;
                 span->bound->border->width.right_specificity = specificity;
                 log_debug("[CSS] Border-right-width: %.2f px", width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for border-width per CSS spec
                 float width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -2037,7 +2037,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.right = 0.0f;
                 span->bound->border->width.right_specificity = specificity;
                 log_debug("[CSS] Border-right-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 float width = 3.0f;
                 if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
@@ -2063,12 +2063,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.bottom = width;
                 span->bound->border->width.bottom_specificity = specificity;
                 log_debug("[CSS] Border-bottom-width: %.2f px", width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for border-width per CSS spec
                 float width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -2079,7 +2079,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.bottom = 0.0f;
                 span->bound->border->width.bottom_specificity = specificity;
                 log_debug("[CSS] Border-bottom-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 float width = 3.0f;
                 if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
@@ -2105,12 +2105,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break; // lower specificity, skip
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float width = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->width.left = width;
                 span->bound->border->width.left_specificity = specificity;
                 log_debug("[CSS] Border-left-width: %.2f px", width);
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // unitless zero is valid for border-width per CSS spec
                 float width = value->data.number.value;
                 // per CSS spec, only unitless zero is valid (treated as 0px)
@@ -2121,7 +2121,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.left = 0.0f;
                 span->bound->border->width.left_specificity = specificity;
                 log_debug("[CSS] Border-left-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* keyword = value->data.keyword;
                 float width = 3.0f;
                 if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
@@ -2142,7 +2142,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->top_style = lexbor_val;
                 log_debug("[CSS] Border-top-style: %s -> %d", value->data.keyword, lexbor_val);
@@ -2159,7 +2159,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->right_style = lexbor_val;
                 log_debug("[CSS] Border-right-style: %s -> %d", value->data.keyword, lexbor_val);
@@ -2176,7 +2176,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->bottom_style = lexbor_val;
                 log_debug("[CSS] Border-bottom-style: %s -> %d", value->data.keyword, lexbor_val);
@@ -2193,7 +2193,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->left_style = lexbor_val;
                 log_debug("[CSS] Border-left-style: %s -> %d", value->data.keyword, lexbor_val);
@@ -2216,10 +2216,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             Color color = {0};
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
                 log_debug("[CSS] Border-top-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
-            } else if (value->type == CSS_VALUE_COLOR) {
+            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
                     color.g = value->data.color.data.rgba.g;
@@ -2251,10 +2251,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             Color color = {0};
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
                 log_debug("[CSS] Border-right-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
-            } else if (value->type == CSS_VALUE_COLOR) {
+            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
                     color.g = value->data.color.data.rgba.g;
@@ -2286,10 +2286,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             Color color = {0};
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
                 log_debug("[CSS] Border-bottom-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
-            } else if (value->type == CSS_VALUE_COLOR) {
+            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
                     color.g = value->data.color.data.rgba.g;
@@ -2321,10 +2321,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             Color color = {0};
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
                 log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
-            } else if (value->type == CSS_VALUE_COLOR) {
+            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
                     color.g = value->data.color.data.rgba.g;
@@ -2354,18 +2354,18 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Parse values from the list or single value
             float border_width = -1.0f;  int border_style = -1;  Color border_color = {0};
 
-            if (value->type == CSS_VALUE_LIST) {
+            if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multiple values
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
                 for (size_t i = 0; i < count; i++) {
                     CssValue* val = values[i];
-                    if (val->type == CSS_VALUE_LENGTH) {
+                    if (val->type == CSS_VALUE_TYPE_LENGTH) {
                         // Width - convert to pixels
                         border_width = convert_lambda_length_to_px(val, lycon, prop_id);
                     }
-                    else if (val->type == CSS_VALUE_KEYWORD) {
+                    else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                         // Could be width keyword, style, or color
                         const char* keyword = val->data.keyword;
                         if (strcasecmp(keyword, "thin") == 0) {
@@ -2386,7 +2386,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                             border_color.c = map_lambda_color_keyword(keyword);
                         }
                     }
-                    else if (val->type == CSS_VALUE_COLOR) {
+                    else if (val->type == CSS_VALUE_TYPE_COLOR) {
                         // Color
                         log_debug("[CSS] Border color value type: %d", val->data.color.type);
                         if (val->data.color.type == CSS_COLOR_RGB) {
@@ -2399,9 +2399,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             } else {
                 // Single value
-                if (value->type == CSS_VALUE_LENGTH) {
+                if (value->type == CSS_VALUE_TYPE_LENGTH) {
                     border_width = convert_lambda_length_to_px(value, lycon, prop_id);
-                } else if (value->type == CSS_VALUE_KEYWORD) {
+                } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                     const char* keyword = value->data.keyword;
                     if (strcasecmp(keyword, "thin") == 0) {
                         border_width = 1.0f;
@@ -2418,7 +2418,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     } else {
                         border_color.c = map_lambda_color_keyword(keyword);
                     }
-                } else if (value->type == CSS_VALUE_COLOR) {
+                } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                     if (value->data.color.type == CSS_COLOR_RGB) {
                         border_color.r = value->data.color.data.rgba.r;
                         border_color.g = value->data.color.data.rgba.g;
@@ -2524,7 +2524,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 2 values: top/bottom, left/right
             // 3 values: top, left/right, bottom
             // 4 values: top, right, bottom, left
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Single value - all sides get same style
                 PropValue border_style = css_value_by_name(value->data.keyword);
                 if (border_style != CSS_VALUE__UNDEF) {
@@ -2535,12 +2535,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] Border-style (all): %s -> 0x%04X", value->data.keyword, border_style);
                 }
             }
-            else if (value->type == CSS_VALUE_LIST) {
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-value border-style
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && values[0]->type == CSS_VALUE_KEYWORD && values[1]->type == CSS_VALUE_KEYWORD) {
+                if (count == 2 && values[0]->type == CSS_VALUE_TYPE_KEYWORD && values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
                     // top/bottom, left/right
                     PropValue vertical = css_value_by_name(values[0]->data.keyword);
                     PropValue horizontal = css_value_by_name(values[1]->data.keyword);
@@ -2550,8 +2550,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->right_style = horizontal;
                     log_debug("[CSS] Border-style (2 values): %s %s", values[0]->data.keyword, values[1]->data.keyword);
                 }
-                else if (count == 3 && values[0]->type == CSS_VALUE_KEYWORD &&
-                           values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD) {
+                else if (count == 3 && values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
+                           values[1]->type == CSS_VALUE_TYPE_KEYWORD && values[2]->type == CSS_VALUE_TYPE_KEYWORD) {
                     // top, left/right, bottom
                     PropValue top = css_value_by_name(values[0]->data.keyword);
                     PropValue horizontal = css_value_by_name(values[1]->data.keyword);
@@ -2562,9 +2562,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->bottom_style = bottom;
                     log_debug("[CSS] Border-style (3 values): %s %s %s", values[0]->data.keyword, values[1]->data.keyword, values[2]->data.keyword);
                 }
-                else if (count == 4 && values[0]->type == CSS_VALUE_KEYWORD &&
-                           values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD &&
-                           values[3]->type == CSS_VALUE_KEYWORD) {
+                else if (count == 4 && values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
+                           values[1]->type == CSS_VALUE_TYPE_KEYWORD && values[2]->type == CSS_VALUE_TYPE_KEYWORD &&
+                           values[3]->type == CSS_VALUE_TYPE_KEYWORD) {
                     // top, right, bottom, left
                     PropValue top = css_value_by_name(values[0]->data.keyword);
                     PropValue right = css_value_by_name(values[1]->data.keyword);
@@ -2594,7 +2594,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 2 values: top/bottom, left/right
             // 3 values: top, left/right, bottom
             // 4 values: top, right, bottom, left
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Single value - all sides get same width
                 float width = value->data.length.value;
 
@@ -2617,16 +2617,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 log_debug("[CSS] Border-width (all): %.2f px", width);
             }
-            else if (value->type == CSS_VALUE_LIST) {
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-value border-width
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER)) {
+                if (count == 2 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top/bottom, left/right
-                    float vertical = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float horizontal = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float vertical = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float horizontal = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->width.top_specificity) {
@@ -2647,13 +2647,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     }
                     log_debug("[CSS] Border-width (2 values): %.2f %.2f px", vertical, horizontal);
                 }
-                else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
+                else if (count == 3 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top, left/right, bottom
-                    float top = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float horizontal = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float top = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float horizontal = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->width.top_specificity) {
@@ -2674,15 +2674,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     }
                     log_debug("[CSS] Border-width (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
                 }
-                else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
-                           (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
+                else if (count == 4 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[3]->type == CSS_VALUE_TYPE_LENGTH || values[3]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top, right, bottom, left
-                    float top = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float right = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
-                    float left = (values[3]->type == CSS_VALUE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
+                    float top = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float right = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float left = (values[3]->type == CSS_VALUE_TYPE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->width.top_specificity) {
@@ -2725,7 +2725,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 3 values: top, left/right, bottom
             // 4 values: top, right, bottom, left
 
-            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Single value - all sides get same color
                 Color color = convert_lambda_color(value);
 
@@ -2748,7 +2748,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 log_debug("[CSS] Border-color (all): 0x%08X", color.c);
             }
-            else if (value->type == CSS_VALUE_LIST) {
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-value border-color
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
@@ -2846,7 +2846,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 3 values: top-left, top-right/bottom-left, bottom-right
             // 4 values: top-left, top-right, bottom-right, bottom-left
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Single value - all corners get same radius
                 float radius = value->data.length.value;
 
@@ -2868,16 +2868,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->radius.bl_specificity = specificity;
                 }
                 log_debug("[CSS] Border-radius (all): %.2f px", radius);
-            } else if (value->type == CSS_VALUE_LIST) {
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-value border-radius
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
-                if (count == 2 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER)) {
+                if (count == 2 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top-left/bottom-right, top-right/bottom-left
-                    float diagonal1 = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float diagonal2 = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float diagonal1 = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float diagonal2 = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = diagonal1;
@@ -2896,13 +2896,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->radius.bl_specificity = specificity;
                     }
                     log_debug("[CSS] Border-radius (2 values): %.2f %.2f px", diagonal1, diagonal2);
-                } else if (count == 3 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER)) {
+                } else if (count == 3 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top-left, top-right/bottom-left, bottom-right
-                    float top_left = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float diagonal = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom_right = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float top_left = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float diagonal = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom_right = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = top_left;
@@ -2921,15 +2921,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->bound->border->radius.bl_specificity = specificity;
                     }
                     log_debug("[CSS] Border-radius (3 values): %.2f %.2f %.2f px", top_left, diagonal, bottom_right);
-                } else if (count == 4 && (values[0]->type == CSS_VALUE_LENGTH || values[0]->type == CSS_VALUE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_LENGTH || values[1]->type == CSS_VALUE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_LENGTH || values[2]->type == CSS_VALUE_NUMBER) &&
-                           (values[3]->type == CSS_VALUE_LENGTH || values[3]->type == CSS_VALUE_NUMBER)) {
+                } else if (count == 4 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER) &&
+                           (values[3]->type == CSS_VALUE_TYPE_LENGTH || values[3]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top-left, top-right, bottom-right, bottom-left
-                    float top_left = (values[0]->type == CSS_VALUE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float top_right = (values[1]->type == CSS_VALUE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom_right = (values[2]->type == CSS_VALUE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
-                    float bottom_left = (values[3]->type == CSS_VALUE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
+                    float top_left = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
+                    float top_right = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float bottom_right = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float bottom_left = (values[3]->type == CSS_VALUE_TYPE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = top_left;
@@ -2964,7 +2964,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float radius = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->radius.top_left = radius;
                 span->bound->border->radius.tl_specificity = specificity;
@@ -2982,7 +2982,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float radius = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->radius.top_right = radius;
                 span->bound->border->radius.tr_specificity = specificity;
@@ -3000,7 +3000,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float radius = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->radius.bottom_right = radius;
                 span->bound->border->radius.br_specificity = specificity;
@@ -3018,7 +3018,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float radius = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->bound->border->radius.bottom_left = radius;
                 span->bound->border->radius.bl_specificity = specificity;
@@ -3040,7 +3040,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_val = css_value_by_name(value->data.keyword);
                 block->position->position = lexbor_val;
                 log_debug("[CSS] Position: %s -> %d", value->data.keyword, lexbor_val);
@@ -3055,15 +3055,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float top = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_TOP);
                 block->position->top = top;
                 block->position->has_top = true;
                 log_debug("[CSS] Top: %.2f px", top);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 log_debug("[CSS] Top: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Top: auto");
                 block->position->has_top = false;
@@ -3078,15 +3078,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float left = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_LEFT);
                 block->position->left = left;
                 block->position->has_left = true;
                 log_debug("[CSS] Left: %.2f px", left);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 log_debug("[CSS] Left: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Left: auto");
                 block->position->has_left = false;
@@ -3103,15 +3103,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float right = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_RIGHT);
                 block->position->right = right;
                 block->position->has_right = true;
                 log_debug("[CSS] Right: %.2f px", right);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 log_debug("[CSS] Right: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Right: auto");
                 block->position->has_right = false;
@@ -3126,15 +3126,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float bottom = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_BOTTOM);
                 block->position->bottom = bottom;
                 block->position->has_bottom = true;
                 log_debug("[CSS] Bottom: %.2f px", bottom);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
                 log_debug("[CSS] Bottom: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword
                 log_debug("[CSS] Bottom: auto");
                 block->position->has_bottom = false;
@@ -3149,11 +3149,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
                 int z = (int)value->data.number.value;
                 block->position->z_index = z;
                 log_debug("[CSS] Z-index: %d", z);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // 'auto' keyword - typically means z-index = 0
                 log_debug("[CSS] Z-index: auto");
                 block->position->z_index = 0;
@@ -3170,7 +3170,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue float_value = css_value_by_name(value->data.keyword);
                 if (float_value > 0) {
                     block->position->float_prop = float_value;
@@ -3187,7 +3187,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue clear_value = css_value_by_name(value->data.keyword);
                 if (clear_value > 0) {
                     block->position->clear = clear_value;
@@ -3206,7 +3206,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
@@ -3224,7 +3224,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
@@ -3241,7 +3241,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_y = overflow_value;
@@ -3263,7 +3263,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue whitespace_value = css_value_by_name(value->data.keyword);
                 if (whitespace_value > 0) {
                     block->blk->white_space = whitespace_value;
@@ -3278,7 +3278,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_VISIBILITY: {
             log_debug("[CSS] Processing visibility property");
             // Visibility applies to all elements, stored in ViewSpan
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue visibility_value = css_value_by_name(value->data.keyword);
                 if (visibility_value > 0) {
                     span->visibility = visibility_value;
@@ -3294,14 +3294,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
 
-            if (value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float opacity = value->data.number.value;
                 // Clamp opacity to 0.0 - 1.0 range
                 if (opacity < 0.0f) opacity = 0.0f;
                 if (opacity > 1.0f) opacity = 1.0f;
                 span->in_line->opacity = opacity;
                 log_debug("[CSS] Opacity: %.2f", opacity);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float opacity = value->data.percentage.value / 100.0f;
                 // Clamp opacity to 0.0 - 1.0 range
                 if (opacity < 0.0f) opacity = 0.0f;
@@ -3340,7 +3340,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue boxsizing_value = css_value_by_name(value->data.keyword);
                 if (boxsizing_value > 0) {
                     block->blk->box_sizing = boxsizing_value;
@@ -3359,7 +3359,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     span->font->font_style = lexbor_value;
@@ -3380,7 +3380,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_transform field to BlockProp would be needed
@@ -3403,7 +3403,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_overflow field to BlockProp would be needed
@@ -3425,7 +3425,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_break field to BlockProp would be needed
@@ -3447,7 +3447,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_wrap field to BlockProp would be needed
@@ -3465,7 +3465,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding font_variant field to FontProp would be needed
@@ -3483,11 +3483,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = convert_lambda_length_to_px(value, lycon, prop_id);
                 // Note: Adding letter_spacing field to FontProp would be needed
                 log_debug("[CSS] letter-spacing: %.2fpx (field not yet added to FontProp)", spacing);
-            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "normal") == 0) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "normal") == 0) {
                 log_debug("[CSS] letter-spacing: normal -> 0px (field not yet added to FontProp)");
             }
             break;
@@ -3500,11 +3500,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float spacing = convert_lambda_length_to_px(value, lycon, prop_id);
                 // Note: Adding word_spacing field to FontProp would be needed
                 log_debug("[CSS] word-spacing: %.2fpx (field not yet added to FontProp)", spacing);
-            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "normal") == 0) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "normal") == 0) {
                 log_debug("[CSS] word-spacing: normal -> 0px (field not yet added to FontProp)");
             }
             break;
@@ -3517,7 +3517,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
                 log_debug("[CSS] text-shadow: none (field not yet added to FontProp)");
             } else {
                 // TODO: Parse shadow offset, blur, and color
@@ -3539,7 +3539,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed (same as resolve_style.cpp)
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->direction = lexbor_value;
@@ -3559,7 +3559,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->wrap = lexbor_value;
@@ -3579,7 +3579,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->justify = lexbor_value;
@@ -3599,7 +3599,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->align_items = lexbor_value;
@@ -3619,7 +3619,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->align_content = lexbor_value;
@@ -3639,11 +3639,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 float gap_value = convert_lambda_length_to_px(value, lycon, prop_id);
                 block->embed->flex->row_gap = (int)gap_value;
                 log_debug("[CSS] row-gap: %.2fpx", gap_value);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // row-gap percentage is relative to the container's width
                 float gap_value = value->data.percentage.value;
                 block->embed->flex->row_gap = (int)gap_value; // Store percentage value
@@ -3663,11 +3663,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
 
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 float gap_value = convert_lambda_length_to_px(value, lycon, prop_id);
                 block->embed->flex->column_gap = (int)gap_value;
                 log_debug("[CSS] column-gap: %.2fpx", gap_value);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // column-gap percentage is relative to the container's width
                 float gap_value = value->data.percentage.value;
                 block->embed->flex->column_gap = (int)gap_value; // Store percentage value
@@ -3679,7 +3679,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
-            if (value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float grow_value = (float)value->data.number.value;
                 span->flex_grow = grow_value;
                 log_debug("[CSS] flex-grow: %.2f", grow_value);
@@ -3689,7 +3689,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_FLEX_SHRINK: {
             log_debug("[CSS] Processing flex-shrink property");
-            if (value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float shrink_value = (float)value->data.number.value;
                 span->flex_shrink = shrink_value;
                 log_debug("[CSS] flex-shrink: %.2f", shrink_value);
@@ -3699,16 +3699,16 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_FLEX_BASIS: {
             log_debug("[CSS] Processing flex-basis property");
-            if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "auto") == 0) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "auto") == 0) {
                 span->flex_basis = -1; // -1 indicates auto
                 span->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: auto");
-            } else if (value->type == CSS_VALUE_LENGTH) {
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float basis_value = convert_lambda_length_to_px(value, lycon, prop_id);
                 span->flex_basis = (int)basis_value;
                 span->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
-            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 span->flex_basis = (int)value->data.percentage.value;
                 span->flex_basis_is_percent = true;
                 log_debug("[CSS] flex-basis: %d%%", span->flex_basis);
@@ -3718,7 +3718,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ORDER: {
             log_debug("[CSS] Processing order property");
-            if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
                 int order_value = (int)value->data.number.value;
                 span->order = order_value;
                 log_debug("[CSS] order: %d", order_value);
@@ -3728,7 +3728,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ALIGN_SELF: {
             log_debug("[CSS] Processing align-self property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 PropValue lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     span->align_self = lexbor_value;
@@ -3769,7 +3769,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             bool flex_basis_is_percent = false;
 
             // Handle single keyword values
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (strcasecmp(value->data.keyword, "none") == 0) {
                     flex_grow = 0;
                     flex_shrink = 0;
@@ -3795,7 +3795,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             // Parse multi-value flex shorthand (e.g., "1 0 100px" or "2 1 50px")
-            if (value->type == CSS_VALUE_LIST) {
+            if (value->type == CSS_VALUE_TYPE_LIST) {
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
 
@@ -3808,7 +3808,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 for (size_t i = 0; i < count && i < 3; i++) {
                     CssValue* val = values[i];
 
-                    if (val->type == CSS_VALUE_NUMBER) {
+                    if (val->type == CSS_VALUE_TYPE_NUMBER) {
                         // Numbers are grow and shrink (unitless)
                         if (value_index == 0) {
                             flex_grow = (float)val->data.number.value;
@@ -3819,19 +3819,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                             log_debug("[CSS]   flex-shrink: %.2f", flex_shrink);
                             value_index++;
                         }
-                    } else if (val->type == CSS_VALUE_LENGTH) {
+                    } else if (val->type == CSS_VALUE_TYPE_LENGTH) {
                         // Length is basis
                         flex_basis = val->data.length.value;
                         flex_basis_is_percent = false;
                         found_basis = true;
                         log_debug("[CSS]   flex-basis: %.2fpx", flex_basis);
-                    } else if (val->type == CSS_VALUE_PERCENTAGE) {
+                    } else if (val->type == CSS_VALUE_TYPE_PERCENTAGE) {
                         // Percentage is basis
                         flex_basis = val->data.percentage.value;
                         flex_basis_is_percent = true;
                         found_basis = true;
                         log_debug("[CSS]   flex-basis: %.2f%%", flex_basis);
-                    } else if (val->type == CSS_VALUE_KEYWORD) {
+                    } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                         if (strcasecmp(val->data.keyword, "auto") == 0) {
                             flex_basis = -1;  // auto
                             flex_basis_is_percent = false;
@@ -3856,7 +3856,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
                          flex_grow, flex_shrink, flex_basis,
                          flex_basis_is_percent ? "%" : (flex_basis == -1 ? " (auto)" : "px"));
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Single number without list wrapper: just flex-grow
                 flex_grow = (float)value->data.number.value;
                 flex_shrink = 1.0f;
@@ -3878,7 +3878,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation shorthand property");
             // Note: Animation shorthand would be parsed into individual properties
             // For now, just log the value
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 log_debug("[CSS] animation: %s", value->data.keyword);
             }
             break;
@@ -3886,13 +3886,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_NAME: {
             log_debug("[CSS] Processing animation-name property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (strcasecmp(value->data.keyword, "none") == 0) {
                     log_debug("[CSS] animation-name: none");
                 } else {
                     log_debug("[CSS] animation-name: %s", value->data.keyword);
                 }
-            } else if (value->type == CSS_VALUE_STRING) {
+            } else if (value->type == CSS_VALUE_TYPE_STRING) {
                 log_debug("[CSS] animation-name: \"%s\"", value->data.string);
             }
             break;
@@ -3900,7 +3900,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_DURATION: {
             log_debug("[CSS] Processing animation-duration property");
-            if (value->type == CSS_VALUE_TIME) {
+            if (value->type == CSS_VALUE_TYPE_TIME) {
                 float duration = (float)value->data.length.value;
                 log_debug("[CSS] animation-duration: %.3fs", duration);
             }
@@ -3909,7 +3909,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION: {
             log_debug("[CSS] Processing animation-timing-function property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* timing = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(timing);
                 if (lexbor_value > 0) {
@@ -3923,7 +3923,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_DELAY: {
             log_debug("[CSS] Processing animation-delay property");
-            if (value->type == CSS_VALUE_TIME) {
+            if (value->type == CSS_VALUE_TYPE_TIME) {
                 float delay = (float)value->data.length.value;
                 log_debug("[CSS] animation-delay: %.3fs", delay);
             }
@@ -3932,9 +3932,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_ITERATION_COUNT: {
             log_debug("[CSS] Processing animation-iteration-count property");
-            if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "infinite") == 0) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && strcasecmp(value->data.keyword, "infinite") == 0) {
                 log_debug("[CSS] animation-iteration-count: infinite");
-            } else if (value->type == CSS_VALUE_NUMBER) {
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float count = (float)value->data.number.value;
                 log_debug("[CSS] animation-iteration-count: %.2f", count);
             }
@@ -3943,7 +3943,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_DIRECTION: {
             log_debug("[CSS] Processing animation-direction property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* direction = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(direction);
                 if (lexbor_value > 0) {
@@ -3957,7 +3957,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_FILL_MODE: {
             log_debug("[CSS] Processing animation-fill-mode property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* fill_mode = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(fill_mode);
                 if (lexbor_value > 0) {
@@ -3971,7 +3971,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_ANIMATION_PLAY_STATE: {
             log_debug("[CSS] Processing animation-play-state property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* play_state = value->data.keyword;
                 if (strcasecmp(play_state, "running") == 0) {
                     log_debug("[CSS] animation-play-state: running");
@@ -3987,7 +3987,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         // Table Properties (Group 17)
         case CSS_PROPERTY_TABLE_LAYOUT: {
             log_debug("[CSS] Processing table-layout property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* layout = value->data.keyword;
                 if (strcasecmp(layout, "auto") == 0) {
                     log_debug("[CSS] table-layout: auto");
@@ -4002,7 +4002,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_BORDER_COLLAPSE: {
             log_debug("[CSS] Processing border-collapse property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* collapse = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(collapse);
                 if (lexbor_value > 0) {
@@ -4016,10 +4016,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_BORDER_SPACING: {
             log_debug("[CSS] Processing border-spacing property");
-            if (value->type == CSS_VALUE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 double spacing = convert_lambda_length_to_px(value, lycon, prop_id);
                 log_debug("[CSS] border-spacing: %.2fpx", spacing);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 log_debug("[CSS] border-spacing: %s", value->data.keyword);
             }
             break;
@@ -4027,7 +4027,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_CAPTION_SIDE: {
             log_debug("[CSS] Processing caption-side property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* side = value->data.keyword;
                 if (strcasecmp(side, "top") == 0) {
                     log_debug("[CSS] caption-side: top");
@@ -4042,7 +4042,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_EMPTY_CELLS: {
             log_debug("[CSS] Processing empty-cells property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* cells = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(cells);
                 if (lexbor_value > 0) {
@@ -4057,7 +4057,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         // List Properties (Group 18)
         case CSS_PROPERTY_LIST_STYLE_TYPE: {
             log_debug("[CSS] Processing list-style-type property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* type = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(type);
                 if (lexbor_value > 0) {
@@ -4071,7 +4071,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_LIST_STYLE_POSITION: {
             log_debug("[CSS] Processing list-style-position property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* position = value->data.keyword;
                 PropValue lexbor_value = css_value_by_name(position);
                 if (lexbor_value > 0) {
@@ -4085,9 +4085,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_LIST_STYLE_IMAGE: {
             log_debug("[CSS] Processing list-style-image property");
-            if (value->type == CSS_VALUE_URL) {
+            if (value->type == CSS_VALUE_TYPE_URL) {
                 log_debug("[CSS] list-style-image: %s", value->data.url);
-            } else if (value->type == CSS_VALUE_KEYWORD) {
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (strcasecmp(value->data.keyword, "none") == 0) {
                     log_debug("[CSS] list-style-image: none");
                 } else {
@@ -4099,7 +4099,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_LIST_STYLE: {
             log_debug("[CSS] Processing list-style shorthand property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* style = value->data.keyword;
                 log_debug("[CSS] list-style: %s", style);
                 // Note: Shorthand parsing would need more complex implementation
@@ -4109,7 +4109,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_COUNTER_RESET: {
             log_debug("[CSS] Processing counter-reset property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* reset = value->data.keyword;
                 if (strcasecmp(reset, "none") == 0) {
                     log_debug("[CSS] counter-reset: none");
@@ -4122,7 +4122,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_COUNTER_INCREMENT: {
             log_debug("[CSS] Processing counter-increment property");
-            if (value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* increment = value->data.keyword;
                 if (strcasecmp(increment, "none") == 0) {
                     log_debug("[CSS] counter-increment: none");
@@ -4136,7 +4136,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
        case CSS_PROPERTY_BACKGROUND: {
             // background shorthand can set background-color, background-image, etc.
             // simple case: single color value (e.g., "background: green;")
-            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssDeclaration color_decl = *decl;
                 color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
                 log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
@@ -4152,7 +4152,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // If only one value is specified, it's used for both row and column gap
             log_debug("[Lambda CSS Shorthand] Expanding gap shorthand");
 
-            if (value->type == CSS_VALUE_LENGTH || value->type == CSS_VALUE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 // single value - use for both row-gap and column-gap
                 log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
                 CssDeclaration gap_decl = *decl;
@@ -4161,7 +4161,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
                 resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
                 return;
-            } else if (value->type == CSS_VALUE_LIST && value->data.list.count == 2) {
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count == 2) {
                 // two values: row-gap column-gap
                 log_debug("[Lambda CSS Shorthand] Expanding two-value gap");
                 CssValue** values = value->data.list.values;
