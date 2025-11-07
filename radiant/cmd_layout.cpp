@@ -60,7 +60,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
-void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
+void log_root_item(Item item, char* indent="  ");
 void dom_element_print(DomElement* element, StrBuf* buf, int indent);
 
 // Function to determine HTML version from Lambda CSS document DOCTYPE
@@ -657,9 +657,8 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
         log_debug("[Lambda CSS] Detected HTML version: %d", detected_version);
     }
-    StrBuf* str_buf = strbuf_new();
-    print_item(str_buf, (Item){.element = html_root});
-    log_debug("Parsed HTML root element:\n%s", str_buf->str);
+    log_debug("Parsed HTML root element");
+    log_root_item((Item){.element = html_root});
 
     // Step 2: Build DomElement tree from Lambda Element tree
     log_debug("Building DomElement tree!!!");
@@ -758,7 +757,7 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_debug("[Lambda CSS] CSS cascade complete");
 
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
-    strbuf_reset(str_buf);
+    StrBuf* str_buf = strbuf_new();
     dom_element_print(dom_root, str_buf, 0);
     log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
 

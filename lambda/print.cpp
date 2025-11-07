@@ -609,6 +609,13 @@ void print_root_item(StrBuf *strbuf, Item item, char* indent) {
     strbuf_append_char(strbuf, '\n');
 }
 
+void log_root_item(Item item, char* indent) {
+    StrBuf *output = strbuf_new_cap(256);
+    print_root_item(output, item, indent);
+    log_debug("%s", output->str);
+    strbuf_free(output);
+}
+
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     print_item(strbuf, item, depth, indent);
 }
