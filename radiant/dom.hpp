@@ -34,8 +34,6 @@ extern "C" {
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include <string.h>
-#include <stdlib.h>
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
@@ -63,16 +61,10 @@ typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 typedef struct DomText DomText;        // Forward declaration for Lambda CSS DOM
 typedef struct DomComment DomComment;  // Forward declaration for Lambda CSS DOM
 
-typedef enum {
-    DOC_TYPE_LEXBOR,      // Parsed with Lexbor
-    DOC_TYPE_LAMBDA_CSS   // Parsed with Lambda CSS system
-} DocumentType;
-
 typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 
 typedef struct {
     Url* url;                       // document URL
-    DocumentType doc_type;          // document source type
     DomElement* lambda_dom_root;    // Lambda CSS DOM root element (DomNode*)
     Element* lambda_html_root;      // Lambda HTML parser root (for Lambda CSS docs)
     int html_version;               // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum

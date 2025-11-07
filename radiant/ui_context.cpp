@@ -129,13 +129,6 @@ int ui_context_init(UiContext* uicon, bool headless) {
 }
 
 void free_document(Document* doc) {
-    if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
-        // Lambda CSS document - free lambda structures
-        // Note: lambda_dom_root and lambda_html_root are managed by Pool
-        // so we don't free them here
-        log_debug("Skipping Lambda CSS DOM tree cleanup (managed by Pool)");
-    }
-
     if (doc->view_tree) {
         view_pool_destroy(doc->view_tree);
         free(doc->view_tree);
@@ -143,7 +136,6 @@ void free_document(Document* doc) {
 
     // Note: lambda_dom_root is pool-allocated and will be freed with the pool
     // No need to explicitly free it here
-
     if (doc->url) {
         url_destroy(doc->url);
     }

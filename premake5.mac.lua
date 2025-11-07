@@ -378,7 +378,7 @@ project "lambda"
         "lambda/js/js_print.cpp",
         "lambda/input/css/css_tokenizer.cpp",
         "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_parser.cpp",
         "lambda/input/css/css_engine.cpp",
         "lambda/input/css/css_formatter.cpp",
@@ -3109,7 +3109,7 @@ project "test_css_style_node"
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_value_parser.cpp",
         "lib/mempool.c",
     }
     
@@ -3178,7 +3178,7 @@ project "test_css_system"
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_value_parser.cpp",
         "lib/mempool.c",
         "lib/string.c",
         "lib/hashmap.c",
@@ -3249,7 +3249,7 @@ project "test_css_dom_integration"
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
@@ -3361,7 +3361,7 @@ project "test_css_style_application_gtest"
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_properties.cpp",
-        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
@@ -4107,7 +4107,7 @@ project "test_dom_element_print"
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_properties.cpp",
         "lambda/input/css/css_parser.cpp",
-        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
     }
     

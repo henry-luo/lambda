@@ -375,25 +375,21 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
     lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
 
-    // layout body content - handle both Lexbor and Lambda CSS documents
+    // navigate DomNode tree to find body
     DomNode* body_node = nullptr;
-
-    if (lycon->doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
-        // Lambda CSS document - navigate DomNode tree to find body
-        log_debug("Searching for body element in Lambda CSS document");
-        DomNode* child = elmt->first_child;
-        while (child) {
-            if (child->is_element()) {
-                const char* tag_name = child->name();
-                log_debug("  Checking child element: %s", tag_name);
-                if (strcmp(tag_name, "body") == 0) {
-                    body_node = child;
-                    log_debug("Found Lambda CSS body element");
-                    break;
-                }
+    log_debug("Searching for body element in Lambda CSS document");
+    DomNode* child = elmt->first_child;
+    while (child) {
+        if (child->is_element()) {
+            const char* tag_name = child->name();
+            log_debug("  Checking child element: %s", tag_name);
+            if (strcmp(tag_name, "body") == 0) {
+                body_node = child;
+                log_debug("Found Lambda CSS body element");
+                break;
             }
-            child = child->next_sibling;
         }
+        child = child->next_sibling;
     }
 
     if (body_node) {
@@ -500,10 +496,7 @@ HtmlVersion detect_html_version(lxb_html_document_t* html_doc) {
 */
 
 int detect_html_version_lambda_css(Document* doc) {
-    if (!doc || doc->doc_type != DOC_TYPE_LAMBDA_CSS) {
-        return HTML5;  // Default fallback
-    }
-
+    if (!doc) { return HTML5; } // Default fallback
     // Return the HTML version that was detected during document loading
     log_debug("Using pre-detected HTML version: %d", doc->html_version);
     return doc->html_version;
@@ -520,13 +513,8 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     // This is a simplified implementation - in a full system, this would be done during CSS parsing
     if (doc) {
         // Detect HTML version based on document type
-        if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
-            // Detect HTML version from Lambda CSS document
-            doc->view_tree->html_version = (HtmlVersion)detect_html_version_lambda_css(doc);
-            clog_info(font_log, "Lambda CSS document - detected HTML version: %d", doc->view_tree->html_version);
-        } else {
-            doc->view_tree->html_version = HTML5;
-        }
+        doc->view_tree->html_version = (HtmlVersion)detect_html_version_lambda_css(doc);
+        clog_info(font_log, "Lambda CSS document - detected HTML version: %d", doc->view_tree->html_version);
     } else {
         doc->view_tree->html_version = HTML5;
     }
@@ -567,24 +555,17 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
 
     // Get root node based on document type
     DomNode* root_node = nullptr;
-
-    if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
-        // Lambda CSS document - use DomElement directly (no wrapper needed)
-        root_node = doc->lambda_dom_root;
-        log_debug("DEBUG: Using lambda_dom_root directly: %p", root_node);
-        if (root_node) {
-            // Validate pointer before calling virtual methods
-            log_debug("DEBUG: root_node->node_type = %d", root_node->node_type);
-            if (root_node->node_type >= DOM_NODE_ELEMENT && root_node->node_type <= DOM_NODE_DOCTYPE) {
-                log_debug("layout lambda css html root %s", root_node->name());
-            } else {
-                log_error("Invalid node_type: %d (pointer may be corrupted)", root_node->node_type);
-                return;
-            }
+    root_node = doc->lambda_dom_root;
+    log_debug("DEBUG: Using lambda_dom_root directly: %p", root_node);
+    if (root_node) {
+        // Validate pointer before calling virtual methods
+        log_debug("DEBUG: root_node->node_type = %d", root_node->node_type);
+        if (root_node->node_type >= DOM_NODE_ELEMENT && root_node->node_type <= DOM_NODE_DOCTYPE) {
+            log_debug("layout lambda css html root %s", root_node->name());
+        } else {
+            log_error("Invalid node_type: %d (pointer may be corrupted)", root_node->node_type);
+            return;
         }
-    } else {
-        log_error("Unknown document type: %d", doc->doc_type);
-        return;
     }
 
     if (!root_node) {
@@ -607,7 +588,7 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("DOM tree: html version %d", doc->view_tree->html_version);
         log_debug("calling print_view_tree...");
-        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio, doc->doc_type);
+        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
         log_debug("print_view_tree complete");
     } else {
         log_debug("Warning: No view tree generated");
