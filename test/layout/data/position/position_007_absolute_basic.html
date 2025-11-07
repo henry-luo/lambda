@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Absolute Position Basic</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            position: relative;
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .absolute-element {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 120px;
+            height: 80px;
+            background-color: #ffcccc;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #999;
+        }
+        .normal-content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="normal-content">
+            This is normal document flow content that will be behind the absolutely positioned element.
+        </div>
+        <div class="absolute-element">Absolute</div>
+        <div class="normal-content">
+            More normal content. The absolutely positioned element is removed from normal flow.
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_007_absolute_basic",
+        "category": "absolute",
+        "features": ["position-absolute", "top", "left", "containing-block"],
+        "description": "Basic absolute positioning with top and left offsets relative to positioned container",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#absolute-positioning"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>
