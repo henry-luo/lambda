@@ -21,7 +21,7 @@ HTML Document
    (lambda/input/html/html_parser.c)
     ↓
 2. Build DomElement Tree with CSS
-   (lambda/input/css/dom_element.h/c)
+   (lambda/input/css/dom_element.hpp/cpp)
    - Parse external CSS files
    - Extract <style> elements
    - Parse inline style="" attributes
@@ -79,8 +79,8 @@ HTML Document
 - Full HTML5 spec compliance
 - Memory pool based allocation
 
-**DomElement Tree** (`lambda/input/css/dom_element.h/c`)
-- Parallel DOM structure for CSS styling
+**DomElement Tree** (`lambda/input/css/dom_element.hpp/cpp`)
+- Parallel DOM structure for CSS styling with C++ inheritance
 - Each element contains:
   - `specified_style`: AVL tree of CSS declarations
   - `tag_name`: Element name (e.g., "div", "p")
@@ -262,8 +262,8 @@ Options:
 
 ### Querying Computed Styles
 
-```c
-#include "lambda/dom_element.h"
+```cpp
+#include "lambda/input/css/dom_element.hpp"
 
 // Get computed style value for an element
 const char* value = dom_element_get_computed_value(
