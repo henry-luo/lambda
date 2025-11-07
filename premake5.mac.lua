@@ -101,13 +101,6 @@ project "lambda-input-full-c"
     
     files {
         "lambda/parse.c",
-        "lambda/input/css/css_tokenizer.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
-        "lambda/input/css/css_parser.c",
-        "lambda/input/css/css_engine.c",
-        "lambda/input/css/css_formatter.c",
-        "lambda/input/css/css_style_node.c",
         "lib/arraylist.c",
         "lib/avl_tree.c",
         "lib/hashmap.c",
@@ -202,14 +195,14 @@ project "lambda-input-full-cpp"
         "lambda/validator/error_reporting.cpp",
         "lambda/format/format.cpp",
         "test/test_stubs.cpp",
+        "lambda/input/css/css_tokenizer.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_parser.cpp",
+        "lambda/input/css/css_engine.cpp",
+        "lambda/input/css/css_formatter.cpp",
+        "lambda/input/css/css_style_node.cpp",
         "lambda/parse.c",
-        "lambda/input/css/css_tokenizer.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
-        "lambda/input/css/css_parser.c",
-        "lambda/input/css/css_engine.c",
-        "lambda/input/css/css_formatter.c",
-        "lambda/input/css/css_style_node.c",
         "lib/arraylist.c",
         "lib/avl_tree.c",
         "lib/hashmap.c",
@@ -393,7 +386,6 @@ project "lambda"
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
-        "radiant/dom.cpp",
         "radiant/ui_context.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
@@ -2263,116 +2255,6 @@ project "test_html_negative_gtest"
     filter {}
     
 
-project "test_lambda_domnode_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetname "test_lambda_domnode_gtest"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda_domnode_gtest.cpp",
-        "radiant/dom.cpp",
-        "lambda/input/css/dom_element.c",
-        "lambda/input/css/selector_matcher.c",
-        "lib/url_parser.c",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-javascript/bindings/c",
-        "lexbor/source",
-        "mac-deps/rpmalloc-install/include",
-        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-        "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "ncurses",
-    }
-    
-    -- Add tree-sitter libraries using linkoptions to append to LIBS section
-    linkoptions {
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-        "-framework Cocoa",
-        "-framework IOKit",
-        "-framework CoreVideo",
-        "-framework OpenGL",
-        "-framework Foundation",
-        "-framework CoreGraphics",
-        "-framework AppKit",
-        "-framework Carbon",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-fno-omit-frame-pointer",
-        "-g",
-        "-O2",
-        "-fms-extensions",
-    }
-    
-    filter {}
-    linkoptions {
-        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
-    }
-    
-    -- AddressSanitizer for test projects only
-    filter { "configurations:Debug", "not platforms:Linux_x64" }
-        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
-        linkoptions { "-fsanitize=address" }
-    
-    filter {}
-    
-
 project "test_dir_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -3116,9 +2998,9 @@ project "test_css_style_node"
     files {
         "test/css/test_css_style_node.cpp",
         "lib/avl_tree.c",
-        "lambda/input/css/css_style_node.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_style_node.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_property_value_parser.cpp",
         "lib/mempool.c",
     }
     
@@ -3185,9 +3067,9 @@ project "test_css_system"
     files {
         "test/css/test_css_system.cpp",
         "lib/avl_tree.c",
-        "lambda/input/css/css_style_node.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/css_style_node.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_property_value_parser.cpp",
         "lib/mempool.c",
         "lib/string.c",
         "lib/hashmap.c",
@@ -3256,12 +3138,12 @@ project "test_css_dom_integration"
     files {
         "test/css/test_css_dom_integration.cpp",
         "lib/avl_tree.c",
-        "lambda/input/css/css_style_node.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
-        "lambda/input/css/css_formatter.c",
-        "lambda/input/css/dom_element.c",
-        "lambda/input/css/selector_matcher.c",
+        "lambda/input/css/css_style_node.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_formatter.cpp",
+        "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/selector_matcher.cpp",
         "lib/mempool.c",
         "lib/string.c",
         "lib/strbuf.c",
@@ -3334,12 +3216,12 @@ project "test_css_style_application_gtest"
     files {
         "test/css/test_css_style_application_gtest.cpp",
         "lib/avl_tree.c",
-        "lambda/input/css/css_style_node.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
-        "lambda/input/css/css_formatter.c",
-        "lambda/input/css/dom_element.c",
-        "lambda/input/css/selector_matcher.c",
+        "lambda/input/css/css_style_node.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_formatter.cpp",
+        "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/selector_matcher.cpp",
         "lib/mempool.c",
         "lib/string.c",
         "lib/strbuf.c",
@@ -3411,8 +3293,8 @@ project "test_html_css_gtest"
     
     files {
         "test/test_html_css_gtest.cpp",
-        "lambda/input/css/dom_element.c",
-        "lambda/input/css/selector_matcher.c",
+        "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/selector_matcher.cpp",
         "lib/url_parser.c",
     }
     
@@ -4053,12 +3935,12 @@ project "test_dom_element_print"
         "lib/hashmap.c",
         "lib/arraylist.c",
         "lib/avl_tree.c",
-        "lambda/input/css/dom_element.c",
-        "lambda/input/css/css_style_node.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_parser.c",
-        "lambda/input/css/css_property_value_parser.c",
-        "lambda/input/css/css_formatter.c",
+        "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/css_style_node.cpp",
+        "lambda/input/css/css_properties.cpp",
+        "lambda/input/css/css_parser.cpp",
+        "lambda/input/css/css_property_value_parser.cpp",
+        "lambda/input/css/css_formatter.cpp",
     }
     
     includedirs {

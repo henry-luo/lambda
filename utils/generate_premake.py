@@ -1840,6 +1840,12 @@ class PremakeGenerator:
             # New format: tests array with individual test objects
             tests = suite.get('tests', [])
             for test in tests:
+                # Skip tests marked with "skip": true
+                if test.get('skip', False):
+                    test_name = test.get('name', test.get('source', 'unknown'))
+                    print(f"Skipping test: {test_name}")
+                    continue
+
                 source = test.get('source', '')
                 binary_name = test.get('binary', '').replace('.exe', '')
                 dependencies = test.get('dependencies', [])

@@ -601,4 +601,9 @@ CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_c
 }
 #endif
 
+// C++ only internal functions (not exposed to C code)
+#ifdef __cplusplus
+int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule);
+#endif
+
 #endif // CSS_PARSER_H

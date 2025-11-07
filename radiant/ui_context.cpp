@@ -141,13 +141,8 @@ void free_document(Document* doc) {
         free(doc->view_tree);
     }
 
-    // Free root DomNode wrapper and its cached children
-    // This is freed together with the view tree as the view tree may depend on it
-    if (doc->root_dom_node) {
-        log_debug("Freeing root DomNode and its cached children");
-        DomNode::free_tree(doc->root_dom_node);
-        doc->root_dom_node = NULL;
-    }
+    // Note: lambda_dom_root is pool-allocated and will be freed with the pool
+    // No need to explicitly free it here
 
     if (doc->url) {
         url_destroy(doc->url);

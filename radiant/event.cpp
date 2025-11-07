@@ -302,7 +302,7 @@ lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_spec
 }
 
 // find iframe by name and set new src using selector
-DomNode *set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
+DomNodeBase* set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
     if (!document || !target_name || !new_src) {
         log_error("Invalid parameters to set_iframe_src_by_name");
         return NULL;
@@ -345,41 +345,32 @@ DomNode *set_iframe_src_by_name(DomElement *document, const char *target_name, c
     }
 
     // find the iframe element matching the selector
-    DomNode* node_found = NULL;
     DomElement* iframe_element = selector_matcher_find_first(matcher, selector, document);
     if (iframe_element) {
         log_debug("Found iframe with name='%s', setting src to: %s", target_name, new_src);
         // set the src attribute
         if (!dom_element_set_attribute(iframe_element, "src", new_src)) {
             log_error("Failed to set src attribute");
-        } else {
-            // return the DomNode wrapper if needed
-            // note: this function returns DomNode* but we found a DomElement*
-            // we need to find the corresponding DomNode wrapper
-            node_found = DomNode::create_mark_element(iframe_element);
-            log_debug("iframe src attribute set successfully");
+            selector_matcher_destroy(matcher);
+            return NULL;
         }
-    } else {
-        log_debug("No iframe found with name='%s'", target_name);
+        log_debug("iframe src attribute set successfully");
+        selector_matcher_destroy(matcher);
+        return iframe_element;  // Return DomElement* (which is a DomNodeBase*)
     }
+
+    log_debug("No iframe found with name='%s'", target_name);
     selector_matcher_destroy(matcher);
-    return node_found;
+    return NULL;
 }
 
 // find the sub-view that matches the given node
-View* find_view(View* view, DomNode *node) {
-    // Compare if the view's node matches the target node
-    // Since we're comparing wrapper DomNode types, we need to check if they wrap the same underlying node
-    if (view->node && node) {
-        // The DomNode wrapper points to DomElement/DomText, so we can compare those directly
-        bool matches = false;
-        if (node->type == MARK_ELEMENT && node->dom_element && view->node == node->dom_element) {
-            matches = true;
-        } else if (node->type == MARK_TEXT && node->dom_text && view->node == node->dom_text) {
-            matches = true;
-        }
-        if (matches) { return view; }
+View* find_view(View* view, DomNodeBase* node) {
+    // Compare if the view's node matches the target node directly
+    if (view->node && node && view->node == node) {
+        return view;
     }
+
     if (view->is_group()) {
         ViewGroup* group = (ViewGroup*)view;
         View* child = group->child;
@@ -389,7 +380,6 @@ View* find_view(View* view, DomNode *node) {
             child = child->next;
         }
     }
-    // log_debug("view not found for node: %s", node->name());
     return NULL;
 }
 
@@ -481,7 +471,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
-                DomNode *elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
+                DomNodeBase* elmt = set_iframe_src_by_name(doc->lambda_dom_root, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     log_debug("found iframe view");

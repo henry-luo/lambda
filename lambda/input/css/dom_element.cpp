@@ -1146,11 +1146,14 @@ int dom_element_count_children(DomElement* element) {
     }
 
     int count = 0;
-    DomElement* child = static_cast<DomElement*>(element->first_child);
+    DomNodeBase* child = element->first_child;
 
     while (child) {
-        count++;
-        child = static_cast<DomElement*>(child->next_sibling);
+        // Only count element children (not text or comment nodes)
+        if (child->is_element()) {
+            count++;
+        }
+        child = child->next_sibling;
     }
 
     return count;

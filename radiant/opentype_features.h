@@ -95,22 +95,22 @@ typedef struct OpenTypeFontInfo {
     bool has_gpos_table;            // Has GPOS table (positioning)
     bool has_gsub_table;            // Has GSUB table (substitution)
     bool has_kern_table;            // Has legacy kern table
-    
+
     // Supported features
     OpenTypeFeature* features;      // Array of supported features
     int feature_count;              // Number of supported features
     int feature_capacity;           // Capacity of features array
-    
+
     // Ligature support
     LigatureInfo* ligatures;        // Array of available ligatures
     int ligature_count;             // Number of ligatures
     int ligature_capacity;          // Capacity of ligatures array
-    
+
     // Kerning support
     struct hashmap* kerning_cache;  // Kerning pair cache
     bool kerning_enabled;           // Whether kerning is enabled
     int kerning_scale_factor;       // Scale factor for current font size
-    
+
     // Performance counters
     int ligature_substitutions;     // Number of ligature substitutions
     int kerning_adjustments;        // Number of kerning adjustments
@@ -122,23 +122,23 @@ typedef struct AdvancedGlyphInfo {
     uint32_t original_codepoint;    // Original codepoint
     uint32_t rendered_codepoint;    // Final rendered codepoint (after substitution)
     FT_UInt glyph_index;           // Glyph index in font
-    
+
     // Positioning information
     int advance_x, advance_y;       // Glyph advance
     int offset_x, offset_y;         // Positioning offset
     int bearing_x, bearing_y;       // Glyph bearing
-    
+
     // OpenType feature information
     bool is_ligature;               // Whether this is a ligature
     bool has_kerning;               // Whether kerning was applied
     bool was_substituted;           // Whether glyph was substituted
     LigatureInfo* ligature_info;    // Ligature information (if applicable)
     KerningPair* kerning_info;      // Kerning information (if applicable)
-    
+
     // Feature tags that affected this glyph
     OpenTypeFeatureTag* applied_features;
     int applied_feature_count;
-    
+
     // Rendering metrics
     float pixel_ratio;              // High-DPI scaling
     bool subpixel_positioned;       // Subpixel positioning applied
@@ -148,27 +148,27 @@ typedef struct AdvancedGlyphInfo {
 typedef struct OpenTypeShapingContext {
     OpenTypeFontInfo* font_info;    // Font OpenType information
     EnhancedFontBox* font_box;      // Enhanced font box
-    
+
     // Input text
     const uint32_t* input_codepoints;   // Input codepoints
     int input_count;                    // Number of input codepoints
-    
+
     // Shaped output
     AdvancedGlyphInfo* shaped_glyphs;   // Shaped glyph information
     int shaped_count;                   // Number of shaped glyphs
     int shaped_capacity;                // Capacity of shaped array
-    
+
     // Feature configuration
     OpenTypeFeature* enabled_features; // Enabled OpenType features
     int enabled_feature_count;          // Number of enabled features
-    
+
     // Shaping parameters
     bool enable_ligatures;              // Enable ligature substitution
     bool enable_kerning;                // Enable kerning adjustment
     bool enable_contextual_alternates;  // Enable contextual alternates
     float font_size;                    // Current font size
     float pixel_ratio;                  // High-DPI scaling
-    
+
     // Performance counters
     int total_substitutions;            // Total glyph substitutions
     int total_positioning_adjustments; // Total positioning adjustments
@@ -227,7 +227,7 @@ void calculate_final_positions(OpenTypeShapingContext* ctx);
 
 // Integration with existing text rendering
 void enhance_font_box_with_opentype(EnhancedFontBox* font_box, OpenTypeFontInfo* ot_info);
-void render_text_with_opentype_features(LayoutContext* lycon, DomNode* text_node, OpenTypeShapingContext* ctx);
+void render_text_with_opentype_features(LayoutContext* lycon, DomNodeBase* text_node, OpenTypeShapingContext* ctx);
 int calculate_text_width_with_opentype(OpenTypeShapingContext* ctx, const uint32_t* codepoints, int count);
 
 // CSS font-feature-settings support

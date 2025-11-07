@@ -64,77 +64,6 @@ typedef struct DomText DomText;        // Forward declaration for Lambda CSS DOM
 typedef struct DomComment DomComment;  // Forward declaration for Lambda CSS DOM
 
 typedef enum {
-    LEXBOR_ELEMENT,   // 0 - Lexbor HTML element
-    MARK_ELEMENT,     // 1 - Lambda DOM element (DomElement)
-    LEXBOR_NODE,      // 2 - Lexbor text/other nodes
-    MARK_TEXT,        // 3 - Lambda DOM text (DomText)
-    MARK_COMMENT,     // 4 - Lambda DOM comment (DomComment)
-} NodeType;
-
-typedef struct DomNode {
-    NodeType type;
-    union {
-        DomElement* dom_element;      // Lambda CSS DOM element (for MARK_ELEMENT)
-        DomText* dom_text;            // Lambda CSS DOM text (for MARK_TEXT)
-        DomComment* dom_comment;      // Lambda CSS DOM comment (for MARK_COMMENT)
-    };
-    DomNode* parent;
-    private:
-    DomNode* _child;  // cached first child
-    DomNode* _next;  // cached next sibling
-
-    public:
-    // for all nodes, element, text and comment
-    char* name();
-
-    // enum ID for element
-    uintptr_t tag();
-
-    // Helper function to convert tag name string to Lexbor tag ID
-    static uintptr_t tag_name_to_lexbor_id(const char* tag_name);
-
-    bool is_element() {
-        return type == MARK_ELEMENT;
-    }
-
-    bool is_text() {
-        if (type == MARK_TEXT) return true;
-        // Filter out comments and other non-text node types
-        return false;
-    }
-
-    bool is_comment() {
-        if (type == MARK_COMMENT) return true;
-        return false;
-    }
-
-    // Text node data access
-    unsigned char* text_data();
-
-    // Element attribute access
-    const lxb_char_t* get_attribute(const char* attr_name, size_t* value_len = nullptr);
-
-    // Mark-specific methods
-    char* mark_text_data();
-    Item mark_get_attribute(const char* attr_name);
-    Item mark_get_content();
-
-    // Mark node constructors
-    static DomNode* create_mark_element(DomElement* element);
-    static DomNode* create_mark_text(DomText* text);
-    static DomNode* create_mark_comment(DomComment* comment);
-
-    // Memory management - free DomNode tree recursively
-    static void free_tree(DomNode* node);
-
-    // Clean up cached children (for stack-allocated root nodes)
-    void free_cached_children();
-
-    DomNode* first_child();
-    DomNode* next_sibling();
-} DomNode;
-
-typedef enum {
     DOC_TYPE_LEXBOR,      // Parsed with Lexbor
     DOC_TYPE_LAMBDA_CSS   // Parsed with Lambda CSS system
 } DocumentType;
@@ -144,12 +73,11 @@ typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 typedef struct {
     Url* url;                       // document URL
     DocumentType doc_type;          // document source type
-    DomElement* lambda_dom_root;    // Lambda CSS DOM root element
+    DomElement* lambda_dom_root;    // Lambda CSS DOM root element (DomNodeBase*)
     Element* lambda_html_root;      // Lambda HTML parser root (for Lambda CSS docs)
     int html_version;               // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
     ViewTree* view_tree;
     StateStore* state;
-    DomNode* root_dom_node;         // Root DomNode wrapper (heap-allocated, freed with view tree)
 } Document;
 
 typedef unsigned short PropValue;
