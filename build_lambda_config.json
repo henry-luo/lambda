@@ -330,7 +330,7 @@
                 "lambda/parse.c",
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
-                "lambda/input/css/css_property_value_parser.cpp",
+                "lambda/input/css/css_value_parser.cpp",
                 "lambda/input/css/css_parser.cpp",
                 "lambda/input/css/css_engine.cpp",
                 "lambda/input/css/css_formatter.cpp",
