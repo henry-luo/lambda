@@ -2275,7 +2275,6 @@ project "test_lambda_domnode_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "lexbor",
     }
     
     linkoptions {
