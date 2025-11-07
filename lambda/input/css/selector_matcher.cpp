@@ -771,7 +771,7 @@ bool selector_matcher_matches_nth_child(SelectorMatcher* matcher,
     // Handle general an+b formula (including special odd/even cases)
     if (from_end) {
         // For nth-last-child, we need to count from the end
-        int total_children = element->parent ? dom_element_count_children(static_cast<DomElement*>(element->parent)) : 1;
+        int total_children = element->parent ? dom_element_count_child_elements(static_cast<DomElement*>(element->parent)) : 1;
         int index = dom_element_get_child_index(element);
         int reverse_index = total_children - index;
 

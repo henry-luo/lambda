@@ -190,7 +190,7 @@ TEST_F(DomIntegrationTest, AppendChild) {
     EXPECT_TRUE(dom_element_append_child(parent, child));
     EXPECT_EQ(child->parent, parent);
     EXPECT_EQ(parent->first_child, child);
-    EXPECT_EQ(dom_element_count_children(parent), 1);
+    EXPECT_EQ(dom_element_count_child_elements(parent), 1);
 }
 
 TEST_F(DomIntegrationTest, MultipleChildren) {
@@ -203,7 +203,7 @@ TEST_F(DomIntegrationTest, MultipleChildren) {
     dom_element_append_child(parent, child2);
     dom_element_append_child(parent, child3);
 
-    EXPECT_EQ(dom_element_count_children(parent), 3);
+    EXPECT_EQ(dom_element_count_child_elements(parent), 3);
     EXPECT_EQ(parent->first_child, child1);
     EXPECT_EQ(child1->next_sibling, child2);
     EXPECT_EQ(child2->next_sibling, child3);
@@ -238,7 +238,7 @@ TEST_F(DomIntegrationTest, RemoveChild) {
     dom_element_append_child(parent, child2);
 
     EXPECT_TRUE(dom_element_remove_child(parent, child1));
-    EXPECT_EQ(dom_element_count_children(parent), 1);
+    EXPECT_EQ(dom_element_count_child_elements(parent), 1);
     EXPECT_EQ(parent->first_child, child2);
     EXPECT_EQ(child1->parent, nullptr);
 }
@@ -989,7 +989,7 @@ TEST_F(DomIntegrationTest, EdgeCase_MaxChildren) {
         dom_element_append_child(parent, child);
     }
 
-    EXPECT_EQ(dom_element_count_children(parent), 1000);
+    EXPECT_EQ(dom_element_count_child_elements(parent), 1000);
 
     // Test nth-child with large indices
     DomElement* child = (DomElement*)parent->first_child;
@@ -2700,8 +2700,8 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithTextChild) {
 
     EXPECT_EQ(text->parent, div);
     EXPECT_EQ(div->first_child, (void*)text);
-    // dom_element_count_children only counts element children, not text nodes
-    EXPECT_EQ(dom_element_count_children(div), 0);
+    // dom_element_count_child_elements only counts element children, not text nodes
+    EXPECT_EQ(dom_element_count_child_elements(div), 0);
 }
 
 TEST_F(DomIntegrationTest, MixedTree_ElementWithCommentChild) {
@@ -2733,8 +2733,8 @@ TEST_F(DomIntegrationTest, MixedTree_ElementTextElement) {
     text->next_sibling = span2;
     span2->prev_sibling = text;
 
-    // dom_element_count_children only counts DomElement* children (2 spans), not text nodes
-    EXPECT_EQ(dom_element_count_children(div), 2);
+    // dom_element_count_child_elements only counts DomElement* children (2 spans), not text nodes
+    EXPECT_EQ(dom_element_count_child_elements(div), 2);
     EXPECT_EQ(div->first_child, (void*)span1);
     EXPECT_EQ(span1->next_sibling, (void*)text);
     EXPECT_EQ(text->next_sibling, (void*)span2);
@@ -2764,7 +2764,7 @@ TEST_F(DomIntegrationTest, MixedTree_AllNodeTypes) {
     span->next_sibling = text2;
     text2->prev_sibling = span;
 
-    // dom_element_count_children has undefined behavior on mixed trees (it casts
+    // dom_element_count_child_elements has undefined behavior on mixed trees (it casts
     // first_child to DomElement* and reads next_sibling at wrong offset for DomText/DomComment).
     // Don't test it here - just verify the node structure manually.
 
@@ -2824,8 +2824,8 @@ TEST_F(DomIntegrationTest, MixedTree_RemoveTextNode) {
     text->next_sibling = span;
     span->prev_sibling = text;
 
-    // dom_element_count_children only counts DomElement* children (1 span)
-    EXPECT_EQ(dom_element_count_children(div), 1);
+    // dom_element_count_child_elements only counts DomElement* children (1 span)
+    EXPECT_EQ(dom_element_count_child_elements(div), 1);
 
     // Remove the text node manually
     div->first_child = span;
@@ -2833,7 +2833,7 @@ TEST_F(DomIntegrationTest, MixedTree_RemoveTextNode) {
     text->parent = nullptr;
     text->next_sibling = nullptr;
 
-    EXPECT_EQ(dom_element_count_children(div), 1);
+    EXPECT_EQ(dom_element_count_child_elements(div), 1);
     EXPECT_EQ(div->first_child, (void*)span);
 }
 
@@ -2873,7 +2873,7 @@ TEST_F(DomIntegrationTest, MixedTree_MultipleTextNodes) {
     text2->next_sibling = text3;
     text3->prev_sibling = text2;
 
-    // dom_element_count_children has undefined behavior on mixed trees - don't test it
+    // dom_element_count_child_elements has undefined behavior on mixed trees - don't test it
     EXPECT_EQ(text1->next_sibling, (void*)text2);
     EXPECT_EQ(text2->next_sibling, (void*)text3);
 }
@@ -2902,9 +2902,9 @@ TEST_F(DomIntegrationTest, MixedTree_NestedWithText) {
     span->next_sibling = text2;
     text2->prev_sibling = span;
 
-    // dom_element_count_children has undefined behavior on mixed trees - don't test it
-    EXPECT_EQ(dom_element_count_children(div), 1);  // Only counts elements correctly
-    // span has text child, but dom_element_count_children has UB on it - don't test
+    // dom_element_count_child_elements has undefined behavior on mixed trees - don't test it
+    EXPECT_EQ(dom_element_count_child_elements(div), 1);  // Only counts elements correctly
+    // span has text child, but dom_element_count_child_elements has UB on it - don't test
     EXPECT_EQ(inner_text->parent, span);
 }
 
@@ -2935,8 +2935,8 @@ TEST_F(DomIntegrationTest, MixedTree_CommentsBetweenElements) {
     comment2->next_sibling = p2;
     p2->prev_sibling = comment2;
 
-    // dom_element_count_children only counts DomElement* children (h1, p1, p2 = 3 elements)
-    EXPECT_EQ(dom_element_count_children(div), 3);
+    // dom_element_count_child_elements only counts DomElement* children (h1, p1, p2 = 3 elements)
+    EXPECT_EQ(dom_element_count_child_elements(div), 3);
 
     // Verify only elements match when filtering
     DomNodeBase* current = div->first_child;
@@ -3011,7 +3011,7 @@ TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
     comment->next_sibling = span;
     span->prev_sibling = comment;
 
-    // dom_element_count_children has undefined behavior on mixed trees - don't use it
+    // dom_element_count_child_elements has undefined behavior on mixed trees - don't use it
 }
 
 // Run all tests

@@ -540,7 +540,19 @@ int dom_element_get_child_index(DomElement* element);
  * @param element Target element
  * @return Number of child elements
  */
-int dom_element_count_children(DomElement* element);
+/**
+ * Count all children (elements, text nodes, comments)
+ * @param element Target element
+ * @return Total number of child nodes
+ */
+int dom_element_child_count(DomElement* element);
+
+/**
+ * Count only element children (excludes text nodes and comments)
+ * @param element Target element
+ * @return Number of child elements
+ */
+int dom_element_count_child_elements(DomElement* element);
 
 /**
  * Check if element matches nth-child formula
