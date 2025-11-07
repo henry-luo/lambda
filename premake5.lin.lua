@@ -62,10 +62,10 @@ project "lambda-lib"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -123,11 +123,11 @@ project "lambda-input-full-c"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "/usr/local/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -149,19 +149,38 @@ project "lambda-input-full-c"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/opt/homebrew/lib/libmbedtls.a",
+        "/opt/homebrew/lib/libmbedx509.a",
+        "/opt/homebrew/lib/libmbedcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     links {
-        "mpdec",
-        "curl",
         "lambda-lib",
+    }
+    
+    defines {
+        "SIMPLE_SCHEMA_PARSER",
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
 
@@ -214,11 +233,11 @@ project "lambda-input-full-cpp"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "/usr/local/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
@@ -253,24 +272,43 @@ project "lambda-input-full-cpp"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/opt/homebrew/lib/libmbedtls.a",
+        "/opt/homebrew/lib/libmbedx509.a",
+        "/opt/homebrew/lib/libmbedcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     links {
-        "mpdec",
-        "curl",
         "lambda-lib",
+    }
+    
+    defines {
+        "SIMPLE_SCHEMA_PARSER",
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     -- Automatically added C++ standard library
     links {
-        "stdc++",
+        "c++",
     }
     
 
@@ -288,174 +326,6 @@ project "lambda-input-full"
     links {
         "lambda-input-full-c",
         "lambda-input-full-cpp",
-    }
-    
-
-project "radiant"
-    kind "ConsoleApp"
-    language "C++"
-    targetname "radiant.exe"
-    targetdir "."
-    objdir "build/obj/%{prj.name}"
-    -- Native HTML/CSS/SVG rendering engine
-    
-    files {
-        "radiant/window.cpp",
-        "radiant/ui_context.cpp",
-        "radiant/parse_html.cpp",
-        "radiant/layout.cpp",
-        "radiant/layout_block.cpp",
-        "radiant/layout_inline.cpp",
-        "radiant/layout_text.cpp",
-        "radiant/layout_positioned.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_flex_measurement.cpp",
-        "radiant/layout_flex_multipass.cpp",
-        "radiant/layout_table.cpp",
-        "radiant/layout_grid.cpp",
-        "radiant/grid_utils.cpp",
-        "radiant/grid_sizing.cpp",
-        "radiant/grid_positioning.cpp",
-        "radiant/layout_grid_content.cpp",
-        "radiant/grid_advanced.cpp",
-        "radiant/resolve_style.cpp",
-        "radiant/lambda_css_resolve.cpp",
-        "radiant/scroller.cpp",
-        "radiant/view_pool.cpp",
-        "radiant/dom.cpp",
-        "radiant/font.cpp",
-        "radiant/font_precision.cpp",
-        "radiant/font_face.cpp",
-        "radiant/surface.cpp",
-        "radiant/render.cpp",
-        "radiant/render_svg.cpp",
-        "radiant/render_pdf.cpp",
-        "radiant/render_img.cpp",
-        "radiant/event.cpp",
-        "radiant/radiant.cpp",
-        "lambda/print.cpp",
-        "lambda/utf_string.cpp",
-        "lambda/name_pool.cpp",
-        "lambda/lambda-data.cpp",
-        "lambda/input/css/css_tokenizer.c",
-        "lambda/input/css/css_properties.c",
-        "lambda/input/css/css_property_value_parser.c",
-        "lambda/input/css/css_parser.c",
-        "lambda/input/css/css_engine.c",
-        "lambda/input/css/css_formatter.c",
-        "lambda/input/css/css_style_node.c",
-        "lambda/input/css/dom_element.c",
-        "lambda/input/css/selector_matcher.c",
-        "lib/strview.c",
-        "lib/strbuf.c",
-        "lib/stringbuf.c",
-        "lib/hashmap.c",
-        "lib/arraylist.c",
-        "lib/avl_tree.c",
-        "lib/log.c",
-        "lib/datetime.c",
-        "lib/string.c",
-        "lib/mempool.c",
-        "lib/file.c",
-        "lib/url.c",
-        "lib/url_parser.c",
-        "lib/utf.c",
-        "lib/image.c",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-javascript/bindings/c",
-        "lexbor/source",
-        "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib",
-        "/usr/local/include",
-        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-        "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "GL",
-        "CoreFoundation",
-        "CoreVideo",
-        "IOKit",
-        "Foundation",
-        "CoreGraphics",
-        "AppKit",
-        "Carbon",
-    }
-    
-    linkoptions {
-        "/usr/local/lib/liblexbor_static.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
-        "/opt/homebrew/lib/libfontconfig_minimal.a",
-        "/opt/homebrew/lib/libglfw3.a",
-        "/usr/local/lib/libthorvg.a",
-        "/opt/homebrew/lib/libturbojpeg.a",
-        "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
-        "/opt/homebrew/lib/libpng.a",
-        "/opt/homebrew/opt/expat/lib/libexpat.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-    }
-    
-    links {
-        "hpdf",
-        "mpdec",
-    }
-    
-    -- Automatically added C++ standard library
-    links {
-        "stdc++",
-    }
-    
-    disablewarnings {
-        "incompatible-pointer-types",
-        "undef",
-        "uninitialized",
-        "sign-compare",
-        "implicit-function-declaration",
-        "implicit-int",
-        "return-type",
-        "format",
-        "free-nonheap-object",
-        "shadow",
-        "array-bounds",
-        "null-dereference",
-        "pointer-arith",
-        "pointer-compare",
-        "pointer-sign",
-        "pointer-to-int-cast",
-        "microsoft-anon-tag",
-    }
-    
-    buildoptions {
-        "-fwrapv",
-        "-fms-extensions",
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-    }
-    
-    defines {
-        "_POSIX_C_SOURCE=200809L",
-        "_GNU_SOURCE",
     }
     
 
@@ -524,7 +394,6 @@ project "lambda"
         "lambda/input/css/selector_matcher.c",
         "radiant/dom.cpp",
         "radiant/ui_context.cpp",
-        "radiant/parse_html.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
         "radiant/layout_inline.cpp",
@@ -540,20 +409,25 @@ project "lambda"
         "radiant/grid_positioning.cpp",
         "radiant/layout_grid_content.cpp",
         "radiant/grid_advanced.cpp",
-        "radiant/resolve_style.cpp",
-        "radiant/lambda_css_resolve.cpp",
+        "radiant/resolve_css_style.cpp",
         "radiant/scroller.cpp",
         "radiant/view_pool.cpp",
         "radiant/font.cpp",
-        "radiant/font_precision.cpp",
         "radiant/font_face.cpp",
         "radiant/surface.cpp",
         "radiant/render.cpp",
         "radiant/render_svg.cpp",
         "radiant/render_pdf.cpp",
         "radiant/render_img.cpp",
+        "radiant/pdf/operators.cpp",
+        "radiant/pdf/pdf_to_view.cpp",
+        "radiant/pdf/coords.cpp",
+        "radiant/pdf/fonts.cpp",
+        "radiant/pdf/pages.cpp",
+        "lambda/input/pdf_decompress.cpp",
         "radiant/event.cpp",
         "radiant/cmd_layout.cpp",
+        "radiant/cmd_view_pdf.cpp",
         "radiant/window.cpp",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
@@ -578,6 +452,7 @@ project "lambda"
         "lambda/input/input-css.cpp",
         "lambda/input/input-pdf.cpp",
         "lambda/input/input_cache_util.cpp",
+        "lambda/input/pdf_decompress.cpp",
         "lambda/input/input_sysinfo.cpp",
         "lambda/input/input-math-ascii.cpp",
         "lambda/input/input-markup.cpp",
@@ -645,16 +520,14 @@ project "lambda"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -664,18 +537,21 @@ project "lambda"
     }
     
     linkoptions {
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
-        "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmbedtls.a",
+        "/opt/homebrew/lib/libmbedx509.a",
+        "/opt/homebrew/lib/libmbedcrypto.a",
+        "/opt/homebrew/lib/libhpdf.a",
+        "/opt/homebrew/lib/libnghttp2.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-        "/usr/local/lib/liblexbor_static.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
         "/opt/homebrew/lib/libpng.a",
         "/opt/homebrew/opt/bzip2/lib/libbz2.a",
@@ -684,17 +560,31 @@ project "lambda"
         "/usr/local/lib/libthorvg.a",
         "/opt/homebrew/lib/libglfw3.a",
         "/opt/homebrew/lib/libturbojpeg.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/opt/homebrew/lib/libhpdf.a",
     }
     
     -- Dynamic libraries
     filter "platforms:native"
         links {
-            "curl",
-            "mpdec",
-            "hpdf",
+        }
+    
+        linkoptions {
+            "-framework CoreFoundation",
+            "-framework CoreServices",
+            "-framework SystemConfiguration",
+            "-framework Cocoa",
+            "-framework IOKit",
+            "-framework CoreVideo",
+            "-framework OpenGL",
+            "-framework Foundation",
+            "-framework CoreGraphics",
+            "-framework AppKit",
+            "-framework Carbon",
         }
     
     filter {}
@@ -741,16 +631,14 @@ project "test_strbuf_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -767,8 +655,8 @@ project "test_strbuf_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -806,16 +694,14 @@ project "test_stringbuf_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -832,8 +718,8 @@ project "test_stringbuf_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -872,16 +758,14 @@ project "test_strview_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -898,8 +782,8 @@ project "test_strview_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -937,16 +821,14 @@ project "test_num_stack_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -963,8 +845,8 @@ project "test_num_stack_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -1002,16 +884,14 @@ project "test_datetime_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1028,8 +908,8 @@ project "test_datetime_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -1068,16 +948,14 @@ project "test_url_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1094,8 +972,8 @@ project "test_url_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -1133,16 +1011,14 @@ project "test_url_extra_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1159,8 +1035,8 @@ project "test_url_extra_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -1198,16 +1074,14 @@ project "test_cmdedit_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1224,9 +1098,9 @@ project "test_cmdedit_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libutf8proc.a",
     }
     
     buildoptions {
@@ -1268,16 +1142,14 @@ project "test_mempool_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1293,8 +1165,8 @@ project "test_mempool_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -1335,16 +1207,14 @@ project "test_avl_tree"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1360,8 +1230,8 @@ project "test_avl_tree"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -1402,16 +1272,14 @@ project "test_avl_tree_perf"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1427,8 +1295,8 @@ project "test_avl_tree_perf"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -1469,16 +1337,14 @@ project "test_element_reader_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1497,25 +1363,20 @@ project "test_element_reader_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -1525,6 +1386,17 @@ project "test_element_reader_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -1537,10 +1409,8 @@ project "test_element_reader_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -1570,16 +1440,14 @@ project "test_mime_detect_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1598,25 +1466,20 @@ project "test_mime_detect_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -1626,6 +1489,17 @@ project "test_mime_detect_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -1639,10 +1513,8 @@ project "test_mime_detect_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -1672,16 +1544,14 @@ project "test_math_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1700,26 +1570,21 @@ project "test_math_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -1729,6 +1594,17 @@ project "test_math_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -1742,10 +1618,8 @@ project "test_math_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -1775,16 +1649,14 @@ project "test_math_ascii_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1803,26 +1675,21 @@ project "test_math_ascii_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -1832,6 +1699,17 @@ project "test_math_ascii_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -1845,10 +1723,8 @@ project "test_math_ascii_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -1878,16 +1754,14 @@ project "test_markup_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -1906,26 +1780,21 @@ project "test_markup_roundtrip_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -1935,6 +1804,17 @@ project "test_markup_roundtrip_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -1948,10 +1828,8 @@ project "test_markup_roundtrip_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -1981,16 +1859,14 @@ project "test_input_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2009,26 +1885,21 @@ project "test_input_roundtrip_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2038,6 +1909,17 @@ project "test_input_roundtrip_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2051,10 +1933,8 @@ project "test_input_roundtrip_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2084,16 +1964,14 @@ project "test_html_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2112,26 +1990,21 @@ project "test_html_roundtrip_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2141,6 +2014,17 @@ project "test_html_roundtrip_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2154,10 +2038,8 @@ project "test_html_roundtrip_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2187,16 +2069,14 @@ project "test_html_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2215,26 +2095,21 @@ project "test_html_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2244,6 +2119,17 @@ project "test_html_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2257,10 +2143,8 @@ project "test_html_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2290,16 +2174,14 @@ project "test_html_negative_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2318,26 +2200,21 @@ project "test_html_negative_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2347,6 +2224,17 @@ project "test_html_negative_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2360,10 +2248,8 @@ project "test_html_negative_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2397,16 +2283,14 @@ project "test_lambda_domnode_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2422,30 +2306,25 @@ project "test_lambda_domnode_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "lexbor",
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-        "/usr/local/lib/liblexbor_static.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2455,6 +2334,17 @@ project "test_lambda_domnode_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2468,10 +2358,8 @@ project "test_lambda_domnode_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2501,16 +2389,14 @@ project "test_dir_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2529,25 +2415,20 @@ project "test_dir_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2557,6 +2438,17 @@ project "test_dir_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2570,10 +2462,8 @@ project "test_dir_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2603,16 +2493,14 @@ project "test_graph_parser_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2631,26 +2519,21 @@ project "test_graph_parser_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2660,6 +2543,17 @@ project "test_graph_parser_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2673,10 +2567,8 @@ project "test_graph_parser_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2706,16 +2598,14 @@ project "test_graph_formatter_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2734,26 +2624,21 @@ project "test_graph_formatter_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2763,6 +2648,17 @@ project "test_graph_formatter_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2776,10 +2672,8 @@ project "test_graph_formatter_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2809,16 +2703,14 @@ project "test_http_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2837,25 +2729,20 @@ project "test_http_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2865,6 +2752,17 @@ project "test_http_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2878,10 +2776,8 @@ project "test_http_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -2911,16 +2807,14 @@ project "test_sysinfo_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -2939,26 +2833,21 @@ project "test_sysinfo_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -2968,6 +2857,17 @@ project "test_sysinfo_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -2981,10 +2881,8 @@ project "test_sysinfo_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3014,16 +2912,14 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3042,26 +2938,21 @@ project "test_jsx_roundtrip_new_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3071,6 +2962,17 @@ project "test_jsx_roundtrip_new_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -3084,10 +2986,8 @@ project "test_jsx_roundtrip_new_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3117,16 +3017,14 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3145,25 +3043,20 @@ project "test_mdx_roundtrip_new_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3173,6 +3066,17 @@ project "test_mdx_roundtrip_new_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -3186,10 +3090,8 @@ project "test_mdx_roundtrip_new_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3209,7 +3111,7 @@ project "test_css_style_node"
     targetextension ".exe"
     
     files {
-        "test/test_css_style_node.cpp",
+        "test/css/test_css_style_node.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3224,16 +3126,14 @@ project "test_css_style_node"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3249,8 +3149,8 @@ project "test_css_style_node"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -3280,7 +3180,7 @@ project "test_css_system"
     targetextension ".exe"
     
     files {
-        "test/test_css_system.cpp",
+        "test/css/test_css_system.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3297,16 +3197,14 @@ project "test_css_system"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3322,8 +3220,8 @@ project "test_css_system"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -3353,7 +3251,7 @@ project "test_css_dom_integration"
     targetextension ".exe"
     
     files {
-        "test/test_css_dom_integration.cpp",
+        "test/css/test_css_dom_integration.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3377,16 +3275,14 @@ project "test_css_dom_integration"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3402,8 +3298,8 @@ project "test_css_dom_integration"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -3433,7 +3329,7 @@ project "test_css_style_application_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_style_application_gtest.cpp",
+        "test/css/test_css_style_application_gtest.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/css_style_node.c",
         "lambda/input/css/css_properties.c",
@@ -3457,16 +3353,14 @@ project "test_css_style_application_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3482,8 +3376,8 @@ project "test_css_style_application_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -3526,16 +3420,14 @@ project "test_html_css_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3554,26 +3446,21 @@ project "test_html_css_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3583,6 +3470,17 @@ project "test_html_css_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -3596,10 +3494,8 @@ project "test_html_css_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3619,7 +3515,7 @@ project "test_css_tokenizer_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_tokenizer_gtest.cpp",
+        "test/css/test_css_tokenizer_gtest.cpp",
     }
     
     includedirs {
@@ -3629,16 +3525,14 @@ project "test_css_tokenizer_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3657,26 +3551,21 @@ project "test_css_tokenizer_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3686,6 +3575,17 @@ project "test_css_tokenizer_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -3699,10 +3599,8 @@ project "test_css_tokenizer_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3732,16 +3630,14 @@ project "test_css_tokenizer_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3760,26 +3656,21 @@ project "test_css_tokenizer_unit"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3789,6 +3680,17 @@ project "test_css_tokenizer_unit"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -3802,10 +3704,8 @@ project "test_css_tokenizer_unit"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3835,16 +3735,14 @@ project "test_css_parser_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3863,26 +3761,21 @@ project "test_css_parser_unit"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3892,6 +3785,17 @@ project "test_css_parser_unit"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -3905,10 +3809,8 @@ project "test_css_parser_unit"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3938,16 +3840,14 @@ project "test_css_engine_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -3966,26 +3866,21 @@ project "test_css_engine_unit"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -3995,6 +3890,17 @@ project "test_css_engine_unit"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4008,10 +3914,8 @@ project "test_css_engine_unit"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4041,16 +3945,14 @@ project "test_css_engine_negative"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4069,26 +3971,21 @@ project "test_css_engine_negative"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4098,6 +3995,17 @@ project "test_css_engine_negative"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4111,10 +4019,8 @@ project "test_css_engine_negative"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4159,16 +4065,14 @@ project "test_dom_element_print"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4184,8 +4088,8 @@ project "test_dom_element_print"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
@@ -4225,16 +4129,14 @@ project "test_css_formatter_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4253,26 +4155,21 @@ project "test_css_formatter_unit"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4282,6 +4179,17 @@ project "test_css_formatter_unit"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4295,10 +4203,8 @@ project "test_css_formatter_unit"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4328,16 +4234,14 @@ project "test_css_roundtrip_unit"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4356,26 +4260,21 @@ project "test_css_roundtrip_unit"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4385,6 +4284,17 @@ project "test_css_roundtrip_unit"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4398,10 +4308,8 @@ project "test_css_roundtrip_unit"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4431,16 +4339,14 @@ project "test_compound_descendant_selectors"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4459,26 +4365,21 @@ project "test_compound_descendant_selectors"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4488,6 +4389,17 @@ project "test_compound_descendant_selectors"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4501,10 +4413,8 @@ project "test_compound_descendant_selectors"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4534,16 +4444,14 @@ project "test_selector_groups"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4562,26 +4470,21 @@ project "test_selector_groups"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4591,6 +4494,17 @@ project "test_selector_groups"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4604,10 +4518,8 @@ project "test_selector_groups"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4627,7 +4539,7 @@ project "test_css_parser_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_parser_gtest.cpp",
+        "test/css/test_css_parser_gtest.cpp",
     }
     
     includedirs {
@@ -4637,16 +4549,14 @@ project "test_css_parser_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4665,26 +4575,21 @@ project "test_css_parser_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4694,6 +4599,17 @@ project "test_css_parser_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4707,10 +4623,8 @@ project "test_css_parser_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4730,7 +4644,7 @@ project "test_css_integration_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_integration_gtest.cpp",
+        "test/css/test_css_integration_gtest.cpp",
     }
     
     includedirs {
@@ -4740,16 +4654,14 @@ project "test_css_integration_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4768,26 +4680,21 @@ project "test_css_integration_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4797,6 +4704,17 @@ project "test_css_integration_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4810,10 +4728,8 @@ project "test_css_integration_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4833,7 +4749,7 @@ project "test_css_files_safe_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_files_safe_gtest.cpp",
+        "test/css/test_css_files_safe_gtest.cpp",
     }
     
     includedirs {
@@ -4843,16 +4759,14 @@ project "test_css_files_safe_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4871,26 +4785,21 @@ project "test_css_files_safe_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -4900,6 +4809,17 @@ project "test_css_files_safe_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -4913,10 +4833,8 @@ project "test_css_files_safe_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -4936,7 +4854,7 @@ project "test_css_frameworks_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_frameworks_gtest.cpp",
+        "test/css/test_css_frameworks_gtest.cpp",
     }
     
     includedirs {
@@ -4946,16 +4864,14 @@ project "test_css_frameworks_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -4974,26 +4890,21 @@ project "test_css_frameworks_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5003,6 +4914,17 @@ project "test_css_frameworks_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5016,10 +4938,8 @@ project "test_css_frameworks_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5030,16 +4950,16 @@ project "test_css_frameworks_gtest"
     filter {}
     
 
-project "test_css_to_lambda_roundtrip_gtest"
+project "test_css_to_mark_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
-    targetname "test_css_to_lambda_roundtrip_gtest"
+    targetname "test_css_to_mark_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_css_to_lambda_roundtrip_gtest.cpp",
+        "test/css/test_css_to_mark_gtest.cpp",
     }
     
     includedirs {
@@ -5049,16 +4969,14 @@ project "test_css_to_lambda_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5077,26 +4995,21 @@ project "test_css_to_lambda_roundtrip_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5106,6 +5019,17 @@ project "test_css_to_lambda_roundtrip_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5119,10 +5043,8 @@ project "test_css_to_lambda_roundtrip_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5152,16 +5074,14 @@ project "test_mdx_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5180,25 +5100,20 @@ project "test_mdx_roundtrip_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5208,6 +5123,17 @@ project "test_mdx_roundtrip_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5221,10 +5147,8 @@ project "test_mdx_roundtrip_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5254,16 +5178,14 @@ project "test_jsx_roundtrip_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5282,25 +5204,20 @@ project "test_jsx_roundtrip_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5310,6 +5227,17 @@ project "test_jsx_roundtrip_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5323,10 +5251,8 @@ project "test_jsx_roundtrip_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5359,16 +5285,14 @@ project "test_latex_html_fixtures"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5387,26 +5311,21 @@ project "test_latex_html_fixtures"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5416,6 +5335,17 @@ project "test_latex_html_fixtures"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5430,10 +5360,8 @@ project "test_latex_html_fixtures"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5463,16 +5391,14 @@ project "test_validator_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5491,25 +5417,20 @@ project "test_validator_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5519,6 +5440,17 @@ project "test_validator_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5531,10 +5463,8 @@ project "test_validator_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5564,16 +5494,14 @@ project "test_ast_validator_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5592,26 +5520,21 @@ project "test_ast_validator_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "-Wl,--end-group",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
     }
     
     -- Add dynamic libraries
     links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "pthread",
-        "stdc++fs",
         "ncurses",
     }
     
@@ -5621,6 +5544,17 @@ project "test_ast_validator_gtest"
     
     -- Add macOS frameworks
     linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     buildoptions {
@@ -5633,10 +5567,8 @@ project "test_ast_validator_gtest"
     
     filter {}
     linkoptions {
-        "-Wl,--whole-archive",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -5666,16 +5598,14 @@ project "test_lambda_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5691,8 +5621,8 @@ project "test_lambda_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -5730,16 +5660,14 @@ project "test_lambda_repl_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5755,8 +5683,8 @@ project "test_lambda_repl_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -5794,16 +5722,14 @@ project "test_lambda_proc_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5819,8 +5745,8 @@ project "test_lambda_proc_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
@@ -5858,16 +5784,14 @@ project "test_js_gtest"
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "mac-deps/rpmalloc-install/include",
-        "/usr/include/freetype2",
-        "/usr/include/fontconfig",
-        "/usr/include",
-        "/usr/include/libpng16",
-        "lib/mem-pool/include",
-        "/usr/local/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
     
     libdirs {
@@ -5883,8 +5807,8 @@ project "test_js_gtest"
     }
     
     linkoptions {
-        "/usr/local/lib/libgtest.a",
-        "/usr/local/lib/libgtest_main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
