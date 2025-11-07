@@ -3144,13 +3144,6 @@ project "test_css_dom_integration"
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
-        "lib/mempool.c",
-        "lib/string.c",
-        "lib/strbuf.c",
-        "lib/stringbuf.c",
-        "lib/log.c",
-        "lib/hashmap.c",
-        "lib/arraylist.c",
     }
     
     includedirs {
@@ -3178,6 +3171,9 @@ project "test_css_dom_integration"
     }
     
     links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
         "gtest",
         "gtest_main",
     }
@@ -3188,6 +3184,38 @@ project "test_css_dom_integration"
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -3195,6 +3223,12 @@ project "test_css_dom_integration"
         "-g",
         "-O2",
         "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3222,13 +3256,6 @@ project "test_css_style_application_gtest"
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
-        "lib/mempool.c",
-        "lib/string.c",
-        "lib/strbuf.c",
-        "lib/stringbuf.c",
-        "lib/log.c",
-        "lib/hashmap.c",
-        "lib/arraylist.c",
     }
     
     includedirs {
@@ -3256,6 +3283,9 @@ project "test_css_style_application_gtest"
     }
     
     links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
         "gtest",
         "gtest_main",
     }
@@ -3266,6 +3296,38 @@ project "test_css_style_application_gtest"
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -3273,6 +3335,12 @@ project "test_css_style_application_gtest"
         "-g",
         "-O2",
         "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only
@@ -3295,7 +3363,6 @@ project "test_html_css_gtest"
         "test/test_html_css_gtest.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
-        "lib/url_parser.c",
     }
     
     includedirs {
@@ -3926,14 +3993,6 @@ project "test_dom_element_print"
     
     files {
         "test/css/unit/test_dom_element_print.cpp",
-        "lib/strbuf.c",
-        "lib/stringbuf.c",
-        "lib/strview.c",
-        "lib/string.c",
-        "lib/log.c",
-        "lib/mempool.c",
-        "lib/hashmap.c",
-        "lib/arraylist.c",
         "lib/avl_tree.c",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/css_style_node.cpp",
@@ -3968,6 +4027,9 @@ project "test_dom_element_print"
     }
     
     links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
         "gtest",
         "gtest_main",
     }
@@ -3978,6 +4040,38 @@ project "test_dom_element_print"
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -3985,6 +4079,12 @@ project "test_dom_element_print"
         "-g",
         "-O2",
         "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only

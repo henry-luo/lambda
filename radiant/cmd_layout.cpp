@@ -22,12 +22,19 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
+}
+
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/document_styler.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
+
+// C API functions from dom_element.cpp
+extern "C" {
+const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 }
 
 #include "../lambda/input/input.h"
@@ -47,7 +54,6 @@ void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio, Document
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool);
@@ -170,34 +176,6 @@ HtmlVersion detect_html_version_from_lambda_element(Element* lambda_html_root, I
     // No DOCTYPE found - assume HTML5 (modern default)
     log_debug("No DOCTYPE found in Lambda Element tree, defaulting to HTML5");
     return HTML5;
-}
-
-/**
- * Extract string attribute from Lambda Element
- * Returns attribute value or nullptr if not found
- */
-const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool) {
-    if (!elem || !attr_name) return nullptr;
-
-    // Create a string key for the attribute
-    String* key_str = (String*)pool_alloc(pool, sizeof(String) + strlen(attr_name) + 1);
-    if (!key_str) return nullptr;
-
-    key_str->len = strlen(attr_name);
-    strcpy(key_str->chars, attr_name);
-
-    Item key;
-    key.item = s2it(key_str);
-
-    // Get the attribute value using elmt_get_typed
-    TypedItem attr_value = elmt_get_typed(elem, key);
-
-    // Check if it's a string
-    if (attr_value.type_id == LMD_TYPE_STRING && attr_value.string) {
-        return attr_value.string->chars;
-    }
-
-    return nullptr;
 }
 
 /**
@@ -480,151 +458,6 @@ const char* extract_inline_css(Element* root) {
     // TODO: Implement style tag extraction
     // For now, return nullptr - external CSS via -c flag will work
     return nullptr;
-}
-
-/**
- * Recursively build DomElement tree from Lambda Element tree
- * Converts HTML parser output (Element) to CSS system format (DomElement)
- * Now includes text nodes, comments, DOCTYPE, and all other node types
- */
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
-    if (!elem || !pool) {
-        log_debug("build_dom_tree_from_element: Invalid arguments\n");
-        return nullptr;
-    }
-
-    // Get element type and tag name
-    TypeElmt* type = (TypeElmt*)elem->type;
-    if (!type) return nullptr;
-
-    const char* tag_name = type->name.str;
-    log_debug("build element: <%s> (parent: %s)", tag_name,
-              parent ? parent->tag_name : "none");
-
-    // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
-    // use case-insensitive comparison for DOCTYPE to handle both !DOCTYPE and !doctype
-    if (strcmp(tag_name, "!--") == 0 ||
-        strcasecmp(tag_name, "!DOCTYPE") == 0 ||
-        strncmp(tag_name, "?", 1) == 0) {
-        return nullptr;  // Skip comments, DOCTYPE, and XML declarations
-    }
-
-    // skip script elements - they should not participate in layout
-    // script elements have display: none by default in browser user-agent stylesheets
-    if (strcasecmp(tag_name, "script") == 0) {
-        return nullptr;  // Skip script elements during DOM tree building
-    }
-
-    // create DomElement
-    DomElement* dom_elem = dom_element_create(pool, tag_name, elem);
-    if (!dom_elem) return nullptr;
-
-    // extract id and class attributes from Lambda Element
-    const char* id_value = extract_element_attribute(elem, "id", pool);
-    if (id_value) {
-        dom_element_set_attribute(dom_elem, "id", id_value);
-    }
-
-    const char* class_value = extract_element_attribute(elem, "class", pool);
-    if (class_value) {
-        // parse multiple classes separated by spaces
-        char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
-        if (class_copy) {
-            strcpy(class_copy, class_value);
-
-            // split by spaces and add each class
-            char* token = strtok(class_copy, " \t\n");
-            while (token) {
-                if (strlen(token) > 0) {
-                    dom_element_add_class(dom_elem, token);
-                }
-                token = strtok(nullptr, " \t\n");
-            }
-        }
-    }
-
-    // extract rowspan and colspan attributes for table cells (td, th)
-    if (strcasecmp(tag_name, "td") == 0 || strcasecmp(tag_name, "th") == 0) {
-        const char* rowspan_value = extract_element_attribute(elem, "rowspan", pool);
-        if (rowspan_value) {
-            dom_element_set_attribute(dom_elem, "rowspan", rowspan_value);
-        }
-
-        const char* colspan_value = extract_element_attribute(elem, "colspan", pool);
-        if (colspan_value) {
-            dom_element_set_attribute(dom_elem, "colspan", colspan_value);
-        }
-    }    // set parent relationship if provided
-    if (parent) {
-        dom_element_append_child(parent, dom_elem);
-    }
-
-    // Process all children - including text nodes, comments, and elements
-    // Elements are Lists, so iterate through items
-
-    log_debug("Processing %lld children for <%s> (dom_elem=%p)", elem->length, tag_name, (void*)dom_elem);
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child_item = elem->items[i];
-        TypeId child_type = get_type_id(child_item);
-        log_debug("  Child %lld: type=%d", i, child_type);
-        if (child_type == LMD_TYPE_ELEMENT) {
-            // element node - recursively build
-            Element* child_elem = (Element*)child_item.pointer;
-            TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
-            const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
-
-            log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
-            DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
-
-            // skip if nullptr (e.g., comments, DOCTYPE were filtered out)
-            if (!child_dom) {
-                log_debug("  Skipped child element: <%s>", child_tag_name);
-                continue;
-            }
-
-            log_debug("  Successfully built child <%s> with parent <%s>. child_dom=%p, child_dom->parent=%p",
-                     child_tag_name, tag_name, (void*)child_dom, (void*)child_dom->parent);
-
-            // The dom_element_append_child was already called in the recursive call,
-            // so the parent-child and sibling relationships are already established correctly.
-            // No manual linking needed!
-
-        } else if (child_type == LMD_TYPE_STRING) {
-            // Text node - create DomText and append manually (no dom_text_append_child function)
-            String* text_str = (String*)child_item.pointer;
-            if (text_str && text_str->len > 0) {
-                DomText* text_node = dom_text_create(pool, text_str->chars);
-                if (text_node) {
-                    text_node->parent = dom_elem;
-
-                    // Add text node using the same append logic as dom_element_append_child
-                    if (!dom_elem->first_child) {
-                        // First child
-                        dom_elem->first_child = text_node;
-                        text_node->prev_sibling = nullptr;
-                        text_node->next_sibling = nullptr;
-                    } else {
-                        // Find last child and append
-                        DomNodeBase* last_child_node = dom_elem->first_child;
-                        while (last_child_node) {
-                            DomNodeBase* next = last_child_node->next_sibling;
-
-                            if (!next) {
-                                // This is the last child, append text node here
-                                last_child_node->next_sibling = text_node;
-                                text_node->prev_sibling = last_child_node;
-                                text_node->next_sibling = nullptr;
-                                break;
-                            }
-                            last_child_node = next;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    return dom_elem;
 }
 
 /**
