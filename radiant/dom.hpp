@@ -34,9 +34,6 @@ extern "C" {
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include <lexbor/html/html.h>
-#include <lexbor/css/css.h>
-#include <lexbor/style/style.h>
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/strbuf.h"

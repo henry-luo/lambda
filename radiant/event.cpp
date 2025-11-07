@@ -295,12 +295,6 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 void event_context_cleanup(EventContext* evcon) {
 }
 
-lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_specificity_t spec, void *ctx) {
-    lxb_dom_element_t *element = lxb_dom_interface_element(node);
-    *(lxb_dom_element_t **)ctx = element;
-    return LXB_STATUS_OK;
-}
-
 // find iframe by name and set new src using selector
 DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
     if (!document || !target_name || !new_src) {

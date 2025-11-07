@@ -2,6 +2,7 @@
 #include "dom_element.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
+#include "../../../radiant/view.hpp"  // For LXB_TAG_* constants
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
@@ -12,8 +13,7 @@
 #include "../../lambda-data.hpp"  // For get_type_id, elmt_get_typed, and proper type definitions
 #include <string.h>
 #include <stdio.h>
-#include <new>  // for placement new
-#include <lexbor/html/html.h>  // For LXB_TAG_* constants
+#include <new>  // For placement new
 
 extern "C" {
     int strcasecmp(const char *s1, const char *s2);

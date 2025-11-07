@@ -109,7 +109,6 @@
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
-        "lexbor/source",
         "mac-deps/rpmalloc-install/include"
     ],
     "libraries": [

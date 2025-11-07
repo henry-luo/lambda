@@ -16,7 +16,7 @@ static int call_strview_to_int(StrView* s) {
 }
 
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
+// void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);

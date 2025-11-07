@@ -138,7 +138,7 @@ void init_text_flow_logging(void);
 void setup_text_flow_log_categories(void);
 
 // CSS @font-face parsing integration
-void parse_font_face_rule(struct LayoutContext* lycon, lxb_css_rule_t* rule);
+void parse_font_face_rule(struct LayoutContext* lycon, void* rule);
 FontFaceDescriptor* create_font_face_descriptor(struct LayoutContext* lycon);
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 
