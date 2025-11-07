@@ -1,7 +1,7 @@
 #ifndef CSS_PARSER_H
 #define CSS_PARSER_H
 
-#include "css_style.h"
+#include "css_style.hpp"
 #include "../../../lib/mempool.h"
 #include <stdint.h>
 #include <stddef.h>

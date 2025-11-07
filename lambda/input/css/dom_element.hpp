@@ -4,9 +4,9 @@
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/strbuf.h"
-#include "css_style.h"
-#include "css_style_node.h"
-#include "dom_node.h"  // Provides DomNodeType enum and utility functions
+#include "css_style.hpp"
+#include "css_style_node.hpp"
+#include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -44,14 +44,16 @@ typedef struct DocumentStyler DocumentStyler;
  * Represents text content between elements
  */
 typedef struct DomText {
+    // Common base fields (must be at same offsets as DomElement/DomComment)
     DomNodeType node_type;       // Always DOM_NODE_TEXT
+    void* parent;                // Parent element (DomElement*)
+    void* first_child;           // Always NULL (text nodes cannot have children)
+    void* next_sibling;          // Next sibling (DomElement*, DomText*, or DomComment*)
+    void* prev_sibling;          // Previous sibling
+
+    // Text-specific fields
     const char* text;            // Text content
     size_t length;               // Text length
-
-    // DOM tree relationships
-    DomElement* parent;          // Parent element
-    void* next_sibling;          // Next sibling (DomElement, DomText, or DomComment)
-    void* prev_sibling;          // Previous sibling
 
     // Memory management
     Pool* pool;                  // Memory pool for allocations
@@ -66,15 +68,17 @@ typedef struct DomText {
  * Represents comments (<!-- -->), DOCTYPE declarations, and XML declarations
  */
 typedef struct DomComment {
+    // Common base fields (must be at same offsets as DomElement/DomText)
     DomNodeType node_type;       // DOM_NODE_COMMENT, DOM_NODE_DOCTYPE, etc.
+    void* parent;                // Parent element (DomElement*, NULL for DOCTYPE at document level)
+    void* first_child;           // Always NULL (comments cannot have children)
+    void* next_sibling;          // Next sibling (DomElement*, DomText*, or DomComment*)
+    void* prev_sibling;          // Previous sibling
+
+    // Comment-specific fields
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
     const char* content;         // Full content/text
     size_t length;               // Content length
-
-    // DOM tree relationships
-    DomElement* parent;          // Parent element (NULL for DOCTYPE at document level)
-    void* next_sibling;          // Next sibling (DomElement, DomText, or DomComment)
-    void* prev_sibling;          // Previous sibling
 
     // Memory management
     Pool* pool;                  // Memory pool for allocations
@@ -125,8 +129,12 @@ typedef struct AttributeStorage {
  * - Parent/child relationships for inheritance
  */
 typedef struct DomElement {
-    // Node type identifier
+    // Common base fields (must be at same offsets as DomText/DomComment)
     DomNodeType node_type;       // Always DOM_NODE_ELEMENT for DomElement
+    void* parent;                // Parent element (DomElement*, NULL at root)
+    void* first_child;           // First child (DomElement*, DomText*, or DomComment*)
+    void* next_sibling;          // Next sibling (DomElement*, DomText*, or DomComment*)
+    void* prev_sibling;          // Previous sibling (DomElement*, DomText*, or DomComment*)
 
     // Basic element information
     Element* native_element;     // Pointer to native Lambda Element
@@ -143,12 +151,6 @@ typedef struct DomElement {
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
     bool needs_style_recompute;  // Flag indicating computed values are stale
-
-    // DOM tree relationships
-    DomElement* parent;          // Parent element (for inheritance)
-    void* first_child;           // First child (DomElement*, DomText*, or DomComment*)
-    void* next_sibling;          // Next sibling (DomElement*, DomText*, or DomComment*)
-    void* prev_sibling;          // Previous sibling (DomElement*, DomText*, or DomComment*)
 
     // Attribute access (for selector matching) - hybrid array/tree storage
     AttributeStorage* attributes;  // Hybrid attribute storage (array < 10, tree >= 10)

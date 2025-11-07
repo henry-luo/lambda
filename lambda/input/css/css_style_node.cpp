@@ -1,5 +1,5 @@
-#include "css_style_node.h"
-#include "css_style.h"
+#include "css_style_node.hpp"
+#include "css_style.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,7 +122,7 @@ CssDeclaration* css_declaration_create(CssPropertyId property_id,
     if (!decl) return NULL;
 
     decl->property_id = property_id;
-    decl->value = value;
+    decl->value = static_cast<CssValue*>(value);
     decl->specificity = specificity;
     decl->origin = origin;
     decl->source_order = 0; // Will be set by caller
@@ -676,7 +676,7 @@ void style_node_print_cascade(StyleNode* node) {
         return;
     }
 
-    const char* prop_name = css_get_property_name(node->base.property_id);
+    const char* prop_name = css_get_property_name(static_cast<CssPropertyId>(node->base.property_id));
     printf("StyleNode for %s (ID: %lu):\n",
            prop_name ? prop_name : "unknown", node->base.property_id);
 
@@ -827,7 +827,7 @@ static bool collect_computed_callback(AvlNode* avl_node, void* context) {
 
 static bool print_cascade_callback(AvlNode* avl_node, void* context) {
     StyleNode* node = (StyleNode*)avl_node->declaration;
-    CssPropertyId property_id = avl_node->property_id;
+    CssPropertyId property_id = static_cast<CssPropertyId>(avl_node->property_id);
     const char* property_name = css_property_get_name(property_id);
 
     printf("    %s: ", property_name ? property_name : "unknown");

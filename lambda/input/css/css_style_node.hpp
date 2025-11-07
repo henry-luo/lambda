@@ -2,7 +2,7 @@
 #define CSS_STYLE_NODE_H
 
 #include "../../../lib/avl_tree.h"
-#include "css_style.h"
+#include "css_style.hpp"
 #include <stdint.h>
 #include <stdbool.h>
 

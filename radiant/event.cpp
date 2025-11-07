@@ -1,9 +1,9 @@
 #include "handler.hpp"
 
 #include "../lib/log.h"
-#include "../lambda/input/css/dom_element.h"
-#include "../lambda/input/css/selector_matcher.h"
-#include "../lambda/input/css/css_parser.h"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/css_parser.hpp"
 Document* show_html_doc(Url *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void to_repaint();

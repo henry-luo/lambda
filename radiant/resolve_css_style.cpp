@@ -904,12 +904,13 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     static const size_t num_inheritable = sizeof(inheritable_props) / sizeof(inheritable_props[0]);
 
     // Get parent's style tree for inheritance
-    StyleTree* parent_tree = (dom_elem->parent && dom_elem->parent->specified_style)
-                             ? dom_elem->parent->specified_style : NULL;
+    DomElement* parent = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
+    StyleTree* parent_tree = (parent && parent->specified_style)
+                             ? parent->specified_style : NULL;
 
     if (parent_tree) {
         log_debug("[Lambda CSS] Checking inheritance from parent <%s>",
-                dom_elem->parent->tag_name);
+                parent->tag_name);
 
         for (size_t i = 0; i < num_inheritable; i++) {
             CssPropertyId prop_id = inheritable_props[i];
@@ -923,7 +924,7 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 
             // Property not set, check parent chain for inherited declaration
             // Walk up the parent chain until we find a declaration
-            DomElement* ancestor = dom_elem->parent;
+            DomElement* ancestor = dom_elem->parent ? static_cast<DomElement*>(dom_elem->parent) : nullptr;
             CssDeclaration* inherited_decl = NULL;
 
             while (ancestor && !inherited_decl) {
@@ -933,7 +934,7 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                         break; // Found it!
                     }
                 }
-                ancestor = ancestor->parent;
+                ancestor = ancestor->parent ? static_cast<DomElement*>(ancestor->parent) : nullptr;
             }
 
             if (inherited_decl && inherited_decl->value) {

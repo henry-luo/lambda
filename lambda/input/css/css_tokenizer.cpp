@@ -1,4 +1,4 @@
-#include "css_tokenizer.h"
+#include "css_tokenizer.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -583,7 +583,7 @@ bool css_is_newline(int c) {
 CSSTokenizer* css_tokenizer_create(Pool* pool) {
     if (!pool) return NULL;
 
-    CSSTokenizer* tokenizer = pool_alloc(pool, sizeof(CSSTokenizer));
+    CSSTokenizer* tokenizer = static_cast<CSSTokenizer*>(pool_alloc(pool, sizeof(CSSTokenizer)));
     if (!tokenizer) return NULL;
 
     tokenizer->pool = pool;
@@ -664,7 +664,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
 
     // Allocate token array (estimate maximum tokens)
     size_t max_tokens = length + 10; // Conservative estimate
-    CssToken* token_array = pool_alloc(tokenizer->pool, sizeof(CssToken) * max_tokens);
+    CssToken* token_array = static_cast<CssToken*>(pool_alloc(tokenizer->pool, sizeof(CssToken) * max_tokens));
     if (!token_array) {
         fprintf(stderr, "[CSS Tokenizer] ERROR: Failed to allocate token array\n");
         return 0;
@@ -898,7 +898,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     token->length = pos - start;
 
                     // Parse number value
-                    char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
+                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
                     if (num_str) {
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
@@ -954,7 +954,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     token->length = pos - start;
 
                     // Parse number value
-                    char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
+                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
                     if (num_str) {
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
@@ -996,7 +996,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     token->length = pos - start;
 
                     // Parse number value
-                    char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
+                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
                     if (num_str) {
                         strncpy(num_str, token->start, number_end - start);
                         num_str[number_end - start] = '\0';
@@ -1189,7 +1189,7 @@ bool css_token_equals_string(const CssToken* token, const char* str) {
 char* css_token_to_string(const CssToken* token, Pool* pool) {
     if (!token || !pool) return NULL;
 
-    char* result = pool_alloc(pool, token->length + 1);
+    char* result = static_cast<char*>(pool_alloc(pool, token->length + 1));
     if (!result) return NULL;
 
     strncpy(result, token->start, token->length);
@@ -1204,7 +1204,7 @@ char* css_token_to_string(const CssToken* token, Pool* pool) {
 CssTokenStream* css_token_stream_create(CssToken* tokens, size_t length, Pool* pool) {
     if (!tokens || !pool) return NULL;
 
-    CssTokenStream* stream = pool_alloc(pool, sizeof(CssTokenStream));
+    CssTokenStream* stream = static_cast<CssTokenStream*>(pool_alloc(pool, sizeof(CssTokenStream)));
     if (!stream) return NULL;
 
     stream->tokens = tokens;

@@ -1,8 +1,8 @@
 #include "layout_table.hpp"
 #include "layout.hpp"
 #include "../lib/log.h"
-#include "../lambda/input/css/dom_element.h"
-#include "../lambda/input/css/css_style_node.h"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 
 // Forward declaration for CSS length resolution
 float resolve_length_value(LayoutContext* lycon, uintptr_t property,

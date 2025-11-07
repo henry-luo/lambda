@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
-#include "dom_element.h"
-#include "css_formatter.h"
-#include "css_style_node.h"
+#include "dom_element.hpp"
+#include "css_formatter.hpp"
+#include "css_style_node.hpp"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
@@ -422,7 +422,7 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
     // Copy attributes from native_element if present
     if (native_element && native_element->type && native_element->data) {
         TypeElmt* elmt_type = (TypeElmt*)native_element->type;
-        ShapeEntry* field = elmt_type->shape;
+        ShapeEntry* field = static_cast<ShapeEntry*>(elmt_type->shape);
 
         // Iterate through all attribute fields
         while (field) {
@@ -968,19 +968,19 @@ bool dom_element_toggle_pseudo_state(DomElement* element, uint32_t pseudo_state)
 // ============================================================================
 
 DomElement* dom_element_get_parent(DomElement* element) {
-    return element ? element->parent : NULL;
+    return element ? static_cast<DomElement*>(element->parent) : NULL;
 }
 
 DomElement* dom_element_get_first_child(DomElement* element) {
-    return element ? element->first_child : NULL;
+    return element ? static_cast<DomElement*>(element->first_child) : NULL;
 }
 
 DomElement* dom_element_get_next_sibling(DomElement* element) {
-    return element ? element->next_sibling : NULL;
+    return element ? static_cast<DomElement*>(element->next_sibling) : NULL;
 }
 
 DomElement* dom_element_get_prev_sibling(DomElement* element) {
-    return element ? element->prev_sibling : NULL;
+    return element ? static_cast<DomElement*>(element->prev_sibling) : NULL;
 }
 
 bool dom_element_append_child(DomElement* parent, DomElement* child) {
@@ -1130,7 +1130,8 @@ bool dom_element_is_first_child(DomElement* element) {
         return false;
     }
 
-    return element->parent->first_child == element;
+    DomElement* parent = static_cast<DomElement*>(element->parent);
+    return parent->first_child == element;
 }
 
 bool dom_element_is_last_child(DomElement* element) {
@@ -1146,7 +1147,8 @@ bool dom_element_is_only_child(DomElement* element) {
         return false;
     }
 
-    return element->parent->first_child == element && element->next_sibling == NULL;
+    DomElement* parent = static_cast<DomElement*>(element->parent);
+    return parent->first_child == element && element->next_sibling == NULL;
 }
 
 int dom_element_get_child_index(DomElement* element) {
@@ -1157,7 +1159,8 @@ int dom_element_get_child_index(DomElement* element) {
     // Count only element children (not text nodes or comments)
     // According to CSS spec, :nth-child() counts only element nodes
     int index = 0;
-    void* sibling = element->parent->first_child;
+    DomElement* parent = static_cast<DomElement*>(element->parent);
+    void* sibling = parent->first_child;
 
     while (sibling && sibling != element) {
         // Only count element nodes for nth-child
@@ -1183,11 +1186,11 @@ int dom_element_count_children(DomElement* element) {
     }
 
     int count = 0;
-    DomElement* child = element->first_child;
+    DomElement* child = static_cast<DomElement*>(element->first_child);
 
     while (child) {
         count++;
-        child = child->next_sibling;
+        child = static_cast<DomElement*>(child->next_sibling);
     }
 
     return count;

@@ -1,4 +1,4 @@
-#include "css_style.h"
+#include "css_style.hpp"
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -629,7 +629,7 @@ static CssProperty* g_property_hash[PROPERTY_HASH_SIZE];
 // Custom property registry
 static CssProperty* g_custom_properties = NULL;
 static int g_custom_property_count = 0;
-static CssPropertyId g_next_custom_id = CSS_PROPERTY_CUSTOM + 1;
+static CssPropertyId g_next_custom_id = static_cast<CssPropertyId>(CSS_PROPERTY_CUSTOM + 1);
 
 // ============================================================================
 // Property Value Validators
@@ -707,7 +707,7 @@ void css_property_system_cleanup(void) {
     g_property_count = 0;
     g_custom_properties = NULL;
     g_custom_property_count = 0;
-    g_next_custom_id = CSS_PROPERTY_CUSTOM + 1;
+    g_next_custom_id = static_cast<CssPropertyId>(CSS_PROPERTY_CUSTOM + 1);
 }
 
 const CssProperty* css_property_get_by_id(CssPropertyId property_id) {
@@ -767,7 +767,7 @@ const CssProperty* css_property_get_by_name(const char* name) {
 
 CssPropertyId css_property_get_id_by_name(const char* name) {
     const CssProperty* prop = css_property_get_by_name(name);
-    return prop ? prop->id : 0;
+    return prop ? prop->id : static_cast<CssPropertyId>(0);
 }
 
 const char* css_get_property_name(CssPropertyId property_id) {
@@ -930,7 +930,7 @@ void* css_property_compute_value(CssPropertyId property_id,
 
 CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
     if (!name || strncmp(name, "--", 2) != 0) {
-        return 0; // Invalid custom property name
+        return static_cast<CssPropertyId>(0); // Invalid custom property name
     }
 
     // Check if already registered
@@ -945,12 +945,13 @@ CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
     }
 
     if (g_custom_property_count >= 100) {
-        return 0; // Too many custom properties
+        return static_cast<CssPropertyId>(0); // Too many custom properties
     }
 
     // Create new custom property
     CssProperty* custom_prop = &g_custom_properties[g_custom_property_count];
-    custom_prop->id = g_next_custom_id++;
+    custom_prop->id = g_next_custom_id;
+    g_next_custom_id = static_cast<CssPropertyId>(static_cast<int>(g_next_custom_id) + 1);
     custom_prop->name = name; // Assume name is already allocated in pool
     custom_prop->type = PROP_TYPE_CUSTOM;
     custom_prop->inheritance = PROP_INHERIT_YES; // Custom properties inherit by default
@@ -968,7 +969,7 @@ CssPropertyId css_property_register_custom(const char* name, Pool* pool) {
 
 CssPropertyId css_property_get_custom_id(const char* name) {
     if (!name || strncmp(name, "--", 2) != 0) {
-        return 0;
+        return static_cast<CssPropertyId>(0);
     }
 
     for (int i = 0; i < g_custom_property_count; i++) {
@@ -977,7 +978,7 @@ CssPropertyId css_property_get_custom_id(const char* name) {
         }
     }
 
-    return 0;
+    return static_cast<CssPropertyId>(0);
 }
 
 bool css_property_is_custom(CssPropertyId property_id) {

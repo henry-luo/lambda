@@ -1,4 +1,4 @@
-#include "css_property_value_parser.h"
+#include "css_property_value_parser.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -487,7 +487,7 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
         return NULL;
     }
 
-    CssValue* value = pool_calloc(parser->pool, sizeof(CssValue));
+    CssValue* value = static_cast<CssValue*>(pool_calloc(parser->pool, sizeof(CssValue)));
     if (!value) {
         return NULL;
     }

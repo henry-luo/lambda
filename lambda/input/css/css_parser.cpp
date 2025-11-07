@@ -12,8 +12,8 @@
  * - Rule parsing with proper token consumption tracking
  */
 
-#include "css_parser.h"
-#include "css_style.h"
+#include "css_parser.hpp"
+#include "css_style.hpp"
 #include "../../../lib/log.h"
 #include <stdlib.h>
 #include <string.h>

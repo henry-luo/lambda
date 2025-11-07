@@ -1,9 +1,9 @@
 #ifndef DOCUMENT_STYLER_H
 #define DOCUMENT_STYLER_H
 
-#include "dom_element.h"
-#include "css_style.h"
-#include "css_parser.h"
+#include "dom_element.hpp"
+#include "css_style.hpp"
+#include "css_parser.hpp"
 #include "../../../lib/mempool.h"
 #include "../../../lib/arraylist.h"
 #include "../../../lib/hashmap.h"

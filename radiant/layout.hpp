@@ -3,8 +3,8 @@
 #pragma once
 #include "view.hpp"
 #include "dom.hpp"
-#include "../lambda/input/css/dom_element.h"
-#include "../lambda/input/css/css_style.h"
+#include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_style.hpp"
 
 // Forward declaration for FloatContext
 struct FloatContext;

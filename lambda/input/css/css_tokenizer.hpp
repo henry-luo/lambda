@@ -2,8 +2,8 @@
 #define CSS_TOKENIZER_H
 
 // Include new CSS system headers
-#include "css_parser.h"
-#include "css_style.h"
+#include "css_parser.hpp"
+#include "css_style.hpp"
 
 #ifdef __cplusplus
 extern "C" {
