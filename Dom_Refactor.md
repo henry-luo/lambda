@@ -99,17 +99,12 @@ typedef struct DomNode {
 
 ### 2. Refactored `DomElement` (Extends `DomNode`)
 
-**File**: `lambda/input/css/dom_element.h`
+**File**: `lambda/input/css/dom_element.hpp` (now uses C++ inheritance)
 
-```c
-typedef struct DomElement {
-    // === DomNode base fields (MUST be first) ===
-    DomNodeType node_type;       // Always DOM_NODE_ELEMENT
-    Pool* pool;                  // Memory pool for allocations
-    DomNode* parent;             // Parent element (for inheritance)
-    void* first_child;           // First child (DomElement*, DomText*, or DomComment*)
-    void* next_sibling;          // Next sibling
-    void* prev_sibling;          // Previous sibling
+```cpp
+struct DomElement : public DomNodeBase {
+    // === DomNodeBase inherited fields ===
+    // node_type, pool, parent, first_child, next_sibling, prev_sibling
 
     // === Element-specific fields ===
     Element* native_element;     // Pointer to native Lambda Element
@@ -270,24 +265,24 @@ DomComment* dom_node_as_comment(DomNode* node) {
 ### Phase 2: Refactor DomElement/DomText/DomComment (Breaking Changes)
 
 **Week 1-2: Restructure Types**
-1. Update `DomElement` in `dom_element.h`:
-   - Add `DomNode` base fields as first members
+1. Update `DomElement` in `dom_element.hpp`:
+   - Use C++ inheritance from `DomNodeBase`
    - Remove redundant `node_type`, `pool`, parent/child fields from old positions
    - Update all size calculations and offsets
 
-2. Update `DomText` in `dom_element.h`:
-   - Add `DomNode` base fields as first members
+2. Update `DomText` in `dom_element.hpp`:
+   - Use C++ inheritance from `DomNodeBase`
    - Remove redundant fields
 
-3. Update `DomComment` in `dom_element.h`:
-   - Add `DomNode` base fields as first members
+3. Update `DomComment` in `dom_element.hpp`:
+   - Use C++ inheritance from `DomNodeBase`
    - Remove redundant fields
 
-4. Update all creation functions in `dom_element.c`:
-   ```c
+4. Update all creation functions in `dom_element.cpp`:
+   ```cpp
    DomElement* dom_element_create(Pool* pool, const char* tag_name, Element* native) {
-       DomElement* elem = (DomElement*)pool_calloc(pool, sizeof(DomElement));
-       elem->node_type = DOM_NODE_ELEMENT;  // Initialize base field
+       void* mem = pool_calloc(pool, sizeof(DomElement));
+       DomElement* elem = new (mem) DomElement();  // Placement new for vtable
        elem->pool = pool;
        // ... rest of initialization
    }

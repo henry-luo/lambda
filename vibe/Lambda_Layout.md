@@ -356,8 +356,8 @@ if (argc >= 2 && strcmp(argv[1], "layout") == 0) {
 #include "../radiant/layout.hpp"
 #include "../radiant/dom.hpp"
 #include "../lambda/input/input.h"
-#include "../lambda/input/css/css_style_node.h"
-#include "../lambda/input/css/dom_element.h"
+#include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 
 typedef struct LayoutOptions {
     const char* input_file;
