@@ -8,7 +8,7 @@
 // DomNode Implementation
 // ============================================================================
 
-const char* DomNode::get_name() const {
+const char* DomNode::name() const {
     // Dispatch based on node type
     switch (node_type) {
         case DOM_NODE_ELEMENT: {
@@ -34,7 +34,7 @@ const char* DomNode::get_name() const {
 // ============================================================================
 
 const char* dom_node_get_name(const DomNode* node) {
-    return node ? node->get_name() : "#null";
+    return node ? node->name() : "#null";
 }
 
 const char* dom_node_get_tag_name(DomNode* node) {
@@ -175,7 +175,7 @@ void dom_node_print(const DomNode* node, int indent) {
 
     for (int i = 0; i < indent; i++) printf("  ");
 
-    const char* name = node->get_name();
+    const char* name = node->name();
     printf("<%s", name);
 
     // Print additional info for elements
