@@ -11,6 +11,8 @@
 extern "C" {
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
 }
 
@@ -115,19 +117,12 @@ float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
 
 // DomNode style resolution function
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
-    // unified resolution for both element types
-    log_debug("resolving style for elment '%s' of type %d", node->name(), node ? (int)node->type() : -1);
-
-    // Both Lexbor and Lambda CSS nodes can use DomElement interface
     if (node && node->is_element()) {
-        // Now both types use the same DOM structure
         DomElement* dom_elem = node->as_element();
-        if (dom_elem && dom_elem->computed_style) {
-            log_debug("resolved lambda css style for: %s", node->name());
-            return;
+        if (dom_elem && dom_elem->specified_style) {
+            // Lambda CSS: use the full implementation from resolve_css_style.cpp
+            resolve_lambda_css_styles(dom_elem, lycon);
         }
-    } else {
-        log_debug("element has no style: %s", node->name());
     }
 }
 
