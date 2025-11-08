@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
-extern "C" {
 #include "../../../lambda/input/css/dom_element.hpp"
+
+extern "C" {
 #include "../../../lib/strbuf.h"
 #include "../../../lib/mempool.h"
 #include "../../../lib/log.h"
@@ -39,7 +40,7 @@ TEST_F(DomElementPrintTest, PrintDivWithId) {
     dom_element_set_attribute(div, "id", "test-id");
 
     // Print the element
-    dom_element_print(div, buffer, 0);
+    div->print(buffer, 0);
 
     // Check the output contains the ID
     const char* result = buffer->str;
@@ -56,7 +57,7 @@ TEST_F(DomElementPrintTest, PrintDivWithClass) {
     dom_element_add_class(div, "test-class");
 
     // Print the element
-    dom_element_print(div, buffer, 0);
+    div->print(buffer, 0);
 
     // Check the output contains the class
     const char* result = buffer->str;
@@ -77,7 +78,7 @@ TEST_F(DomElementPrintTest, PrintNestedElements) {
     ASSERT_TRUE(dom_element_append_child(div, span));
 
     // Print with indentation
-    dom_element_print(div, buffer, 2);
+    div->print(buffer, 2);
 
     // Check output structure
     const char* result = buffer->str;
@@ -94,7 +95,7 @@ TEST_F(DomElementPrintTest, PrintWithIndentation) {
     ASSERT_NE(p, nullptr);
 
     // Print with indentation level 3
-    dom_element_print(p, buffer, 3);
+    p->print(buffer, 3);
 
     // Check that indentation is applied
     const char* result = buffer->str;
@@ -164,7 +165,7 @@ TEST_F(DomElementPrintTest, PrintComplexHTMLDocument) {
     ASSERT_TRUE(dom_element_append_child(html, body));
 
     // Print the entire document
-    dom_element_print(html, buffer, 0);
+    html->print(buffer, 0);
 
     // Check output structure
     const char* result = buffer->str;
@@ -207,7 +208,7 @@ TEST_F(DomElementPrintTest, PrintElementWithMultipleAttributes) {
     dom_element_set_attribute(form, "data-submit-url", "/api/contact");
     dom_element_set_attribute(form, "data-success-message", "Thank you for your message!");
 
-    dom_element_print(form, buffer, 0);
+    form->print(buffer, 0);
 
     const char* result = buffer->str;
     ASSERT_NE(result, nullptr);
@@ -235,7 +236,7 @@ TEST_F(DomElementPrintTest, PrintElementWithPseudoStates) {
     // Set multiple pseudo-states (simulating user interaction)
     input->pseudo_state = PSEUDO_STATE_FOCUS | PSEUDO_STATE_HOVER | PSEUDO_STATE_DISABLED;
 
-    dom_element_print(input, buffer, 0);
+    input->print(buffer, 0);
 
     const char* result = buffer->str;
     ASSERT_NE(result, nullptr);
@@ -302,7 +303,7 @@ TEST_F(DomElementPrintTest, PrintDeeplyNestedStructure) {
     ASSERT_TRUE(dom_element_append_child(container, row));
 
     // Print with indentation
-    dom_element_print(container, buffer, 0);
+    container->print(buffer, 0);
 
     const char* result = buffer->str;
     ASSERT_NE(result, nullptr);
@@ -379,7 +380,7 @@ TEST_F(DomElementPrintTest, PrintFormWithInputElements) {
     ASSERT_TRUE(dom_element_append_child(fieldset, submit_btn));
     ASSERT_TRUE(dom_element_append_child(form, fieldset));
 
-    dom_element_print(form, buffer, 0);
+    form->print(buffer, 0);
 
     const char* result = buffer->str;
     ASSERT_NE(result, nullptr);
@@ -465,7 +466,7 @@ TEST_F(DomElementPrintTest, PrintTableStructure) {
     ASSERT_TRUE(dom_element_append_child(table, thead));
     ASSERT_TRUE(dom_element_append_child(table, tbody));
 
-    dom_element_print(table, buffer, 0);
+    table->print(buffer, 0);
 
     const char* result = buffer->str;
     ASSERT_NE(result, nullptr);

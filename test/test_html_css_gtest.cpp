@@ -3,14 +3,15 @@
 #include <sstream>
 #include <string>
 
-extern "C" {
-#include "../lambda/input/input.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_tokenizer.hpp"
+
+extern "C" {
+#include "../lambda/input/input.h"
 #include "../lib/mempool.h"
 #include "../lib/url.h"
 }

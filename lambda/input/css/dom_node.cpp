@@ -1,12 +1,12 @@
 #include "dom_node.hpp"
 #include "dom_element.hpp"
+#include "css_formatter.hpp"
+#include "css_style_node.hpp"
 #include "../../../lib/log.h"
-#include <stdio.h>
+#include "../../../lib/strbuf.h"
+#include "../../../lib/stringbuf.h"
+#include "../../../lib/string.h"
 #include <string.h>
-
-// ============================================================================
-// DomNode Implementation
-// ============================================================================
 
 const char* DomNode::name() const {
     // Dispatch based on node type
@@ -140,48 +140,315 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
 // Utility Methods Implementation
 // ============================================================================
 
-void DomNode::print(int indent) const {
-    for (int i = 0; i < indent; i++) printf("  ");
+/**
+ * Context for style property printing callback
+ */
+typedef struct {
+    StrBuf* buf;
+    bool* has_props;
+} StylePrintContext;
 
-    const char* node_name = this->name();
-    printf("<%s", node_name);
-
-    // Print additional info for elements
-    if (this->is_element()) {
-        const DomElement* elem = this->as_element();
-        if (elem->id) {
-            printf(" id=\"%s\"", elem->id);
-        }
-        if (elem->class_count > 0) {
-            printf(" class=\"");
-            for (int i = 0; i < elem->class_count; i++) {
-                if (i > 0) printf(" ");
-                printf("%s", elem->class_names[i]);
-            }
-            printf("\"");
-        }
-    } else if (this->is_text()) {
-        const DomText* text = this->as_text();
-        if (text->text && text->length > 0) {
-            // Print truncated text content
-            printf(" \"");
-            size_t max_len = 40;
-            if (text->length <= max_len) {
-                printf("%.*s", (int)text->length, text->text);
-            } else {
-                printf("%.*s...", (int)(max_len - 3), text->text);
-            }
-            printf("\"");
-        }
+/**
+ * Callback function for printing each style property
+ * Called by style_tree_foreach for each property in the style tree
+ */
+static bool print_style_property_callback(StyleNode* node, void* context) {
+    if (!node || !node->winning_decl || !context) {
+        return true;  // continue iteration
     }
 
-    printf(">\n");
+    StylePrintContext* ctx = (StylePrintContext*)context;
+    CssDeclaration* decl = node->winning_decl;
 
-    // Recursively print children
-    const DomNode* child = this->first_child;
-    while (child) {
-        child->print(indent + 1);
-        child = child->next_sibling;
+    if (!decl->value) {
+        return true;  // skip properties without values
+    }
+
+    // Add comma separator if not first property
+    if (*ctx->has_props) {
+        strbuf_append_str(ctx->buf, ", ");
+    }
+
+    // Get property name using the property database
+    const char* prop_name = css_get_property_name(decl->property_id);
+
+    if (!prop_name) {
+        // If no name available, print with property ID for debugging
+        char prop_id_buf[32];
+        snprintf(prop_id_buf, sizeof(prop_id_buf), "property-%d", (int)decl->property_id);
+        strbuf_append_str(ctx->buf, prop_id_buf);
+    } else {
+        // Print property name
+        strbuf_append_str(ctx->buf, prop_name);
+    }
+    strbuf_append_char(ctx->buf, ':');
+
+    // Format the value using the CSS formatter
+    CssValue* val = (CssValue*)decl->value;
+
+    // Create a temporary pool and formatter for value formatting
+    Pool* temp_pool = pool_create();
+    if (temp_pool) {
+        CssFormatter* formatter = css_formatter_create(temp_pool, CSS_FORMAT_COMPACT);
+        if (formatter) {
+            // Format the value
+            css_format_value(formatter, val);
+
+            // Get the formatted string from the formatter's output buffer
+            String* result = stringbuf_to_string(formatter->output);
+            if (result && result->len > 0) {
+                strbuf_append_str(ctx->buf, result->chars);
+            }
+
+            css_formatter_destroy(formatter);
+        }
+        pool_destroy(temp_pool);
+    }
+
+    *ctx->has_props = true;
+    return true;  // continue iteration
+}
+
+void DomNode::print(StrBuf* buf, int indent) const {
+    // If no buffer provided, print to console (legacy behavior)
+    if (!buf) {
+        for (int i = 0; i < indent; i++) printf("  ");
+
+        const char* node_name = this->name();
+        printf("<%s", node_name);
+
+        // Print additional info for elements
+        if (this->is_element()) {
+            const DomElement* elem = this->as_element();
+            if (elem->id) {
+                printf(" id=\"%s\"", elem->id);
+            }
+            if (elem->class_count > 0) {
+                printf(" class=\"");
+                for (int i = 0; i < elem->class_count; i++) {
+                    if (i > 0) printf(" ");
+                    printf("%s", elem->class_names[i]);
+                }
+                printf("\"");
+            }
+        } else if (this->is_text()) {
+            const DomText* text = this->as_text();
+            if (text->text && text->length > 0) {
+                // Print truncated text content
+                printf(" \"");
+                size_t max_len = 40;
+                if (text->length <= max_len) {
+                    printf("%.*s", (int)text->length, text->text);
+                } else {
+                    printf("%.*s...", (int)(max_len - 3), text->text);
+                }
+                printf("\"");
+            }
+        }
+
+        printf(">\n");
+
+        // Recursively print children
+        const DomNode* child = this->first_child;
+        while (child) {
+            child->print(nullptr, indent + 1);
+            child = child->next_sibling;
+        }
+        return;
+    }
+
+    // Buffer-based printing (detailed format from dom_element_print)
+    if (this->is_element()) {
+        const DomElement* element = this->as_element();
+        
+        // Add indentation
+        strbuf_append_char_n(buf, ' ', indent);
+
+        // Print opening tag
+        strbuf_append_char(buf, '<');
+        strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+
+        // Print id attribute first if present
+        if (element->id && element->id[0] != '\0') {
+            strbuf_append_str(buf, " id=\"");
+            strbuf_append_str(buf, element->id);
+            strbuf_append_char(buf, '"');
+        }
+
+        // Print class attribute if present
+        if (element->class_count > 0 && element->class_names) {
+            strbuf_append_str(buf, " class=\"");
+            for (int i = 0; i < element->class_count; i++) {
+                if (i > 0) {
+                    strbuf_append_char(buf, ' ');
+                }
+                strbuf_append_str(buf, element->class_names[i]);
+            }
+            strbuf_append_char(buf, '"');
+        }
+
+        // Print other attributes
+        if (element->attributes) {
+            int attr_count = 0;
+            const char** attr_names = attribute_storage_get_names(element->attributes, &attr_count);
+            if (attr_names) {
+                for (int i = 0; i < attr_count; i++) {
+                    const char* name = attr_names[i];
+                    const char* value = attribute_storage_get(element->attributes, name);
+
+                    // Skip id and class as they're already printed above
+                    if (strcmp(name, "id") != 0 && strcmp(name, "class") != 0 && value) {
+                        strbuf_append_char(buf, ' ');
+                        strbuf_append_str(buf, name);
+                        strbuf_append_str(buf, "=\"");
+                        strbuf_append_str(buf, value);
+                        strbuf_append_char(buf, '"');
+                    }
+                }
+            }
+        }
+
+        // Print pseudo-state information if any (for testing/debugging)
+        if (element->pseudo_state != 0) {
+            strbuf_append_str(buf, " [pseudo:");
+            if (element->pseudo_state & PSEUDO_STATE_HOVER) strbuf_append_str(buf, " hover");
+            if (element->pseudo_state & PSEUDO_STATE_ACTIVE) strbuf_append_str(buf, " active");
+            if (element->pseudo_state & PSEUDO_STATE_FOCUS) strbuf_append_str(buf, " focus");
+            if (element->pseudo_state & PSEUDO_STATE_VISITED) strbuf_append_str(buf, " visited");
+            if (element->pseudo_state & PSEUDO_STATE_CHECKED) strbuf_append_str(buf, " checked");
+            if (element->pseudo_state & PSEUDO_STATE_DISABLED) strbuf_append_str(buf, " disabled");
+            strbuf_append_char(buf, ']');
+        }
+
+        strbuf_append_char(buf, '>');
+
+        // Print specified CSS styles if present
+        if (element->id || element->class_count > 0 || element->specified_style) {
+            int has_text = false;
+            strbuf_append_str(buf, "[");
+
+            // print id
+            if (element->id && element->id[0] != '\0') {
+                strbuf_append_format(buf, "id:'%s'", element->id);
+                has_text = true;
+            }
+
+            // print classes
+            if (element->class_count > 0 && element->class_names) {
+                strbuf_append_str(buf, has_text ? ", classes:" : "classes:");
+                strbuf_append_char(buf, '[');
+                for (int i = 0; i < element->class_count; i++) {
+                    strbuf_append_format(buf, "\"%s\"", element->class_names[i]);
+                    if (i < element->class_count - 1) strbuf_append_char(buf, ',');
+                }
+                strbuf_append_char(buf, ']');
+                has_text = true;
+            }
+
+            // print styles generically using style_tree_foreach
+            if (element->specified_style && element->specified_style->tree) {
+                strbuf_append_str(buf, has_text ? ", styles:{" : "styles:{");
+
+                bool has_props = false;
+                StylePrintContext ctx = { buf, &has_props };
+
+                // Iterate through all properties in the style tree
+                style_tree_foreach(element->specified_style, print_style_property_callback, &ctx);
+
+                strbuf_append_str(buf, "}");
+            }
+
+            strbuf_append_char(buf, ']');
+        }
+
+        // Print children
+        const DomNode* child = this->first_child;
+        bool has_element_children = false;
+
+        // Count and print children
+        while (child) {
+            if (child->is_element()) {
+                // Recursively print child elements with newline before each child
+                has_element_children = true;
+                strbuf_append_char(buf, '\n');
+                child->print(buf, indent + 2);
+            } else if (child->is_text()) {
+                // Print text nodes (skip whitespace-only text nodes)
+                const DomText* text_node = (const DomText*)child;
+
+                if (text_node->text && text_node->length > 0) {
+                    // Check if text node contains only whitespace
+                    bool is_whitespace_only = true;
+                    for (size_t i = 0; i < text_node->length; i++) {
+                        char c = text_node->text[i];
+                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                            is_whitespace_only = false;
+                            break;
+                        }
+                    }
+
+                    if (!is_whitespace_only) {
+                        strbuf_append_str(buf, "\n");
+                        strbuf_append_char_n(buf, ' ', indent + 2);
+                        strbuf_append_str(buf, "\"");
+                        strbuf_append_str_n(buf, text_node->text, text_node->length);
+                        strbuf_append_str(buf, "\"");
+                    }
+                }
+            } else if (child->is_comment()) {
+                // Print comment/DOCTYPE nodes
+                const DomComment* comment_node = (const DomComment*)child;
+                strbuf_append_char(buf, '\n');
+                strbuf_append_char_n(buf, ' ', indent + 2);
+                strbuf_append_str(buf, "<!-- ");
+                if (comment_node->content) {
+                    strbuf_append_str(buf, comment_node->content);
+                }
+                strbuf_append_str(buf, " -->");
+            }
+
+            // Move to next sibling
+            child = child->next_sibling;
+        }
+
+        // Print closing tag
+        // Add newline and indentation before closing tag only if we had element children
+        if (has_element_children) {
+            strbuf_append_char(buf, '\n');
+            strbuf_append_char_n(buf, ' ', indent);
+        }
+        strbuf_append_str(buf, "</");
+        strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+        strbuf_append_char(buf, '>');
+
+        // Add trailing newline only for root element (indent == 0)
+        if (indent == 0) {
+            strbuf_append_char(buf, '\n');
+        }
+    } else if (this->is_text()) {
+        // For standalone text node printing
+        const DomText* text_node = this->as_text();
+        if (text_node->text && text_node->length > 0) {
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "\"");
+            strbuf_append_str_n(buf, text_node->text, text_node->length);
+            strbuf_append_str(buf, "\"");
+            if (indent == 0) {
+                strbuf_append_char(buf, '\n');
+            }
+        }
+    } else if (this->is_comment()) {
+        // For standalone comment/DOCTYPE printing
+        const DomComment* comment_node = this->as_comment();
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "<!-- ");
+        if (comment_node->content) {
+            strbuf_append_str(buf, comment_node->content);
+        }
+        strbuf_append_str(buf, " -->");
+        if (indent == 0) {
+            strbuf_append_char(buf, '\n');
+        }
     }
 }
 
