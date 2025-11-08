@@ -1,11 +1,11 @@
 {
-  "total_files": 15,
-  "generated": 15,
-  "skipped": 0,
+  "total_files": 50,
+  "generated": 20,
+  "skipped": 30,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
-    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
+    "userAgent": "Unknown",
     "viewport": {
       "width": 1200,
       "height": 800,
@@ -14,123 +14,403 @@
   },
   "results": [
     {
-      "category": "box",
-      "file": "baseline_806_float_left.html",
+      "category": "basic",
+      "file": "abspos-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 20,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "abspos-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "abspos-003.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "abspos-004.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "baseline_818_white_space.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 36,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "baseline_819_visibility.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-001.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 30,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-002.htm",
       "success": true,
       "was_skipped": false,
       "node_count": 22,
       "error": null
     },
     {
-      "category": "box",
-      "file": "baseline_813_float_right.html",
+      "category": "basic",
+      "file": "blocks-003.htm",
       "success": true,
       "was_skipped": false,
-      "node_count": 23,
+      "node_count": 22,
       "error": null
     },
     {
-      "category": "box",
-      "file": "baseline_814_clear_float.html",
+      "category": "basic",
+      "file": "blocks-004.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-005.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-006.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-011.htm",
       "success": true,
       "was_skipped": false,
       "node_count": 21,
       "error": null
     },
     {
-      "category": "box",
-      "file": "box_004_borders.html",
+      "category": "basic",
+      "file": "blocks-012.htm",
       "success": true,
       "was_skipped": false,
-      "node_count": 38,
+      "node_count": 21,
       "error": null
     },
     {
-      "category": "box",
-      "file": "box_005_box_sizing.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 31,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_006_text_align.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 48,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_007_vertical_align.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 53,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_008_centering.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 46,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_009_baseline_alignment.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 91,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_010_line_height.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 70,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_011_display_types.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 97,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_012_overflow.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 76,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_013_nested_boxes.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 67,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "clear-001.html",
+      "category": "basic",
+      "file": "blocks-013.htm",
       "success": true,
       "was_skipped": false,
       "node_count": 25,
       "error": null
     },
     {
-      "category": "box",
-      "file": "float-001.html",
+      "category": "basic",
+      "file": "blocks-014.htm",
       "success": true,
       "was_skipped": false,
-      "node_count": 11,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-015.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-016.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 25,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-017.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 35,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-018.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-019.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-020.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-021.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-022.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-025.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 33,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "blocks-026.htm",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "code_001_basic_blocks.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 31,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "color-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 25,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "image_001_basic_layout.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 29,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "image_002_sample_images.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 37,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "inline-block-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "line-height-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 27,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "margin-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "margin-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "margin-collapse-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 34,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "padding-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "padding-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-absolute-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-absolute-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-absolute-003.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-absolute-005.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 29,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-003.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-004.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-005.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-007.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-008.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "position-relative-010.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "quote_001_basic_blockquote.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 27,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "relpos-calcs-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 24,
       "error": null
     }
   ]

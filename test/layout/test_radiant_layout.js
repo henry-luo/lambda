@@ -890,7 +890,9 @@ class RadiantLayoutTester {
      * Test a single HTML file
      */
     async testSingleFile(htmlFile, category) {
-        const testName = path.basename(htmlFile, '.html');
+        // Handle both .html and .htm extensions
+        const ext = htmlFile.endsWith('.htm') && !htmlFile.endsWith('.html') ? '.htm' : '.html';
+        const testName = path.basename(htmlFile, ext);
         const testFileName = path.basename(htmlFile);
         // console.log(`\n🧪 Testing: ${testName}`);
 
@@ -1007,7 +1009,7 @@ class RadiantLayoutTester {
 
         try {
             const files = await fs.readdir(categoryDir);
-            const htmlFiles = files.filter(file => file.endsWith('.html'));
+            const htmlFiles = files.filter(file => file.endsWith('.html') || file.endsWith('.htm'));
 
             if (htmlFiles.length === 0) {
                 console.log(`No HTML files found in ${category}/`);
@@ -1093,7 +1095,7 @@ class RadiantLayoutTester {
             try {
                 const files = await fs.readdir(categoryDir);
                 const matchingFiles = files.filter(file =>
-                    file.endsWith('.html') && file.includes(pattern)
+                    (file.endsWith('.html') || file.endsWith('.htm')) && file.includes(pattern)
                 );
 
                 if (matchingFiles.length > 0) {

@@ -13,7 +13,9 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
     console.log(`🔍 Checking layout extraction for: ${htmlFilePath}`);
 
     // Determine output file path first
-    const baseName = path.basename(htmlFilePath, '.html');
+    // Handle both .html and .htm extensions
+    const ext = htmlFilePath.endsWith('.htm') && !htmlFilePath.endsWith('.html') ? '.htm' : '.html';
+    const baseName = path.basename(htmlFilePath, ext);
     const category = path.basename(path.dirname(htmlFilePath));
     const outputDir = path.join(__dirname, '..', 'reference', category);
     const outputFile = path.join(outputDir, `${baseName}.json`);
@@ -611,7 +613,7 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
         try {
             const files = await fs.readdir(categoryDir);
             const htmlFiles = files
-                .filter(file => file.endsWith('.html'))
+                .filter(file => file.endsWith('.html') || file.endsWith('.htm'))
                 .map(file => ({
                     category: cat,
                     file: file,
@@ -782,7 +784,7 @@ async function main() {
             forceRegenerate = true;
         } else if (arg === '--include-css21') {
             includeCss21 = true;
-        } else if (arg.endsWith('.html')) {
+        } else if (arg.endsWith('.html') || arg.endsWith('.htm')) {
             singleFile = arg;
         } else {
             console.error(`❌ Unknown argument: ${arg}`);
@@ -800,12 +802,16 @@ Options:
   --include-css21         Include css2.1 test suite (excluded by default)
   --help, -h              Show this help message
 
+Arguments:
+  html_file               Path to a single HTML or HTM file to extract (optional)
+
 Examples:
   node extract_browser_references.js                                    # Extract all test files (excludes css2.1)
   node extract_browser_references.js --category baseline                # Extract only baseline tests
   node extract_browser_references.js --include-css21                    # Extract all including css2.1 suite
   node extract_browser_references.js --force                           # Force regenerate all references
-  node extract_browser_references.js ../data/basic/flex_001.html        # Extract single file
+  node extract_browser_references.js ../data/basic/flex_001.html        # Extract single .html file
+  node extract_browser_references.js ../data/css2.1/blocks-001.htm      # Extract single .htm file
 
 Generated files:
   ../reference/<category>/<test_name>.json                  # Individual reference files
@@ -813,6 +819,7 @@ Generated files:
 
 Note: By default, existing reference files are skipped. Use --force to regenerate them.
       The css2.1 test suite is excluded by default due to its size. Use --include-css21 to include it.
+      Both .html and .htm file extensions are supported.
 `);
         process.exit(0);
     }
