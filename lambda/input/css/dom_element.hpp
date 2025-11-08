@@ -556,18 +556,6 @@ bool dom_element_matches_nth_child(DomElement* element, int a, int b);
 // ============================================================================
 
 /**
- * Print element information for debugging
- * @param element Element to print
- */
-void dom_element_print_info(DomElement* element);
-
-/**
- * Print element's style tree for debugging
- * @param element Element to print
- */
-void dom_element_print_styles(DomElement* element);
-
-/**
  * Get element statistics
  * @param element Element to analyze
  * @param specified_count Output: number of specified properties

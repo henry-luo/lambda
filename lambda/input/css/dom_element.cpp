@@ -1274,54 +1274,6 @@ bool dom_element_matches_nth_child(DomElement* element, int a, int b) {
 // Utility Functions
 // ============================================================================
 
-void dom_element_print_info(DomElement* element) {
-    if (!element) {
-        printf("DOM Element: NULL\n");
-        return;
-    }
-
-    printf("DOM Element: <%s", element->tag_name);
-
-    if (element->id) {
-        printf(" id=\"%s\"", element->id);
-    }
-
-    if (element->class_count > 0) {
-        printf(" class=\"");
-        for (int i = 0; i < element->class_count; i++) {
-            printf("%s%s", i > 0 ? " " : "", element->class_names[i]);
-        }
-        printf("\"");
-    }
-
-    printf(">\n");
-    printf("  Style version: %u\n", element->style_version);
-    printf("  Needs recompute: %s\n", element->needs_style_recompute ? "yes" : "no");
-    printf("  Pseudo-state: 0x%08X\n", element->pseudo_state);
-    printf("  Children: %d\n", dom_element_count_child_elements(element));
-}
-
-void dom_element_print_styles(DomElement* element) {
-    if (!element) {
-        printf("DOM Element: NULL\n");
-        return;
-    }
-
-    printf("Specified styles for <%s>:\n", element->tag_name);
-    if (element->specified_style) {
-        style_tree_print(element->specified_style);
-    } else {
-        printf("  (none)\n");
-    }
-
-    printf("\nComputed styles for <%s>:\n", element->tag_name);
-    if (element->computed_style) {
-        style_tree_print(element->computed_style);
-    } else {
-        printf("  (none)\n");
-    }
-}
-
 void dom_element_get_style_stats(DomElement* element,
                                  int* specified_count,
                                  int* computed_count,
