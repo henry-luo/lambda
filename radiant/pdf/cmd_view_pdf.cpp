@@ -5,14 +5,11 @@
  * Uses existing radiant window infrastructure
  */
 
-#include "../radiant/view.hpp"
-#include "../radiant/pdf/pdf_to_view.hpp"
-#include "../lambda/input/input.h"
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "../view.hpp"
+#include "../pdf/pdf_to_view.hpp"
+#include "../../lambda/input/input.h"
+#include "../../lib/log.h"
+#include "../../lib/mempool.h"
 
 // External functions
 void parse_pdf(Input* input, const char* pdf_data); // From input-pdf.cpp

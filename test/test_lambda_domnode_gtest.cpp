@@ -10,7 +10,7 @@ extern "C" {
 #include "../lambda/input/css/dom_element.hpp"
 
 // build_dom_tree_from_element is now exported from dom_element.cpp
-extern "C" DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 
 /**
  * Test DomNodeBase Integration (C++ Inheritance Model)

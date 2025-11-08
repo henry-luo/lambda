@@ -1531,7 +1531,7 @@ const char* dom_comment_get_content(DomComment* comment_node) {
  * Extract string attribute from Lambda Element
  * Returns attribute value or nullptr if not found
  */
-extern "C" const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool) {
+const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool) {
     if (!elem || !attr_name) return nullptr;
 
     // Create a string key for the attribute
@@ -1818,7 +1818,7 @@ void dom_element_print(DomElement* element, StrBuf* buf, int indent) {
  * Converts HTML parser output (Element) to CSS system format (DomElement)
  * Now includes text nodes, comments, DOCTYPE, and all other node types
  */
-extern "C" DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
     if (!elem || !pool) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
         return nullptr;

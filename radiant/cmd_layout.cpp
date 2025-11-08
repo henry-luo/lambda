@@ -16,6 +16,9 @@
  *   --debug              Enable debug output
  */
 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
@@ -30,20 +33,10 @@ extern "C" {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/document_styler.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
-
-// C API functions from dom_element.cpp
-extern "C" {
-const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
-}
-
 #include "../lambda/input/input.h"
 #include "../radiant/dom.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -62,6 +55,8 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
 void dom_element_print(DomElement* element, StrBuf* buf, int indent);
+const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
