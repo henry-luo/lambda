@@ -870,12 +870,12 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
     // get the CSS declaration for this property
     CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
     if (!decl) {
-        log_debug("[Lambda CSS Property] No declaration found for property %d (style_node=%p)", 
+        log_debug("[Lambda CSS Property] No declaration found for property %d (style_node=%p)",
                   prop_id, (void*)style_node);
         return true; // continue iteration
     }
-    
-    log_debug("[Lambda CSS Property] Found declaration for property %d: decl=%p, value=%p", 
+
+    log_debug("[Lambda CSS Property] Found declaration for property %d: decl=%p, value=%p",
               prop_id, (void*)decl, (void*)decl->value);
 
     // resolve this property
@@ -967,15 +967,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
     log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
     if (!decl || !lycon || !lycon->view) {
         log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
-                  (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
+            (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
         return;
     }
     const CssValue* value = decl->value;
-    if (!value) {
-        log_debug("[Lambda CSS Property] No value in declaration");
-        return;
-    }
-    log_debug("[Lambda CSS Property] Processing property %d, value type=%d", prop_id, value->type);
+    if (!value) { log_debug("No value in declaration");  return; }
+    log_debug("[Lambda CSS Property] Processing property %d, %s, value type=%d",
+        prop_id, css_value_by_id(prop_id)->name, value->type);
     int32_t specificity = get_lambda_specificity(decl);
     log_debug("[Lambda CSS Property] Specificity: %d", specificity);
 
@@ -991,7 +989,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->in_line) {
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
-
             Color color_val = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Map keyword to color (e.g., "red", "blue")
@@ -1008,7 +1005,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                              color_val.r, color_val.g, color_val.b, color_val.a, color_val.c);
                 }
             }
-
             if (color_val.c != 0) {
                 span->in_line->color = color_val;
             }
@@ -1262,8 +1258,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
             break;
         }
-
-        // ===== TODO: More property groups to be added =====
 
         // ===== GROUP 2: Box Model Basics =====
 
@@ -2600,126 +2594,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            // CSS border-width shorthand: 1-4 length values
-            // 1 value: all sides
-            // 2 values: top/bottom, left/right
-            // 3 values: top, left/right, bottom
-            // 4 values: top, right, bottom, left
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                // Single value - all sides get same width
-                float width = value->data.length.value;
-
-                // Check specificity for each side before setting
-                if (specificity >= span->bound->border->width.top_specificity) {
-                    span->bound->border->width.top = width;
-                    span->bound->border->width.top_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->width.right_specificity) {
-                    span->bound->border->width.right = width;
-                    span->bound->border->width.right_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->width.bottom_specificity) {
-                    span->bound->border->width.bottom = width;
-                    span->bound->border->width.bottom_specificity = specificity;
-                }
-                if (specificity >= span->bound->border->width.left_specificity) {
-                    span->bound->border->width.left = width;
-                    span->bound->border->width.left_specificity = specificity;
-                }
-                log_debug("[CSS] Border-width (all): %.2f px", width);
-            }
-            else if (value->type == CSS_VALUE_TYPE_LIST) {
-                // Multi-value border-width
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-
-                if (count == 2 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER)) {
-                    // top/bottom, left/right
-                    float vertical = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float horizontal = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-
-                    // Check specificity for each side before setting
-                    if (specificity >= span->bound->border->width.top_specificity) {
-                        span->bound->border->width.top = vertical;
-                        span->bound->border->width.top_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.bottom_specificity) {
-                        span->bound->border->width.bottom = vertical;
-                        span->bound->border->width.bottom_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.left_specificity) {
-                        span->bound->border->width.left = horizontal;
-                        span->bound->border->width.left_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.right_specificity) {
-                        span->bound->border->width.right = horizontal;
-                        span->bound->border->width.right_specificity = specificity;
-                    }
-                    log_debug("[CSS] Border-width (2 values): %.2f %.2f px", vertical, horizontal);
-                }
-                else if (count == 3 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER)) {
-                    // top, left/right, bottom
-                    float top = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float horizontal = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
-
-                    // Check specificity for each side before setting
-                    if (specificity >= span->bound->border->width.top_specificity) {
-                        span->bound->border->width.top = top;
-                        span->bound->border->width.top_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.left_specificity) {
-                        span->bound->border->width.left = horizontal;
-                        span->bound->border->width.left_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.right_specificity) {
-                        span->bound->border->width.right = horizontal;
-                        span->bound->border->width.right_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.bottom_specificity) {
-                        span->bound->border->width.bottom = bottom;
-                        span->bound->border->width.bottom_specificity = specificity;
-                    }
-                    log_debug("[CSS] Border-width (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
-                }
-                else if (count == 4 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER) &&
-                           (values[3]->type == CSS_VALUE_TYPE_LENGTH || values[3]->type == CSS_VALUE_TYPE_NUMBER)) {
-                    // top, right, bottom, left
-                    float top = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float right = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
-                    float left = (values[3]->type == CSS_VALUE_TYPE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
-
-                    // Check specificity for each side before setting
-                    if (specificity >= span->bound->border->width.top_specificity) {
-                        span->bound->border->width.top = top;
-                        span->bound->border->width.top_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.right_specificity) {
-                        span->bound->border->width.right = right;
-                        span->bound->border->width.right_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.bottom_specificity) {
-                        span->bound->border->width.bottom = bottom;
-                        span->bound->border->width.bottom_specificity = specificity;
-                    }
-                    if (specificity >= span->bound->border->width.left_specificity) {
-                        span->bound->border->width.left = left;
-                        span->bound->border->width.left_specificity = specificity;
-                    }
-                    log_debug("[CSS] Border-width (4 values): %.2f %.2f %.2f %.2f px", top, right, bottom, left);
-                    span->bound->border->width.bottom_specificity = specificity;
-                    span->bound->border->width.left_specificity = specificity;
-                    log_debug("[CSS] Border-width (4 values): %.2f %.2f %.2f %.2f px", top, right, bottom, left);
-                }
-            }
+            resolve_spacing_prop(lycon, CSS_PROPERTY_BORDER_WIDTH, value, specificity, &span->bound->border->width);
             break;
+
         }
 
         case CSS_PROPERTY_BORDER_COLOR: {

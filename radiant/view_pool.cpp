@@ -10,7 +10,7 @@ extern "C" {
 }
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
-static const css_data lxb_css_value_data[] = {
+static const css_data css_value_definitions[] = {
     {"_undef", 6, CSS_VALUE__UNDEF},
     {"initial", 7, CSS_VALUE_INITIAL},
     {"inherit", 7, CSS_VALUE_INHERIT},
@@ -413,16 +413,16 @@ static const css_data lxb_css_value_data[] = {
 const css_data* css_value_by_id(PropValue id) {
     // Support both standard and custom value IDs
     if (id < CSS_VALUE__LAST_ENTRY) {
-        return &lxb_css_value_data[id];
+        return &css_value_definitions[id];
     }
     // For custom values beyond CSS_VALUE__LAST_ENTRY, calculate index
     if (id >= CSS_VALUE_CONTAIN && id <= CSS_VALUE_DENSE) {
         size_t custom_index = CSS_VALUE__LAST_ENTRY + (id - CSS_VALUE_CONTAIN);
-        if (custom_index < sizeof(lxb_css_value_data) / sizeof(lxb_css_value_data[0])) {
-            return &lxb_css_value_data[custom_index];
+        if (custom_index < sizeof(css_value_definitions) / sizeof(css_value_definitions[0])) {
+            return &css_value_definitions[custom_index];
         }
     }
-    return NULL;
+    return css_value_definitions; // return _undef for unknown IDs
 }
 
 // hash function for CSS keyword strings (case-insensitive)
@@ -452,7 +452,7 @@ PropValue css_value_by_name(const char* name) {
     if (!name) return CSS_VALUE__UNDEF;
 
     static HashMap* keyword_cache = NULL;
-    static const size_t table_size = sizeof(lxb_css_value_data) / sizeof(lxb_css_value_data[0]);
+    static const size_t table_size = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);
 
     // initialize hashmap on first use
     if (!keyword_cache) {
@@ -463,12 +463,12 @@ PropValue css_value_by_name(const char* name) {
             css_keyword_hash,
             css_keyword_compare,
             NULL,                 // no element free function
-            (void*)lxb_css_value_data  // udata pointing to value table
+            (void*)css_value_definitions  // udata pointing to value table
         );
 
         // populate hashmap with all keywords
         for (size_t i = 0; i < table_size; i++) {
-            const char* keyword = lxb_css_value_data[i].name;
+            const char* keyword = css_value_definitions[i].name;
             hashmap_set(keyword_cache, &keyword);
         }
     }
@@ -479,8 +479,8 @@ PropValue css_value_by_name(const char* name) {
         // find index in table to get the unique value
         const char* found_name = *result;
         for (size_t i = 0; i < table_size; i++) {
-            if (lxb_css_value_data[i].name == found_name) {
-                return lxb_css_value_data[i].unique;
+            if (css_value_definitions[i].name == found_name) {
+                return css_value_definitions[i].unique;
             }
         }
     }
