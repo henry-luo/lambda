@@ -129,17 +129,16 @@ int ui_context_init(UiContext* uicon, bool headless) {
 }
 
 void free_document(Document* doc) {
+    if (!doc) return;
     if (doc->view_tree) {
         view_pool_destroy(doc->view_tree);
         free(doc->view_tree);
     }
-
     // Note: dom_root is pool-allocated and will be freed with the pool
     // No need to explicitly free it here
     if (doc->url) {
         url_destroy(doc->url);
     }
-
     free(doc);
 }
 

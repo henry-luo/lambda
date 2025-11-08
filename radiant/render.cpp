@@ -348,8 +348,12 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
             rect.width -= block->bound->border->width.left + block->bound->border->width.right;
             rect.height -= block->bound->border->width.top + block->bound->border->width.bottom;
         }
-        scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
-            block->content_width, block->content_height, &rdcon->block.clip);
+        if (block->scroller->pane) {
+            scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
+                block->content_width, block->content_height, &rdcon->block.clip);
+        } else {
+            log_error("scroller has no scroll pane");
+        }
     }
 }
 
