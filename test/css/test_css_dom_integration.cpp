@@ -1131,8 +1131,10 @@ TEST_F(DomIntegrationTest, CompleteStyleApplication) {
     EXPECT_NE(dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE), nullptr);
 
     // Print debug info
-    dom_element_print_info(element);
-    dom_element_print_styles(element);
+    StrBuf* buf = strbuf_new();
+    element->print(buf, 0);
+    printf("Element info:\n%s\n", buf->str);
+    strbuf_free(buf);
 }
 
 TEST_F(DomIntegrationTest, SelectorMatcherStatistics) {
