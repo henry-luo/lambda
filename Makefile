@@ -401,14 +401,14 @@ help:
 	@echo "  test-layout              - Run Radiant layout integration tests (all suites)"
 	@echo "                             Uses Radiant engine (Lexbor-based HTML/CSS rendering)"
 	@echo "                             Usage: make test-layout suite=baseline (run specific suite)"
-	@echo "                             Usage: make test-layout test=table_simple (run specific test, .html optional)"
+	@echo "                             Usage: make test-layout test=table_simple (run specific test, .html/.htm optional)"
 	@echo "                             Usage: make test-layout pattern=float (run tests matching pattern)"
 	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
 	@echo "  layout                   - Run Lambda CSS layout integration tests (all suites)"
 	@echo "                             Uses Lambda CSS engine (custom CSS cascade and layout)"
 	@echo "                             Usage: make layout suite=baseline (run specific suite)"
-	@echo "                             Usage: make layout test=table_simple (run specific test, .html optional)"
+	@echo "                             Usage: make layout test=table_simple (run specific test, .html/.htm optional)"
 	@echo "                             Usage: make layout pattern=float (run tests matching pattern)"
 	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
@@ -1503,7 +1503,7 @@ capture-layout:
 
 # test-layout: Run layout tests using Radiant engine (Lexbor-based)
 # Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
-# Note: test parameter now accepts filename with or without .html extension
+# Note: test parameter now accepts filename with or without .html/.htm extension
 # Example: make test-layout test=baseline_301_simple_margin
 test-layout:
 	@echo "🎨 Running Radiant Layout Engine Tests"
@@ -1514,8 +1514,22 @@ test-layout:
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
-				*.html) TEST_FILE="$$TEST_VAR" ;; \
-				*) TEST_FILE="$${TEST_VAR}.html" ;; \
+				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
+				*) \
+					TEST_FILE=""; \
+					for dir in basic baseline css2.1 flex grid; do \
+						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
+							TEST_FILE="$${TEST_VAR}.htm"; \
+							break; \
+						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.html" ]; then \
+							TEST_FILE="$${TEST_VAR}.html"; \
+							break; \
+						fi; \
+					done; \
+					if [ -z "$$TEST_FILE" ]; then \
+						TEST_FILE="$${TEST_VAR}.html"; \
+					fi \
+				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
 			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --test $$TEST_FILE -v; \
@@ -1536,7 +1550,7 @@ test-layout:
 
 # layout: Run layout tests using Lambda CSS engine
 # Usage: make layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
-# Note: test parameter now accepts filename with or without .html extension
+# Note: test parameter now accepts filename with or without .html/.htm extension
 # Example: make layout test=baseline_301_simple_margin
 layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
@@ -1547,8 +1561,22 @@ layout:
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			case "$$TEST_VAR" in \
-				*.html) TEST_FILE="$$TEST_VAR" ;; \
-				*) TEST_FILE="$${TEST_VAR}.html" ;; \
+				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
+				*) \
+					TEST_FILE=""; \
+					for dir in basic baseline css2.1 flex grid; do \
+						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
+							TEST_FILE="$${TEST_VAR}.htm"; \
+							break; \
+						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.html" ]; then \
+							TEST_FILE="$${TEST_VAR}.html"; \
+							break; \
+						fi; \
+					done; \
+					if [ -z "$$TEST_FILE" ]; then \
+						TEST_FILE="$${TEST_VAR}.html"; \
+					fi \
+				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
 			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --test $$TEST_FILE -v; \
