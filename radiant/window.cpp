@@ -272,12 +272,8 @@ int run_layout(const char* html_file) {
     return 0;
 }
 
-int window_main(int argc, char* argv[]) {
-    return window_main_with_file(NULL);
-}
-
 // Internal function that accepts an optional HTML file to display
-int window_main_with_file(const char* html_file) {
+int view_html_in_window(const char* html_file) {
     // Original GUI mode
     log_init_wrapper();
     ui_context_init(&ui_context, false);
@@ -352,4 +348,9 @@ int window_main_with_file(const char* html_file) {
     ui_context_cleanup(&ui_context);
     log_cleanup();
     return 0;
+}
+
+int window_main(int argc, char* argv[]) {
+    // render the default index.html
+    return view_html_in_window(NULL);
 }
