@@ -1263,105 +1263,29 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_WIDTH: {
             log_debug("[CSS] Processing width property");
-            if (!block) break;
-            if (!block->blk) {
-                block->blk = alloc_block_prop(lycon);
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float width = convert_lambda_length_to_px(value, lycon, prop_id);
-                // per CSS spec, negative values for width are invalid and should be ignored
-                if (width < 0.0f) {
-                    log_debug("[CSS] Width: %.2f px (negative, ignored per CSS spec)", width);
-                    break;
-                }
+            // width cannot be negative
+            float width = max(resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value), 0);
+            lycon->block.given_width = width;
+            log_debug("width property: %f, type: %d", lycon->block.given_width, value->type);
+            // Store the raw width value for box-sizing calculations
+            if (block) {
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_width = width;
-                lycon->block.given_width = width;  // CRITICAL: Also set in LayoutContext for layout calculation
-                block->blk->given_width_type = CSS_VALUE_INITIAL; // Mark as explicitly set
-                log_debug("[CSS] Width: %.2f px", width);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for width per CSS spec
-                float width = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (width != 0.0f) {
-                    log_debug("[CSS] Width: unitless %.2f (invalid, only 0 allowed)", width);
-                    break;
-                }
-                block->blk->given_width = 0.0f;
-                lycon->block.given_width = 0.0f;
-                block->blk->given_width_type = CSS_VALUE_INITIAL;
-                log_debug("[CSS] Width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // Calculate percentage width based on parent width
-                float percentage = value->data.percentage.value;
-                // per CSS spec, negative percentages for width are invalid
-                if (percentage < 0.0f) {
-                    log_debug("[CSS] Width: %.2f%% (negative, ignored per CSS spec)", percentage);
-                    break;
-                }
-                // Calculate pixel value from percentage
-                float parent_width = lycon->block.pa_block ? lycon->block.pa_block->content_width : 0;
-                float width = percentage * parent_width / 100.0f;
-                if (width < 0.0f) {
-                    log_debug("[CSS] Width: %.2f%% (calculated %.2f px, negative, ignored)", percentage, width);
-                    break;
-                }
-                block->blk->given_width = width;
-                lycon->block.given_width = width;
-                block->blk->given_width_type = CSS_VALUE__PERCENTAGE;
-                log_debug("[CSS] Width: %.2f%% of parent %.2f px = %.2f px", percentage, parent_width, width);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword
-                log_debug("[CSS] Width: auto");
-                block->blk->given_width_type = CSS_VALUE_AUTO;
-                lycon->block.given_width = -1.0f;  // -1 means auto in LayoutContext
+                block->blk->given_width_type = value->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(value->data.keyword) : 0;;
             }
+            log_debug("[CSS] Width: %.2f px", width);
             break;
         }
 
         case CSS_PROPERTY_HEIGHT: {
             log_debug("[CSS] Processing height property");
-            if (!block) break;
-            if (!block->blk) {
-                block->blk = alloc_block_prop(lycon);
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                log_debug("[CSS] Height before conversion: %.2f, unit: %d", value->data.length.value, value->data.length.unit);
-                float height = convert_lambda_length_to_px(value, lycon, prop_id);
-                log_debug("[CSS] Height after conversion: %.2f px", height);
-                // per CSS spec, negative values for height are invalid and should be ignored
-                if (height < 0.0f) {
-                    log_debug("[CSS] Height: %.2f px (negative, ignored per CSS spec)", height);
-                    break;
-                }
+            float height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, value);
+            lycon->block.given_height = height = isnan(height) ? height : max(height, 0);  // height cannot be negative
+            log_debug("height property: %d", lycon->block.given_height);
+            // store the raw height value for box-sizing calculations
+            if (block) {
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_height = height;
-                lycon->block.given_height = height;  // CRITICAL: Also set in LayoutContext for layout calculation
-                log_debug("[CSS] Height: %.2f px", height);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for height per CSS spec
-                float height = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (height != 0.0f) {
-                    log_debug("[CSS] Height: unitless %.2f (invalid, only 0 allowed)", height);
-                    break;
-                }
-                block->blk->given_height = 0.0f;
-                lycon->block.given_height = 0.0f;
-                log_debug("[CSS] Height: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                // per CSS spec, negative percentages for height are invalid
-                if (percentage < 0.0f) {
-                    log_debug("[CSS] Height: %.2f%% (negative, ignored per CSS spec)", percentage);
-                    break;
-                }
-                log_debug("[CSS] Height: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword
-                log_debug("[CSS] Height: auto");
-                block->blk->given_height = -1.0f; // -1 means auto
-                lycon->block.given_height = -1.0f;  // -1 means auto in LayoutContext
             }
             break;
         }
