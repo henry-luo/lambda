@@ -372,10 +372,15 @@ PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
 // ============================================================================
 
 int32_t get_lambda_specificity(const CssDeclaration* decl) {
-    if (!decl) return 0;
+    if (!decl) {
+        log_debug("[CSS] get_lambda_specificity: decl is NULL");
+        return 0;
+    }
     // Lambda CssSpecificity is a struct with (a, b, c) components
     // Convert to int32_t by packing:
     int32_t specificity = (decl->specificity.ids << 16) | (decl->specificity.classes << 8) | decl->specificity.elements;
+    log_debug("[CSS] decl specificity: ids=%d, classes=%d, elmts=%d => %d",
+        decl->specificity.ids, decl->specificity.classes, decl->specificity.elements, specificity);
     return specificity;
 }
 
@@ -814,7 +819,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     }
     // store value in final spacing struct if specificity is higher
     Margin *trg_margin = is_margin ? (Margin *) trg_spacing : NULL;
-    if (specificity > trg_spacing->top_specificity) {
+    if (specificity >= trg_spacing->top_specificity) {
         trg_spacing->top = sp.top;
         trg_spacing->top_specificity = specificity;
         if (trg_margin) trg_margin->top_type = sp.top_type;
@@ -822,18 +827,18 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     } else {
         log_debug("skipped top spacing update due to lower specificity: %d <= %d", specificity, trg_spacing->top_specificity);
     }
-    if (specificity > trg_spacing->bottom_specificity) {
+    if (specificity >= trg_spacing->bottom_specificity) {
         trg_spacing->bottom = sp.bottom;
         trg_spacing->bottom_specificity = specificity;
         if (trg_margin) trg_margin->bottom_type = sp.bottom_type;
     }
-    if (specificity > trg_spacing->right_specificity) {
+    if (specificity >= trg_spacing->right_specificity) {
         // only margin-left and right support auto value
         trg_spacing->right = sp.right;
         trg_spacing->right_specificity = specificity;
         if (trg_margin) trg_margin->right_type = sp.right_type;
     }
-    if (specificity > trg_spacing->left_specificity) {
+    if (specificity >= trg_spacing->left_specificity) {
         trg_spacing->left = sp.left;
         trg_spacing->left_specificity = specificity;
         if (trg_margin) trg_margin->left_type = sp.left_type;
@@ -850,8 +855,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 static bool resolve_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
 
-    // Get StyleNode from AvlNode->declaration field (not by casting)
-    // AvlNode stores a pointer to StyleNode in its declaration field
+    // Get StyleNode from AvlNode->declaration field
     StyleNode* style_node = (StyleNode*)node->declaration;
 
     // get property ID from node
@@ -862,9 +866,13 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
     // get the CSS declaration for this property
     CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
     if (!decl) {
-        log_debug("[Lambda CSS Property] No declaration found for property %d", prop_id);
+        log_debug("[Lambda CSS Property] No declaration found for property %d (style_node=%p)", 
+                  prop_id, (void*)style_node);
         return true; // continue iteration
     }
+    
+    log_debug("[Lambda CSS Property] Found declaration for property %d: decl=%p, value=%p", 
+              prop_id, (void*)decl, (void*)decl->value);
 
     // resolve this property
     resolve_lambda_css_property(prop_id, decl, lycon);
