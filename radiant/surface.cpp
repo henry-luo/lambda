@@ -21,14 +21,18 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 }
 
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
+    if (uicon->document == NULL || uicon->document->url == NULL) {
+        log_error("Missing URL context for image: %s", img_url);
+        return NULL;
+    }
     Url* abs_url = parse_url(uicon->document->url, img_url);
     if (!abs_url) {
-        printf("Failed to parse URL: %s\n", img_url);
+        log_error("Failed to parse URL: %s", img_url);
         return NULL;
     }
     char* file_path = url_to_local_path(abs_url);
     if (!file_path) {
-        printf("Failed to parse URL: %s\n", img_url);
+        log_error("Invalid local URL: %s", img_url);
         url_destroy(abs_url);
         return NULL;
     }
@@ -42,12 +46,12 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
     if (entry) {
-        printf("Image loaded from cache: %s\n", file_path);
+        log_debug("Image loaded from cache: %s", file_path);
         url_destroy(abs_url);
         return entry->image;
     }
     else {
-        printf("Image not found in cache: %s\n", file_path);
+        log_debug("Image not found in cache: %s", file_path);
     }
 
     ImageSurface *surface;
