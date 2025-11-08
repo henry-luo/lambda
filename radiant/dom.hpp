@@ -61,11 +61,11 @@ typedef struct DomComment DomComment;  // Forward declaration for Lambda CSS DOM
 typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 
 typedef struct {
-    Url* url;                       // document URL
-    DomElement* dom_root;    // Lambda CSS DOM root element (DomNode*)
-    Element* html_root;      // Lambda HTML parser root (for Lambda CSS docs)
-    int html_version;               // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
-    ViewTree* view_tree;
+    Url* url;               // document URL
+    Element* html_root;     // parsed HTML tree in Mark notation 
+    DomElement* dom_root;   // Lambda CSS DOM root element (DomNode*)
+    int html_version;       // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
+    ViewTree* view_tree;    // View tree after layout
     StateStore* state;
 } Document;
 

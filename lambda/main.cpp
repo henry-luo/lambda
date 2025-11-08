@@ -58,8 +58,8 @@ int render_html_to_png(const char* html_file, const char* png_file);
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality);
 
 // PDF viewer functions from radiant (cmd_view_pdf.cpp)
-int view_pdf_in_window(const char* pdf_file);
-int view_html_in_window(const char* html_file);
+extern int view_pdf_in_window(const char* pdf_file);
+extern int view_html_in_window(const char* html_file);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
