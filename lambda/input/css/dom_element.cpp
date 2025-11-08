@@ -11,22 +11,6 @@
 #include "../../../lib/strview.h"
 #include "../../lambda.h"
 #include "../../lambda-data.hpp"  // For get_type_id, elmt_get_typed, and proper type definitions
-#include <string.h>
-#include <stdio.h>
-#include <new>  // For placement new
-
-extern "C" {
-    int strcasecmp(const char *s1, const char *s2);
-}
-
-// Forward declaration for strtok_r (POSIX function)
-#ifndef strtok_r
-extern char *strtok_r(char *str, const char *delim, char **saveptr);
-#endif
-
-// ============================================================================
-// Tag Name to ID Conversion
-// ============================================================================
 
 /**
  * Convert HTML tag name string to Lexbor tag ID
@@ -428,14 +412,12 @@ DomElement* dom_element_create(Pool* pool, const char* tag_name, Element* native
     }
 
     // Allocate raw memory from pool
-    void* mem = pool_calloc(pool, sizeof(DomElement));
-    if (!mem) {
+    DomElement* element = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    if (!element) {
         return NULL;
     }
 
-    // Use placement new to construct DomElement with proper vtable initialization
-    DomElement* element = new (mem) DomElement();
-
+    // Initialize the element (this sets up the base DomNode fields and derived fields)
     if (!dom_element_init(element, pool, tag_name, native_element)) {
         return NULL;
     }
@@ -448,11 +430,15 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
         return false;
     }
 
-    // NOTE: Do NOT use memset here! DomElement inherits from DomNode which has virtual
-    // methods, so it has a vtable pointer that must not be zeroed. pool_calloc already
-    // zeroes the memory, so we just need to set specific fields.
-
+    // NOTE: pool_calloc already zeros the memory, so we just need to initialize specific fields
+    // Initialize base DomNode fields
     element->node_type = DOM_NODE_ELEMENT;
+    element->parent = NULL;
+    element->first_child = NULL;
+    element->next_sibling = NULL;
+    element->prev_sibling = NULL;
+
+    // Initialize DomElement fields
     element->pool = pool;
     element->native_element = native_element;
 
@@ -1358,16 +1344,22 @@ DomText* dom_text_create(Pool* pool, const char* text) {
         return NULL;
     }
 
-    // Allocate raw memory and use placement new for proper vtable initialization
-    void* mem = pool_calloc(pool, sizeof(DomText));
-    if (!mem) {
+    // Allocate raw memory from pool (already zeroed by pool_calloc)
+    DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
+    if (!text_node) {
         return NULL;
     }
 
-    DomText* text_node = new (mem) DomText();
-
+    // Initialize base DomNode fields
     text_node->node_type = DOM_NODE_TEXT;
+    text_node->parent = NULL;
+    text_node->first_child = NULL;
+    text_node->next_sibling = NULL;
+    text_node->prev_sibling = NULL;
+
+    // Initialize DomText fields
     text_node->length = strlen(text);
+    text_node->pool = pool;
 
     // Copy text to pool
     char* text_copy = (char*)pool_alloc(pool, text_node->length + 1);
@@ -1376,11 +1368,6 @@ DomText* dom_text_create(Pool* pool, const char* text) {
     }
     strcpy(text_copy, text);
     text_node->text = text_copy;
-
-    text_node->parent = NULL;
-    text_node->next_sibling = NULL;
-    text_node->prev_sibling = NULL;
-    text_node->pool = pool;
 
     return text_node;
 }
@@ -1423,15 +1410,21 @@ DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* ta
         return NULL;
     }
 
-    // Allocate raw memory and use placement new for proper vtable initialization
-    void* mem = pool_calloc(pool, sizeof(DomComment));
-    if (!mem) {
+    // Allocate raw memory from pool (already zeroed by pool_calloc)
+    DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
+    if (!comment_node) {
         return NULL;
     }
 
-    DomComment* comment_node = new (mem) DomComment(node_type);
-
+    // Initialize base DomNode fields
     comment_node->node_type = node_type;
+    comment_node->parent = NULL;
+    comment_node->first_child = NULL;
+    comment_node->next_sibling = NULL;
+    comment_node->prev_sibling = NULL;
+
+    // Initialize DomComment fields
+    comment_node->pool = pool;
 
     // Copy tag name to pool
     size_t tag_len = strlen(tag_name);
@@ -1455,11 +1448,6 @@ DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* ta
         comment_node->content = "";
         comment_node->length = 0;
     }
-
-    comment_node->parent = NULL;
-    comment_node->next_sibling = NULL;
-    comment_node->prev_sibling = NULL;
-    comment_node->pool = pool;
 
     return comment_node;
 }
@@ -1507,7 +1495,6 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Pool
     return nullptr;
 }
 
-// ============================================================================
 DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
     if (!elem || !pool) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
