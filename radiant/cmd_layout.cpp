@@ -54,7 +54,6 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
-void dom_element_print(DomElement* element, StrBuf* buf, int indent);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
 DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 
@@ -753,7 +752,7 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
     StrBuf* str_buf = strbuf_new();
-    dom_element_print(dom_root, str_buf, 0);
+    dom_root->print(str_buf, 0);
     log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
 
     // Step 8: Create Document structure

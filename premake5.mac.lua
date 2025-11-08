@@ -3216,6 +3216,7 @@ project "test_css_dom_integration"
         "lambda/input/css/css_properties.cpp",
         "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
+        "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
     }
@@ -3327,6 +3328,7 @@ project "test_css_style_application_gtest"
         "lambda/input/css/css_properties.cpp",
         "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
+        "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
     }
@@ -3433,6 +3435,7 @@ project "test_html_css_gtest"
     
     files {
         "test/test_html_css_gtest.cpp",
+        "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
     }
@@ -4061,6 +4064,7 @@ project "test_dom_element_print"
         "test/css/unit/test_dom_element_print.cpp",
         "lib/avl_tree.c",
         "lambda/input/css/dom_element.cpp",
+        "lambda/input/css/dom_node.cpp",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_properties.cpp",
         "lambda/input/css/css_parser.cpp",

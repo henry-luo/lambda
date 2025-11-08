@@ -10,10 +10,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * DOM Element Extension for CSS Styling
  *
@@ -591,84 +587,10 @@ void dom_element_get_style_stats(DomElement* element,
  */
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
 
-/**
- * Print a DOM element and its children to a string buffer
- * @param element Element to print
- * @param buf String buffer to append to
- * @param indent Current indentation level (number of spaces)
- */
-void dom_element_print(DomElement* element, StrBuf* buf, int indent);
-
 // ============================================================================
-// DOM Text Node API
+// DomNode Inline Method Implementations
+// These must be defined after DomElement, DomText, DomComment are complete
 // ============================================================================
-
-/**
- * Create a new DomText node
- * @param pool Memory pool for allocations
- * @param text Text content (will be copied)
- * @return New DomText or NULL on failure
- */
-DomText* dom_text_create(Pool* pool, const char* text);
-
-/**
- * Destroy a DomText node
- * @param text_node Text node to destroy
- */
-void dom_text_destroy(DomText* text_node);
-
-/**
- * Get text content
- * @param text_node Text node
- * @return Text content string
- */
-const char* dom_text_get_content(DomText* text_node);
-
-/**
- * Set text content
- * @param text_node Text node
- * @param text New text content (will be copied)
- * @return true on success, false on failure
- */
-bool dom_text_set_content(DomText* text_node, const char* text);
-
-// ============================================================================
-// DOM Comment/DOCTYPE Node API
-// ============================================================================
-
-/**
- * Create a new DomComment node
- * @param pool Memory pool for allocations
- * @param node_type Type of node (DOM_NODE_COMMENT, DOM_NODE_DOCTYPE, etc.)
- * @param tag_name Node name (e.g., "!--", "!DOCTYPE")
- * @param content Content/text (will be copied)
- * @return New DomComment or NULL on failure
- */
-DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* tag_name, const char* content);
-
-/**
- * Destroy a DomComment node
- * @param comment_node Comment/DOCTYPE node to destroy
- */
-void dom_comment_destroy(DomComment* comment_node);
-
-/**
- * Get comment/DOCTYPE content
- * @param comment_node Comment node
- * @return Content string
- */
-const char* dom_comment_get_content(DomComment* comment_node);
-
-// Note: DOM node type utilities (dom_node_get_type, dom_node_is_element, etc.)
-// are now provided by dom_node.h
-
-#ifdef __cplusplus
-}
-
-// ============================================================================
-// DomNodeBase Inline Method Implementations
-// ============================================================================
-// These must come after the derived class definitions are complete
 
 inline DomElement* DomNode::as_element() {
     return is_element() ? static_cast<DomElement*>(this) : nullptr;
@@ -709,6 +631,5 @@ inline const char* DomNode::get_attribute(const char* attr_name) const {
     const DomElement* elem = as_element();
     return elem ? dom_element_get_attribute(const_cast<DomElement*>(elem), attr_name) : nullptr;
 }
-#endif
 
 #endif // DOM_ELEMENT_H

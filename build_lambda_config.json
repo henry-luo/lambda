@@ -1297,6 +1297,7 @@
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_formatter.cpp",
+                            "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp"
                         ],
@@ -1319,6 +1320,7 @@
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_formatter.cpp",
+                            "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp"
                         ],
@@ -1336,6 +1338,7 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
+                            "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/selector_matcher.cpp"
                         ],
@@ -1415,6 +1418,7 @@
                         "additional_sources": [
                             "lib/avl_tree.c",
                             "lambda/input/css/dom_element.cpp",
+                            "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/css_style_node.cpp",
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_parser.cpp",
