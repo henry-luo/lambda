@@ -799,6 +799,10 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
             log_warn("unexpected spacing value count: %d", value_cnt);
             break;
         }
+    } else {
+        // Single value margin
+        sp.top = resolve_length_value(lycon, property, src_space);
+        sp.top_type = src_space->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(src_space->data.keyword) : 0;
     }
     switch (value_cnt) {
     case 1:
