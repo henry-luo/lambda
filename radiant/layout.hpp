@@ -164,7 +164,7 @@ float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
                                    CssPropertyId prop_id);
 
 // Convert Lambda CSS color to Radiant Color type
-Color convert_lambda_color(const CssValue* value);
+Color resolve_color_value(const CssValue* value);
 Color color_name_to_rgb(CssEnum color_name);
 
 /**

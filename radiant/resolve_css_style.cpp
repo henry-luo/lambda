@@ -78,7 +78,7 @@ float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon, C
     }
 }
 
-Color convert_lambda_color(const CssValue* value) {
+Color resolve_color_value(const CssValue* value) {
     Color result;
     result.r = 0;
     result.g = 0;
@@ -984,7 +984,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->in_line) {
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
-            span->in_line->color = convert_lambda_color(value);
+            span->in_line->color = resolve_color_value(value);
             break;
         }
 
@@ -2250,7 +2250,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color = convert_lambda_color(value);
+                color = resolve_color_value(value);
                 log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
@@ -2444,7 +2444,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->width.left_specificity = specificity;
             }
             else if (border.color) {
-                span->bound->border->left_color = convert_lambda_color(border.color);
+                span->bound->border->left_color = resolve_color_value(border.color);
             }
             break;
         }
@@ -2554,7 +2554,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_COLOR || value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Single value - all sides get same color
-                Color color = convert_lambda_color(value);
+                Color color = resolve_color_value(value);
 
                 // Check specificity for each side before setting
                 if (specificity >= span->bound->border->top_color_specificity) {
@@ -2581,8 +2581,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssValue** values = value->data.list.values;
                 if (count == 2) {
                     // top/bottom, left/right
-                    Color vertical = convert_lambda_color(values[0]);
-                    Color horizontal = convert_lambda_color(values[1]);
+                    Color vertical = resolve_color_value(values[0]);
+                    Color horizontal = resolve_color_value(values[1]);
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->top_color_specificity) {
@@ -2605,9 +2605,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 else if (count == 3) {
                     // top, left/right, bottom
-                    Color top = convert_lambda_color(values[0]);
-                    Color horizontal = convert_lambda_color(values[1]);
-                    Color bottom = convert_lambda_color(values[2]);
+                    Color top = resolve_color_value(values[0]);
+                    Color horizontal = resolve_color_value(values[1]);
+                    Color bottom = resolve_color_value(values[2]);
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->top_color_specificity) {
@@ -2630,10 +2630,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 }
                 else if (count == 4) {
                     // top, right, bottom, left
-                    Color top = convert_lambda_color(values[0]);
-                    Color right = convert_lambda_color(values[1]);
-                    Color bottom = convert_lambda_color(values[2]);
-                    Color left = convert_lambda_color(values[3]);
+                    Color top = resolve_color_value(values[0]);
+                    Color right = resolve_color_value(values[1]);
+                    Color bottom = resolve_color_value(values[2]);
+                    Color left = resolve_color_value(values[3]);
 
                     // Check specificity for each side before setting
                     if (specificity >= span->bound->border->top_color_specificity) {
