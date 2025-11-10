@@ -232,7 +232,68 @@ enum {
     HTM_TAG__LAST_ENTRY         = 0x00c4
 };
 
-enum {
+typedef enum CssEnumGroup {
+    CSS_VALUE_GROUP__UNDEF = 0,
+    CSS_VALUE_GROUP_GLOBAL,              // initial, inherit, unset, revert
+    CSS_VALUE_GROUP_ALIGNMENT,           // flex-start, flex-end, center, space-between, space-around, stretch, baseline
+    CSS_VALUE_GROUP_SIZE,                // auto, min-content, max-content, fit-content
+    CSS_VALUE_GROUP_VERTICAL_ALIGN,      // top, bottom, middle, baseline, text-top, text-bottom, sub, super, alphabetic, etc.
+    CSS_VALUE_GROUP_POSITION_SIDE,       // first, last, top, bottom, left, right
+    CSS_VALUE_GROUP_BORDER_WIDTH,        // thin, medium, thick
+    CSS_VALUE_GROUP_BORDER_STYLE,        // none, hidden, dotted, dashed, solid, double, groove, ridge, inset, outset
+    CSS_VALUE_GROUP_BOX_MODEL,           // content-box, border-box, padding-box
+    CSS_VALUE_GROUP_LOGICAL_SIDE,        // inline-start, inline-end, block-start, block-end
+    CSS_VALUE_GROUP_COLOR,               // currentcolor, transparent, aliceblue, antiquewhite, aqua, etc.
+    CSS_VALUE_GROUP_SYSTEM_COLOR,        // Canvas, CanvasText, LinkText, etc.
+    CSS_VALUE_GROUP_COLOR_FUNCTION,      // rgb, rgba, hsl, hsla, hwb, lab, lch, oklab, oklch, color
+    CSS_VALUE_GROUP_CURSOR,              // hand, pointer, text, wait, progress, grab, grabbing, move
+    CSS_VALUE_GROUP_DIRECTION,           // ltr, rtl
+    CSS_VALUE_GROUP_DISPLAY_OUTSIDE,     // block, inline, run-in
+    CSS_VALUE_GROUP_DISPLAY_INSIDE,      // flow, flow-root, table, flex, grid, ruby
+    CSS_VALUE_GROUP_DISPLAY_LISTITEM,    // list-item
+    CSS_VALUE_GROUP_DISPLAY_INTERNAL,    // table-row-group, table-header-group, table-footer-group, table-row, table-cell, etc.
+    CSS_VALUE_GROUP_DISPLAY_BOX,         // contents, none
+    CSS_VALUE_GROUP_DISPLAY_LEGACY,      // inline-block, inline-table, inline-flex, inline-grid
+    CSS_VALUE_GROUP_FLEX_DIRECTION,      // row, row-reverse, column, column-reverse
+    CSS_VALUE_GROUP_FLEX_WRAP,           // nowrap, wrap, wrap-reverse
+    CSS_VALUE_GROUP_FLEX_JUSTIFY,        // space-evenly (extends alignment group)
+    CSS_VALUE_GROUP_GRID_AUTO_FLOW,      // row, column, dense
+    CSS_VALUE_GROUP_FONT_FAMILY,         // serif, sans-serif, cursive, fantasy, monospace, system-ui, emoji, math, fangsong, ui-*
+    CSS_VALUE_GROUP_FONT_SIZE,           // xx-small, x-small, small, medium, large, x-large, xx-large, xxx-large, larger, smaller
+    CSS_VALUE_GROUP_FONT_STRETCH,        // normal, ultra-condensed, extra-condensed, condensed, semi-condensed, semi-expanded, expanded, extra-expanded, ultra-expanded
+    CSS_VALUE_GROUP_FONT_STYLE,          // normal, italic, oblique
+    CSS_VALUE_GROUP_FONT_WEIGHT,         // normal, bold, bolder, lighter
+    CSS_VALUE_GROUP_LINE_BREAK,          // auto, loose, normal, strict, anywhere
+    CSS_VALUE_GROUP_OVERFLOW,            // visible, hidden, clip, scroll, auto
+    CSS_VALUE_GROUP_OVERFLOW_WRAP,       // normal, break-word, anywhere
+    CSS_VALUE_GROUP_POSITION,            // static, relative, absolute, sticky, fixed
+    CSS_VALUE_GROUP_TEXT_ALIGN,          // left, right, center, justify, start, end, match-parent, justify-all
+    CSS_VALUE_GROUP_TEXT_DECO_LINE,      // none, underline, overline, line-through, blink
+    CSS_VALUE_GROUP_TEXT_DECO_STYLE,     // solid, double, dotted, dashed, wavy
+    CSS_VALUE_GROUP_TEXT_JUSTIFY,        // auto, inter-word, inter-character, none
+    CSS_VALUE_GROUP_TEXT_ORIENTATION,    // mixed, upright, sideways
+    CSS_VALUE_GROUP_TEXT_OVERFLOW,       // clip, ellipsis
+    CSS_VALUE_GROUP_TEXT_TRANSFORM,      // none, capitalize, uppercase, lowercase, full-width, full-size-kana
+    CSS_VALUE_GROUP_UNICODE_BIDI,        // normal, embed, isolate, bidi-override, isolate-override, plaintext
+    CSS_VALUE_GROUP_WHITE_SPACE,         // normal, pre, nowrap, pre-wrap, break-spaces, pre-line
+    CSS_VALUE_GROUP_WORD_BREAK,          // normal, break-all, keep-all, break-word
+    CSS_VALUE_GROUP_FLOAT,               // left, right, none
+    CSS_VALUE_GROUP_CLEAR,               // left, right, both, none
+    CSS_VALUE_GROUP_WRITING_MODE,        // horizontal-tb, vertical-rl, vertical-lr, sideways-rl, sideways-lr
+    CSS_VALUE_GROUP_LIST_STYLE_TYPE,     // disc, circle, square, decimal, lower-roman, upper-roman, lower-alpha, upper-alpha, none
+    CSS_VALUE_GROUP_BGROUND_SIZE,        // auto, contain, cover
+    CSS_VALUE_GROUP_BGROUND_ATTACHMENT,  // scroll, fixed, local
+    CSS_VALUE_GROUP_BGROUND_CLIP,        // border-box, padding-box, content-box
+    CSS_VALUE_GROUP_BGROUND_BLEND,       // multiply, overlay, normal
+    CSS_VALUE_GROUP_BGROUND_REPEAT,      // repeat, no-repeat, round, space
+    CSS_VALUE_GROUP_TABLE_LAYOUT,        // auto, fixed
+    CSS_VALUE_GROUP_BORDER_COLLAPSE,     // collapse, separate
+    CSS_VALUE_GROUP_EMPTY_CELLS,         // show, hide
+    CSS_VALUE_GROUP_SPECIAL_TYPE,        // _length, _percentage, _number, _integer, _angle
+    CSS_VALUE_GROUP_MISC,                // other values that don't fit clear categories
+} CssEnumGroup;
+
+typedef enum CssEnum : int16_t {
     CSS_VALUE__UNDEF               = 0x0000,
     CSS_VALUE_INITIAL              = 0x0001,
     CSS_VALUE_INHERIT              = 0x0002,
@@ -644,10 +705,11 @@ enum {
     CSS_VALUE_FR                   = 0x0193,
     CSS_VALUE_DENSE                = 0x0194,
     CSS_VALUE__LAST_ENTRY          = 0x0195
-};
+} CssEnum;
 
-#define RDT_DISPLAY_TEXT                (CSS_VALUE__LAST_ENTRY + 10)
-#define RDT_DISPLAY_REPLACED            (CSS_VALUE__LAST_ENTRY + 11)
+// radiant specific CSS display values
+#define RDT_DISPLAY_TEXT                (CSS_VALUE__LAST_ENTRY + 1)
+#define RDT_DISPLAY_REPLACED            (CSS_VALUE__LAST_ENTRY + 2)
 
 // Enum definitions needed by flex system
 typedef enum { VIS_VISIBLE, VIS_HIDDEN, VIS_COLLAPSE } Visibility;
@@ -662,7 +724,7 @@ typedef unsigned char lxb_char_t;
 
 // Length/percentage value structure (replacing lexbor's lxb_css_value_length_percentage_t)
 typedef struct {
-    PropValue type;  // CSS_VALUE__LENGTH or CSS_VALUE__PERCENTAGE
+    CssEnum type;  // CSS_VALUE__LENGTH or CSS_VALUE__PERCENTAGE
     union {
         struct {
             float num;
@@ -677,13 +739,13 @@ typedef struct {
 
 // Color value structure stub
 typedef struct {
-    PropValue type;
+    CssEnum type;
     uint32_t rgba;
 } lxb_css_value_color_t;
 
 // Line height property structure (replacing lexbor's lxb_css_property_line_height_t)
 typedef struct {
-    PropValue type;  // CSS_VALUE__NUMBER, CSS_VALUE__LENGTH, CSS_VALUE__PERCENTAGE, CSS_VALUE_NORMAL
+    CssEnum type;  // CSS_VALUE__NUMBER, CSS_VALUE__LENGTH, CSS_VALUE__PERCENTAGE, CSS_VALUE_NORMAL
     union {
         struct {
             float num;
@@ -703,14 +765,15 @@ typedef struct {
 #include "event.hpp"
 #include "flex.hpp"
 
-typedef struct {
+typedef struct CssEnumInfo{
     const char *name;
     size_t     length;
-    PropValue  unique;
-} css_data;
+    CssEnum  unique;
+    CssEnumGroup group;
+} CssEnumInfo;
 
-const css_data* css_value_by_id(PropValue id);
-PropValue css_value_by_name(const char* name);
+const CssEnumInfo* css_value_by_id(CssEnum id);
+CssEnum css_value_by_name(const char* name);
 
 // static inline float pack_as_nan(int value) {
 //     uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
@@ -800,16 +863,16 @@ typedef struct View View;
 typedef struct ViewBlock ViewBlock;
 
 typedef struct {
-    PropValue outer;
-    PropValue inner;
+    CssEnum outer;
+    CssEnum inner;
 } DisplayValue;
 
 typedef struct {
     char* family;  // font family name
     float font_size;  // font size in pixels, scaled by pixel_ratio
-    PropValue font_style;
-    PropValue font_weight;
-    PropValue text_deco; // CSS text decoration
+    CssEnum font_style;
+    CssEnum font_weight;
+    CssEnum text_deco; // CSS text decoration
     // derived font properties
     float space_width;  // width of a space character of the current font
     float ascender;    // font ascender in pixels
@@ -819,9 +882,9 @@ typedef struct {
 } FontProp;
 
 typedef struct {
-    PropValue cursor;
+    CssEnum cursor;
     Color color;
-    PropValue vertical_align;
+    CssEnum vertical_align;
     float opacity;  // CSS opacity value (0.0 to 1.0)
 } InlineProp;
 
@@ -831,7 +894,7 @@ typedef struct Spacing {
 } Spacing;
 
 typedef struct Margin : Spacing {
-    PropValue top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
+    CssEnum top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
 } Margin;
 
 typedef struct Corner {
@@ -841,7 +904,7 @@ typedef struct Corner {
 
 typedef struct {
     Spacing width;
-    PropValue top_style, right_style, bottom_style, left_style;
+    CssEnum top_style, right_style, bottom_style, left_style;
     Color top_color, right_color, bottom_color, left_color;
     int32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
     Corner radius;
@@ -862,32 +925,32 @@ typedef struct {
 } BoundaryProp;
 
 typedef struct {
-    PropValue position;     // static, relative, absolute, fixed, sticky
+    CssEnum position;     // static, relative, absolute, fixed, sticky
     float top, right, bottom, left;  // offset values in pixels
     int z_index;            // stacking order
     bool has_top, has_right, has_bottom, has_left;  // which offsets are set
-    PropValue clear;        // clear property for floats
-    PropValue float_prop;   // float property (left, right, none)
+    CssEnum clear;        // clear property for floats
+    CssEnum float_prop;   // float property (left, right, none)
     ViewBlock* first_abs_child;   // first child absolute/fixed positioned view
     ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
 } PositionProp;
 
 typedef struct {
-    PropValue text_align;
+    CssEnum text_align;
     lxb_css_property_line_height_t *line_height;
     float text_indent;  // can be negative
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
-    PropValue list_style_type;
-    PropValue list_style_position;  // inside, outside
+    CssEnum list_style_type;
+    CssEnum list_style_position;  // inside, outside
     char* list_style_image;         // URL or none
     char* counter_reset;            // counter names and values
     char* counter_increment;        // counter names and values
-    PropValue box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
-    PropValue white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
+    CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
+    CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
-    PropValue given_width_type;
+    CssEnum given_width_type;
     // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 
@@ -1044,7 +1107,7 @@ typedef struct {
 } ScrollPane;
 
 typedef struct {
-    PropValue overflow_x, overflow_y;
+    CssEnum overflow_x, overflow_y;
     ScrollPane* pane;
     bool has_hz_overflow, has_vt_overflow;
     bool has_hz_scroll, has_vt_scroll;
@@ -1214,7 +1277,7 @@ typedef struct {
 } BlockBlot;
 
 typedef struct {
-    PropValue list_style_type;
+    CssEnum list_style_type;
     int item_index;
 } ListBlot;
 
