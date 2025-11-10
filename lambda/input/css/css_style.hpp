@@ -633,11 +633,8 @@ typedef struct CssValue {
         // URL value
         const char* url;
 
-        // Keyword value
-        const char* keyword;
-
-        // keyword enum value
-        CssEnum enum_id;
+        // Keyword value (enum-based)
+        CssEnum keyword;
 
         // Color hex value (legacy support)
         const char* color_hex;

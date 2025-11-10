@@ -885,7 +885,6 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
             // Determine value type from token
             if (tokens[i].type == CSS_TOKEN_IDENT) {
-                value->type = CSS_VALUE_TYPE_KEYWORD;
                 const char* token_val = NULL;
                 if (tokens[i].value) {
                     token_val = tokens[i].value;
@@ -899,6 +898,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 }
 
                 // Strip quotes from keyword (font names can be quoted)
+                const char* keyword_to_lookup = token_val;
                 if (token_val) {
                     size_t len = strlen(token_val);
                     if (len >= 2 && ((token_val[0] == '\'' && token_val[len-1] == '\'') ||
@@ -908,12 +908,23 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                         if (unquoted) {
                             memcpy(unquoted, token_val + 1, len - 2);
                             unquoted[len - 2] = '\0';
-                            value->data.keyword = unquoted;
-                        } else {
-                            value->data.keyword = pool_strdup(pool, token_val);
+                            keyword_to_lookup = unquoted;
                         }
+                    }
+                }
+
+                // Lookup keyword enum
+                if (keyword_to_lookup) {
+                    CssEnum enum_id = css_enum_by_name(keyword_to_lookup);
+                    if (enum_id != CSS_VALUE__UNDEF) {
+                        // Known keyword
+                        value->type = CSS_VALUE_TYPE_KEYWORD;
+                        value->data.keyword = enum_id;
                     } else {
-                        value->data.keyword = pool_strdup(pool, token_val);
+                        // Unknown keyword - store as custom property
+                        value->type = CSS_VALUE_TYPE_CUSTOM;
+                        value->data.custom_property.name = pool_strdup(pool, keyword_to_lookup);
+                        value->data.custom_property.fallback = NULL;
                     }
                 }
             } else if (tokens[i].type == CSS_TOKEN_STRING) {
@@ -996,15 +1007,28 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                     value->data.color.data.rgba.a = 255;
                 }
             } else {
-                value->type = CSS_VALUE_TYPE_KEYWORD;
+                // Not a hex color - treat as keyword
+                const char* keyword_val = NULL;
                 if (tokens[i].value) {
-                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                    keyword_val = tokens[i].value;
                 } else if (tokens[i].start && tokens[i].length > 0) {
                     char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
                     if (keyword_buf) {
                         memcpy(keyword_buf, tokens[i].start, tokens[i].length);
                         keyword_buf[tokens[i].length] = '\0';
-                        value->data.keyword = keyword_buf;
+                        keyword_val = keyword_buf;
+                    }
+                }
+
+                if (keyword_val) {
+                    CssEnum enum_id = css_enum_by_name(keyword_val);
+                    if (enum_id != CSS_VALUE__UNDEF) {
+                        value->type = CSS_VALUE_TYPE_KEYWORD;
+                        value->data.keyword = enum_id;
+                    } else {
+                        value->type = CSS_VALUE_TYPE_CUSTOM;
+                        value->data.custom_property.name = pool_strdup(pool, keyword_val);
+                        value->data.custom_property.fallback = NULL;
                     }
                 }
             }
@@ -1033,7 +1057,6 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             list_value->data.list.values[list_idx++] = value;
 
             if (tokens[i].type == CSS_TOKEN_IDENT) {
-                value->type = CSS_VALUE_TYPE_KEYWORD;
                 const char* token_val = NULL;
                 if (tokens[i].value) {
                     token_val = tokens[i].value;
@@ -1047,6 +1070,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 }
 
                 // Strip quotes from keyword (font names can be quoted)
+                const char* keyword_to_lookup = token_val;
                 if (token_val) {
                     size_t len = strlen(token_val);
                     if (len >= 2 && ((token_val[0] == '\'' && token_val[len-1] == '\'') ||
@@ -1056,12 +1080,21 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                         if (unquoted) {
                             memcpy(unquoted, token_val + 1, len - 2);
                             unquoted[len - 2] = '\0';
-                            value->data.keyword = unquoted;
-                        } else {
-                            value->data.keyword = pool_strdup(pool, token_val);
+                            keyword_to_lookup = unquoted;
                         }
+                    }
+                }
+
+                // Lookup keyword enum
+                if (keyword_to_lookup) {
+                    CssEnum enum_id = css_enum_by_name(keyword_to_lookup);
+                    if (enum_id != CSS_VALUE__UNDEF) {
+                        value->type = CSS_VALUE_TYPE_KEYWORD;
+                        value->data.keyword = enum_id;
                     } else {
-                        value->data.keyword = pool_strdup(pool, token_val);
+                        value->type = CSS_VALUE_TYPE_CUSTOM;
+                        value->data.custom_property.name = pool_strdup(pool, keyword_to_lookup);
+                        value->data.custom_property.fallback = NULL;
                     }
                 }
             } else if (tokens[i].type == CSS_TOKEN_STRING) {
@@ -1144,15 +1177,28 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                     value->data.color.data.rgba.a = 255;
                 }
             } else {
-                value->type = CSS_VALUE_TYPE_KEYWORD;
+                // Not a hex color - treat as keyword
+                const char* keyword_val = NULL;
                 if (tokens[i].value) {
-                    value->data.keyword = pool_strdup(pool, tokens[i].value);
+                    keyword_val = tokens[i].value;
                 } else if (tokens[i].start && tokens[i].length > 0) {
                     char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
                     if (keyword_buf) {
                         memcpy(keyword_buf, tokens[i].start, tokens[i].length);
                         keyword_buf[tokens[i].length] = '\0';
-                        value->data.keyword = keyword_buf;
+                        keyword_val = keyword_buf;
+                    }
+                }
+
+                if (keyword_val) {
+                    CssEnum enum_id = css_enum_by_name(keyword_val);
+                    if (enum_id != CSS_VALUE__UNDEF) {
+                        value->type = CSS_VALUE_TYPE_KEYWORD;
+                        value->data.keyword = enum_id;
+                    } else {
+                        value->type = CSS_VALUE_TYPE_CUSTOM;
+                        value->data.custom_property.name = pool_strdup(pool, keyword_val);
+                        value->data.custom_property.fallback = NULL;
                     }
                 }
             }

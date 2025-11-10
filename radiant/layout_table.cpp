@@ -63,11 +63,11 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
 
             if (collapse_decl && collapse_decl->value) {
                 CssValue* val = (CssValue*)collapse_decl->value;
-                if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword) {
-                    if (strcmp(val->data.keyword, "collapse") == 0) {
+                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                    if (val->data.keyword == CSS_VALUE_COLLAPSE || val->data.keyword == CSS_VALUE_COLLAPSE_TABLE) {
                         table->border_collapse = true;
                         log_debug("Table border-collapse: collapse (true)");
-                    } else if (strcmp(val->data.keyword, "separate") == 0) {
+                    } else if (val->data.keyword == CSS_VALUE_SEPARATE) {
                         table->border_collapse = false;
                         log_debug("Table border-collapse: separate (false)");
                     }
@@ -210,19 +210,19 @@ static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
                 CSS_PROPERTY_VERTICAL_ALIGN);
 
             if (valign_decl && valign_decl->value && valign_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                const char* valign_keyword = valign_decl->value->data.keyword;
+                CssEnum valign_keyword = valign_decl->value->data.keyword;
 
                 // Map CSS vertical-align keywords to cell enum
-                if (strcmp(valign_keyword, "top") == 0) {
+                if (valign_keyword == CSS_VALUE_TOP) {
                     cell->vertical_align = ViewTableCell::CELL_VALIGN_TOP;
                     log_debug("Cell vertical-align: top");
-                } else if (strcmp(valign_keyword, "middle") == 0) {
+                } else if (valign_keyword == CSS_VALUE_MIDDLE) {
                     cell->vertical_align = ViewTableCell::CELL_VALIGN_MIDDLE;
                     log_debug("Cell vertical-align: middle");
-                } else if (strcmp(valign_keyword, "bottom") == 0) {
+                } else if (valign_keyword == CSS_VALUE_BOTTOM) {
                     cell->vertical_align = ViewTableCell::CELL_VALIGN_BOTTOM;
                     log_debug("Cell vertical-align: bottom");
-                } else if (strcmp(valign_keyword, "baseline") == 0) {
+                } else if (valign_keyword == CSS_VALUE_BASELINE) {
                     cell->vertical_align = ViewTableCell::CELL_VALIGN_BASELINE;
                     log_debug("Cell vertical-align: baseline");
                 }

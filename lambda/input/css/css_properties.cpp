@@ -599,9 +599,16 @@ CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool)
         return prop;
     }
 
-    // Fallback: store as keyword
-    prop->value->type = CSS_VALUE_TYPE_KEYWORD;
-    prop->value->data.keyword = pool_strdup(pool, value);
+    // Fallback: lookup keyword and store enum, or store as custom
+    CssEnum enum_id = css_enum_by_name(value);
+    if (enum_id != CSS_VALUE__UNDEF) {
+        prop->value->type = CSS_VALUE_TYPE_KEYWORD;
+        prop->value->data.keyword = enum_id;
+    } else {
+        prop->value->type = CSS_VALUE_TYPE_CUSTOM;
+        prop->value->data.custom_property.name = pool_strdup(pool, value);
+        prop->value->data.custom_property.fallback = NULL;
+    }
 
     return prop;
 }void css_property_free(CSSProperty* property) {

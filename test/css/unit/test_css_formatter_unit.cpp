@@ -58,7 +58,7 @@ protected:
     CssValue* CreateKeywordValue(const char* keyword) {
         CssValue* value = (CssValue*)pool_alloc(pool.get(), sizeof(CssValue));
         value->type = CSS_VALUE_TYPE_KEYWORD;
-        value->data.keyword = keyword;
+        value->data.keyword = css_enum_by_name(keyword);
         return value;
     }
 
@@ -297,7 +297,7 @@ TEST_F(CssFormatterUnitTest, FormatStylesheet_SingleRule) {
 
     ASSERT_NE(result, nullptr);
     // Should contain the CSS rule content
-    EXPECT_GT(strlen(result), 0);
+    EXPECT_GT(strlen(result), 0u);
     EXPECT_TRUE(strstr(result, "div") != nullptr);
     EXPECT_TRUE(strstr(result, "color") != nullptr);
 }
@@ -310,7 +310,7 @@ TEST_F(CssFormatterUnitTest, FormatStylesheet_MultipleRules) {
 
     ASSERT_NE(result, nullptr);
     // Should contain multiple CSS rules
-    EXPECT_GT(strlen(result), 0);
+    EXPECT_GT(strlen(result), 0u);
     EXPECT_TRUE(strstr(result, "div") != nullptr);
     EXPECT_TRUE(strstr(result, "color") != nullptr);
     EXPECT_TRUE(strstr(result, "p") != nullptr || strstr(result, "margin") != nullptr);
@@ -343,7 +343,7 @@ TEST_F(CssFormatterUnitTest, StylesheetToString_DefaultCompact) {
 
     ASSERT_NE(result, nullptr);
     // Should produce some output
-    EXPECT_GT(strlen(result), 0);
+    EXPECT_GT(strlen(result), 0u);
 }
 
 TEST_F(CssFormatterUnitTest, StylesheetToString_WithStyle) {
@@ -352,7 +352,7 @@ TEST_F(CssFormatterUnitTest, StylesheetToString_WithStyle) {
     const char* result = css_stylesheet_to_string_styled(stylesheet, pool.get(), CSS_FORMAT_EXPANDED);
 
     ASSERT_NE(result, nullptr);
-    EXPECT_GT(strlen(result), 0);
+    EXPECT_GT(strlen(result), 0u);
 }
 
 TEST_F(CssFormatterUnitTest, StylesheetToString_NullStylesheet) {
@@ -381,7 +381,7 @@ TEST_F(CssFormatterUnitTest, FormatRule_Simple) {
     const char* result = css_format_rule(formatter, stylesheet->rules[0]);
 
     ASSERT_NE(result, nullptr);
-    EXPECT_GT(strlen(result), 0);
+    EXPECT_GT(strlen(result), 0u);
 }
 
 TEST_F(CssFormatterUnitTest, FormatRule_NullFormatter) {
@@ -419,7 +419,7 @@ TEST_F(CssFormatterUnitTest, FormatSelector_Simple) {
     const char* result = css_format_selector_group(formatter, selector_group);
 
     ASSERT_NE(result, nullptr);
-    EXPECT_GT(strlen(result), 0);
+    EXPECT_GT(strlen(result), 0u);
     EXPECT_STREQ(result, "div");
 }
 
@@ -455,8 +455,8 @@ TEST_F(CssFormatterUnitTest, FormatStyles_CompactVsExpanded) {
     ASSERT_NE(expanded, nullptr);
 
     // Both should produce output
-    EXPECT_GT(strlen(compact), 0);
-    EXPECT_GT(strlen(expanded), 0);
+    EXPECT_GT(strlen(compact), 0u);
+    EXPECT_GT(strlen(expanded), 0u);
 
     // They may differ in formatting (once full implementation is done)
     // For now, just verify they both work
@@ -528,8 +528,8 @@ TEST_F(CssFormatterUnitTest, EdgeCase_MultipleFormatsOnSameFormatter) {
 
     // With stub implementation, both may have same structure but different property names
     // Just verify both calls work without crashing
-    EXPECT_GT(strlen(result1), 0);
-    EXPECT_GT(strlen(result2), 0);
+    EXPECT_GT(strlen(result1), 0u);
+    EXPECT_GT(strlen(result2), 0u);
 }
 
 // =============================================================================
@@ -547,7 +547,7 @@ TEST_F(CssFormatterUnitTest, Integration_ParseAndFormat) {
     const char* formatted = css_format_stylesheet(formatter, stylesheet);
 
     ASSERT_NE(formatted, nullptr);
-    EXPECT_GT(strlen(formatted), 0);
+    EXPECT_GT(strlen(formatted), 0u);
 }
 
 TEST_F(CssFormatterUnitTest, Integration_ComplexStylesheet) {
@@ -562,7 +562,7 @@ TEST_F(CssFormatterUnitTest, Integration_ComplexStylesheet) {
 
     ASSERT_NE(formatted, nullptr);
     // Should contain actual CSS content from the parsed rules
-    EXPECT_GT(strlen(formatted), 0);
+    EXPECT_GT(strlen(formatted), 0u);
     // Look for CSS selectors or properties that should be present
     EXPECT_TRUE(strstr(formatted, "body") != nullptr ||
                 strstr(formatted, "h1") != nullptr ||
@@ -585,7 +585,7 @@ TEST_F(CssFormatterUnitTest, Integration_ComplexStylesheet) {
 
     // With stub implementation, the formatted output may not be valid CSS
     // Just verify formatting produces output and doesn't crash
-    EXPECT_GT(strlen(formatted), 0);
+    EXPECT_GT(strlen(formatted), 0u);
 
     // Note: Full round-trip test will work once formatter is fully implemented
 }
