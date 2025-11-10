@@ -596,7 +596,7 @@ static void resolve_font_size(LayoutContext* lycon, const CssDeclaration* decl) 
             if (size > 0) {
                 lycon->font.current_font_size = size;
                 log_debug("resolved font size from keyword '%s': %.2f px",
-                         value->data.keyword, size);
+                         css_enum_info(value->data.keyword)->name, size);
                 return;
             }
         }
@@ -1138,7 +1138,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 log_debug("[CSS] Font weight keyword: '%s' -> Lexbor enum: %d",
-                         value->data.keyword, lexbor_weight);
+                         css_enum_info(value->data.keyword)->name, lexbor_weight);
             } else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
                 log_debug("[CSS] Font weight number: %d -> Lexbor enum: %d",
                          (int)value->data.number.value, lexbor_weight);
@@ -1157,7 +1157,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Keyword font family - check if generic or specific
-                span->font->family = (char*)value->data.keyword;
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                span->font->family = info ? (char*)info->name : NULL;
                 log_debug("[CSS] Set span->font->family = '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
