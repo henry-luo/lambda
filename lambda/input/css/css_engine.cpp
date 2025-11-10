@@ -96,7 +96,7 @@ static bool css_style_node_matches_element_name(CssStyleNode* node, const char* 
 }
 
 // Enhanced CSS4+ pseudo-selector functions
-static bool css_enhanced_pseudo_has_matches(CssStyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_has_matches(CssStyleNode* node, CssSelectorComponent* component) {
     // :has() pseudo-class matching
     // This would require checking if the node's element has descendants matching a selector
     // For now, return false as this requires full DOM traversal context
@@ -105,7 +105,7 @@ static bool css_enhanced_pseudo_has_matches(CssStyleNode* node, CSSSelectorCompo
     return false;
 }
 
-static bool css_enhanced_pseudo_is_matches(CssStyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_is_matches(CssStyleNode* node, CssSelectorComponent* component) {
     // :is() pseudo-class matching (matches any selector in a list)
     // This would require checking if the node's element matches any selector in the component
     // For now, return false as this requires full selector matching context
@@ -114,7 +114,7 @@ static bool css_enhanced_pseudo_is_matches(CssStyleNode* node, CSSSelectorCompon
     return false;
 }
 
-static bool css_enhanced_pseudo_where_matches(CssStyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_where_matches(CssStyleNode* node, CssSelectorComponent* component) {
     // :where() pseudo-class matching (same as :is() but with 0 specificity)
     // This would require checking if the node's element matches any selector in the component
     // For now, return false as this requires full selector matching context
@@ -123,7 +123,7 @@ static bool css_enhanced_pseudo_where_matches(CssStyleNode* node, CSSSelectorCom
     return false;
 }
 
-static bool css_enhanced_pseudo_not_matches(CssStyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_not_matches(CssStyleNode* node, CssSelectorComponent* component) {
     // :not() pseudo-class matching (matches if element doesn't match selector)
     // This would require checking if the node's element does NOT match the selector
     // For now, return false as this requires full selector matching context
@@ -132,7 +132,7 @@ static bool css_enhanced_pseudo_not_matches(CssStyleNode* node, CSSSelectorCompo
     return false;
 }
 
-static bool css_nesting_parent_matches(CssStyleNode* node, CSSSelectorComponent* component) {
+static bool css_nesting_parent_matches(CssStyleNode* node, CssSelectorComponent* component) {
     // CSS nesting parent selector (&) matching
     // This would require checking if the node's element matches the parent selector context
     // For now, return false as this requires nesting context
