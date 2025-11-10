@@ -1,11 +1,3 @@
-/**
- * CSS Test Helpers
- *
- * Shared utilities for CSS unit testing in Lambda.
- * Provides memory management, token/selector validation,
- * and common test patterns.
- */
-
 #ifndef CSS_TEST_HELPERS_HPP
 #define CSS_TEST_HELPERS_HPP
 
@@ -391,5 +383,14 @@ namespace Utils {
 
 #define ASSERT_CSS_RULE(rule, sel_count, decl_count) \
     CssTestHelpers::RuleAssertions::AssertRule(rule, sel_count, decl_count)
+
+// Helper macro to register the test environment in main()
+// Usage: Add CSS_TEST_ENVIRONMENT_MAIN() at the end of your test file
+#define CSS_TEST_ENVIRONMENT_MAIN() \
+    int main(int argc, char** argv) { \
+        ::testing::InitGoogleTest(&argc, argv); \
+        ::testing::AddGlobalTestEnvironment(new CssTestHelpers::CssTestEnvironment()); \
+        return RUN_ALL_TESTS(); \
+    }
 
 #endif // CSS_TEST_HELPERS_HPP

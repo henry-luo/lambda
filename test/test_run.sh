@@ -81,7 +81,8 @@ echo "=============================================================="
 
 # Configuration
 TIMEOUT_DURATION="60s"
-TEST_OUTPUT_DIR="test_output"
+# Use absolute path to ensure it works in background processes
+TEST_OUTPUT_DIR="$(pwd)/test_output"
 
 # Create output directory
 mkdir -p "$TEST_OUTPUT_DIR"
@@ -318,6 +319,7 @@ is_gtest_test() {
 run_test_with_timeout() {
     local test_exe="$1"
     local base_name="$(basename "$test_exe" .exe)"
+    # TEST_OUTPUT_DIR is already an absolute path
     local json_file="$TEST_OUTPUT_DIR/${base_name}_results.json"
 
     echo "📋 Running $base_name..." >&2
@@ -422,16 +424,23 @@ run_test_with_timeout() {
     fi
 
     # Check if JSON file was created and is valid
-    if [ -f "$json_file" ] && jq empty "$json_file" 2>/dev/null; then
-        echo "$json_file"
-        return 0
-    else
-        echo "❌ No valid JSON output from $base_name" >&2
-        # Create a minimal error JSON file for consistency
-        echo '{"passed": 0, "failed": 1, "tests": [{"name": "json_error", "status": "failed", "message": "No valid JSON output"}]}' > "$json_file"
-        echo "$json_file"
-        return 1
-    fi
+    # Wait up to 30 seconds for the file to be written (handles race condition in parallel execution)
+    local wait_count=0
+    while [ $wait_count -lt 300 ]; do
+        if [ -f "$json_file" ] && jq empty "$json_file" 2>/dev/null; then
+            echo "$json_file"
+            return 0
+        fi
+        sleep 0.1
+        wait_count=$((wait_count + 1))
+    done
+
+    # If we get here, the file wasn't created or is invalid
+    echo "❌ No valid JSON output from $base_name" >&2
+    # Create a minimal error JSON file for consistency
+    echo '{"passed": 0, "failed": 1, "tests": [{"name": "json_error", "status": "failed", "message": "No valid JSON output"}]}' > "$json_file"
+    echo "$json_file"
+    return 1
 }
 
 # Function to parse JSON results and extract counts

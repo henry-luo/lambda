@@ -181,7 +181,7 @@ TEST_P(LatexHtmlFixtureParameterizedTest, RunFixture) {
     std::set<std::string> tests_to_skip = {
         "document with title",           // Missing title/author/date processing
         "UTF-8 text and punctuation",   // Spacing issues with thin spaces
-        "special characters",            // Incorrect character escaping and spacing  
+        "special characters",            // Incorrect character escaping and spacing
         "verbatim text",                // Inline verbatim command issues
         "quote environment",            // Treated as itemize instead of quote
         "verbatim environment",         // Treated as itemize instead of verbatim
@@ -301,3 +301,7 @@ TEST_F(LatexHtmlFixtureTest, ListEnvironments) {
 
     run_fixture_test(fixture);
 }
+
+// =============================================================================
+// Main Entry Point - Using GTest default main
+// =============================================================================

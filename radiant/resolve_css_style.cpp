@@ -1285,34 +1285,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float min_width = convert_lambda_length_to_px(value, lycon, prop_id);
-                // per CSS spec, negative values for min-width are invalid and should be ignored
-                if (min_width < 0.0f) {
-                    log_debug("[CSS] Min-width: %.2f px (negative, ignored per CSS spec)", min_width);
-                    break;
-                }
-                block->blk->given_min_width = min_width;
-                log_debug("[CSS] Min-width: %.2f px", min_width);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for min-width per CSS spec
-                float min_width = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (min_width != 0.0f) {
-                    log_debug("[CSS] Min-width: unitless %.2f (invalid, only 0 allowed)", min_width);
-                    break;
-                }
-                block->blk->given_min_width = 0.0f;
-                log_debug("[CSS] Min-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                if (percentage < 0.0f) {
-                    log_debug("[CSS] Min-width: %.2f%% (negative, ignored per CSS spec)", percentage);
-                    break;
-                }
-                log_debug("[CSS] Min-width: %.2f%% (percentage not yet fully supported)", percentage);
-            }
+            block->blk->given_min_width = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
+            log_debug("[CSS] Min-width: %.2f px", block->blk->given_min_width);
             break;
         }
 
@@ -1322,37 +1296,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float max_width = convert_lambda_length_to_px(value, lycon, prop_id);
-                // per CSS spec, negative values for max-width are invalid and should be ignored
-                if (max_width < 0.0f) {
-                    log_debug("[CSS] Max-width: %.2f px (negative, ignored per CSS spec)", max_width);
-                    break;
-                }
-                block->blk->given_max_width = max_width;
-                log_debug("[CSS] Max-width: %.2f px", max_width);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for max-width per CSS spec
-                float max_width = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (max_width != 0.0f) {
-                    log_debug("[CSS] Max-width: unitless %.2f (invalid, only 0 allowed)", max_width);
-                    break;
-                }
-                block->blk->given_max_width = 0.0f;
-                log_debug("[CSS] Max-width: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                if (percentage < 0.0f) {
-                    log_debug("[CSS] Max-width: %.2f%% (negative, ignored per CSS spec)", percentage);
-                    break;
-                }
-                log_debug("[CSS] Max-width: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                block->blk->given_max_width = -1.0f; // -1 means none/unlimited
-                log_debug("[CSS] Max-width: none");
-            }
+            block->blk->given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
+            log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
             break;
         }
 
@@ -1362,34 +1307,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float min_height = convert_lambda_length_to_px(value, lycon, prop_id);
-                // per CSS spec, negative values for min-height are invalid and should be ignored
-                if (min_height < 0.0f) {
-                    log_debug("[CSS] Min-height: %.2f px (negative, ignored per CSS spec)", min_height);
-                    break;
-                }
-                block->blk->given_min_height = min_height;
-                log_debug("[CSS] Min-height: %.2f px", min_height);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for min-height per CSS spec
-                float min_height = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (min_height != 0.0f) {
-                    log_debug("[CSS] Min-height: unitless %.2f (invalid, only 0 allowed)", min_height);
-                    break;
-                }
-                block->blk->given_min_height = 0.0f;
-                log_debug("[CSS] Min-height: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                if (percentage < 0.0f) {
-                    log_debug("[CSS] Min-height: %.2f%% (negative, ignored per CSS spec)", percentage);
-                    break;
-                }
-                log_debug("[CSS] Min-height: %.2f%% (percentage not yet fully supported)", percentage);
-            }
+            block->blk->given_min_height = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
+            log_debug("[CSS] Min-height: %.2f px", block->blk->given_min_height);
             break;
         }
 
@@ -1399,37 +1318,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->blk) {
                 block->blk = alloc_block_prop(lycon);
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float max_height = convert_lambda_length_to_px(value, lycon, prop_id);
-                // per CSS spec, negative values for max-height are invalid and should be ignored
-                if (max_height < 0.0f) {
-                    log_debug("[CSS] Max-height: %.2f px (negative, ignored per CSS spec)", max_height);
-                    break;
-                }
-                block->blk->given_max_height = max_height;
-                log_debug("[CSS] Max-height: %.2f px", max_height);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for max-height per CSS spec
-                float max_height = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (max_height != 0.0f) {
-                    log_debug("[CSS] Max-height: unitless %.2f (invalid, only 0 allowed)", max_height);
-                    break;
-                }
-                block->blk->given_max_height = 0.0f;
-                log_debug("[CSS] Max-height: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                if (percentage < 0.0f) {
-                    log_debug("[CSS] Max-height: %.2f%% (negative, ignored per CSS spec)", percentage);
-                    break;
-                }
-                log_debug("[CSS] Max-height: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                block->blk->given_max_height = -1.0f; // -1 means none/unlimited
-                log_debug("[CSS] Max-height: none");
-            }
+            block->blk->given_max_height = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
+            log_debug("[CSS] Max-height: %.2f px", block->blk->given_max_height);
             break;
         }
 
@@ -1457,130 +1347,46 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->margin.top_specificity) {
-                break; // lower specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float margin = value->data.length.value;
-                span->bound->margin.top = margin;
+            if (specificity >= span->bound->margin.top_specificity) {
+                span->bound->margin.top = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, value);
                 span->bound->margin.top_specificity = specificity;
-                log_debug("[CSS] Margin-top: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                float margin = (float)value->data.number.value;
-                span->bound->margin.top = margin;
-                span->bound->margin.top_specificity = specificity;
-                log_debug("[CSS] Margin-top: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->margin.top_specificity = specificity;
-                log_debug("[CSS] Margin-top: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword for margins
-                span->bound->margin.top_type = CSS_VALUE_AUTO;
-                span->bound->margin.top_specificity = specificity;
-                log_debug("[CSS] Margin-top: auto");
+                span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
             break;
         }
-
         case CSS_PROPERTY_MARGIN_RIGHT: {
             log_debug("[CSS] Processing margin-right property");
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->margin.right_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float margin = value->data.length.value;
-                span->bound->margin.right = margin;
+            if (specificity >= span->bound->margin.right_specificity) {
+                span->bound->margin.right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, value);
                 span->bound->margin.right_specificity = specificity;
-                log_debug("[CSS] Margin-right: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                float margin = (float)value->data.number.value;
-                span->bound->margin.right = margin;
-                span->bound->margin.right_specificity = specificity;
-                log_debug("[CSS] Margin-right: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->margin.right_specificity = specificity;
-                log_debug("[CSS] Margin-right: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                span->bound->margin.right_type = CSS_VALUE_AUTO;
-                span->bound->margin.right_specificity = specificity;
-                log_debug("[CSS] Margin-right: auto");
+                span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
             break;
         }
-
         case CSS_PROPERTY_MARGIN_BOTTOM: {
             log_debug("[CSS] Processing margin-bottom property");
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->margin.bottom_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float margin = value->data.length.value;
-                span->bound->margin.bottom = margin;
+            if (specificity >= span->bound->margin.bottom_specificity) {
+                span->bound->margin.bottom = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_BOTTOM, value);
                 span->bound->margin.bottom_specificity = specificity;
-                log_debug("[CSS] Margin-bottom: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                float margin = (float)value->data.number.value;
-                span->bound->margin.bottom = margin;
-                span->bound->margin.bottom_specificity = specificity;
-                log_debug("[CSS] Margin-bottom: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->margin.bottom_specificity = specificity;
-                log_debug("[CSS] Margin-bottom: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                span->bound->margin.bottom_type = CSS_VALUE_AUTO;
-                span->bound->margin.bottom_specificity = specificity;
-                log_debug("[CSS] Margin-bottom: auto");
+                span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
             break;
         }
-
         case CSS_PROPERTY_MARGIN_LEFT: {
             log_debug("[CSS] Processing margin-left property");
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->margin.left_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float margin = value->data.length.value;
-                span->bound->margin.left = margin;
+            if (specificity >= span->bound->margin.left_specificity) {
+                span->bound->margin.left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, value);
                 span->bound->margin.left_specificity = specificity;
-                log_debug("[CSS] Margin-left: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                float margin = (float)value->data.number.value;
-                span->bound->margin.left = margin;
-                span->bound->margin.left_specificity = specificity;
-                log_debug("[CSS] Margin-left: %.2f px", margin);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->margin.left_specificity = specificity;
-                log_debug("[CSS] Margin-left: %.2f%% (percentage)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                span->bound->margin.left_type = CSS_VALUE_AUTO;
-                span->bound->margin.left_specificity = specificity;
-                log_debug("[CSS] Margin-left: auto");
+                span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
             break;
         }
@@ -1590,142 +1396,45 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->padding.top_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float padding = value->data.length.value;
-                span->bound->padding.top = padding;
+            if (specificity >= span->bound->padding.top_specificity) {
+                span->bound->padding.top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, value);
                 span->bound->padding.top_specificity = specificity;
-                log_debug("[CSS] Padding-top: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for padding per CSS spec
-                float padding = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (padding != 0.0f) {
-                    log_debug("[CSS] Padding-top: unitless %.2f (invalid, only 0 allowed)", padding);
-                    break;
-                }
-                span->bound->padding.top = 0.0f;
-                span->bound->padding.top_specificity = specificity;
-                log_debug("[CSS] Padding-top: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->padding.top_specificity = specificity;
-                log_debug("[CSS] Padding-top: %.2f%% (percentage)", percentage);
             }
             break;
         }
-
         case CSS_PROPERTY_PADDING_RIGHT: {
             log_debug("[CSS] Processing padding-right property");
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->padding.right_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float padding = value->data.length.value;
-                span->bound->padding.right = padding;
+            if (specificity >= span->bound->padding.right_specificity) {
+                span->bound->padding.right = resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, value);
                 span->bound->padding.right_specificity = specificity;
-                log_debug("[CSS] Padding-right: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for padding per CSS spec
-                float padding = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (padding != 0.0f) {
-                    log_debug("[CSS] Padding-right: unitless %.2f (invalid, only 0 allowed)", padding);
-                    break;
-                }
-                span->bound->padding.right = 0.0f;
-                span->bound->padding.right_specificity = specificity;
-                log_debug("[CSS] Padding-right: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->padding.right_specificity = specificity;
-                log_debug("[CSS] Padding-right: %.2f%% (percentage)", percentage);
             }
             break;
         }
-
         case CSS_PROPERTY_PADDING_BOTTOM: {
             log_debug("[CSS] Processing padding-bottom property");
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->padding.bottom_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float padding = value->data.length.value;
-                span->bound->padding.bottom = padding;
+            if (specificity >= span->bound->padding.bottom_specificity) {
+                span->bound->padding.bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, value);
                 span->bound->padding.bottom_specificity = specificity;
-                log_debug("[CSS] Padding-bottom: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for padding per CSS spec
-                float padding = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (padding != 0.0f) {
-                    log_debug("[CSS] Padding-bottom: unitless %.2f (invalid, only 0 allowed)", padding);
-                    break;
-                }
-                span->bound->padding.bottom = 0.0f;
-                span->bound->padding.bottom_specificity = specificity;
-                log_debug("[CSS] Padding-bottom: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->padding.bottom_specificity = specificity;
-                log_debug("[CSS] Padding-bottom: %.2f%% (percentage)", percentage);
             }
             break;
         }
-
         case CSS_PROPERTY_PADDING_LEFT: {
             log_debug("[CSS] Processing padding-left property");
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->padding.left_specificity) {
-                break; // lower or equal specificity, skip
-            }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float padding = value->data.length.value;
-                span->bound->padding.left = padding;
+            if (specificity >= span->bound->padding.left_specificity) {
+                span->bound->padding.left = resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, value);
                 span->bound->padding.left_specificity = specificity;
-                log_debug("[CSS] Padding-left: %.2f px", padding);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // unitless zero is valid for padding per CSS spec
-                float padding = value->data.number.value;
-                // per CSS spec, only unitless zero is valid (treated as 0px)
-                if (padding != 0.0f) {
-                    log_debug("[CSS] Padding-left: unitless %.2f (invalid, only 0 allowed)", padding);
-                    break;
-                }
-                span->bound->padding.left = 0.0f;
-                span->bound->padding.left_specificity = specificity;
-                log_debug("[CSS] Padding-left: 0 (unitless zero)");
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                span->bound->padding.left_specificity = specificity;
-                log_debug("[CSS] Padding-left: %.2f%% (percentage)", percentage);
             }
             break;
         }
-
-        // ===== GROUP 3: Background & Borders =====
 
         case CSS_PROPERTY_BACKGROUND_COLOR: {
             log_debug("[CSS] Processing background-color property (value type=%d)", value->type);
@@ -1735,37 +1444,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->background) {
                 span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
             }
-
-            Color bg_color = {0};
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Map keyword to color (e.g., "red", "lightgray")
-                CssEnum keyword = value->data.keyword;
-                const CssEnumInfo* info = css_enum_info(keyword);
-                bg_color = color_name_to_rgb(keyword);
-                log_debug("[CSS] Background color keyword: '%s' -> 0x%08X", info ? info->name : "unknown", bg_color.c);
-            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                // Direct RGBA color value
-                if (value->data.color.type == CSS_COLOR_RGB) {
-                    bg_color.r = value->data.color.data.rgba.r;
-                    bg_color.g = value->data.color.data.rgba.g;
-                    bg_color.b = value->data.color.data.rgba.b;
-                    bg_color.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Background color RGBA: (%d,%d,%d,%d) -> 0x%08X",
-                             bg_color.r, bg_color.g, bg_color.b, bg_color.a, bg_color.c);
-                }
-            }
-
-            if (bg_color.c != 0) {
-                span->bound->background->color = bg_color;
-                log_debug("[CSS] Set background color to 0x%08X", bg_color.c);
-            } else {
-                log_debug("[CSS] Skipping background color (color is 0)");
-            }
+            span->bound->background->color = resolve_color_value(value);
             break;
         }
 
         // ===== GROUP 16: Background Advanced Properties =====
-
         case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
             log_debug("[CSS] Processing background-attachment property");
             if (!span->bound) {

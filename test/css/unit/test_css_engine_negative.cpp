@@ -1014,14 +1014,14 @@ TEST_F(CssEngineNegativeTest, Fuzz_CSSSoup) {
     auto engine = CreateEngine();
     ASSERT_NE(engine, nullptr);
 
-    const char* css = 
+    const char* css =
         "div { color: red; !@#$ } "
         "@media $$$ { p { font: %%% } } "
         "[[[ .class { @@@ : ### } ]]] "
         "url((())) rgb(999,999,999) "
         "#id#id#id .class.class.class "
         "{ } { } { } : : : ; ; ;";
-    
+
     CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
 
     // Complex mix of valid CSS and garbage
@@ -1039,9 +1039,9 @@ TEST_F(CssEngineNegativeTest, Fuzz_RandomBytes) {
         0x5B, 0x5D, 0x7C, 0x5C, 0x2F, 0x3C, 0x3E, 0x3F,
         0x00  // null terminator
     };
-    
+
     CssToken* tokens = nullptr;
-    int token_count = css_tokenizer_tokenize(tokenizer, (const char*)css, 
+    int token_count = css_tokenizer_tokenize(tokenizer, (const char*)css,
                                              sizeof(css) - 1, &tokens);
 
     // Should tokenize without crashing
@@ -1078,12 +1078,12 @@ TEST_F(CssEngineNegativeTest, Fuzz_RandomInputStressTest) {
         }
 
         // Print the generated random input
-        std::cout << "Iteration " << (iteration + 1) << "/" << 100 
+        std::cout << "Iteration " << (iteration + 1) << "/" << 100
                   << " (length=" << length << "): " << random_css << std::endl;
 
         // Try to parse the random input - should not crash or hang
         CssStylesheet* sheet = css_parse_stylesheet(engine, random_css.c_str(), nullptr);
-        
+
         // Parser should handle gracefully without crashing
         // No specific assertions needed - just surviving the parse is the test
     }
@@ -1093,10 +1093,5 @@ TEST_F(CssEngineNegativeTest, Fuzz_RandomInputStressTest) {
 }
 
 // ============================================================================
-// Main Entry Point
+// Main Entry Point - Using GTest default main
 // ============================================================================
-
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
