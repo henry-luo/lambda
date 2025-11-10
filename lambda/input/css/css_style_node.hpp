@@ -6,10 +6,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /**
  * CSS Style Node System
  *
@@ -365,8 +361,5 @@ uint32_t css_specificity_to_value(CssSpecificity specificity);
  */
 void css_specificity_print(CssSpecificity specificity);
 
-#ifdef __cplusplus
-}
-#endif
 
 #endif // CSS_STYLE_NODE_H

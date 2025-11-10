@@ -7,14 +7,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "css_value.hpp"
 
 // Forward declarations
-typedef struct CSSSelectorComponent CSSSelectorComponent;
+typedef struct CssSelectorComponent CssSelectorComponent;
 typedef struct CssCalcNode CssCalcNode;
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /**
  * CSS Style System
@@ -638,6 +635,9 @@ typedef struct CssValue {
 
         // Keyword value
         const char* keyword;
+
+        // keyword enum value
+        CssEnum enum_id;
 
         // Color hex value (legacy support)
         const char* color_hex;
@@ -1294,9 +1294,5 @@ bool css_property_validate_value_from_string(CssPropertyId property_id,
 // Property parsing functions
 CssDeclaration* css_parse_property(const char* name, const char* value, Pool* pool);
 void css_property_free(CssDeclaration* property);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // CSS_STYLE_H
