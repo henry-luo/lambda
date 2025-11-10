@@ -2899,7 +2899,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     // Note: Adding text_transform field to BlockProp would be needed
                     // For now, log the value that would be set
                     log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)",
-                             value->data.keyword, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -2921,7 +2921,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (lexbor_value > 0) {
                     // Note: Adding text_overflow field to BlockProp would be needed
                     log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)",
-                             value->data.keyword, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -2943,7 +2943,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (lexbor_value > 0) {
                     // Note: Adding word_break field to BlockProp would be needed
                     log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
-                             value->data.keyword, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -2965,7 +2965,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (lexbor_value > 0) {
                     // Note: Adding word_wrap field to BlockProp would be needed
                     log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)",
-                             value->data.keyword, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -2983,7 +2983,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (lexbor_value > 0) {
                     // Note: Adding font_variant field to FontProp would be needed
                     log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)",
-                             value->data.keyword, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
