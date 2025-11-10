@@ -23,7 +23,7 @@ void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
 
-void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
+void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     // finalize the block size
     float flow_width, flow_height;
     if (block->bound) {

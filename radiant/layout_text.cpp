@@ -136,7 +136,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             if (result) { return result; }
         }
         else if (node->is_element()) {
-            PropValue outer_display = resolve_display_value(node).outer;
+            CssEnum outer_display = resolve_display_value(node).outer;
             if (outer_display == CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
             else if (outer_display == CSS_VALUE_INLINE) {
                 LineFillStatus result = span_has_line_filled(lycon, node);

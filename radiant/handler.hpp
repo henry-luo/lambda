@@ -12,7 +12,7 @@ typedef struct EventContext {
     FontBox font;  // current font style
 
     // effects fields
-    PropValue new_cursor;
+    CssEnum new_cursor;
     char* new_url;
     char* new_target;
     bool need_repaint;

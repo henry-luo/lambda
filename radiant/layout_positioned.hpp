@@ -20,7 +20,7 @@ struct ViewBlock;
 typedef struct FloatBox {
     ViewBlock* element;      // floating element
     int x, y, width, height; // float box bounds
-    PropValue float_side;    // left or right
+    CssEnum float_side;    // left or right
 } FloatBox;
 
 typedef struct FloatContext {
@@ -36,15 +36,15 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
 
 // Utility functions
 bool element_has_positioning(ViewBlock* block);
-ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
+ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 
 // Float context functions (Phase 4)
 FloatContext* create_float_context(ViewBlock* container);
-void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float_side);
-void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue float_side);
+void add_float_to_context(FloatContext* ctx, ViewBlock* element, CssEnum float_side);
+void position_float_element(FloatContext* ctx, ViewBlock* element, CssEnum float_side);
 void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx);
-int find_clear_position(FloatContext* ctx, PropValue clear_value);
+int find_clear_position(FloatContext* ctx, CssEnum clear_value);
 
 // Float context lifecycle management
 void init_float_context_for_block(LayoutContext* lycon, ViewBlock* block);

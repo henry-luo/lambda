@@ -24,7 +24,7 @@ typedef struct Blockbox {
     float init_ascender;  // initial ascender of the line at start of the line
     float init_descender;  // initial descender of the line at start of the line
     float lead_y; // leading space when line height is greater than font size
-    PropValue text_align;
+    CssEnum text_align;
     float given_width, given_height;  // specified width and height by css or html attributes
     struct Blockbox* pa_block;  // parent block
 } Blockbox;
@@ -37,7 +37,7 @@ typedef struct Linebox {
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     View* start_view;
-    PropValue vertical_align;
+    CssEnum vertical_align;
     bool is_line_start;
     bool has_space;                 // whether last layout character is a space
     FontBox line_start_font;
@@ -172,7 +172,7 @@ float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
 
 // Convert Lambda CSS color to Radiant Color type
 Color convert_lambda_color(const CssValue* value);
-Color color_name_to_rgb(PropValue color_name);
+Color color_name_to_rgb(CssEnum color_name);
 
 /**
  * Get specificity value from Lambda CSS declaration
@@ -194,7 +194,7 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 // Called for each property in DomElement->specified_style
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
-int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
+int resolve_justify_content(CssEnum value); // Returns Lexbor constant directly
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
@@ -211,7 +211,7 @@ bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 
 void line_init(LayoutContext* lycon, float left, float right);
-float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline);
+float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);
 
 // DomNode style resolution

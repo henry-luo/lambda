@@ -21,7 +21,7 @@ void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 // Function declaration moved to layout.hpp
 char* read_text_file(const char *filename);
-void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
+void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display);
 // Forward declarations
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
@@ -126,7 +126,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     }
 }
 
-float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {
+float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline) {
     log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f",
         align, item_height, line_height, baseline_pos, item_baseline);
     switch (align) {
@@ -157,7 +157,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, flo
 }
 
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
-    FontBox pa_font = lycon->font;  PropValue pa_line_align = lycon->line.vertical_align;
+    FontBox pa_font = lycon->font;  CssEnum pa_line_align = lycon->line.vertical_align;
     log_debug("span_vertical_align");
     View* child = span->child;
     if (child) {
@@ -202,7 +202,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
         float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
-        PropValue align = block->in_line && block->in_line->vertical_align ?
+        CssEnum align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);

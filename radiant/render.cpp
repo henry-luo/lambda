@@ -150,7 +150,7 @@ static void toRoman(int num, char* result, int uppercase) {
 }
 
 // list bullet formatting function
-void formatListNumber(StrBuf* buf, int num, PropValue list_style) {
+void formatListNumber(StrBuf* buf, int num, CssEnum list_style) {
     if (num <= 0) { return; }
     switch (list_style) {
         case CSS_VALUE_LOWER_ROMAN:
