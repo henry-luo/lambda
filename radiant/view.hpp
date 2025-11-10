@@ -411,6 +411,7 @@ typedef struct Corner {
 typedef struct {
     Spacing width;
     CssEnum top_style, right_style, bottom_style, left_style;
+    int32_t top_style_specificity, right_style_specificity, bottom_style_specificity, left_style_specificity;
     Color top_color, right_color, bottom_color, left_color;
     int32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
     Corner radius;
