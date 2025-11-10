@@ -2425,16 +2425,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+            if (specificity >= span->bound->border->radius.tl_specificity) {
+                float radius = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->radius.top_left = radius;
                 span->bound->border->radius.tl_specificity = specificity;
-                log_debug("[CSS] border-top-left-radius: %.2fpx", radius);
             }
             break;
         }
-
         case CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS: {
             log_debug("[CSS] Processing border-top-right-radius property");
             if (!span->bound) {
@@ -2443,16 +2440,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+            if (specificity >= span->bound->border->radius.tr_specificity) {
+                float radius = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->radius.top_right = radius;
                 span->bound->border->radius.tr_specificity = specificity;
-                log_debug("[CSS] border-top-right-radius: %.2fpx", radius);
             }
             break;
         }
-
         case CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS: {
             log_debug("[CSS] Processing border-bottom-right-radius property");
             if (!span->bound) {
@@ -2461,16 +2455,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+            if (specificity >= span->bound->border->radius.br_specificity) {
+                float radius = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->radius.bottom_right = radius;
                 span->bound->border->radius.br_specificity = specificity;
-                log_debug("[CSS] border-bottom-right-radius: %.2fpx", radius);
             }
             break;
         }
-
         case CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS: {
             log_debug("[CSS] Processing border-bottom-left-radius property");
             if (!span->bound) {
@@ -2479,12 +2470,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+            if (specificity >= span->bound->border->radius.bl_specificity) {
+                float radius = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->radius.bottom_left = radius;
                 span->bound->border->radius.bl_specificity = specificity;
-                log_debug("[CSS] border-bottom-left-radius: %.2fpx", radius);
             }
             break;
         }
@@ -2492,6 +2481,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         // ===== GROUP 4: Layout Properties =====
         case CSS_PROPERTY_DISPLAY: {
             log_debug("[CSS] css display property should have been resolved earlier");
+            // nothing to do here
             break;
         }
 
@@ -2517,90 +2507,53 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float top = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_TOP);
-                block->position->top = top;
-                block->position->has_top = true;
-                log_debug("[CSS] Top: %.2f px", top);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                log_debug("[CSS] Top: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword
-                log_debug("[CSS] Top: auto");
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_top = false;
+            } else {
+                block->position->top = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
+                block->position->has_top = true;
             }
             break;
         }
-
         case CSS_PROPERTY_LEFT: {
             log_debug("[CSS] Processing left property");
             if (!block) break;
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float left = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_LEFT);
-                block->position->left = left;
-                block->position->has_left = true;
-                log_debug("[CSS] Left: %.2f px", left);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                log_debug("[CSS] Left: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword
-                log_debug("[CSS] Left: auto");
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_left = false;
+            } else {
+                block->position->left = resolve_length_value(lycon, CSS_PROPERTY_LEFT, value);
+                block->position->has_left = true;
             }
             break;
         }
-
-        // ===== GROUP 6: Remaining Position Properties =====
-
         case CSS_PROPERTY_RIGHT: {
             log_debug("[CSS] Processing right property");
             if (!block) break;
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float right = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_RIGHT);
-                block->position->right = right;
-                block->position->has_right = true;
-                log_debug("[CSS] Right: %.2f px", right);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                log_debug("[CSS] Right: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword
-                log_debug("[CSS] Right: auto");
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_right = false;
+            } else {
+                block->position->right = resolve_length_value(lycon, CSS_PROPERTY_RIGHT, value);
+                block->position->has_right = true;
             }
             break;
         }
-
         case CSS_PROPERTY_BOTTOM: {
             log_debug("[CSS] Processing bottom property");
             if (!block) break;
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float bottom = convert_lambda_length_to_px(value, lycon, CSS_PROPERTY_BOTTOM);
-                block->position->bottom = bottom;
-                block->position->has_bottom = true;
-                log_debug("[CSS] Bottom: %.2f px", bottom);
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                float percentage = value->data.percentage.value;
-                log_debug("[CSS] Bottom: %.2f%% (percentage not yet fully supported)", percentage);
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // 'auto' keyword
-                log_debug("[CSS] Bottom: auto");
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {  // ignore 'auto' or any other keyword
                 block->position->has_bottom = false;
+            } else {
+                block->position->bottom = resolve_length_value(lycon, CSS_PROPERTY_BOTTOM, value);
+                block->position->has_bottom = true;
             }
             break;
         }
