@@ -1176,6 +1176,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         // Check if it's a generic font family keyword
                         const CssEnumInfo* info = css_enum_info(item->data.keyword);
                         family = info ? info->name : NULL;
+                        log_debug("[CSS] Font family KEYWORD value: '%s'", family ? family : "(null)");
+                    } else if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+                        // Custom font family name (e.g., "Arial", "Helvetica")
+                        family = item->data.custom_property.name;
+                        log_debug("[CSS] Font family CUSTOM value: '%s'", family);
                     }
                     if (family) {
                         // Quotes already stripped during parsing
