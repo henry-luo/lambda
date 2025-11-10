@@ -307,16 +307,6 @@ typedef struct {
 //     return (ia & 0x003FFFFF) == CSS_VALUE_AUTO;
 // }
 
-typedef union {
-    uint32_t c;  // 32-bit ABGR color format,
-    struct {
-        uint8_t r;
-        uint8_t g;
-        uint8_t b;
-        uint8_t a;
-    };
-} Color;
-
 typedef struct Rect {
     float x, y;
     float width, height;
