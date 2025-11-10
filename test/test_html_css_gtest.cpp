@@ -525,7 +525,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
     decl->property_id = CSS_PROPERTY_COLOR;
     decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    decl->value->data.keyword = pool_strdup(pool, "blue");
+    decl->value->data.keyword = css_enum_by_name("blue");
     decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class selector
     decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -536,7 +536,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
     CssDeclaration* color = dom_element_get_specified_value(div, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "blue");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("blue"));
     EXPECT_EQ(color->specificity.classes, 1);
 }
 
@@ -551,7 +551,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
     stylesheet_decl->property_id = CSS_PROPERTY_COLOR;
     stylesheet_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     stylesheet_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    stylesheet_decl->value->data.keyword = pool_strdup(pool, "blue");
+    stylesheet_decl->value->data.keyword = css_enum_by_name("blue");
     stylesheet_decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class
     stylesheet_decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -561,7 +561,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
     CssDeclaration* color = dom_element_get_specified_value(div, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "red");  // inline wins!
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("red"));  // inline wins!
     EXPECT_EQ(color->specificity.inline_style, 1);
 }
 
@@ -575,7 +575,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     class_decl->property_id = CSS_PROPERTY_COLOR;
     class_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     class_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    class_decl->value->data.keyword = pool_strdup(pool, "blue");
+    class_decl->value->data.keyword = css_enum_by_name("blue");
     class_decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class
     class_decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -586,7 +586,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     id_decl->property_id = CSS_PROPERTY_COLOR;
     id_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     id_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    id_decl->value->data.keyword = pool_strdup(pool, "green");
+    id_decl->value->data.keyword = css_enum_by_name("green");
     id_decl->specificity = css_specificity_create(0, 1, 0, 0, false);  // ID
     id_decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -596,7 +596,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     CssDeclaration* color = dom_element_get_specified_value(div, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "green");  // ID wins!
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("green"));  // ID wins!
     EXPECT_EQ(color->specificity.ids, 1);
 }
 
@@ -632,7 +632,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     ASSERT_NE(decl->value, nullptr);
 
     decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    decl->value->data.keyword = pool_strdup(pool, "blue");
+    decl->value->data.keyword = css_enum_by_name("blue");
     decl->specificity = css_specificity_create(0, 0, 1, 0, false);  // class selector
     decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -644,7 +644,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     CssDeclaration* color = dom_element_get_specified_value(dom_root, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr) << "Color property not found after application";
     ASSERT_NE(color->value, nullptr) << "Color value is null";
-    EXPECT_STREQ(color->value->data.keyword, "blue") << "Color value mismatch";
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("blue")) << "Color value mismatch";
     EXPECT_EQ(color->specificity.classes, 1) << "Specificity should indicate class selector";
 
     printf("✓ Complete pipeline test passed\n");
@@ -1461,7 +1461,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
         decl->property_id = prop_id;
         decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
         decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-        decl->value->data.keyword = pool_strdup(pool, "value");
+        decl->value->data.keyword = css_enum_by_name("value");
         decl->specificity = css_specificity_create(0, 0, 1, 0, false);
         decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -1485,7 +1485,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     elem_decl->property_id = CSS_PROPERTY_COLOR;
     elem_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     elem_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    elem_decl->value->data.keyword = pool_strdup(pool, "black");
+    elem_decl->value->data.keyword = css_enum_by_name("black");
     elem_decl->specificity = css_specificity_create(0, 0, 0, 1, false);
     elem_decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -1496,7 +1496,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     class_decl->property_id = CSS_PROPERTY_COLOR;
     class_decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     class_decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-    class_decl->value->data.keyword = pool_strdup(pool, "blue");
+    class_decl->value->data.keyword = css_enum_by_name("blue");
     class_decl->specificity = css_specificity_create(0, 0, 1, 0, false);
     class_decl->origin = CSS_ORIGIN_AUTHOR;
 
@@ -1506,7 +1506,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     CssDeclaration* color = dom_element_get_specified_value(div, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "blue");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("blue"));
     EXPECT_EQ(color->specificity.classes, 1);
 }
 
@@ -1534,7 +1534,7 @@ TEST_F(HtmlCssIntegrationTest, NestedElements_StyleInheritance) {
     // Parent should have inline color
     CssDeclaration* parent_color = dom_element_get_specified_value(dom_root, CSS_PROPERTY_COLOR);
     ASSERT_NE(parent_color, nullptr);
-    EXPECT_STREQ(parent_color->value->data.keyword, "red");
+    EXPECT_EQ(parent_color->value->data.keyword, css_enum_by_name("red"));
 }
 
 TEST_F(HtmlCssIntegrationTest, CompleteFlow_HTMLWithCSSAndInlineStyles) {

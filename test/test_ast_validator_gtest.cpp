@@ -759,7 +759,7 @@ TEST_F(AstValidatorTest, ErrorMessageContent) {
     EXPECT_FALSE(result->valid) << "Should be invalid due to type mismatch";
     ASSERT_NE(result->errors, nullptr) << "Should have error details";
     ASSERT_NE(result->errors->message, nullptr) << "Should have error message";
-    EXPECT_GT(strlen(result->errors->message->chars), 0) << "Error message should not be empty";
+    EXPECT_GT(strlen(result->errors->message->chars), 0u) << "Error message should not be empty";
 }
 
 TEST_F(AstValidatorTest, ValidationStateIsolation) {

@@ -502,7 +502,7 @@ TEST_F(CssRoundtripTest, FileRoundtrip_Simple) {
     ASSERT_NE(formatted, nullptr) << "Failed to format " << path;
 
     // Verify formatted output is not empty
-    EXPECT_GT(strlen(formatted), 0);
+    EXPECT_GT(strlen(formatted), 0u);
 }
 
 TEST_F(CssRoundtripTest, FileRoundtrip_Stylesheet) {
@@ -553,7 +553,7 @@ TEST_P(CssFileRoundtripTest, FileRoundtrip) {
     ASSERT_NE(formatted, nullptr) << "Failed to format: " << basename;
 
     // Verify output
-    EXPECT_GT(strlen(formatted), 0) << "Empty formatted output for: " << basename;
+    EXPECT_GT(strlen(formatted), 0u) << "Empty formatted output for: " << basename;
 
     // Re-parse formatted output
     CssStylesheet* stylesheet2 = ParseCSS(formatted);
@@ -674,13 +674,13 @@ TEST_F(CssRoundtripTest, AtRule_FontFace_Simple) {
     ASSERT_NE(stylesheet, nullptr) << "Failed to parse @font-face";
 
     fprintf(stderr, "Parsed %zu rules\n", stylesheet->rule_count);
-    EXPECT_EQ(stylesheet->rule_count, 1) << "Should have 1 rule";
+    EXPECT_EQ(stylesheet->rule_count, 1u) << "Should have 1 rule";
 
     const char* formatted = FormatStylesheet(stylesheet);
     ASSERT_NE(formatted, nullptr) << "Failed to format @font-face";
 
     fprintf(stderr, "Formatted CSS: '%s'\n", formatted);
-    EXPECT_GT(strlen(formatted), 0) << "Empty formatted output";
+    EXPECT_GT(strlen(formatted), 0u) << "Empty formatted output";
 
     // Check that formatted output contains @font-face
     EXPECT_NE(strstr(formatted, "@font-face"), nullptr) << "Formatted output missing @font-face";
@@ -706,7 +706,7 @@ TEST_F(CssRoundtripTest, AtRule_FontFace_Full) {
 
     CssStylesheet* stylesheet = ParseCSS(css);
     ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->rule_count, 1);
+    EXPECT_EQ(stylesheet->rule_count, 1u);
 
     const char* formatted = FormatStylesheet(stylesheet);
     ASSERT_NE(formatted, nullptr);
@@ -725,7 +725,7 @@ TEST_F(CssRoundtripTest, AtRule_Keyframes_Simple) {
 
     CssStylesheet* stylesheet = ParseCSS(css);
     ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->rule_count, 1);
+    EXPECT_EQ(stylesheet->rule_count, 1u);
 
     const char* formatted = FormatStylesheet(stylesheet);
     ASSERT_NE(formatted, nullptr);
@@ -743,7 +743,7 @@ TEST_F(CssRoundtripTest, AtRule_Media_Simple) {
 
     CssStylesheet* stylesheet = ParseCSS(css);
     ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->rule_count, 1);
+    EXPECT_EQ(stylesheet->rule_count, 1u);
 
     const char* formatted = FormatStylesheet(stylesheet);
     ASSERT_NE(formatted, nullptr);
@@ -768,7 +768,7 @@ TEST_F(CssRoundtripTest, AtRule_Multiple) {
     ASSERT_NE(stylesheet, nullptr);
 
     fprintf(stderr, "Parsed %zu rules\n", stylesheet->rule_count);
-    EXPECT_EQ(stylesheet->rule_count, 3) << "Should have 3 at-rules";
+    EXPECT_EQ(stylesheet->rule_count, 3u) << "Should have 3 at-rules";
 
     const char* formatted = FormatStylesheet(stylesheet);
     ASSERT_NE(formatted, nullptr);
@@ -801,7 +801,7 @@ TEST_F(CssRoundtripTest, AtRule_MixedWithStyleRules) {
     ASSERT_NE(stylesheet, nullptr);
 
     fprintf(stderr, "Parsed %zu rules\n", stylesheet->rule_count);
-    EXPECT_EQ(stylesheet->rule_count, 5) << "Should have 5 rules (3 style + 2 at-rules)";
+    EXPECT_EQ(stylesheet->rule_count, 5u) << "Should have 5 rules (3 style + 2 at-rules)";
 
     const char* formatted = FormatStylesheet(stylesheet);
     ASSERT_NE(formatted, nullptr);

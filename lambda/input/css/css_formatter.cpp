@@ -123,11 +123,14 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
     // Don't reset buffer - append to existing content
 
     switch (value->type) {
-        case CSS_VALUE_TYPE_KEYWORD:
-            if (value->data.keyword) {
-                stringbuf_append_str(formatter->output, value->data.keyword);
+        case CSS_VALUE_TYPE_KEYWORD: {
+            // Lookup keyword name from enum
+            const CssEnumInfo* info = css_enum_info(value->data.keyword);
+            if (info && info->name) {
+                stringbuf_append_str(formatter->output, info->name);
             }
             break;
+        }
 
         case CSS_VALUE_TYPE_LENGTH:
             // Format number with unit
@@ -251,6 +254,13 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
                         }
                     }
                 }
+            }
+            break;
+
+        case CSS_VALUE_TYPE_CUSTOM:
+            // Output custom property name (unrecognized keyword stored as string)
+            if (value->data.custom_property.name) {
+                stringbuf_append_str(formatter->output, value->data.custom_property.name);
             }
             break;
 

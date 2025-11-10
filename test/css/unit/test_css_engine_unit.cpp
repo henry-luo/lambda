@@ -88,7 +88,7 @@ TEST_F(CssEngineTest, Stylesheet_Empty) {
 
     // Empty stylesheet should be valid with 0 rules
     if (sheet != nullptr) {
-        EXPECT_EQ(sheet->rule_count, 0);
+        EXPECT_EQ(sheet->rule_count, 0u);
     }
 }
 

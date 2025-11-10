@@ -58,9 +58,12 @@
         "lambda/input/css/css_tokenizer.cpp",
         "lambda/input/css/css_properties.cpp",
         "lambda/input/css/css_value_parser.cpp",
+        "lambda/input/css/css_value.cpp",
+        "lambda/input/css/css_value.cpp",
         "lambda/input/css/css_parser.cpp",
         "lambda/input/css/css_engine.cpp",
         "lambda/input/css/css_formatter.cpp",
+        "lib/hashmap.c",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
@@ -330,6 +333,8 @@
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
                 "lambda/input/css/css_value_parser.cpp",
+                "lambda/input/css/css_value.cpp",
+                "lambda/input/css/css_value.cpp",
                 "lambda/input/css/css_parser.cpp",
                 "lambda/input/css/css_engine.cpp",
                 "lambda/input/css/css_formatter.cpp",
@@ -854,11 +859,11 @@
         "test_suites": [
             {
                 "suite": "library",
-                "name": "📚 Library Tests",
+                "name": "\ud83d\udcda Library Tests",
                 "tests": [
                     {
                         "source": "test_strbuf_gtest.cpp",
-                        "name": "📝 String Buffer Tests (GTest)",
+                        "name": "\ud83d\udcdd String Buffer Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -870,7 +875,7 @@
                     },
                     {
                         "source": "test_stringbuf_gtest.cpp",
-                        "name": "🧵 StringBuf Tests (GTest)",
+                        "name": "\ud83e\uddf5 StringBuf Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -883,7 +888,7 @@
                     },
                     {
                         "source": "test_strview_gtest.cpp",
-                        "name": "👀 String View Tests (GTest)",
+                        "name": "\ud83d\udc40 String View Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -895,7 +900,7 @@
                     },
                     {
                         "source": "test_num_stack_gtest.cpp",
-                        "name": "🔢 Number Stack Tests (GTest)",
+                        "name": "\ud83d\udd22 Number Stack Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -907,7 +912,7 @@
                     },
                     {
                         "source": "test_datetime_gtest.cpp",
-                        "name": "📅 DateTime Tests (GTest)",
+                        "name": "\ud83d\udcc5 DateTime Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -920,7 +925,7 @@
                     },
                     {
                         "source": "test_url_gtest.cpp",
-                        "name": "🔗 URL Tests (GTest)",
+                        "name": "\ud83d\udd17 URL Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -932,7 +937,7 @@
                     },
                     {
                         "source": "test_url_extra_gtest.cpp",
-                        "name": "🌐 URL Extra Tests (GTest)",
+                        "name": "\ud83c\udf10 URL Extra Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -944,7 +949,7 @@
                     },
                     {
                         "source": "test_cmdedit_gtest.cpp",
-                        "name": "⌨️  Command Line Editor Tests (GTest)",
+                        "name": "\u2328\ufe0f  Command Line Editor Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -958,7 +963,7 @@
                     },
                     {
                         "source": "test_basic_gtest.cpp",
-                        "name": "🧪 Basic Tests (GTest)",
+                        "name": "\ud83e\uddea Basic Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -968,7 +973,7 @@
                     },
                     {
                         "source": "test_mempool_gtest.cpp",
-                        "name": "🚀 Unified Memory Pool Tests (GTest)",
+                        "name": "\ud83d\ude80 Unified Memory Pool Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -982,7 +987,7 @@
                     },
                     {
                         "source": "test_avl_tree.cpp",
-                        "name": "🌲 AVL Tree Implementation Tests (GTest)",
+                        "name": "\ud83c\udf32 AVL Tree Implementation Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -997,7 +1002,7 @@
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",
-                        "name": "⚡ AVL Tree Performance Tests (GTest)",
+                        "name": "\u26a1 AVL Tree Performance Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -1012,7 +1017,7 @@
                     },
                     {
                         "source": "test_element_reader_gtest.cpp",
-                        "name": "🔍 Element Reader Tests (GTest)",
+                        "name": "\ud83d\udd0d Element Reader Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1031,11 +1036,11 @@
             },
             {
                 "suite": "input",
-                "name": "📄 Input Processing Tests",
+                "name": "\ud83d\udcc4 Input Processing Tests",
                 "tests": [
                     {
                         "source": "test_mime_detect_gtest.cpp",
-                        "name": "📎 MIME Detection Tests (GTest)",
+                        "name": "\ud83d\udcce MIME Detection Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1047,7 +1052,7 @@
                     },
                     {
                         "source": "test_math_gtest.cpp",
-                        "name": "🔢 Math Roundtrip Tests (GTest)",
+                        "name": "\ud83d\udd22 Math Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1060,7 +1065,7 @@
                     },
                     {
                         "source": "test_math_ascii_gtest.cpp",
-                        "name": "🔤 ASCII Math Roundtrip Tests (GTest)",
+                        "name": "\ud83d\udd24 ASCII Math Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1073,7 +1078,7 @@
                     },
                     {
                         "source": "test_markup_roundtrip_gtest.cpp",
-                        "name": "📝 Markup Roundtrip Tests (GTest)",
+                        "name": "\ud83d\udcdd Markup Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1086,7 +1091,7 @@
                     },
                     {
                         "source": "test_input_roundtrip_gtest.cpp",
-                        "name": "🔄 Input Roundtrip Tests (GTest) - JSON Only",
+                        "name": "\ud83d\udd04 Input Roundtrip Tests (GTest) - JSON Only",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1099,7 +1104,7 @@
                     },
                     {
                         "source": "test_html_roundtrip_gtest.cpp",
-                        "name": "🌐 HTML Roundtrip Tests (GTest)",
+                        "name": "\ud83c\udf10 HTML Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1112,7 +1117,7 @@
                     },
                     {
                         "source": "test_html_gtest.cpp",
-                        "name": "🌐 HTML Parser Tests (GTest)",
+                        "name": "\ud83c\udf10 HTML Parser Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1125,7 +1130,7 @@
                     },
                     {
                         "source": "test_html_negative_gtest.cpp",
-                        "name": "🚨 HTML Parser Negative Tests (GTest) - Invalid HTML",
+                        "name": "\ud83d\udea8 HTML Parser Negative Tests (GTest) - Invalid HTML",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1138,7 +1143,7 @@
                     },
                     {
                         "source": "test_lambda_domnode_gtest.cpp",
-                        "name": "🔗 DomNodeBase Tests (GTest)",
+                        "name": "\ud83d\udd17 DomNodeBase Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1156,7 +1161,7 @@
                     },
                     {
                         "source": "test_dir_gtest.cpp",
-                        "name": "📁 Directory Listing Tests (GTest)",
+                        "name": "\ud83d\udcc1 Directory Listing Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1168,7 +1173,7 @@
                     },
                     {
                         "source": "test_graph_parser_gtest.cpp",
-                        "name": "📊 Graph Parser Tests (GTest) - DOT and Mermaid",
+                        "name": "\ud83d\udcca Graph Parser Tests (GTest) - DOT and Mermaid",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1181,7 +1186,7 @@
                     },
                     {
                         "source": "test_graph_formatter_gtest.cpp",
-                        "name": "🎨 Graph Formatter Tests (GTest) - DOT, Mermaid, D2",
+                        "name": "\ud83c\udfa8 Graph Formatter Tests (GTest) - DOT, Mermaid, D2",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1194,7 +1199,7 @@
                     },
                     {
                         "source": "test/test_http_gtest.cpp",
-                        "name": "🌐 HTTP/HTTPS Tests (GTest)",
+                        "name": "\ud83c\udf10 HTTP/HTTPS Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1206,7 +1211,7 @@
                     },
                     {
                         "source": "test/test_sysinfo_gtest.cpp",
-                        "name": "🖥️  System Information Tests (GTest)",
+                        "name": "\ud83d\udda5\ufe0f  System Information Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1219,7 +1224,7 @@
                     },
                     {
                         "source": "test/test_jsx_roundtrip_new_gtest.cpp",
-                        "name": "🔢 JSX Roundtrip Tests (GTest)",
+                        "name": "\ud83d\udd22 JSX Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1232,7 +1237,7 @@
                     },
                     {
                         "source": "test/test_mdx_roundtrip_new_gtest.cpp",
-                        "name": "📝 MDX Roundtrip Tests (GTest)",
+                        "name": "\ud83d\udcdd MDX Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1244,7 +1249,7 @@
                     },
                     {
                         "source": "test/css/test_css_style_node.cpp",
-                        "name": "🎨 CSS Style Node & Cascade Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Style Node & Cascade Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -1253,16 +1258,19 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
+                            "lib/hashmap.c",
+                            "lib/hashmap.c",
                             "lambda/input/css/css_style_node.cpp",
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
+                            "lambda/input/css/css_value.cpp",
                             "lib/mempool.c"
                         ],
                         "binary": "test_css_style_node.exe"
                     },
                     {
                         "source": "test/css/test_css_system.cpp",
-                        "name": "🎨 CSS Property System & Style Node Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Property System & Style Node Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -1271,9 +1279,11 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
+                            "lib/hashmap.c",
                             "lambda/input/css/css_style_node.cpp",
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
+                            "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
                             "lib/string.c",
                             "lib/hashmap.c"
@@ -1282,7 +1292,7 @@
                     },
                     {
                         "source": "test/css/test_css_dom_integration.cpp",
-                        "name": "🌐 DOM Integration & Selector Matching Tests (GTest)",
+                        "name": "\ud83c\udf10 DOM Integration & Selector Matching Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1293,9 +1303,11 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
+                            "lib/hashmap.c",
                             "lambda/input/css/css_style_node.cpp",
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
+                            "lambda/input/css/css_value.cpp",
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
@@ -1305,7 +1317,7 @@
                     },
                     {
                         "source": "test/css/test_css_style_application_gtest.cpp",
-                        "name": "🎨 CSS Style Application Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Style Application Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1316,9 +1328,11 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
+                            "lib/hashmap.c",
                             "lambda/input/css/css_style_node.cpp",
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
+                            "lambda/input/css/css_value.cpp",
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
@@ -1328,7 +1342,7 @@
                     },
                     {
                         "source": "test_html_css_gtest.cpp",
-                        "name": "🌐 HTML to CSS End-to-End Integration Tests (GTest)",
+                        "name": "\ud83c\udf10 HTML to CSS End-to-End Integration Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1346,7 +1360,7 @@
                     },
                     {
                         "source": "test/css/test_css_tokenizer_gtest.cpp",
-                        "name": "🎨 CSS Tokenizer Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Tokenizer Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1359,7 +1373,7 @@
                     },
                     {
                         "source": "test/css/unit/test_css_tokenizer_unit.cpp",
-                        "name": "🎨 CSS Tokenizer Unit Tests (Comprehensive)",
+                        "name": "\ud83c\udfa8 CSS Tokenizer Unit Tests (Comprehensive)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1372,7 +1386,7 @@
                     },
                     {
                         "source": "test/css/unit/test_css_parser_unit.cpp",
-                        "name": "🎨 CSS Parser Unit Tests (Comprehensive)",
+                        "name": "\ud83c\udfa8 CSS Parser Unit Tests (Comprehensive)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1385,7 +1399,7 @@
                     },
                     {
                         "source": "test/css/unit/test_css_engine_unit.cpp",
-                        "name": "🎨 CSS Engine Unit Tests (Comprehensive)",
+                        "name": "\ud83c\udfa8 CSS Engine Unit Tests (Comprehensive)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1398,7 +1412,7 @@
                     },
                     {
                         "source": "test/css/unit/test_css_engine_negative.cpp",
-                        "name": "🎨 CSS Engine Negative Tests (Error Handling)",
+                        "name": "\ud83c\udfa8 CSS Engine Negative Tests (Error Handling)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1411,7 +1425,7 @@
                     },
                     {
                         "source": "test/css/unit/test_dom_element_print.cpp",
-                        "name": "🎨 DOM Element Print Tests",
+                        "name": "\ud83c\udfa8 DOM Element Print Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1419,10 +1433,12 @@
                             "lib/avl_tree.c",
                             "lambda/input/css/dom_element.cpp",
                             "lambda/input/css/dom_node.cpp",
+                            "lib/hashmap.c",
                             "lambda/input/css/css_style_node.cpp",
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_parser.cpp",
                             "lambda/input/css/css_value_parser.cpp",
+                            "lambda/input/css/css_value.cpp",
                             "lambda/input/css/css_formatter.cpp"
                         ],
                         "libraries": [
@@ -1434,7 +1450,7 @@
                     },
                     {
                         "source": "test/css/unit/test_css_formatter_unit.cpp",
-                        "name": "🎨 CSS Formatter Unit Tests",
+                        "name": "\ud83c\udfa8 CSS Formatter Unit Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1447,7 +1463,7 @@
                     },
                     {
                         "source": "test/css/unit/test_css_roundtrip_unit.cpp",
-                        "name": "🎨 CSS Roundtrip Unit Tests (Parse→Format→Parse)",
+                        "name": "\ud83c\udfa8 CSS Roundtrip Unit Tests (Parse\u2192Format\u2192Parse)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1460,7 +1476,7 @@
                     },
                     {
                         "source": "test/css/test_compound_descendant_selectors.cpp",
-                        "name": "🎨 CSS Compound & Descendant Selector Tests",
+                        "name": "\ud83c\udfa8 CSS Compound & Descendant Selector Tests",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1473,7 +1489,7 @@
                     },
                     {
                         "source": "test/css/test_selector_groups.cpp",
-                        "name": "🎨 CSS Selector Groups Tests (Comma-separated)",
+                        "name": "\ud83c\udfa8 CSS Selector Groups Tests (Comma-separated)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1486,7 +1502,7 @@
                     },
                     {
                         "source": "test/css/test_css_parser_gtest.cpp",
-                        "name": "🎨 CSS Parser Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Parser Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1499,7 +1515,7 @@
                     },
                     {
                         "source": "test/css/test_css_integration_gtest.cpp",
-                        "name": "🎨 CSS Integration Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Integration Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1512,7 +1528,7 @@
                     },
                     {
                         "source": "test/css/test_css_files_safe_gtest.cpp",
-                        "name": "🎨 CSS Files Safe Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Files Safe Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1525,7 +1541,7 @@
                     },
                     {
                         "source": "test/css/test_css_frameworks_gtest.cpp",
-                        "name": "🎨 CSS Framework Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS Framework Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1538,7 +1554,7 @@
                     },
                     {
                         "source": "test/css/test_css_to_mark_gtest.cpp",
-                        "name": "🎨 CSS to Mark Round-trip Tests (GTest)",
+                        "name": "\ud83c\udfa8 CSS to Mark Round-trip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1551,7 +1567,7 @@
                     },
                     {
                         "source": "test/test_mdx_roundtrip_gtest.cpp",
-                        "name": "📄 MDX Roundtrip Tests (GTest)",
+                        "name": "\ud83d\udcc4 MDX Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1563,7 +1579,7 @@
                     },
                     {
                         "source": "test/test_jsx_roundtrip_gtest.cpp",
-                        "name": "⚛️  JSX Roundtrip Tests (GTest)",
+                        "name": "\u269b\ufe0f  JSX Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1575,7 +1591,7 @@
                     },
                     {
                         "source": "test/latex/test_latex_html_fixtures.cpp",
-                        "name": "📄 LaTeX to HTML Fixture Tests (GTest)",
+                        "name": "\ud83d\udcc4 LaTeX to HTML Fixture Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1602,11 +1618,11 @@
             },
             {
                 "suite": "validator",
-                "name": "🔍 Validator Tests",
+                "name": "\ud83d\udd0d Validator Tests",
                 "tests": [
                     {
                         "source": "test/test_validator_gtest.cpp",
-                        "name": "🔍 Validator Tests (GTest)",
+                        "name": "\ud83d\udd0d Validator Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1618,7 +1634,7 @@
                     },
                     {
                         "source": "test/test_ast_validator_gtest.cpp",
-                        "name": "🔍 AST Validator Tests (GTest)",
+                        "name": "\ud83d\udd0d AST Validator Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1642,11 +1658,11 @@
             },
             {
                 "suite": "lambda",
-                "name": "🐑 Lambda Runtime Tests",
+                "name": "\ud83d\udc11 Lambda Runtime Tests",
                 "tests": [
                     {
                         "source": "test/test_lambda_gtest.cpp",
-                        "name": "🐑 Lambda Runtime Tests (GTest)",
+                        "name": "\ud83d\udc11 Lambda Runtime Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_gtest.exe",
                         "libraries": [
@@ -1656,7 +1672,7 @@
                     },
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",
-                        "name": "🎮 Lambda REPL Interface Tests (GTest)",
+                        "name": "\ud83c\udfae Lambda REPL Interface Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_repl_gtest.exe",
                         "libraries": [
@@ -1666,7 +1682,7 @@
                     },
                     {
                         "source": "test/test_lambda_proc_gtest.cpp",
-                        "name": "🐑 Lambda Procedural Tests (GTest)",
+                        "name": "\ud83d\udc11 Lambda Procedural Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_proc_gtest.exe",
                         "libraries": [
@@ -1676,7 +1692,7 @@
                     },
                     {
                         "source": "test/test_js_gtest.cpp",
-                        "name": "🟨 JavaScript Transpiler Tests (GTest)",
+                        "name": "\ud83d\udfe8 JavaScript Transpiler Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_js_gtest.exe",
                         "libraries": [

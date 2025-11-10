@@ -108,11 +108,9 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!value) return NULL;
 
-    value->type = CSS_VALUE_TYPE_KEYWORD;
-
     // Strip quotes from keyword (font names can be quoted)
     size_t len = strlen(keyword);
-    const char* keyword_to_copy = keyword;
+    const char* keyword_to_lookup = keyword;
     char* unquoted = NULL;
 
     if (len >= 2 && ((keyword[0] == '\'' && keyword[len-1] == '\'') ||
@@ -122,15 +120,26 @@ CssValue* css_value_create_keyword(Pool* pool, const char* keyword) {
         if (unquoted) {
             memcpy(unquoted, keyword + 1, len - 2);
             unquoted[len - 2] = '\0';
-            keyword_to_copy = unquoted;
+            keyword_to_lookup = unquoted;
         }
     }
 
-    // Copy keyword string
-    char* keyword_copy = (char*)pool_alloc(pool, strlen(keyword_to_copy) + 1);
-    if (keyword_copy) {
-        strcpy(keyword_copy, keyword_to_copy);
-        value->data.keyword = keyword_copy;
+    // Lookup keyword enum
+    CssEnum enum_id = css_enum_by_name(keyword_to_lookup);
+
+    if (enum_id != CSS_VALUE__UNDEF) {
+        // Known keyword - store as enum
+        value->type = CSS_VALUE_TYPE_KEYWORD;
+        value->data.keyword = enum_id;
+    } else {
+        // Unknown keyword - store as custom property string
+        value->type = CSS_VALUE_TYPE_CUSTOM;
+        char* keyword_copy = (char*)pool_alloc(pool, strlen(keyword_to_lookup) + 1);
+        if (keyword_copy) {
+            strcpy(keyword_copy, keyword_to_lookup);
+            value->data.custom_property.name = keyword_copy;
+            value->data.custom_property.fallback = NULL;
+        }
     }
 
     return value;
@@ -732,8 +741,13 @@ bool css_value_is_color(const CssValue* value) {
 }
 
 bool css_value_is_keyword(const CssValue* value, const char* keyword) {
-    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
-           value->data.keyword && strcmp(value->data.keyword, keyword) == 0;
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD || !keyword) {
+        return false;
+    }
+
+    // Lookup the enum for the keyword to compare
+    CssEnum keyword_enum = css_enum_by_name(keyword);
+    return value->data.keyword == keyword_enum;
 }
 
 bool css_value_is_function(const CssValue* value, const char* function_name) {

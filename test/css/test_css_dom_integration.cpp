@@ -2235,7 +2235,7 @@ TEST_F(DomIntegrationTest, InlineStyle_SingleProperty) {
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
     EXPECT_EQ(color->value->type, CSS_VALUE_TYPE_KEYWORD);
-    EXPECT_STREQ(color->value->data.keyword, "red");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("red"));
 
     // Verify inline style specificity (1,0,0,0)
     EXPECT_EQ(color->specificity.inline_style, 1);
@@ -2255,7 +2255,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "blue");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("blue"));
     EXPECT_EQ(color->specificity.inline_style, 1);
 
     CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
@@ -2270,7 +2270,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
     ASSERT_NE(bg, nullptr);
     ASSERT_NE(bg->value, nullptr);
     EXPECT_EQ(bg->value->type, CSS_VALUE_TYPE_KEYWORD);
-    EXPECT_STREQ(bg->value->data.keyword, "yellow");
+    EXPECT_EQ(bg->value->data.keyword, css_enum_by_name("yellow"));
     EXPECT_EQ(bg->specificity.inline_style, 1);
 }
 
@@ -2290,7 +2290,7 @@ TEST_F(DomIntegrationTest, InlineStyle_OverridesStylesheet) {
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "red");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("red"));
     EXPECT_EQ(color->specificity.inline_style, 1);
 }
 
@@ -2328,7 +2328,7 @@ TEST_F(DomIntegrationTest, InlineStyle_WhitespaceHandling) {
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "red");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("red"));
 }
 
 TEST_F(DomIntegrationTest, InlineStyle_EmptyValue) {
@@ -2356,7 +2356,7 @@ TEST_F(DomIntegrationTest, InlineStyle_InvalidDeclarations) {
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "red");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("red"));
 }
 
 TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
@@ -2368,7 +2368,7 @@ TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
     CssDeclaration* color1 = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color1, nullptr);
     ASSERT_NE(color1->value, nullptr);
-    EXPECT_STREQ(color1->value->data.keyword, "red");
+    EXPECT_EQ(color1->value->data.keyword, css_enum_by_name("red"));
 
     // Update with new inline style
     dom_element_set_attribute(element, "style", "color: blue; font-size: 14px");
@@ -2377,7 +2377,7 @@ TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
     CssDeclaration* color2 = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color2, nullptr);
     ASSERT_NE(color2->value, nullptr);
-    EXPECT_STREQ(color2->value->data.keyword, "blue");
+    EXPECT_EQ(color2->value->data.keyword, css_enum_by_name("blue"));
 
     CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
     ASSERT_NE(font_size, nullptr);
@@ -2465,17 +2465,17 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleElements) {
     CssDeclaration* color1 = dom_element_get_specified_value(elem1, CSS_PROPERTY_COLOR);
     ASSERT_NE(color1, nullptr);
     ASSERT_NE(color1->value, nullptr);
-    EXPECT_STREQ(color1->value->data.keyword, "red");
+    EXPECT_EQ(color1->value->data.keyword, css_enum_by_name("red"));
 
     CssDeclaration* color2 = dom_element_get_specified_value(elem2, CSS_PROPERTY_COLOR);
     ASSERT_NE(color2, nullptr);
     ASSERT_NE(color2->value, nullptr);
-    EXPECT_STREQ(color2->value->data.keyword, "blue");
+    EXPECT_EQ(color2->value->data.keyword, css_enum_by_name("blue"));
 
     CssDeclaration* color3 = dom_element_get_specified_value(elem3, CSS_PROPERTY_COLOR);
     ASSERT_NE(color3, nullptr);
     ASSERT_NE(color3->value, nullptr);
-    EXPECT_STREQ(color3->value->data.keyword, "green");
+    EXPECT_EQ(color3->value->data.keyword, css_enum_by_name("green"));
 }
 
 TEST_F(DomIntegrationTest, InlineStyle_MixedWithOtherAttributes) {
@@ -2499,7 +2499,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MixedWithOtherAttributes) {
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
     ASSERT_NE(color, nullptr);
     ASSERT_NE(color->value, nullptr);
-    EXPECT_STREQ(color->value->data.keyword, "red");
+    EXPECT_EQ(color->value->data.keyword, css_enum_by_name("red"));
 }
 
 // ============================================================================
@@ -2511,7 +2511,7 @@ TEST_F(DomIntegrationTest, DomText_Create) {
     ASSERT_NE(text, nullptr);
     EXPECT_EQ(text->node_type, DOM_NODE_TEXT);
     EXPECT_STREQ(dom_text_get_content(text), "Hello World");
-    EXPECT_EQ(text->length, 11);
+    EXPECT_EQ(text->length, 11u);
     EXPECT_EQ(text->parent, nullptr);
     EXPECT_EQ(text->next_sibling, nullptr);
     EXPECT_EQ(text->prev_sibling, nullptr);
@@ -2521,7 +2521,7 @@ TEST_F(DomIntegrationTest, DomText_CreateEmpty) {
     DomText* text = dom_text_create(pool, "");
     ASSERT_NE(text, nullptr);
     EXPECT_STREQ(dom_text_get_content(text), "");
-    EXPECT_EQ(text->length, 0);
+    EXPECT_EQ(text->length, 0u);
 }
 
 TEST_F(DomIntegrationTest, DomText_CreateNull) {
@@ -2535,7 +2535,7 @@ TEST_F(DomIntegrationTest, DomText_SetContent) {
 
     EXPECT_TRUE(dom_text_set_content(text, "Updated Content"));
     EXPECT_STREQ(dom_text_get_content(text), "Updated Content");
-    EXPECT_EQ(text->length, 15);
+    EXPECT_EQ(text->length, 15u);
 }
 
 TEST_F(DomIntegrationTest, DomText_SetContentEmpty) {
@@ -2544,7 +2544,7 @@ TEST_F(DomIntegrationTest, DomText_SetContentEmpty) {
 
     EXPECT_TRUE(dom_text_set_content(text, ""));
     EXPECT_STREQ(dom_text_get_content(text), "");
-    EXPECT_EQ(text->length, 0);
+    EXPECT_EQ(text->length, 0u);
 }
 
 TEST_F(DomIntegrationTest, DomText_SetContentNull) {
@@ -2583,7 +2583,7 @@ TEST_F(DomIntegrationTest, DomComment_CreateComment) {
     EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
     EXPECT_STREQ(comment->tag_name, "comment");
     EXPECT_STREQ(dom_comment_get_content(comment), " This is a comment ");
-    EXPECT_EQ(comment->length, 19);
+    EXPECT_EQ(comment->length, 19u);
 }
 
 TEST_F(DomIntegrationTest, DomComment_CreateDoctype) {
@@ -2605,7 +2605,7 @@ TEST_F(DomIntegrationTest, DomComment_EmptyContent) {
     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "");
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(dom_comment_get_content(comment), "");
-    EXPECT_EQ(comment->length, 0);
+    EXPECT_EQ(comment->length, 0u);
 }
 
 TEST_F(DomIntegrationTest, DomComment_NullParameters) {
