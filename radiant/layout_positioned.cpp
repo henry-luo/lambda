@@ -3,7 +3,7 @@
 #include <stdlib.h>
 
 // Forward declarations
-ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
+ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type);
 float adjust_min_max_width(ViewBlock* block, float width);
 float adjust_min_max_height(ViewBlock* block, float height);
 float adjust_border_padding_width(ViewBlock* block, float width);
@@ -49,7 +49,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
  * For absolute: nearest positioned ancestor or initial containing block
  * For fixed: viewport (initial containing block)
  */
-ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type) {
+ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     if (position_type == CSS_VALUE_FIXED) {
         // Fixed positioning uses viewport as containing block
         // For now, return the root block (will be enhanced for viewport support)
@@ -302,7 +302,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     FloatContext* float_ctx = get_current_float_context(lycon);
     if (!float_ctx) {
         // If no float context exists, create one for the current containing block
-        ViewBlock* containing_block = find_containing_block(block, 333); // CSS_VALUE_STATIC for normal flow
+        ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_STATIC); // CSS_VALUE_STATIC for normal flow
         if (!containing_block) {
             containing_block = (ViewBlock*)lycon->view; // fallback to current context
         }
@@ -373,7 +373,7 @@ FloatContext* create_float_context(ViewBlock* container) {
 /**
  * Add a float element to the float context
  */
-void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float_side) {
+void add_float_to_context(FloatContext* ctx, ViewBlock* element, CssEnum float_side) {
     if (!ctx || !element) {
         printf("DEBUG: ERROR - add_float_to_context called with NULL ctx or element\n");
         return;
@@ -425,7 +425,7 @@ void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float
 /**
  * Position a float element within its containing block
  */
-void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue float_side) {
+void position_float_element(FloatContext* ctx, ViewBlock* element, CssEnum float_side) {
     if (!ctx || !element) return;
 
     ViewBlock* container = ctx->container;
@@ -563,7 +563,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
 
                     // Check if float intersects vertically with the current line
                     if (float_bottom > line_top && float_top < line_bottom) {
-                        PropValue float_side = child_block->position->float_prop;
+                        CssEnum float_side = child_block->position->float_prop;
 
                         if (float_side == 47) {  // CSS_VALUE_LEFT
                             // Left float: adjust left boundary to right edge of float
@@ -644,7 +644,7 @@ void cleanup_float_context(LayoutContext* lycon) {
 /**
  * Find Y position where clear property can be satisfied
  */
-int find_clear_position(FloatContext* ctx, PropValue clear_value) {
+int find_clear_position(FloatContext* ctx, CssEnum clear_value) {
     if (!ctx) return 0;
 
     int clear_y = ctx->current_y;
@@ -683,7 +683,7 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
     log_debug("[CLEAR] Entry: block=%s, block=%p, block->y=%.2f", block_tag_before, (void*)block, block->y);
 
     // Get or create float context for the containing block
-    ViewBlock* containing_block = find_containing_block(block, 333); // CSS_VALUE_STATIC for normal flow
+    ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_STATIC); // CSS_VALUE_STATIC for normal flow
     if (!containing_block) {
         containing_block = (ViewBlock*)lycon->view; // fallback to current context
     }

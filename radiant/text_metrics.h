@@ -13,22 +13,22 @@ typedef struct AdvancedCharacterMetrics {
     int advance_x, advance_y;   // Character advance
     int bearing_x, bearing_y;   // Glyph bearing
     int width, height;          // Glyph dimensions
-    
+
     // Advanced positioning
     int left_side_bearing;      // Left side bearing
     int right_side_bearing;     // Right side bearing
     int top_side_bearing;       // Top side bearing
     int bottom_side_bearing;    // Bottom side bearing
-    
+
     // Baseline information
     int baseline_offset;        // Offset from baseline
     int ascender_offset;        // Offset from ascender line
     int descender_offset;       // Offset from descender line
-    
+
     // High-DPI support
     float pixel_ratio;          // Display pixel ratio used
     bool scaled_for_display;    // Metrics scaled for high-DPI
-    
+
     // Caching information
     bool is_cached;             // Cached flag
     uint64_t cache_timestamp;   // When cached (for invalidation)
@@ -40,22 +40,22 @@ typedef struct TextLineMetrics {
     int line_width;             // Total line width
     int line_height;            // Total line height
     int baseline_y;             // Baseline Y position
-    
+
     // Font metrics for the line
     int max_ascender;           // Maximum ascender in line
     int max_descender;          // Maximum descender in line
     int max_line_gap;           // Maximum line gap in line
-    
+
     // Advanced metrics
     int x_height_max;           // Maximum x-height in line
     int cap_height_max;         // Maximum cap-height in line
     int dominant_baseline;      // Dominant baseline for alignment
-    
+
     // Character count and positioning
     int character_count;        // Number of characters in line
     int* character_positions;   // X positions of each character
     AdvancedCharacterMetrics* char_metrics; // Metrics for each character
-    
+
     // Line breaking information
     int break_opportunities;    // Number of break opportunities
     int* break_positions;       // Positions where line can break
@@ -67,22 +67,22 @@ typedef struct UnicodeRenderContext {
     // Font information
     EnhancedFontBox* primary_font;      // Primary font for rendering
     FontFallbackChain* fallback_chain;  // Font fallback chain
-    
+
     // Rendering parameters
     float pixel_ratio;                  // Display pixel ratio
     bool subpixel_positioning;          // Enable subpixel positioning
     bool font_hinting;                  // Enable font hinting
-    
+
     // Text properties
-    PropValue text_direction;           // LTR, RTL, auto
-    PropValue writing_mode;             // horizontal-tb, vertical-rl, etc.
+    CssEnum text_direction;           // LTR, RTL, auto
+    CssEnum writing_mode;             // horizontal-tb, vertical-rl, etc.
     char* language;                     // Language code for text shaping
-    
+
     // Performance caching
     struct hashmap* glyph_cache;        // Glyph rendering cache
     struct hashmap* metrics_cache;      // Character metrics cache
     bool cache_enabled;                 // Enable caching
-    
+
     // Debug and logging
     bool debug_rendering;               // Enable debug output
     int cache_hits;                     // Cache hit counter
@@ -94,18 +94,18 @@ typedef struct AdvancedGlyphRenderInfo {
     uint32_t codepoint;                 // Unicode codepoint
     FT_GlyphSlot glyph;                 // FreeType glyph slot
     AdvancedCharacterMetrics metrics;   // Advanced character metrics
-    
+
     // Rendering state
     FT_Face font_face;                  // Font face used for rendering
     bool uses_fallback;                 // Uses fallback font
     char* fallback_font_name;           // Name of fallback font used
-    
+
     // Positioning information
     float subpixel_x;                   // Subpixel X positioning
     float subpixel_y;                   // Subpixel Y positioning
     int pixel_x;                        // Final pixel X position
     int pixel_y;                        // Final pixel Y position
-    
+
     // Quality information
     bool hinting_applied;               // Font hinting was applied
     bool antialiasing_enabled;          // Antialiasing enabled
@@ -137,7 +137,7 @@ void compute_character_positions(TextLineMetrics* line_metrics, UnicodeRenderCon
 // Advanced baseline calculations
 int calculate_dominant_baseline(TextLineMetrics* line_metrics);
 int calculate_mixed_font_baseline(EnhancedFontBox** fonts, int font_count);
-int calculate_vertical_alignment_offset(AdvancedCharacterMetrics* char_metrics, PropValue vertical_align);
+int calculate_vertical_alignment_offset(AdvancedCharacterMetrics* char_metrics, CssEnum vertical_align);
 
 // Subpixel positioning and rendering
 void apply_subpixel_positioning(AdvancedGlyphRenderInfo* glyph_info, float subpixel_x, float subpixel_y);

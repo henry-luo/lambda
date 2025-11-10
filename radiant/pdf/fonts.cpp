@@ -80,7 +80,7 @@ const char* map_pdf_font_to_system(const char* pdf_font) {
  * @param pdf_font PDF font name
  * @return Font weight (CSS_VALUE_NORMAL or CSS_VALUE_BOLD)
  */
-PropValue get_font_weight_from_name(const char* pdf_font) {
+CssEnum get_font_weight_from_name(const char* pdf_font) {
     if (strstr(pdf_font, "Bold") || strstr(pdf_font, "Heavy") || strstr(pdf_font, "Black")) {
         return CSS_VALUE_BOLD;
     }
@@ -93,7 +93,7 @@ PropValue get_font_weight_from_name(const char* pdf_font) {
  * @param pdf_font PDF font name
  * @return Font style (CSS_VALUE_NORMAL, CSS_VALUE_ITALIC, or CSS_VALUE_OBLIQUE)
  */
-PropValue get_font_style_from_name(const char* pdf_font) {
+CssEnum get_font_style_from_name(const char* pdf_font) {
     if (strstr(pdf_font, "Italic")) {
         return CSS_VALUE_ITALIC;
     }

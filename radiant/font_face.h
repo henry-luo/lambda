@@ -17,9 +17,9 @@ typedef struct FontFaceDescriptor {
     char* family_name;           // font-family value
     char* src_local_path;        // local font file path (no web URLs)
     char* src_local_name;        // src: local() font name value
-    PropValue font_style;        // normal, italic, oblique
-    PropValue font_weight;       // 100-900, normal, bold
-    PropValue font_display;      // auto, block, swap, fallback, optional
+    CssEnum font_style;        // normal, italic, oblique
+    CssEnum font_weight;       // 100-900, normal, bold
+    CssEnum font_display;      // auto, block, swap, fallback, optional
     bool is_loaded;              // loading state
     FT_Face loaded_face;         // cached FT_Face when loaded
 
@@ -73,8 +73,8 @@ typedef struct EnhancedFontBox {
 // Font matching criteria
 typedef struct FontMatchCriteria {
     const char* family_name;
-    PropValue weight;           // 100-900
-    PropValue style;           // normal, italic, oblique
+    CssEnum weight;           // 100-900
+    CssEnum style;           // normal, italic, oblique
     int size;                  // font size in pixels
     uint32_t required_codepoint; // Specific codepoint support needed (optional)
 } FontMatchCriteria;
@@ -161,7 +161,7 @@ void log_font_fallback_triggered(const char* requested, const char* fallback);
 // Enhanced font matching
 FontMatchResult find_best_font_match(UiContext* uicon, FontMatchCriteria* criteria);
 float calculate_font_match_score(FontFaceDescriptor* descriptor, FontMatchCriteria* criteria);
-FT_Face synthesize_font_style(FT_Face base_face, PropValue target_style, PropValue target_weight);
+FT_Face synthesize_font_style(FT_Face base_face, CssEnum target_style, CssEnum target_weight);
 
 // Font fallback chain management
 FontFallbackChain* build_fallback_chain(UiContext* uicon, const char* css_font_family);
@@ -171,7 +171,7 @@ void cache_codepoint_font_mapping(FontFallbackChain* chain, uint32_t codepoint, 
 
 // Enhanced metrics functions
 void compute_enhanced_font_metrics(EnhancedFontBox* fbox);
-int calculate_line_height_from_css(EnhancedFontBox* fbox, PropValue line_height_css);
+int calculate_line_height_from_css(EnhancedFontBox* fbox, CssEnum line_height_css);
 int get_baseline_offset(EnhancedFontBox* fbox);
 int get_char_width_cached(EnhancedFontBox* fbox, uint32_t codepoint);
 void cache_character_metrics(EnhancedFontBox* fbox, uint32_t codepoint);

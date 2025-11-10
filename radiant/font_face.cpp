@@ -84,8 +84,8 @@ void parse_font_face_rule_OLD(LayoutContext* lycon, lxb_css_rule_t* rule) {
         "./test/layout/font/LiberationSans-BoldItalic.ttf"
     };
 
-    PropValue weights[] = {CSS_VALUE_NORMAL, CSS_VALUE_BOLD, CSS_VALUE_NORMAL, CSS_VALUE_BOLD};
-    PropValue styles[] = {CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_ITALIC, CSS_VALUE_ITALIC};
+    CssEnum weights[] = {CSS_VALUE_NORMAL, CSS_VALUE_BOLD, CSS_VALUE_NORMAL, CSS_VALUE_BOLD};
+    CssEnum styles[] = {CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_ITALIC, CSS_VALUE_ITALIC};
 
     for (int i = 0; i < 4; i++) {
         FontFaceDescriptor* descriptor = create_font_face_descriptor(lycon);
@@ -510,7 +510,7 @@ void compute_enhanced_font_metrics(EnhancedFontBox* fbox) {
               face->family_name, metrics->ascender, metrics->descender, metrics->height);
 }
 
-int calculate_line_height_from_css(EnhancedFontBox* fbox, PropValue line_height_css) {
+int calculate_line_height_from_css(EnhancedFontBox* fbox, CssEnum line_height_css) {
     if (!fbox) {
         return 0;
     }

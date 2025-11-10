@@ -143,7 +143,7 @@ Color convert_lambda_color(const CssValue* value) {
 // ============================================================================
 
 // CSS4 has a total of 148 colors
-Color color_name_to_rgb(PropValue color_name) {
+Color color_name_to_rgb(CssEnum color_name) {
     uint32_t c;
     switch (color_name) {
         case CSS_VALUE_ALICEBLUE: c = 0xF0F8FF;  break;
@@ -315,7 +315,7 @@ uint32_t map_lambda_color_keyword(const char* keyword) {
     }
 
     // convert color enum to RGB color value
-    Color color = color_name_to_rgb((PropValue)color_enum);
+    Color color = color_name_to_rgb((CssEnum)color_enum);
     return color.c;
 }
 
@@ -337,7 +337,7 @@ float map_lambda_font_size_keyword(const char* keyword) {
 }
 
 // map Lambda CSS font-weight keywords/numbers to Lexbor PropValue enum
-PropValue map_lambda_font_weight_to_lexbor(const CssValue* value) {
+CssEnum map_lambda_font_weight_to_lexbor(const CssValue* value) {
     if (!value) return CSS_VALUE_NORMAL;
 
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -778,22 +778,22 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         case 4:
             log_debug("resolving 4th spacing");
             sp.left = resolve_length_value(lycon, property, values[3]);
-            sp.left_type = values[3]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[3]->data.keyword) : 0;
+            sp.left_type = values[3]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[3]->data.keyword) : CSS_VALUE__UNDEF;
             // intended fall through
         case 3:
             log_debug("resolving 3rd spacing");
             sp.bottom = resolve_length_value(lycon, property, values[2]);
-            sp.bottom_type = values[2]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[2]->data.keyword) : 0;
+            sp.bottom_type = values[2]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[2]->data.keyword) : CSS_VALUE__UNDEF;
             // intended fall through
         case 2:
             log_debug("resolving 2nd spacing");
             sp.right = resolve_length_value(lycon, property, values[1]);
-            sp.right_type = values[1]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[1]->data.keyword) : 0;
+            sp.right_type = values[1]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[1]->data.keyword) : CSS_VALUE__UNDEF;
             // intended fall through
         case 1:
             log_debug("resolving 1st spacing");
             sp.top = resolve_length_value(lycon, property, values[0]);
-            sp.top_type = values[0]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[0]->data.keyword) : 0;
+            sp.top_type = values[0]->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(values[0]->data.keyword) : CSS_VALUE__UNDEF;
             break;
         default:
             log_warn("unexpected spacing value count: %d", value_cnt);
@@ -802,7 +802,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     } else {
         // Single value margin
         sp.top = resolve_length_value(lycon, property, src_space);
-        sp.top_type = src_space->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(src_space->data.keyword) : 0;
+        sp.top_type = src_space->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(src_space->data.keyword) : CSS_VALUE__UNDEF;
     }
     switch (value_cnt) {
     case 1:
@@ -963,6 +963,23 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     }
 }
 
+struct MultiValue {
+    CssValue* length;
+    CssValue* color;
+    CssValue* style;
+};
+
+void set_multi_value(MultiValue* mv, CssValue* value) {
+    if (!mv || !value) return;
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
+        mv->length = value;
+    } else if (value->type == CSS_VALUE_TYPE_COLOR) {
+        mv->color = value;
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        mv->style = value;
+    }
+}
+
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
     log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
     if (!decl || !lycon || !lycon->view) {
@@ -973,7 +990,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
     const CssValue* value = decl->value;
     if (!value) { log_debug("No value in declaration");  return; }
     log_debug("[Lambda CSS Property] Processing property %d, %s, value type=%d",
-        prop_id, css_value_by_id(prop_id)->name, value->type);
+        prop_id, css_property_name_from_id(prop_id), value->type);
     int32_t specificity = get_lambda_specificity(decl);
     log_debug("[Lambda CSS Property] Specificity: %d", specificity);
 
@@ -1084,7 +1101,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             // Map Lambda CSS value to Lexbor PropValue enum
-            PropValue lexbor_weight = map_lambda_font_weight_to_lexbor(value);
+            CssEnum lexbor_weight = map_lambda_font_weight_to_lexbor(value);
             span->font->font_weight = lexbor_weight;
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1191,7 +1208,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue align_value = css_value_by_name(value->data.keyword);
+                CssEnum align_value = css_value_by_name(value->data.keyword);
                 if (align_value != CSS_VALUE__UNDEF) {
                     block->blk->text_align = align_value;
                     log_debug("[CSS] Text-align: %s -> 0x%04X", value->data.keyword, align_value);
@@ -1207,7 +1224,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue deco_value = css_value_by_name(value->data.keyword);
+                CssEnum deco_value = css_value_by_name(value->data.keyword);
                 if (deco_value != CSS_VALUE__UNDEF) {
                     span->font->text_deco = deco_value;
                     log_debug("[CSS] Text-decoration: %s -> 0x%04X", value->data.keyword, deco_value);
@@ -1223,7 +1240,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue valign_value = css_value_by_name(value->data.keyword);
+                CssEnum valign_value = css_value_by_name(value->data.keyword);
                 if (valign_value != CSS_VALUE__UNDEF) {
                     span->in_line->vertical_align = valign_value;
                     log_debug("[CSS] Vertical-align: %s -> 0x%04X", value->data.keyword, valign_value);
@@ -1250,7 +1267,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue cursor_value = css_value_by_name(value->data.keyword);
+                CssEnum cursor_value = css_value_by_name(value->data.keyword);
                 if (cursor_value != CSS_VALUE__UNDEF) {
                     span->in_line->cursor = cursor_value;
                     log_debug("[CSS] Cursor: %s -> 0x%04X", value->data.keyword, cursor_value);
@@ -1271,7 +1288,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (block) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_width = width;
-                block->blk->given_width_type = value->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(value->data.keyword) : 0;;
+                block->blk->given_width_type = value->type == CSS_VALUE_TYPE_KEYWORD ? css_value_by_name(value->data.keyword) : CSS_VALUE__UNDEF;
             }
             log_debug("[CSS] Width: %.2f px", width);
             break;
@@ -2073,7 +2090,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_val = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->top_style = lexbor_val;
                 log_debug("[CSS] Border-top-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2090,7 +2107,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_val = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->right_style = lexbor_val;
                 log_debug("[CSS] Border-right-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2107,7 +2124,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_val = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->bottom_style = lexbor_val;
                 log_debug("[CSS] Border-bottom-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2124,7 +2141,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_val = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_val = css_value_by_name(value->data.keyword);
                 span->bound->border->left_style = lexbor_val;
                 log_debug("[CSS] Border-left-style: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2282,7 +2299,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             // Border shorthand: <width> <style> <color> (any order)
             // Parse values from the list or single value
-            float border_width = -1.0f;  int border_style = -1;  Color border_color = {0};
+            float border_width = -1.0f;  CssEnum border_style = CSS_VALUE__UNDEF;  Color border_color = {0};
 
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multiple values
@@ -2436,7 +2453,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            log_debug("[CSS] border-left: shorthand parsing not yet fully implemented");
+            MultiValue border = {0};
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+            }
+            else if (value->type == CSS_VALUE_TYPE_COLOR) {
+
+            }
+            else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+
+            }
             break;
         }
 
@@ -2456,7 +2481,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // 4 values: top, right, bottom, left
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Single value - all sides get same style
-                PropValue border_style = css_value_by_name(value->data.keyword);
+                CssEnum border_style = css_value_by_name(value->data.keyword);
                 if (border_style != CSS_VALUE__UNDEF) {
                     span->bound->border->top_style = border_style;
                     span->bound->border->right_style = border_style;
@@ -2472,8 +2497,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
                 if (count == 2 && values[0]->type == CSS_VALUE_TYPE_KEYWORD && values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
                     // top/bottom, left/right
-                    PropValue vertical = css_value_by_name(values[0]->data.keyword);
-                    PropValue horizontal = css_value_by_name(values[1]->data.keyword);
+                    CssEnum vertical = css_value_by_name(values[0]->data.keyword);
+                    CssEnum horizontal = css_value_by_name(values[1]->data.keyword);
                     span->bound->border->top_style = vertical;
                     span->bound->border->bottom_style = vertical;
                     span->bound->border->left_style = horizontal;
@@ -2483,9 +2508,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 else if (count == 3 && values[0]->type == CSS_VALUE_TYPE_KEYWORD &&
                            values[1]->type == CSS_VALUE_TYPE_KEYWORD && values[2]->type == CSS_VALUE_TYPE_KEYWORD) {
                     // top, left/right, bottom
-                    PropValue top = css_value_by_name(values[0]->data.keyword);
-                    PropValue horizontal = css_value_by_name(values[1]->data.keyword);
-                    PropValue bottom = css_value_by_name(values[2]->data.keyword);
+                    CssEnum top = css_value_by_name(values[0]->data.keyword);
+                    CssEnum horizontal = css_value_by_name(values[1]->data.keyword);
+                    CssEnum bottom = css_value_by_name(values[2]->data.keyword);
                     span->bound->border->top_style = top;
                     span->bound->border->left_style = horizontal;
                     span->bound->border->right_style = horizontal;
@@ -2496,10 +2521,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                            values[1]->type == CSS_VALUE_TYPE_KEYWORD && values[2]->type == CSS_VALUE_TYPE_KEYWORD &&
                            values[3]->type == CSS_VALUE_TYPE_KEYWORD) {
                     // top, right, bottom, left
-                    PropValue top = css_value_by_name(values[0]->data.keyword);
-                    PropValue right = css_value_by_name(values[1]->data.keyword);
-                    PropValue bottom = css_value_by_name(values[2]->data.keyword);
-                    PropValue left = css_value_by_name(values[3]->data.keyword);
+                    CssEnum top = css_value_by_name(values[0]->data.keyword);
+                    CssEnum right = css_value_by_name(values[1]->data.keyword);
+                    CssEnum bottom = css_value_by_name(values[2]->data.keyword);
+                    CssEnum left = css_value_by_name(values[3]->data.keyword);
                     span->bound->border->top_style = top;
                     span->bound->border->right_style = right;
                     span->bound->border->bottom_style = bottom;
@@ -2854,7 +2879,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_val = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_val = css_value_by_name(value->data.keyword);
                 block->position->position = lexbor_val;
                 log_debug("[CSS] Position: %s -> %d", value->data.keyword, lexbor_val);
             }
@@ -2984,7 +3009,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue float_value = css_value_by_name(value->data.keyword);
+                CssEnum float_value = css_value_by_name(value->data.keyword);
                 if (float_value > 0) {
                     block->position->float_prop = float_value;
                     log_debug("[CSS] Float: %s -> 0x%04X", value->data.keyword, float_value);
@@ -3001,7 +3026,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue clear_value = css_value_by_name(value->data.keyword);
+                CssEnum clear_value = css_value_by_name(value->data.keyword);
                 if (clear_value > 0) {
                     block->position->clear = clear_value;
                     log_debug("[CSS] Clear: %s -> 0x%04X", value->data.keyword, clear_value);
@@ -3020,7 +3045,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue overflow_value = css_value_by_name(value->data.keyword);
+                CssEnum overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
                     block->scroller->overflow_y = overflow_value;
@@ -3038,7 +3063,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue overflow_value = css_value_by_name(value->data.keyword);
+                CssEnum overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
                     log_debug("[CSS] Overflow-x: %s -> 0x%04X", value->data.keyword, overflow_value);
@@ -3055,7 +3080,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue overflow_value = css_value_by_name(value->data.keyword);
+                CssEnum overflow_value = css_value_by_name(value->data.keyword);
                 if (overflow_value > 0) {
                     block->scroller->overflow_y = overflow_value;
                     log_debug("[CSS] Overflow-y: %s -> 0x%04X", value->data.keyword, overflow_value);
@@ -3077,7 +3102,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue whitespace_value = css_value_by_name(value->data.keyword);
+                CssEnum whitespace_value = css_value_by_name(value->data.keyword);
                 if (whitespace_value > 0) {
                     block->blk->white_space = whitespace_value;
                     log_debug("[CSS] White-space: %s -> 0x%04X", value->data.keyword, whitespace_value);
@@ -3092,7 +3117,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing visibility property");
             // Visibility applies to all elements, stored in ViewSpan
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue visibility_value = css_value_by_name(value->data.keyword);
+                CssEnum visibility_value = css_value_by_name(value->data.keyword);
                 if (visibility_value > 0) {
                     span->visibility = visibility_value;
                     log_debug("[CSS] Visibility: %s -> 0x%04X", value->data.keyword, visibility_value);
@@ -3154,7 +3179,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue boxsizing_value = css_value_by_name(value->data.keyword);
+                CssEnum boxsizing_value = css_value_by_name(value->data.keyword);
                 if (boxsizing_value > 0) {
                     block->blk->box_sizing = boxsizing_value;
                     log_debug("[CSS] Box-sizing: %s -> 0x%04X", value->data.keyword, boxsizing_value);
@@ -3173,7 +3198,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     span->font->font_style = lexbor_value;
                     log_debug("[CSS] font-style: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3194,7 +3219,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_transform field to BlockProp would be needed
                     // For now, log the value that would be set
@@ -3217,7 +3242,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_overflow field to BlockProp would be needed
                     log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)",
@@ -3239,7 +3264,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_break field to BlockProp would be needed
                     log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
@@ -3261,7 +3286,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_wrap field to BlockProp would be needed
                     log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)",
@@ -3279,7 +3304,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding font_variant field to FontProp would be needed
                     log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)",
@@ -3353,7 +3378,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->direction = lexbor_value;
                     log_debug("[CSS] flex-direction: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3373,7 +3398,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->wrap = lexbor_value;
                     log_debug("[CSS] flex-wrap: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3393,7 +3418,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->justify = lexbor_value;
                     log_debug("[CSS] justify-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3413,7 +3438,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->align_items = lexbor_value;
                     log_debug("[CSS] align-items: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3433,7 +3458,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     block->embed->flex->align_content = lexbor_value;
                     log_debug("[CSS] align-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3542,7 +3567,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_ALIGN_SELF: {
             log_debug("[CSS] Processing align-self property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                PropValue lexbor_value = css_value_by_name(value->data.keyword);
+                CssEnum lexbor_value = css_value_by_name(value->data.keyword);
                 if (lexbor_value > 0) {
                     span->align_self = lexbor_value;
                     log_debug("[CSS] align-self: %s -> 0x%04X", value->data.keyword, lexbor_value);
@@ -3724,7 +3749,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation-timing-function property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* timing = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(timing);
+                CssEnum lexbor_value = css_value_by_name(timing);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] animation-timing-function: %s -> 0x%04X", timing, lexbor_value);
                 } else {
@@ -3758,7 +3783,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation-direction property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* direction = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(direction);
+                CssEnum lexbor_value = css_value_by_name(direction);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] animation-direction: %s -> 0x%04X", direction, lexbor_value);
                 } else {
@@ -3772,7 +3797,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing animation-fill-mode property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* fill_mode = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(fill_mode);
+                CssEnum lexbor_value = css_value_by_name(fill_mode);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] animation-fill-mode: %s -> 0x%04X", fill_mode, lexbor_value);
                 } else {
@@ -3817,7 +3842,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing border-collapse property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* collapse = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(collapse);
+                CssEnum lexbor_value = css_value_by_name(collapse);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] border-collapse: %s -> 0x%04X", collapse, lexbor_value);
                 } else {
@@ -3857,7 +3882,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing empty-cells property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* cells = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(cells);
+                CssEnum lexbor_value = css_value_by_name(cells);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] empty-cells: %s -> 0x%04X", cells, lexbor_value);
                 } else {
@@ -3872,7 +3897,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing list-style-type property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* type = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(type);
+                CssEnum lexbor_value = css_value_by_name(type);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] list-style-type: %s -> 0x%04X", type, lexbor_value);
                 } else {
@@ -3886,7 +3911,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing list-style-position property");
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 const char* position = value->data.keyword;
-                PropValue lexbor_value = css_value_by_name(position);
+                CssEnum lexbor_value = css_value_by_name(position);
                 if (lexbor_value > 0) {
                     log_debug("[CSS] list-style-position: %s -> 0x%04X", position, lexbor_value);
                 } else {

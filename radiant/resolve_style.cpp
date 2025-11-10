@@ -4,7 +4,7 @@
 
 #include "../lib/log.h"
 #include <string.h>
-AlignType resolve_align_type(PropValue value);
+AlignType resolve_align_type(CssEnum value);
 
 float resolve_length_value(LayoutContext* lycon, uintptr_t property,
     const lxb_css_value_length_percentage_t *value);

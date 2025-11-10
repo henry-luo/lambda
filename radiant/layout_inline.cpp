@@ -94,7 +94,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // save parent context
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
-    PropValue pa_line_align = lycon->line.vertical_align;
+    CssEnum pa_line_align = lycon->line.vertical_align;
     lycon->elmt = elmt;
 
     ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, elmt);

@@ -62,14 +62,12 @@ typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 
 typedef struct {
     Url* url;               // document URL
-    Element* html_root;     // parsed HTML tree in Mark notation 
+    Element* html_root;     // parsed HTML tree in Mark notation
     DomElement* dom_root;   // Lambda CSS DOM root element (DomNode*)
     int html_version;       // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
     ViewTree* view_tree;    // View tree after layout
     StateStore* state;
 } Document;
-
-typedef unsigned short PropValue;
 
 Document* load_html_doc(Url *base, char* doc_filename);
 void free_document(Document* doc);
