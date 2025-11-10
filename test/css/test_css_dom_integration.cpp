@@ -5,6 +5,7 @@
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "helpers/css_test_helpers.hpp"
 
 extern "C" {
 #include "../../lib/mempool.h"
@@ -3013,10 +3014,4 @@ TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
     span->prev_sibling = comment;
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't use it
-}
-
-// Run all tests
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }

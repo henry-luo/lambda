@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../../../lambda/input/css/dom_element.hpp"
+#include "../helpers/css_test_helpers.hpp"
 
 extern "C" {
 #include "../../../lib/strbuf.h"
@@ -489,3 +490,7 @@ TEST_F(DomElementPrintTest, PrintTableStructure) {
     EXPECT_TRUE(strstr(result, "</th>") != nullptr);
     EXPECT_TRUE(strstr(result, "</td>") != nullptr);
 }
+
+// =============================================================================
+// Main Entry Point - Using GTest default main
+// =============================================================================

@@ -589,3 +589,7 @@ TEST_F(CssFormatterUnitTest, Integration_ComplexStylesheet) {
 
     // Note: Full round-trip test will work once formatter is fully implemented
 }
+
+// =============================================================================
+// Main Entry Point - Using GTest default main
+// =============================================================================
