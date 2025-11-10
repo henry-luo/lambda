@@ -424,9 +424,9 @@ run_test_with_timeout() {
     fi
 
     # Check if JSON file was created and is valid
-    # Wait up to 30 seconds for the file to be written (handles race condition in parallel execution)
+    # Wait up to 45 seconds for the file to be written (handles race condition in parallel execution)
     local wait_count=0
-    while [ $wait_count -lt 300 ]; do
+    while [ $wait_count -lt 450 ]; do
         if [ -f "$json_file" ] && jq empty "$json_file" 2>/dev/null; then
             echo "$json_file"
             return 0
@@ -728,77 +728,102 @@ echo ""
 
 # Execute tests (parallel or sequential)
 if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
-    echo "⚡ Running tests in parallel..."
+    echo "⚡ Running tests in parallel (max 5 concurrent)..."
     echo ""
 
-    # Start all tests in parallel
-    test_pids=()
+    # Rolling window parallel execution
+    MAX_CONCURRENT=5
     result_files=()
+    total_tests_count=${#test_executables[@]}
+    current_index=0
+    completed_count=0
 
-    for test_exe in "${test_executables[@]}"; do
-        base_name=$(basename "$test_exe" .exe)
+    # Arrays to track running jobs (parallel arrays)
+    running_pids=()
+    running_names=()
 
-        # Check if we have a source file for this test (try both .c and .cpp)
-        source_file_c="test/${base_name}.c"
-        source_file_cpp="test/${base_name}.cpp"
+    # Helper function to start a test
+    start_test() {
+        local test_exe="$1"
+        local base_name=$(basename "$test_exe" .exe)
+
+        # Check if we have a source file for this test
+        local source_file_c="test/${base_name}.c"
+        local source_file_cpp="test/${base_name}.cpp"
         if [ -f "$source_file_c" ] || [ -f "$source_file_cpp" ] || [ -x "$test_exe" ]; then
-            # Calculate result file path - this must match what run_single_test creates
-            result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
+            # Calculate result file path
+            local result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
             result_files+=("$result_file")
 
-            echo "   Starting $base_name..."
+            echo "   [$((current_index + 1))/$total_tests_count] Starting $base_name..."
 
-            # Run test in background and collect PID
-            # Capture output to a temporary file instead of discarding it
-            temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
+            # Run test in background
+            local temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
             run_single_test "$test_exe" > "$temp_output" 2>&1 &
-            pid=$!
-            test_pids+=($pid)
+            local pid=$!
 
-            echo "   Started $base_name with PID $pid"
+            running_pids+=("$pid")
+            running_names+=("$base_name")
+            current_index=$((current_index + 1))
+            return 0
         else
             echo "⚠️  Skipping $test_exe (no source file and not executable)"
+            current_index=$((current_index + 1))
+            return 1
+        fi
+    }
+
+    # Start initial batch of tests
+    while [ $current_index -lt $total_tests_count ] && [ ${#running_pids[@]} -lt $MAX_CONCURRENT ]; do
+        start_test "${test_executables[$current_index]}"
+    done
+
+    echo ""
+    echo "⏳ Running with ${#running_pids[@]} concurrent jobs..."
+
+    # Main loop: wait for jobs to finish and start new ones
+    while [ ${#running_pids[@]} -gt 0 ] || [ $current_index -lt $total_tests_count ]; do
+        # Check each running PID
+        for i in "${!running_pids[@]}"; do
+            pid="${running_pids[$i]}"
+            if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+                # Process has finished
+                wait "$pid" 2>/dev/null || true
+                test_name="${running_names[$i]}"
+                echo "   ✓ Completed $test_name"
+
+                # Remove from arrays by setting to empty
+                running_pids[$i]=""
+                running_names[$i]=""
+                completed_count=$((completed_count + 1))
+
+                # Start a new test if available
+                if [ $current_index -lt $total_tests_count ]; then
+                    start_test "${test_executables[$current_index]}"
+                fi
+            fi
+        done
+
+        # Clean up empty entries from arrays
+        new_pids=()
+        new_names=()
+        for i in "${!running_pids[@]}"; do
+            if [ -n "${running_pids[$i]}" ]; then
+                new_pids+=("${running_pids[$i]}")
+                new_names+=("${running_names[$i]}")
+            fi
+        done
+        running_pids=("${new_pids[@]}")
+        running_names=("${new_names[@]}")
+
+        # Small sleep to avoid busy-waiting
+        if [ ${#running_pids[@]} -gt 0 ]; then
+            sleep 0.1
         fi
     done
 
     echo ""
-    echo "Started ${#test_pids[@]} parallel processes"
-    echo "Expected result files: ${#result_files[@]}"
-
-    # Wait for all tests to complete
-    echo "⏳ Waiting for ${#test_pids[@]} parallel test(s) to complete..."
-
-    # Wait for each process with timeout
-    wait_timeout=300  # 5 minutes total timeout
-    start_time=$(date +%s)
-
-    for i in "${!test_pids[@]}"; do
-        pid="${test_pids[$i]}"
-        echo "   Waiting for PID $pid..."
-
-        # Check if process is still running
-        if kill -0 "$pid" 2>/dev/null; then
-            # Wait for this specific process with timeout
-            elapsed=0
-            while kill -0 "$pid" 2>/dev/null && [ $elapsed -lt $wait_timeout ]; do
-                sleep 1
-                elapsed=$(($(date +%s) - start_time))
-            done
-
-            # If still running after timeout, kill it
-            if kill -0 "$pid" 2>/dev/null; then
-                echo "   ⚠️ Process $pid timed out, killing..."
-                kill -TERM "$pid" 2>/dev/null || true
-                sleep 2
-                kill -KILL "$pid" 2>/dev/null || true
-            fi
-        fi
-
-        # Final wait to collect exit status
-        wait "$pid" 2>/dev/null || true
-    done
-
-    echo "✅ All parallel tests completed!"
+    echo "✅ All $completed_count parallel tests completed!"
     echo ""
 
     # Process results from all test files
