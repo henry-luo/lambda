@@ -1820,33 +1820,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->border->top_color_specificity) {
-                break; // lower specificity, skip
-            }
-
-            Color color = {0};
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color = color_name_to_rgb(value->data.keyword);
-                log_debug("[CSS] Border-top-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
-            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                if (value->data.color.type == CSS_COLOR_RGB) {
-                    color.r = value->data.color.data.rgba.r;
-                    color.g = value->data.color.data.rgba.g;
-                    color.b = value->data.color.data.rgba.b;
-                    color.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Border-top-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
-                }
-            }
-
-            if (color.c != 0) {
-                span->bound->border->top_color = color;
+            if (specificity >= span->bound->border->top_color_specificity) {
+                span->bound->border->top_color = resolve_color_value(value);
                 span->bound->border->top_color_specificity = specificity;
             }
             break;
         }
-
         case CSS_PROPERTY_BORDER_RIGHT_COLOR: {
             log_debug("[CSS] Processing border-right-color property");
             if (!span->bound) {
@@ -1855,33 +1834,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->border->right_color_specificity) {
-                break; // lower specificity, skip
-            }
-
-            Color color = {0};
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color = color_name_to_rgb(value->data.keyword);
-                log_debug("[CSS] Border-right-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
-            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                if (value->data.color.type == CSS_COLOR_RGB) {
-                    color.r = value->data.color.data.rgba.r;
-                    color.g = value->data.color.data.rgba.g;
-                    color.b = value->data.color.data.rgba.b;
-                    color.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Border-right-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
-                }
-            }
-
-            if (color.c != 0) {
-                span->bound->border->right_color = color;
+            if (specificity >= span->bound->border->right_color_specificity) {
+                span->bound->border->right_color = resolve_color_value(value);
                 span->bound->border->right_color_specificity = specificity;
             }
             break;
         }
-
         case CSS_PROPERTY_BORDER_BOTTOM_COLOR: {
             log_debug("[CSS] Processing border-bottom-color property");
             if (!span->bound) {
@@ -1890,33 +1848,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->border->bottom_color_specificity) {
-                break; // lower specificity, skip
-            }
-
-            Color color = {0};
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color = color_name_to_rgb(value->data.keyword);
-                log_debug("[CSS] Border-bottom-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
-            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                if (value->data.color.type == CSS_COLOR_RGB) {
-                    color.r = value->data.color.data.rgba.r;
-                    color.g = value->data.color.data.rgba.g;
-                    color.b = value->data.color.data.rgba.b;
-                    color.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Border-bottom-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
-                }
-            }
-
-            if (color.c != 0) {
-                span->bound->border->bottom_color = color;
+            if (specificity >= span->bound->border->bottom_color_specificity) {
+                span->bound->border->bottom_color = resolve_color_value(value);
                 span->bound->border->bottom_color_specificity = specificity;
             }
             break;
         }
-
         case CSS_PROPERTY_BORDER_LEFT_COLOR: {
             log_debug("[CSS] Processing border-left-color property");
             if (!span->bound) {
@@ -1925,28 +1862,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
-            // Check specificity before overwriting
-            if (specificity < span->bound->border->left_color_specificity) {
-                break; // lower specificity, skip
-            }
-
-            Color color = {0};
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color = resolve_color_value(value);
-                log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
-            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                if (value->data.color.type == CSS_COLOR_RGB) {
-                    color.r = value->data.color.data.rgba.r;
-                    color.g = value->data.color.data.rgba.g;
-                    color.b = value->data.color.data.rgba.b;
-                    color.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Border-left-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
-                }
-            }
-
-            if (color.c != 0) {
-                span->bound->border->left_color = color;
+            if (specificity >= span->bound->border->left_color_specificity) {
+                span->bound->border->left_color = resolve_color_value(value);
                 span->bound->border->left_color_specificity = specificity;
             }
             break;
@@ -2080,11 +1997,22 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            // Note: Border-top shorthand sets width, style, and color for top
-            log_debug("[CSS] border-top: shorthand parsing not yet fully implemented");
+            MultiValue border = {0};
+            set_multi_value( &border, value);
+            if (border.style) {
+                span->bound->border->top_style = border.style->data.keyword;
+                span->bound->border->top_style_specificity = specificity;
+            }
+            else if (border.length) {
+                span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length);
+                span->bound->border->width.top_specificity = specificity;
+            }
+            else if (border.color) {
+                span->bound->border->top_color = resolve_color_value(border.color);
+                span->bound->border->top_color_specificity = specificity;
+            }
             break;
         }
-
         case CSS_PROPERTY_BORDER_RIGHT: {
             log_debug("[CSS] Processing border-right shorthand property");
             if (!span->bound) {
@@ -2093,10 +2021,22 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            log_debug("[CSS] border-right: shorthand parsing not yet fully implemented");
+            MultiValue border = {0};
+            set_multi_value( &border, value);
+            if (border.style) {
+                span->bound->border->right_style = border.style->data.keyword;
+                span->bound->border->right_style_specificity = specificity;
+            }
+            else if (border.length) {
+                span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length);
+                span->bound->border->width.right_specificity = specificity;
+            }
+            else if (border.color) {
+                span->bound->border->right_color = resolve_color_value(border.color);
+                span->bound->border->right_color_specificity = specificity;
+            }
             break;
         }
-
         case CSS_PROPERTY_BORDER_BOTTOM: {
             log_debug("[CSS] Processing border-bottom shorthand property");
             if (!span->bound) {
@@ -2105,10 +2045,21 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            log_debug("[CSS] border-bottom: shorthand parsing not yet fully implemented");
+            MultiValue border = {0};
+            set_multi_value( &border, value);
+            if (border.style) {
+                span->bound->border->bottom_style = border.style->data.keyword;
+                span->bound->border->bottom_style_specificity = specificity;
+            }
+            else if (border.length) {
+                span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length);
+                span->bound->border->width.bottom_specificity = specificity;
+            }
+            else if (border.color) {
+                span->bound->border->bottom_color = resolve_color_value(border.color);
+            }
             break;
         }
-
         case CSS_PROPERTY_BORDER_LEFT: {
             log_debug("[CSS] Processing border-left shorthand property");
             if (!span->bound) {
@@ -2121,6 +2072,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             set_multi_value( &border, value);
             if (border.style) {
                 span->bound->border->left_style = border.style->data.keyword;
+                span->bound->border->left_style_specificity = specificity;
             }
             else if (border.length) {
                 span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length);
