@@ -422,6 +422,12 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
         if (token_index >= token_count) break;
 
+        // Skip EOF token - nothing left to parse
+        if (tokens[token_index].type == CSS_TOKEN_EOF) {
+            fprintf(stderr, "[CSS Integration] Reached EOF token at position %d\n", token_index);
+            break;
+        }
+
         fprintf(stderr, "[CSS Integration] Parsing rule starting at token %d (type=%d)\n",
                 token_index, tokens[token_index].type);
 

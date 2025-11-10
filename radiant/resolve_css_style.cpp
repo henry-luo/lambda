@@ -1842,7 +1842,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: scroll, fixed, local
-                log_debug("[CSS] background-attachment: %s", value->data.keyword);
+                log_debug("[CSS] background-attachment: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store attachment value when BackgroundProp is extended
             }
             break;
@@ -1859,7 +1859,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
-                log_debug("[CSS] background-origin: %s", value->data.keyword);
+                log_debug("[CSS] background-origin: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store origin value when BackgroundProp is extended
             }
             break;
@@ -1876,7 +1876,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
-                log_debug("[CSS] background-clip: %s", value->data.keyword);
+                log_debug("[CSS] background-clip: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store clip value when BackgroundProp is extended
             }
             break;
@@ -1901,7 +1901,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // TODO: Store position-x percentage when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: left, center, right
-                log_debug("[CSS] background-position-x: %s", value->data.keyword);
+                log_debug("[CSS] background-position-x: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store position-x keyword when BackgroundProp is extended
             }
             break;
@@ -1926,7 +1926,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // TODO: Store position-y percentage when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: top, center, bottom
-                log_debug("[CSS] background-position-y: %s", value->data.keyword);
+                log_debug("[CSS] background-position-y: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store position-y keyword when BackgroundProp is extended
             }
             break;
@@ -1943,7 +1943,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: normal, multiply, screen, overlay, darken, lighten, etc.
-                log_debug("[CSS] background-blend-mode: %s", value->data.keyword);
+                log_debug("[CSS] background-blend-mode: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store blend mode when BackgroundProp is extended
             }
             break;
@@ -2211,7 +2211,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
-                log_debug("[CSS] Border-top-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+                log_debug("[CSS] Border-top-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
@@ -2246,7 +2246,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
-                log_debug("[CSS] Border-right-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+                log_debug("[CSS] Border-right-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
@@ -2281,7 +2281,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
-                log_debug("[CSS] Border-bottom-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+                log_debug("[CSS] Border-bottom-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
@@ -2316,7 +2316,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
-                log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+                log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
                     color.r = value->data.color.data.rgba.r;
@@ -2507,7 +2507,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 //     span->bound->border->right_style = border_style;
                 //     span->bound->border->bottom_style = border_style;
                 //     span->bound->border->left_style = border_style;
-                //     log_debug("[CSS] Border-style (all): %s -> 0x%04X", value->data.keyword, border_style);
+                //     log_debug("[CSS] Border-style (all): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, border_style);
                 // }
             }
             else if (value->type == CSS_VALUE_TYPE_COLOR) {
@@ -2541,7 +2541,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     span->bound->border->right_style = border_style;
                     span->bound->border->bottom_style = border_style;
                     span->bound->border->left_style = border_style;
-                    log_debug("[CSS] Border-style (all): %s -> 0x%04X", value->data.keyword, border_style);
+                    log_debug("[CSS] Border-style (all): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, border_style);
                 }
             }
             else if (value->type == CSS_VALUE_TYPE_LIST) {
@@ -3111,7 +3111,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
                     block->scroller->overflow_y = overflow_value;
-                    log_debug("[CSS] Overflow: %s -> 0x%04X (both x and y)", value->data.keyword, overflow_value);
+                    log_debug("[CSS] Overflow: %s -> 0x%04X (both x and y)", css_enum_info(value->data.keyword)->name, overflow_value);
                 }
             }
             break;
@@ -3128,7 +3128,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum overflow_value = value->data.keyword;
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
-                    log_debug("[CSS] Overflow-x: %s -> 0x%04X", value->data.keyword, overflow_value);
+                    log_debug("[CSS] Overflow-x: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
                 }
             }
             break;
@@ -3145,7 +3145,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum overflow_value = value->data.keyword;
                 if (overflow_value > 0) {
                     block->scroller->overflow_y = overflow_value;
-                    log_debug("[CSS] Overflow-y: %s -> 0x%04X", value->data.keyword, overflow_value);
+                    log_debug("[CSS] Overflow-y: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
                 }
             }
             break;
@@ -3167,7 +3167,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum whitespace_value = value->data.keyword;
                 if (whitespace_value > 0) {
                     block->blk->white_space = whitespace_value;
-                    log_debug("[CSS] White-space: %s -> 0x%04X", value->data.keyword, whitespace_value);
+                    log_debug("[CSS] White-space: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, whitespace_value);
                 }
             }
             break;
@@ -3182,7 +3182,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum visibility_value = value->data.keyword;
                 if (visibility_value > 0) {
                     span->visibility = visibility_value;
-                    log_debug("[CSS] Visibility: %s -> 0x%04X", value->data.keyword, visibility_value);
+                    log_debug("[CSS] Visibility: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, visibility_value);
                 }
             }
             break;
@@ -3244,7 +3244,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum boxsizing_value = value->data.keyword;
                 if (boxsizing_value > 0) {
                     block->blk->box_sizing = boxsizing_value;
-                    log_debug("[CSS] Box-sizing: %s -> 0x%04X", value->data.keyword, boxsizing_value);
+                    log_debug("[CSS] Box-sizing: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, boxsizing_value);
                 }
             }
             break;
@@ -3263,7 +3263,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     span->font->font_style = lexbor_value;
-                    log_debug("[CSS] font-style: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] font-style: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3443,7 +3443,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     block->embed->flex->direction = lexbor_value;
-                    log_debug("[CSS] flex-direction: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] flex-direction: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3463,7 +3463,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     block->embed->flex->wrap = lexbor_value;
-                    log_debug("[CSS] flex-wrap: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] flex-wrap: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3483,7 +3483,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     block->embed->flex->justify = lexbor_value;
-                    log_debug("[CSS] justify-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] justify-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3503,7 +3503,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     block->embed->flex->align_items = lexbor_value;
-                    log_debug("[CSS] align-items: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] align-items: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3523,7 +3523,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     block->embed->flex->align_content = lexbor_value;
-                    log_debug("[CSS] align-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] align-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3632,7 +3632,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssEnum lexbor_value = value->data.keyword;
                 if (lexbor_value > 0) {
                     span->align_self = lexbor_value;
-                    log_debug("[CSS] align-self: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                    log_debug("[CSS] align-self: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
                 }
             }
             break;
@@ -3779,7 +3779,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Note: Animation shorthand would be parsed into individual properties
             // For now, just log the value
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                log_debug("[CSS] animation: %s", value->data.keyword);
+                log_debug("[CSS] animation: %s", css_enum_info(value->data.keyword)->name);
             }
             break;
         }
@@ -3921,7 +3921,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 double spacing = convert_lambda_length_to_px(value, lycon, prop_id);
                 log_debug("[CSS] border-spacing: %.2fpx", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                log_debug("[CSS] border-spacing: %s", value->data.keyword);
+                log_debug("[CSS] border-spacing: %s", css_enum_info(value->data.keyword)->name);
             }
             break;
         }

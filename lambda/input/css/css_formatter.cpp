@@ -128,6 +128,10 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
             const CssEnumInfo* info = css_enum_info(value->data.keyword);
             if (info && info->name) {
                 stringbuf_append_str(formatter->output, info->name);
+            } else {
+                // Fallback for invalid enum - output "initial" as safe default
+                fprintf(stderr, "[CSS Formatter] WARNING: Invalid keyword enum %d, using 'initial'\n", value->data.keyword);
+                stringbuf_append_str(formatter->output, "initial");
             }
             break;
         }
