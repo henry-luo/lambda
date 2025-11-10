@@ -592,6 +592,16 @@ typedef struct CSSColorMix {
     const char* method;         // Color space method
 } CSSColorMix;
 
+typedef union {
+    uint32_t c;  // 32-bit ABGR color format,
+    struct {
+        uint8_t r;
+        uint8_t g;
+        uint8_t b;
+        uint8_t a;
+    };
+} Color;
+
 // Generic CSS value structure
 typedef struct CssValue {
     CssValueType type;
@@ -618,6 +628,7 @@ typedef struct CssValue {
         struct {
             CssColorType type;
             union {
+                Color color;
                 struct { uint8_t r, g, b, a; } rgba;
                 struct { double h, s, l, a; } hsla;
                 struct { double h, w, b, a; } hwba;

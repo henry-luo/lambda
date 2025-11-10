@@ -128,13 +128,6 @@ void free_view(ViewTree* tree, View* view);
 int map_css_keyword_to_lexbor(const char* keyword);
 
 /**
- * Map Lambda color keyword to RGBA value
- * @param keyword const char* keyword string (e.g., "red", "blue")
- * @return uint32_t RGBA color (0xRRGGBBAA format)
- */
-uint32_t map_lambda_color_keyword(const char* keyword);
-
-/**
  * Map Lambda font-size keyword to pixel value
  * @param keyword const char* keyword string (e.g., "small", "large")
  * @return float font size in pixels

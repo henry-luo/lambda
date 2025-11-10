@@ -443,7 +443,7 @@ int map_css_keyword_to_lexbor(const char* keyword)
 
 **Color Parsing**:
 ```cpp
-uint32_t map_lambda_color_keyword(const char* color_name)
+uint32_t color_name_to_rgb(const char* color_name)
 // Maps color names to RGBA values
 // Supports 25+ color keywords (red, blue, orange, lightgray, etc.)
 ```
@@ -529,7 +529,7 @@ keyword[len] = '\0';
 
 **Root Cause**: Incomplete color keyword map
 
-**Solution**: Extended `map_lambda_color_keyword()` function to include missing colors:
+**Solution**: Extended `color_name_to_rgb()` function to include missing colors:
 ```cpp
 else if (strcasecmp(color_name, "orange") == 0) {
     return 0xFFA500FF; // RGB(255, 165, 0)

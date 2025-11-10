@@ -2,9 +2,6 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
-// Forward declarations
-uint32_t map_lambda_color_keyword(CssEnum keyword_enum);
-
 // ============================================================================
 // Value Conversion Functions
 // ============================================================================
@@ -89,68 +86,29 @@ Color convert_lambda_color(const CssValue* value) {
     result.a = 255; // default black, opaque
 
     if (!value) return result;
-
     switch (value->type) {
         case CSS_VALUE_TYPE_COLOR: {
             // Access color data from CssValue anonymous struct
             switch (value->data.color.type) {
                 case CSS_COLOR_RGB:
-                    result.r = value->data.color.data.rgba.r;
-                    result.g = value->data.color.data.rgba.g;
-                    result.b = value->data.color.data.rgba.b;
-                    result.a = value->data.color.data.rgba.a;
+                    result = value->data.color.data.color;
                     break;
-
                 case CSS_COLOR_HSL:
                     // TODO: convert HSL to RGB
                     // for now, leave as black
                     break;
-
                 default:
                     break;
             }
             break;
         }
-
         case CSS_VALUE_TYPE_KEYWORD: {
             // map color keyword to RGB
-            CssEnum keyword = value->data.keyword;
-
-            switch (keyword) {
-                case CSS_VALUE_BLACK:
-                    result.r = 0; result.g = 0; result.b = 0; result.a = 255;
-                    break;
-                case CSS_VALUE_WHITE:
-                    result.r = 255; result.g = 255; result.b = 255; result.a = 255;
-                    break;
-                case CSS_VALUE_RED:
-                    result.r = 255; result.g = 0; result.b = 0; result.a = 255;
-                    break;
-                case CSS_VALUE_GREEN:
-                    result.r = 0; result.g = 128; result.b = 0; result.a = 255;
-                    break;
-                case CSS_VALUE_BLUE:
-                    result.r = 0; result.g = 0; result.b = 255; result.a = 255;
-                    break;
-                case CSS_VALUE_TRANSPARENT:
-                    result.r = 0; result.g = 0; result.b = 0; result.a = 0;
-                    break;
-                default:
-                    // Use the color keyword mapping function
-                    uint32_t color_val = map_lambda_color_keyword(keyword);
-                    result.r = color_val & 0xFF;
-                    result.g = (color_val >> 8) & 0xFF;
-                    result.b = (color_val >> 16) & 0xFF;
-                    result.a = (color_val >> 24) & 0xFF;
-                    break;
-            }
-            break;
+            result = color_name_to_rgb(value->data.keyword);
         }
-
         default:
             break;
     }
-
     return result;
 }
 
@@ -316,16 +274,6 @@ Color color_name_to_rgb(CssEnum color_name) {
     uint32_t g = (c >> 8) & 0xFF;
     uint32_t b = c & 0xFF;
     return (Color){ 0xFF000000 | (b << 16) | (g << 8) | r };
-}
-
-uint32_t map_lambda_color_keyword(CssEnum keyword_enum) {
-    if (keyword_enum == CSS_VALUE__UNDEF) {
-        return 0xFF000000; // default black in ABGR format
-    }
-
-    // convert color enum to RGB color value
-    Color color = color_name_to_rgb(keyword_enum);
-    return color.c;
 }
 
 float map_lambda_font_size_keyword(CssEnum keyword_enum) {
@@ -973,9 +921,9 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 }
 
 struct MultiValue {
-    CssValue* length;
-    CssValue* color;
-    CssValue* style;
+    const CssValue* length;
+    const CssValue* color;
+    const CssValue* style;
 };
 
 void set_multi_value(MultiValue* mv, const CssValue* value) {
@@ -989,10 +937,10 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
         if (info) {
             switch (info->group) {
                 case CSS_VALUE_GROUP_BORDER_STYLE:
-                    // mv->style.enum_id = info->enum_id;
+                    mv->style = value;
                     break;
                 case CSS_VALUE_GROUP_COLOR:
-                    // mv->color = value;
+                    mv->color = value;
                     break;
                 default:
                     // could be other keyword types
@@ -1036,26 +984,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->in_line) {
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
-            Color color_val = {0};
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Map keyword to color (e.g., "red", "blue")
-                color_val.c = map_lambda_color_keyword(value->data.keyword);
-                const CssEnumInfo* info = css_enum_info(value->data.keyword);
-                log_debug("[CSS] Color keyword: %s -> 0x%08X", info ? info->name : "unknown", color_val.c);
-            } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                // Direct RGBA color value from color struct
-                if (value->data.color.type == CSS_COLOR_RGB) {
-                    color_val.r = value->data.color.data.rgba.r;
-                    color_val.g = value->data.color.data.rgba.g;
-                    color_val.b = value->data.color.data.rgba.b;
-                    color_val.a = value->data.color.data.rgba.a;
-                    log_debug("[CSS] Color RGBA: (%d,%d,%d,%d) -> 0x%08X",
-                             color_val.r, color_val.g, color_val.b, color_val.a, color_val.c);
-                }
-            }
-            if (color_val.c != 0) {
-                span->in_line->color = color_val;
-            }
+            span->in_line->color = convert_lambda_color(value);
             break;
         }
 
@@ -1812,7 +1741,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // Map keyword to color (e.g., "red", "lightgray")
                 CssEnum keyword = value->data.keyword;
                 const CssEnumInfo* info = css_enum_info(keyword);
-                bg_color.c = map_lambda_color_keyword(keyword);
+                bg_color = color_name_to_rgb(keyword);
                 log_debug("[CSS] Background color keyword: '%s' -> 0x%08X", info ? info->name : "unknown", bg_color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 // Direct RGBA color value
@@ -2216,7 +2145,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color.c = map_lambda_color_keyword(value->data.keyword);
+                color = color_name_to_rgb(value->data.keyword);
                 log_debug("[CSS] Border-top-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
@@ -2251,7 +2180,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color.c = map_lambda_color_keyword(value->data.keyword);
+                color = color_name_to_rgb(value->data.keyword);
                 log_debug("[CSS] Border-right-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
@@ -2286,7 +2215,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color.c = map_lambda_color_keyword(value->data.keyword);
+                color = color_name_to_rgb(value->data.keyword);
                 log_debug("[CSS] Border-bottom-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
@@ -2321,7 +2250,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             Color color = {0};
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                color.c = map_lambda_color_keyword(value->data.keyword);
+                color = convert_lambda_color(value);
                 log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", css_enum_info(value->data.keyword)->name, color.c);
             } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                 if (value->data.color.type == CSS_COLOR_RGB) {
@@ -2382,7 +2311,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                             border_style = keyword;
                         } else {
                             // Color keyword
-                            border_color.c = map_lambda_color_keyword(keyword);
+                            border_color = color_name_to_rgb(keyword);
                         }
                     }
                     else if (val->type == CSS_VALUE_TYPE_COLOR) {
@@ -2415,7 +2344,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                                keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_HIDDEN) {
                         border_style = keyword;
                     } else {
-                        border_color.c = map_lambda_color_keyword(keyword);
+                        border_color = color_name_to_rgb(keyword);
                     }
                 } else if (value->type == CSS_VALUE_TYPE_COLOR) {
                     if (value->data.color.type == CSS_COLOR_RGB) {
@@ -2508,19 +2437,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             MultiValue border = {0};
             set_multi_value( &border, value);
             if (border.style) {
-                // if (border_style != CSS_VALUE__UNDEF) {
-                //     span->bound->border->top_style = border_style;
-                //     span->bound->border->right_style = border_style;
-                //     span->bound->border->bottom_style = border_style;
-                //     span->bound->border->left_style = border_style;
-                //     log_debug("[CSS] Border-style (all): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, border_style);
-                // }
+                span->bound->border->left_style = border.style->data.keyword;
             }
-            else if (value->type == CSS_VALUE_TYPE_COLOR) {
-
+            else if (border.length) {
+                span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length);
+                span->bound->border->width.left_specificity = specificity;
             }
-            else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-
+            else if (border.color) {
+                span->bound->border->left_color = convert_lambda_color(border.color);
             }
             break;
         }
