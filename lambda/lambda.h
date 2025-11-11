@@ -86,7 +86,8 @@ typedef struct Decimal Decimal;
 #ifndef __cplusplus
 typedef uint64_t Item;
 #else
-// uses the high byte to tag the pointer, defined for little-endian
+
+// uses the high byte to tag the item/pointer, defined for little-endian
 typedef union Item {
     struct {
         union {
