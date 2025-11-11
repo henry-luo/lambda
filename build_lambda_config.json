@@ -48,8 +48,6 @@
         "lambda/lambda-mem.cpp",
         "lambda/mark_builder.cpp",
         "lambda/mark_reader.cpp",
-        "lambda/element_reader_utils.cpp",
-        "lambda/element_reader.cpp",
         "lambda/validate.cpp",
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
@@ -334,8 +332,6 @@
                 "lambda/format/format.cpp",
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",
-                "lambda/element_reader_utils.cpp",
-                "lambda/element_reader.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/css/css_tokenizer.cpp",
@@ -1022,22 +1018,6 @@
                             "lib/mempool.c"
                         ],
                         "binary": "test_avl_tree_perf.exe"
-                    },
-                    {
-                        "source": "test_element_reader_gtest.cpp",
-                        "name": "\ud83d\udd0d Element Reader Tests (GTest)",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "additional_sources": [
-                            "lambda/element_reader.cpp",
-                            "lambda/element_reader_utils.cpp"
-                        ],
-                        "binary": "test_element_reader_gtest.exe"
                     }
                 ],
                 "type": "library"

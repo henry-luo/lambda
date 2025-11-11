@@ -7,7 +7,7 @@ static void format_item_reader_with_indent(StringBuf* sb, const ItemReader& item
 static void format_string(StringBuf* sb, String* str);
 static void format_array_reader_with_indent(StringBuf* sb, const ArrayReader& arr, int indent);
 static void format_map_reader_with_indent(StringBuf* sb, const MapReader& mp, int indent);
-static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent);
+static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent, Pool* pool);
 
 // Helper function to add indentation
 static void add_indent(StringBuf* sb, int indent) {
@@ -23,12 +23,12 @@ static void format_map_reader_contents(StringBuf* sb, const MapReader& map_reade
         stringbuf_append_str(sb, "\"[MAX_DEPTH]\":null");
         return;
     }
-    
+
     bool first = true;
     auto iter = map_reader.entries();
     const char* key;
     ItemReader value;
-    
+
     while (iter.next(&key, &value)) {
         if (!first) {
             stringbuf_append_str(sb, ",\n");
@@ -36,16 +36,16 @@ static void format_map_reader_contents(StringBuf* sb, const MapReader& map_reade
             stringbuf_append_char(sb, '\n');
             first = false;
         }
-        
+
         add_indent(sb, indent + 1);
-        
+
         // Format the key (always quoted in JSON)
         stringbuf_append_format(sb, "\"%s\":", key);
-        
+
         // Format the value
         format_item_reader_with_indent(sb, value, indent + 1);
     }
-    
+
     if (!first) {
         stringbuf_append_char(sb, '\n');
         add_indent(sb, indent);
@@ -58,18 +58,18 @@ static void format_string(StringBuf* sb, String* str) {
         stringbuf_append_str(sb, "\"\"");
         return;
     }
-    
+
     // Handle literal "lambda.nil" content as empty string
     if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
         stringbuf_append_str(sb, "\"\"");
         return;
     }
-    
+
     stringbuf_append_char(sb, '"');
-    
+
     const char* s = str->chars;
     size_t len = str->len;
-    
+
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         switch (c) {
@@ -114,25 +114,25 @@ static void format_string(StringBuf* sb, String* str) {
 
 static void format_array_reader_with_indent(StringBuf* sb, const ArrayReader& arr, int indent) {
     stringbuf_append_char(sb, '[');
-    
+
     int64_t arr_length = arr.length();
     if (arr_length > 0) {
         stringbuf_append_char(sb, '\n');
-        
+
         auto iter = arr.items();
         ItemReader item;
         bool first = true;
-        
+
         while (iter.next(&item)) {
-            if (!first) { 
-                stringbuf_append_str(sb, ",\n"); 
+            if (!first) {
+                stringbuf_append_str(sb, ",\n");
             }
             first = false;
-            
+
             add_indent(sb, indent + 1);
             format_item_reader_with_indent(sb, item, indent + 1);
         }
-        
+
         stringbuf_append_char(sb, '\n');
         add_indent(sb, indent);
     }
@@ -145,16 +145,16 @@ static void format_map_reader_with_indent(StringBuf* sb, const MapReader& mp, in
     stringbuf_append_char(sb, '}');
 }
 
-static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent) {
+static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent, Pool* pool) {
     stringbuf_append_format(sb, "\n{\"$\":\"%s\"", elem.tagName());
-    
+
     // Add attributes as direct properties
     if (elem.attrCount() > 0) {
         AttributeReaderWrapper attrs(elem);
-        auto iter = attrs.iterator();
+        auto iter = attrs.iterator(pool);
         const char* key;
         ItemReader value;
-        
+
         while (iter.next(&key, &value)) {
             stringbuf_append_str(sb, ",\n");
             add_indent(sb, indent + 1);
@@ -162,37 +162,37 @@ static void format_element_reader_with_indent(StringBuf* sb, const ElementReader
             format_item_reader_with_indent(sb, value, indent + 1);
         }
     }
-    
+
     // Add children if any
     if (elem.childCount() > 0) {
         stringbuf_append_str(sb, ",\n");
         add_indent(sb, indent + 1);
         stringbuf_append_str(sb, "\"_\":");
-        
+
         // Format children as an array
         stringbuf_append_char(sb, '[');
-        auto child_iter = elem.children();
+        auto child_iter = elem.children(pool);
         ItemReader child;
         bool first = true;
-        
+
         while (child_iter.next(&child)) {
             if (!first) {
                 stringbuf_append_str(sb, ",\n");
             }
             first = false;
-            
+
             stringbuf_append_char(sb, '\n');
             add_indent(sb, indent + 2);
             format_item_reader_with_indent(sb, child, indent + 2);
         }
-        
+
         if (!first) {
             stringbuf_append_char(sb, '\n');
             add_indent(sb, indent + 1);
         }
         stringbuf_append_char(sb, ']');
     }
-    
+
     stringbuf_append_char(sb, '\n');
     add_indent(sb, indent);
     stringbuf_append_char(sb, '}');
@@ -222,7 +222,7 @@ static void format_item_reader_with_indent(StringBuf* sb, const ItemReader& item
         format_map_reader_with_indent(sb, mp, indent);
     } else if (item.isElement()) {
         ElementReaderWrapper elem = item.asElement();
-        format_element_reader_with_indent(sb, elem, indent);
+        format_element_reader_with_indent(sb, elem, indent, item.pool());
     } else {
         // Unknown type
         stringbuf_append_str(sb, "null");
@@ -232,10 +232,10 @@ static void format_item_reader_with_indent(StringBuf* sb, const ItemReader& item
 String* format_json(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
-    
+
     ItemReader reader(root_item, pool);
     format_item_reader_with_indent(sb, reader, 0);
-    
+
     return stringbuf_to_string(sb);
 }
 

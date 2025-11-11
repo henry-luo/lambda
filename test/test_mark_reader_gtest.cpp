@@ -406,11 +406,11 @@ TEST_F(MarkReaderTest, ElementReaderChildren) {
         .child(child2)
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     EXPECT_EQ(elem.childCount(), 2);
     EXPECT_TRUE(elem.hasChildElements());
     
-    ItemReader first_child = elem.childAt(0);
+    ItemReader first_child = elem.childAt(0, pool);
     EXPECT_TRUE(first_child.isElement());
     
     ElementReaderWrapper first_elem = first_child.asElement();
@@ -424,9 +424,9 @@ TEST_F(MarkReaderTest, ElementReaderChildIteration) {
         .child(builder->element("li").text("Item 3").final())
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     
-    ElementReaderWrapper::ChildIterator iter = elem.children();
+    ElementReaderWrapper::ChildIterator iter = elem.children(pool);
     ItemReader child;
     int count = 0;
     
@@ -446,7 +446,7 @@ TEST_F(MarkReaderTest, ElementReaderElementChildIteration) {
         .child(builder->element("p").text("Para").final())
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     
     ElementReaderWrapper::ElementChildIterator iter = elem.childElements();
     ElementReaderWrapper child_elem;
@@ -469,9 +469,9 @@ TEST_F(MarkReaderTest, ElementReaderFindChild) {
         .child(p_item)
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     
-    ItemReader found_h1 = elem.findChild("h1");
+    ItemReader found_h1 = elem.findChild("h1", pool);
     EXPECT_TRUE(found_h1.isElement());
     
     ElementReaderWrapper h1_elem = found_h1.asElement();
@@ -481,7 +481,7 @@ TEST_F(MarkReaderTest, ElementReaderFindChild) {
     EXPECT_TRUE(found_p.isValid());
     EXPECT_STREQ(found_p.tagName(), "p");
     
-    ItemReader not_found = elem.findChild("div");
+    ItemReader not_found = elem.findChild("div", pool);
     EXPECT_TRUE(not_found.isNull());
 }
 
@@ -490,7 +490,7 @@ TEST_F(MarkReaderTest, ElementReaderTextOnly) {
         .text("Just text")
         .final();
     
-    ElementReaderWrapper elem(text_only, pool);
+    ElementReaderWrapper elem(text_only);
     EXPECT_TRUE(elem.isTextOnly());
     
     Item with_child = builder->element("div")
@@ -498,14 +498,14 @@ TEST_F(MarkReaderTest, ElementReaderTextOnly) {
         .child(builder->element("span").final())
         .final();
     
-    ElementReaderWrapper elem2(with_child, pool);
+    ElementReaderWrapper elem2(with_child);
     EXPECT_FALSE(elem2.isTextOnly());
 }
 
 TEST_F(MarkReaderTest, ElementReaderEmpty) {
     Item empty_elem = builder->element("div").final();
     
-    ElementReaderWrapper elem(empty_elem, pool);
+    ElementReaderWrapper elem(empty_elem);
     EXPECT_TRUE(elem.isEmpty());
     EXPECT_EQ(elem.childCount(), 0);
     EXPECT_FALSE(elem.hasChildElements());
@@ -522,7 +522,7 @@ TEST_F(MarkReaderTest, AttributeReaderBasic) {
         .attr("width", (int64_t)100)
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     AttributeReaderWrapper attrs(elem);
     
     EXPECT_TRUE(attrs.isValid());
@@ -545,7 +545,7 @@ TEST_F(MarkReaderTest, AttributeReaderWithDefaults) {
         .attr("src", "image.jpg")
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     AttributeReaderWrapper attrs(elem);
     
     const char* src = attrs.getStringOr("src", "default.jpg");
@@ -565,10 +565,10 @@ TEST_F(MarkReaderTest, AttributeReaderIteration) {
         .attr("rel", "noopener")
         .final();
     
-    ElementReaderWrapper elem(elem_item, pool);
+    ElementReaderWrapper elem(elem_item);
     AttributeReaderWrapper attrs(elem);
     
-    AttributeReaderWrapper::Iterator iter = attrs.iterator();
+    AttributeReaderWrapper::Iterator iter = attrs.iterator(pool);
     const char* key;
     ItemReader value;
     int count = 0;
