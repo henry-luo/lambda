@@ -124,7 +124,7 @@ TEST_F(MarkReaderTest, ArrayReaderBasic) {
         .append((int64_t)1)
         .append((int64_t)2)
         .append((int64_t)3)
-        .build();
+        .final();
     
     ItemReader item_reader(array_item, pool);
     EXPECT_TRUE(item_reader.isArray());
@@ -146,7 +146,7 @@ TEST_F(MarkReaderTest, ArrayReaderBasic) {
 }
 
 TEST_F(MarkReaderTest, ArrayReaderEmpty) {
-    Item array_item = builder->array().build();
+    Item array_item = builder->array().final();
     
     ArrayReader arr = ArrayReader::fromItem(array_item, pool);
     EXPECT_TRUE(arr.isValid());
@@ -158,7 +158,7 @@ TEST_F(MarkReaderTest, ArrayReaderOutOfBounds) {
     Item array_item = builder->array()
         .append("a")
         .append("b")
-        .build();
+        .final();
     
     ArrayReader arr = ArrayReader::fromItem(array_item, pool);
     
@@ -174,7 +174,7 @@ TEST_F(MarkReaderTest, ArrayReaderIteration) {
         .append("apple")
         .append("banana")
         .append("cherry")
-        .build();
+        .final();
     
     ArrayReader arr = ArrayReader::fromItem(array_item, pool);
     
@@ -201,7 +201,7 @@ TEST_F(MarkReaderTest, ArrayReaderMixedTypes) {
         .append("string")
         .append(3.14)
         .append(true)
-        .build();
+        .final();
     
     ArrayReader arr = ArrayReader::fromItem(array_item, pool);
     
@@ -231,7 +231,7 @@ TEST_F(MarkReaderTest, MapReaderBasic) {
         .put("name", "John")
         .put("age", (int64_t)30)
         .put("active", true)
-        .build();
+        .final();
     
     ItemReader item_reader(map_item, pool);
     EXPECT_TRUE(item_reader.isMap());
@@ -260,7 +260,7 @@ TEST_F(MarkReaderTest, MapReaderBasic) {
 }
 
 TEST_F(MarkReaderTest, MapReaderEmpty) {
-    Item map_item = builder->map().build();
+    Item map_item = builder->map().final();
     
     MapReader map = MapReader::fromItem(map_item, pool);
     EXPECT_TRUE(map.isValid());
@@ -271,7 +271,7 @@ TEST_F(MarkReaderTest, MapReaderEmpty) {
 TEST_F(MarkReaderTest, MapReaderMissingKey) {
     Item map_item = builder->map()
         .put("existing", "value")
-        .build();
+        .final();
     
     MapReader map = MapReader::fromItem(map_item, pool);
     
@@ -284,7 +284,7 @@ TEST_F(MarkReaderTest, MapReaderKeyIteration) {
         .put("key1", "val1")
         .put("key2", "val2")
         .put("key3", "val3")
-        .build();
+        .final();
     
     MapReader map = MapReader::fromItem(map_item, pool);
     
@@ -309,7 +309,7 @@ TEST_F(MarkReaderTest, MapReaderValueIteration) {
         .put("a", (int64_t)1)
         .put("b", (int64_t)2)
         .put("c", (int64_t)3)
-        .build();
+        .final();
     
     MapReader map = MapReader::fromItem(map_item, pool);
     
@@ -329,7 +329,7 @@ TEST_F(MarkReaderTest, MapReaderEntryIteration) {
     Item map_item = builder->map()
         .put("x", (int64_t)10)
         .put("y", (int64_t)20)
-        .build();
+        .final();
     
     MapReader map = MapReader::fromItem(map_item, pool);
     
@@ -350,16 +350,16 @@ TEST_F(MarkReaderTest, MapReaderNestedStructures) {
     Item nested_array = builder->array()
         .append((int64_t)1)
         .append((int64_t)2)
-        .build();
+        .final();
     
     Item nested_map = builder->map()
         .put("inner", "value")
-        .build();
+        .final();
     
     Item map_item = builder->map()
         .put("array", nested_array)
         .put("map", nested_map)
-        .build();
+        .final();
     
     MapReader map = MapReader::fromItem(map_item, pool);
     
@@ -382,7 +382,7 @@ TEST_F(MarkReaderTest, ElementReaderBasic) {
     Item elem_item = builder->element("div")
         .attr("class", "container")
         .text("Hello")
-        .build();
+        .final();
     
     ItemReader item_reader(elem_item, pool);
     EXPECT_TRUE(item_reader.isElement());
@@ -398,13 +398,13 @@ TEST_F(MarkReaderTest, ElementReaderBasic) {
 }
 
 TEST_F(MarkReaderTest, ElementReaderChildren) {
-    Item child1 = builder->element("p").text("Para 1").build();
-    Item child2 = builder->element("p").text("Para 2").build();
+    Item child1 = builder->element("p").text("Para 1").final();
+    Item child2 = builder->element("p").text("Para 2").final();
     
     Item elem_item = builder->element("div")
         .child(child1)
         .child(child2)
-        .build();
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     EXPECT_EQ(elem.childCount(), 2);
@@ -419,10 +419,10 @@ TEST_F(MarkReaderTest, ElementReaderChildren) {
 
 TEST_F(MarkReaderTest, ElementReaderChildIteration) {
     Item elem_item = builder->element("ul")
-        .child(builder->element("li").text("Item 1").build())
-        .child(builder->element("li").text("Item 2").build())
-        .child(builder->element("li").text("Item 3").build())
-        .build();
+        .child(builder->element("li").text("Item 1").final())
+        .child(builder->element("li").text("Item 2").final())
+        .child(builder->element("li").text("Item 3").final())
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     
@@ -441,10 +441,10 @@ TEST_F(MarkReaderTest, ElementReaderChildIteration) {
 TEST_F(MarkReaderTest, ElementReaderElementChildIteration) {
     Item elem_item = builder->element("div")
         .text("Text node")
-        .child(builder->element("span").text("Span").build())
+        .child(builder->element("span").text("Span").final())
         .text("More text")
-        .child(builder->element("p").text("Para").build())
-        .build();
+        .child(builder->element("p").text("Para").final())
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     
@@ -461,13 +461,13 @@ TEST_F(MarkReaderTest, ElementReaderElementChildIteration) {
 }
 
 TEST_F(MarkReaderTest, ElementReaderFindChild) {
-    Item h1_item = builder->element("h1").text("Title").build();
-    Item p_item = builder->element("p").text("Content").build();
+    Item h1_item = builder->element("h1").text("Title").final();
+    Item p_item = builder->element("p").text("Content").final();
     
     Item elem_item = builder->element("article")
         .child(h1_item)
         .child(p_item)
-        .build();
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     
@@ -488,22 +488,22 @@ TEST_F(MarkReaderTest, ElementReaderFindChild) {
 TEST_F(MarkReaderTest, ElementReaderTextOnly) {
     Item text_only = builder->element("p")
         .text("Just text")
-        .build();
+        .final();
     
     ElementReaderWrapper elem(text_only, pool);
     EXPECT_TRUE(elem.isTextOnly());
     
     Item with_child = builder->element("div")
         .text("Text")
-        .child(builder->element("span").build())
-        .build();
+        .child(builder->element("span").final())
+        .final();
     
     ElementReaderWrapper elem2(with_child, pool);
     EXPECT_FALSE(elem2.isTextOnly());
 }
 
 TEST_F(MarkReaderTest, ElementReaderEmpty) {
-    Item empty_elem = builder->element("div").build();
+    Item empty_elem = builder->element("div").final();
     
     ElementReaderWrapper elem(empty_elem, pool);
     EXPECT_TRUE(elem.isEmpty());
@@ -520,7 +520,7 @@ TEST_F(MarkReaderTest, AttributeReaderBasic) {
         .attr("id", "main")
         .attr("class", "container")
         .attr("width", (int64_t)100)
-        .build();
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     AttributeReaderWrapper attrs(elem);
@@ -543,7 +543,7 @@ TEST_F(MarkReaderTest, AttributeReaderBasic) {
 TEST_F(MarkReaderTest, AttributeReaderWithDefaults) {
     Item elem_item = builder->element("img")
         .attr("src", "image.jpg")
-        .build();
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     AttributeReaderWrapper attrs(elem);
@@ -563,7 +563,7 @@ TEST_F(MarkReaderTest, AttributeReaderIteration) {
         .attr("href", "https://example.com")
         .attr("target", "_blank")
         .attr("rel", "noopener")
-        .build();
+        .final();
     
     ElementReaderWrapper elem(elem_item, pool);
     AttributeReaderWrapper attrs(elem);
@@ -587,8 +587,8 @@ TEST_F(MarkReaderTest, AttributeReaderIteration) {
 
 TEST_F(MarkReaderTest, MarkReaderBasic) {
     Item root = builder->element("html")
-        .child(builder->element("body").text("Content").build())
-        .build();
+        .child(builder->element("body").text("Content").final())
+        .final();
     
     MarkReader reader(root, pool);
     
@@ -600,15 +600,15 @@ TEST_F(MarkReaderTest, MarkReaderBasic) {
 }
 
 TEST_F(MarkReaderTest, MarkReaderFindAll) {
-    Item p1 = builder->element("p").text("Para 1").build();
-    Item p2 = builder->element("p").text("Para 2").build();
-    Item div = builder->element("div").text("Not a p").build();
+    Item p1 = builder->element("p").text("Para 1").final();
+    Item p2 = builder->element("p").text("Para 2").final();
+    Item div = builder->element("div").text("Not a p").final();
     
     Item root = builder->element("body")
         .child(p1)
         .child(div)
         .child(p2)
-        .build();
+        .final();
     
     MarkReader reader(root, pool);
     
@@ -673,21 +673,21 @@ TEST_F(MarkReaderTest, ComplexNestedDocument) {
         .attr("id", "main-article")
         .child(
             builder->element("header")
-                .child(builder->element("h1").text("Title").build())
-                .build()
+                .child(builder->element("h1").text("Title").final())
+                .final()
         )
         .child(
             builder->element("section")
-                .child(builder->element("p").text("Paragraph 1").build())
-                .child(builder->element("p").text("Paragraph 2").build())
-                .build()
+                .child(builder->element("p").text("Paragraph 1").final())
+                .child(builder->element("p").text("Paragraph 2").final())
+                .final()
         )
         .child(
             builder->element("footer")
-                .child(builder->element("small").text("Copyright 2025").build())
-                .build()
+                .child(builder->element("small").text("Copyright 2025").final())
+                .final()
         )
-        .build();
+        .final();
     
     MarkReader reader(article, pool);
     ItemReader root = reader.getRoot();

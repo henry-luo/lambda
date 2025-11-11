@@ -63,7 +63,7 @@ static Item parse_number(Input *input, MarkBuilder* builder, const char **json) 
     char* end;
     double value = strtod(*json, &end);
     *json = end;
-    
+
     // Check if it's an integer
     if (value == (int64_t)value) {
         return builder->createInt((int64_t)value);
@@ -74,14 +74,14 @@ static Item parse_number(Input *input, MarkBuilder* builder, const char **json) 
 
 static Item parse_array(Input *input, MarkBuilder* builder, const char **json) {
     if (**json != '[') return builder->createNull();
-    
+
     ArrayBuilder arr_builder = builder->array();
 
     (*json)++; // skip [
     skip_whitespace(json);
-    if (**json == ']') { 
+    if (**json == ']') {
         (*json)++;
-        return arr_builder.build();
+        return arr_builder.final();
     }
 
     while (**json) {
@@ -89,7 +89,7 @@ static Item parse_array(Input *input, MarkBuilder* builder, const char **json) {
         arr_builder.append(item);
 
         skip_whitespace(json);
-        if (**json == ']') { 
+        if (**json == ']') {
             (*json)++;
             break;
         }
@@ -100,27 +100,27 @@ static Item parse_array(Input *input, MarkBuilder* builder, const char **json) {
         (*json)++;
         skip_whitespace(json);
     }
-    return arr_builder.build();
+    return arr_builder.final();
 }
 
 static Item parse_object(Input *input, MarkBuilder* builder, const char **json) {
     if (**json != '{') return builder->createNull();
-    
+
     MapBuilder map_builder = builder->map();
 
     (*json)++; // skip '{'
     skip_whitespace(json);
     if (**json == '}') { // empty map
         (*json)++;
-        return map_builder.build();
+        return map_builder.final();
     }
 
     while (**json) {
         String* key = parse_string(input, builder, json);
-        if (!key) return map_builder.build();
+        if (!key) return map_builder.final();
 
         skip_whitespace(json);
-        if (**json != ':') return map_builder.build();
+        if (**json != ':') return map_builder.final();
         (*json)++;
         skip_whitespace(json);
 
@@ -129,15 +129,15 @@ static Item parse_object(Input *input, MarkBuilder* builder, const char **json) 
         map_builder.put(key, value);
 
         skip_whitespace(json);
-        if (**json == '}') { 
+        if (**json == '}') {
             (*json)++;
             break;
         }
-        if (**json != ',') return map_builder.build();
+        if (**json != ',') return map_builder.final();
         (*json)++;
         skip_whitespace(json);
     }
-    return map_builder.build();
+    return map_builder.final();
 }
 
 static Item parse_value(Input *input, MarkBuilder* builder, const char **json) {
@@ -183,7 +183,7 @@ static Item parse_value(Input *input, MarkBuilder* builder, const char **json) {
 void parse_json(Input* input, const char* json_string) {
     printf("json_parse\n");
     input->sb = stringbuf_new(input->pool);
-    
+
     MarkBuilder builder(input);
     input->root = parse_value(input, &builder, &json_string);
 }

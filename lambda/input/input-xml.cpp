@@ -212,7 +212,7 @@ static Item parse_comment(Input *input, MarkBuilder* builder, const char **xml) 
     } else {
         *xml = comment_end;
     }
-    return element.build();
+    return element.final();
 }
 
 static Item parse_cdata(Input *input, MarkBuilder* builder, const char **xml) {
@@ -323,7 +323,7 @@ static Item parse_entity(Input *input, MarkBuilder* builder, const char **xml) {
     // Add type attribute (internal/external)
     element.attr("type", is_external ? "external" : "internal");
     
-    return element.build();
+    return element.final();
 }
 
 static Item parse_dtd_declaration(Input *input, MarkBuilder* builder, const char **xml) {
@@ -384,7 +384,7 @@ static Item parse_dtd_declaration(Input *input, MarkBuilder* builder, const char
             element.child(Item{.item = s2it(content_text)});
         }
     }
-    return element.build();
+    return element.final();
 }
 
 static Item parse_doctype(Input *input, MarkBuilder* builder, const char **xml) {
@@ -456,7 +456,7 @@ static Item parse_doctype(Input *input, MarkBuilder* builder, const char **xml) 
             (*xml)++; // skip >
         }
         
-        return dt_elmt.build();
+        return dt_elmt.final();
     } else {
         // No internal subset, just skip to end
         while (**xml && **xml != '>') {
@@ -551,7 +551,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **xml) 
                 element.child(Item{.item = s2it(pi_data)});
             }
         }
-        return element.build();
+        return element.final();
     }
 
     // parse tag name
@@ -675,7 +675,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **xml) 
             if (**xml == '>') (*xml)++; // Skip >
         }
     }    
-    return element.build();
+    return element.final();
 }
 
 void parse_xml(Input* input, const char* xml_string) {
@@ -732,5 +732,5 @@ void parse_xml(Input* input, const char* xml_string) {
     
     // Always return the document wrapper to maintain consistent structure
     // This ensures all XML content is wrapped in a <document> element
-    input->root = doc_element.build();
+    input->root = doc_element.final();
 }
