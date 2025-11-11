@@ -1,10 +1,11 @@
 #include "format.h"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
 #include "../../lib/stringbuf.h"
+#include "../mark_reader.hpp"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
-static void format_item(StringBuf* sb, Item item, const char* tag_name);
+static void format_item_reader(StringBuf* sb, const ItemReader& item, const char* tag_name);
 
 // Helper function to check if a type is simple (can be output as XML attribute)
 static bool is_simple_type(TypeId type) {
@@ -67,152 +68,118 @@ static void format_xml_string(StringBuf* sb, String* str) {
     }
 }
 
-static void format_array(StringBuf* sb, Array* arr, const char* tag_name) {
-    printf("format_array: arr %p, length %ld\n", (void*)arr, arr ? arr->length : 0);
-    if (arr && arr->length > 0) {
-        for (long i = 0; i < arr->length; i++) {
-            Item item = arr->items[i];
-            format_item(sb, item, tag_name ? tag_name : "item");
+static void format_array_reader(StringBuf* sb, const ArrayReader& arr, const char* tag_name) {
+    printf("format_array_reader: arr with %lld items\n", (long long)arr.length());
+    
+    auto iter = arr.items();
+    ItemReader item;
+    while (iter.next(&item)) {
+        format_item_reader(sb, item, tag_name ? tag_name : "item");
+    }
+}
+
+static void format_map_attributes(StringBuf* sb, const MapReader& map_reader) {
+    auto iter = map_reader.entries();
+    const char* key;
+    ItemReader value;
+    
+    while (iter.next(&key, &value)) {
+        // Only output simple types as attributes
+        if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
+            stringbuf_append_char(sb, ' ');
+            stringbuf_append_format(sb, "%s=\"", key);
+            
+            if (value.isString()) {
+                String* str = value.asString();
+                if (str) {
+                    format_xml_string(sb, str);
+                }
+            } else if (value.isInt()) {
+                int64_t int_val = value.asInt();
+                char num_buf[32];
+                snprintf(num_buf, sizeof(num_buf), "%" PRId64, int_val);
+                stringbuf_append_str(sb, num_buf);
+            } else if (value.isFloat()) {
+                double float_val = value.asFloat();
+                char num_buf[32];
+                snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
+                stringbuf_append_str(sb, num_buf);
+            } else if (value.isBool()) {
+                bool bool_val = value.asBool();
+                stringbuf_append_str(sb, bool_val ? "true" : "false");
+            }
+            
+            stringbuf_append_char(sb, '"');
         }
     }
 }
 
-static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_data) {
-    if (!map_type || !map_data || !map_type->shape) return;
+static void format_attributes(StringBuf* sb, const MapReader& map_reader) {
+    printf("format_attributes: formatting map attributes\n");
     
-    ShapeEntry* field = map_type->shape;
-    for (int i = 0; i < map_type->length && field; i++) {
-        if (field->name && field->type) {
-            void* data = ((char*)map_data) + field->byte_offset;
+    auto iter = map_reader.entries();
+    const char* key;
+    ItemReader value;
+    
+    while (iter.next(&key, &value)) {
+        // Only output simple types as attributes, skip null values
+        if (!value.isNull() && (value.isString() || value.isInt() || value.isFloat() || value.isBool())) {
+            stringbuf_append_char(sb, ' ');
+            stringbuf_append_format(sb, "%s=\"", key);
             
-            // Only output simple types as attributes
-            TypeId field_type = field->type->type_id;
-            if (is_simple_type(field_type)) {
-                stringbuf_append_char(sb, ' ');
-                stringbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
-                
-                if (field_type == LMD_TYPE_STRING) {
-                    String* str = *(String**)data;
-                    if (str) {
+            if (value.isString()) {
+                String* str = value.asString();
+                if (str && str != &EMPTY_STRING) {
+                    // Also check for literal "lambda.nil" content
+                    if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+                        // Output empty string for "lambda.nil"
+                    } else {
                         format_xml_string(sb, str);
                     }
-                } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
-                    int64_t int_val = *(int64_t*)data;
-                    char num_buf[32];
-                    snprintf(num_buf, sizeof(num_buf), "%" PRId64, int_val);
-                    stringbuf_append_str(sb, num_buf);
-                } else if (field_type == LMD_TYPE_FLOAT) {
-                    double float_val = *(double*)data;
-                    char num_buf[32];
-                    snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
-                    stringbuf_append_str(sb, num_buf);
-                } else if (field_type == LMD_TYPE_BOOL) {
-                    bool bool_val = *(bool*)data;
-                    stringbuf_append_str(sb, bool_val ? "true" : "false");
                 }
-                // else // leave out null or unsupported types
-                
-                stringbuf_append_char(sb, '"');
+            } else if (value.isInt()) {
+                int64_t int_val = value.asInt();
+                char num_buf[32];
+                snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
+                stringbuf_append_str(sb, num_buf);
+            } else if (value.isFloat()) {
+                double float_val = value.asFloat();
+                char num_buf[32];
+                snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
+                stringbuf_append_str(sb, num_buf);
+            } else if (value.isBool()) {
+                bool bool_val = value.asBool();
+                stringbuf_append_str(sb, bool_val ? "true" : "false");
             }
+            
+            stringbuf_append_char(sb, '"');
         }
-        field = field->next;
     }
 }
 
-static void format_attributes(StringBuf* sb, TypeMap* map_type, void* map_data) {
-    if (!map_type || !map_data || !map_type->shape) return;
-    printf("format_attributes: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
+static void format_map_elements(StringBuf* sb, const MapReader& map_reader) {
+    printf("format_map_elements: formatting map elements\n");
     
-    ShapeEntry* field = map_type->shape;
-    for (int i = 0; i < map_type->length && field; i++) {
-        if (field->name && field->type) {
-            void* data = ((char*)map_data) + field->byte_offset;
-            TypeId field_type = field->type->type_id;
-            
-            // Debug: print field information
-            printf("Field %d: name length=%lld, name str='%.*s', type=%d\n", 
-                   i, (long long)field->name->length, (int)field->name->length, field->name->str, field_type);
-            
-            // Only output simple types as attributes, skip null values
-            if (is_simple_type(field_type) && field_type != LMD_TYPE_NULL) {
-                stringbuf_append_char(sb, ' ');
-                stringbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
-                
-                if (field_type == LMD_TYPE_STRING) {
-                    String* str = *(String**)data;
-                    if (str && str != &EMPTY_STRING) {
-                        // Also check for literal "lambda.nil" content
-                        if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-                            // Output empty string for "lambda.nil"
-                        } else {
-                            format_xml_string(sb, str);
-                        }
-                    }
-                } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
-                    int64_t int_val = *(int64_t*)data;
-                    char num_buf[32];
-                    snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
-                    stringbuf_append_str(sb, num_buf);
-                } else if (field_type == LMD_TYPE_FLOAT) {
-                    double float_val = *(double*)data;
-                    char num_buf[32];
-                    snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
-                    stringbuf_append_str(sb, num_buf);
-                } else if (field_type == LMD_TYPE_BOOL) {
-                    bool bool_val = *(bool*)data;
-                    stringbuf_append_str(sb, bool_val ? "true" : "false");
-                }
-                // else // leave out null or unsupported types
-                
-                stringbuf_append_char(sb, '"');
-            }
-        }
-        field = field->next;
-    }
-}
-
-static void format_map_elements(StringBuf* sb, TypeMap* map_type, void* map_data) {
-    if (!map_type || !map_data || !map_type->shape) return;
-    printf("format_map_elements: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
+    auto iter = map_reader.entries();
+    const char* key;
+    ItemReader value;
     
-    ShapeEntry* field = map_type->shape;
-    for (int i = 0; i < map_type->length && field; i++) {
-        if (field->name && field->type) {
-            void* data = ((char*)map_data) + field->byte_offset;
-            TypeId field_type = field->type->type_id;
-            
-            // Debug: print field information
-            printf("Field %d: name length=%lld, name str='%.*s', type=%d\n", 
-                   i, (long long)field->name->length, (int)field->name->length, field->name->str, field_type);
-            
-            // Only output complex types as child elements (not simple attributes)
-            if (!is_simple_type(field_type)) {
-                if (field_type == LMD_TYPE_NULL) {
-                    // Create empty element for null
-                    stringbuf_append_char(sb, '<');
-                    stringbuf_append_format(sb, " %.*s=\"%.*s\"", (int)field->name->length, field->name->str, (int)field->name->length, field->name->str);
-                    stringbuf_append_str(sb, "/>");
-                } else {
-                    // Create a proper null-terminated tag name
-                    printf("format field: %d\n", field_type);
-                    StringBuf* tag_buf = stringbuf_new(NULL);
-                    stringbuf_append_format(tag_buf, "%.*s", (int)field->name->length, field->name->str);
-                    String* tag_string = stringbuf_to_string(tag_buf);
-                    char* tag_name = tag_string->chars;
-                    
-                    Item item_data = *(Item*)data;
-                    format_item(sb, item_data, tag_name);
-                    
-                    stringbuf_free(tag_buf);
-                }
+    while (iter.next(&key, &value)) {
+        // Only output complex types as child elements (not simple attributes)
+        if (!value.isString() && !value.isInt() && !value.isFloat() && !value.isBool()) {
+            if (value.isNull()) {
+                // Create empty element for null
+                stringbuf_append_format(sb, "<%s/>", key);
+            } else {
+                // Format complex types as child elements
+                format_item_reader(sb, value, key);
             }
         }
-        field = field->next;
     }
 }
 
-static void format_map(StringBuf* sb, Map* mp, const char* tag_name) {
-    printf("format_map: mp %p, type %p, data %p\n", (void*)mp, (void*)mp->type, (void*)mp->data);
+static void format_map_reader(StringBuf* sb, const MapReader& map_reader, const char* tag_name) {
+    printf("format_map_reader: formatting map\n");
     
     if (!tag_name) tag_name = "object";
     
@@ -220,22 +187,17 @@ static void format_map(StringBuf* sb, Map* mp, const char* tag_name) {
     stringbuf_append_str(sb, tag_name);
     
     // Add simple types as attributes for better XML structure
-    if (mp && mp->type) {
-        TypeMap* map_type = (TypeMap*)mp->type;
-        format_map_attributes(sb, map_type, mp->data);
-    }
+    format_map_attributes(sb, map_reader);
     
     // Check if there are complex child elements
     bool has_children = false;
-    if (mp && mp->type) {
-        TypeMap* map_type = (TypeMap*)mp->type;
-        ShapeEntry* field = map_type->shape;
-        for (int i = 0; i < map_type->length && field; i++) {
-            if (field->name && field->type && !is_simple_type(field->type->type_id)) {
-                has_children = true;
-                break;
-            }
-            field = field->next;
+    auto check_iter = map_reader.entries();
+    const char* check_key;
+    ItemReader check_value;
+    while (check_iter.next(&check_key, &check_value)) {
+        if (!check_value.isString() && !check_value.isInt() && !check_value.isFloat() && !check_value.isBool() && !check_value.isNull()) {
+            has_children = true;
+            break;
         }
     }
     
@@ -243,10 +205,7 @@ static void format_map(StringBuf* sb, Map* mp, const char* tag_name) {
         stringbuf_append_char(sb, '>');
         
         // Add complex types as child elements
-        if (mp && mp->type) {
-            TypeMap* map_type = (TypeMap*)mp->type;
-            format_map_elements(sb, map_type, mp->data);
-        }
+        format_map_elements(sb, map_reader);
         
         stringbuf_append_str(sb, "</");
         stringbuf_append_str(sb, tag_name);
@@ -257,107 +216,85 @@ static void format_map(StringBuf* sb, Map* mp, const char* tag_name) {
     }
 }
 
-static void format_item(StringBuf* sb, Item item, const char* tag_name) {
+static void format_item_reader(StringBuf* sb, const ItemReader& item, const char* tag_name) {
     // Safety check for null pointer
     if (!sb) return;
     
-    // Check if item is null
-    if ((item.item == ITEM_NULL)) {
-        if (!tag_name) tag_name = "value";
-        stringbuf_append_format(sb, "<%s/>", tag_name);
-        return;
-    }
-    
-    // Additional safety check for Item structure
-    if (get_type_id(item) == 0 && item.pointer == 0) {
-        if (!tag_name) tag_name = "value";
-        stringbuf_append_format(sb, "<%s/>", tag_name);
-        return;
-    }
-    
-    TypeId type = get_type_id(item);
-    printf("format_item: item %p, type %d, tag_name '%s'\n", (void*)item.pointer, type, tag_name ? tag_name : "NULL");
-    
     if (!tag_name) tag_name = "value";
     
-    switch (type) {
-    case LMD_TYPE_NULL:
+    // Check if item is null
+    if (item.isNull()) {
         stringbuf_append_format(sb, "<%s/>", tag_name);
-        break;
-    case LMD_TYPE_BOOL: {
-        bool val = item.bool_val;
-        stringbuf_append_format(sb, "<%s>%s</%s>", tag_name, val ? "true" : "false", tag_name);
-        break;
+        return;
     }
-    case LMD_TYPE_INT:
-    case LMD_TYPE_INT64:
-    case LMD_TYPE_FLOAT:
+    
+    printf("format_item_reader: formatting item, tag_name '%s'\n", tag_name);
+    
+    if (item.isBool()) {
+        bool val = item.asBool();
+        stringbuf_append_format(sb, "<%s>%s</%s>", tag_name, val ? "true" : "false", tag_name);
+    }
+    else if (item.isInt()) {
         stringbuf_append_format(sb, "<%s>", tag_name);
-        format_number(sb, item);
+        int64_t int_val = item.asInt();
+        char num_buf[32];
+        snprintf(num_buf, sizeof(num_buf), "%" PRId64, int_val);
+        stringbuf_append_str(sb, num_buf);
         stringbuf_append_format(sb, "</%s>", tag_name);
-        break;
-    case LMD_TYPE_STRING: {
-        String* str = (String*)item.pointer;
+    }
+    else if (item.isFloat()) {
+        stringbuf_append_format(sb, "<%s>", tag_name);
+        double float_val = item.asFloat();
+        char num_buf[32];
+        snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
+        stringbuf_append_str(sb, num_buf);
+        stringbuf_append_format(sb, "</%s>", tag_name);
+    }
+    else if (item.isString()) {
+        String* str = item.asString();
         stringbuf_append_format(sb, "<%s>", tag_name);
         if (str) {
             format_xml_string(sb, str);
         }
         stringbuf_append_format(sb, "</%s>", tag_name);
-        break;
     }
-    case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)item.pointer;
-        if (arr) {
-            stringbuf_append_format(sb, "<%s>", tag_name);
-            format_array(sb, arr, "item");
-            stringbuf_append_format(sb, "</%s>", tag_name);
-        } else {
-            stringbuf_append_format(sb, "<%s/>", tag_name);
-        }
-        break;
+    else if (item.isArray()) {
+        ArrayReader arr = item.asArray();
+        stringbuf_append_format(sb, "<%s>", tag_name);
+        format_array_reader(sb, arr, "item");
+        stringbuf_append_format(sb, "</%s>", tag_name);
     }
-    case LMD_TYPE_MAP: {
-        Map* mp = (Map*)item.pointer;
-        if (mp) {
-            format_map(sb, mp, tag_name);
-        } else {
-            stringbuf_append_format(sb, "<%s/>", tag_name);
-        }
-        break;
+    else if (item.isMap()) {
+        MapReader mp = item.asMap();
+        format_map_reader(sb, mp, tag_name);
     }
-    case LMD_TYPE_ELEMENT: {
-        printf("format_item: handling LMD_TYPE_ELEMENT\n");
-        Element* element = item.element;
-        if (!element || !element->type) {
-            printf("format_item: element is null or element->type is null\n");
+    else if (item.isElement()) {
+        printf("format_item_reader: handling element\n");
+        ElementReaderWrapper elem = item.asElement();
+        
+        const char* elem_name = elem.tagName();
+        if (!elem_name || elem_name[0] == '\0') {
+            printf("format_item_reader: element has no name\n");
             stringbuf_append_format(sb, "<%s/>", tag_name);
-            break;
+            return;
         }
         
-        TypeElmt* elmt_type = (TypeElmt*)element->type;
-        printf("format_item: element type name='%.*s', length=%ld, content_length=%ld\n", 
-               (int)elmt_type->name.length, elmt_type->name.str, elmt_type->length, elmt_type->content_length);
-        
-        char element_name[256];
-        snprintf(element_name, sizeof(element_name), "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
+        printf("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld\n", 
+               elem_name, (long long)elem.attrCount(), (long long)elem.childCount());
         
         // Special handling for XML declaration
-        if (strcmp(element_name, "?xml") == 0) {
+        if (strcmp(elem_name, "?xml") == 0) {
             stringbuf_append_str(sb, "<?xml");
             
             // Handle XML declaration content as attributes
-            if (elmt_type->content_length > 0) {
-                List* element_as_list = (List*)element;
-                for (long i = 0; i < element_as_list->length; i++) {
-                    Item content_item = element_as_list->items[i];
-                    TypeId content_type = get_type_id(content_item);
-                    
-                    if (content_type == LMD_TYPE_STRING) {
-                        String* str = (String*)content_item.pointer;
-                        if (str && str != &EMPTY_STRING) {
-                            stringbuf_append_char(sb, ' ');
-                            stringbuf_append_str(sb, str->chars);
-                        }
+            auto child_iter = elem.children();
+            ItemReader child;
+            while (child_iter.next(&child)) {
+                if (child.isString()) {
+                    String* str = child.asString();
+                    if (str && str != &EMPTY_STRING) {
+                        stringbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, str->chars);
                     }
                 }
             }
@@ -367,31 +304,49 @@ static void format_item(StringBuf* sb, Item item, const char* tag_name) {
         }
         
         stringbuf_append_char(sb, '<');
-        stringbuf_append_str(sb, element_name);
+        stringbuf_append_str(sb, elem_name);
         
-        // Handle attributes (simple types from element fields)
-        if (elmt_type->length > 0 && element->data) {
-            printf("format_item: element has %ld fields, checking for attributes\n", elmt_type->length);
-            TypeMap* map_type = (TypeMap*)elmt_type;
-            format_attributes(sb, map_type, element->data);
+        // Handle attributes
+        if (elem.attrCount() > 0) {
+            printf("format_item_reader: element has attributes, formatting\n");
+            AttributeReaderWrapper attrs(elem);
+            auto attr_iter = attrs.iterator();
+            const char* key;
+            ItemReader value;
+            
+            while (attr_iter.next(&key, &value)) {
+                stringbuf_append_char(sb, ' ');
+                stringbuf_append_str(sb, key);
+                stringbuf_append_str(sb, "=\"");
+                
+                if (value.isString()) {
+                    String* str = value.asString();
+                    if (str && str != &EMPTY_STRING) {
+                        format_xml_string(sb, str);
+                    }
+                } else if (value.isInt()) {
+                    stringbuf_append_format(sb, "%lld", (long long)value.asInt());
+                } else if (value.isFloat()) {
+                    stringbuf_append_format(sb, "%g", value.asFloat());
+                } else if (value.isBool()) {
+                    stringbuf_append_str(sb, value.asBool() ? "true" : "false");
+                }
+                
+                stringbuf_append_char(sb, '"');
+            }
         }
         
         stringbuf_append_char(sb, '>');
         
-        // Handle element content (text/child elements as list)
-        if (elmt_type->content_length > 0) {
-            printf("format_item: element has %ld content items, formatting as list\n", elmt_type->content_length);
-            List* element_as_list = (List*)element;
-            printf("format_item: list length=%ld\n", element_as_list->length);
+        // Handle element content (text/child elements)
+        if (elem.childCount() > 0) {
+            printf("format_item_reader: element has %lld children\n", (long long)elem.childCount());
             
-            // Format each content item
-            for (long i = 0; i < element_as_list->length; i++) {
-                Item content_item = element_as_list->items[i];
-                TypeId content_type = get_type_id(content_item);
-                printf("format_item: content item %ld, type=%d\n", i, content_type);
-                
-                if (content_type == LMD_TYPE_STRING) {
-                    String* str = (String*)content_item.pointer;
+            auto child_iter = elem.children();
+            ItemReader child;
+            while (child_iter.next(&child)) {
+                if (child.isString()) {
+                    String* str = child.asString();
                     if (str && str != &EMPTY_STRING) {
                         // Also check for literal "lambda.nil" content
                         if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
@@ -400,30 +355,21 @@ static void format_item(StringBuf* sb, Item item, const char* tag_name) {
                             format_xml_string(sb, str);
                         }
                     }
-                    // Skip EMPTY_STRING - don't output "lambda.nil"
                 } else {
                     // For child elements, format them recursively
-                    format_item(sb, content_item, NULL);
+                    format_item_reader(sb, child, NULL);
                 }
             }
         }
         
         stringbuf_append_str(sb, "</");
-        stringbuf_append_str(sb, element_name);
+        stringbuf_append_str(sb, elem_name);
         stringbuf_append_char(sb, '>');
-        break;
     }
-    default:
-        // unknown types
-        printf("format_item: unknown type %d, handling as map\n", type);
-        // Try to handle unknown types as maps
-        Map* mp = (Map*)item.pointer;
-        if (mp) {
-            format_map(sb, mp, tag_name);
-        } else {
-            stringbuf_append_format(sb, "<%s/>", tag_name);
-        }
-        break;
+    else {
+        // Unknown type or null
+        printf("format_item_reader: unknown type, outputting empty element\n");
+        stringbuf_append_format(sb, "<%s/>", tag_name);
     }
 }
 
@@ -433,64 +379,52 @@ String* format_xml(Pool* pool, Item root_item) {
     
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
     
+    ItemReader reader(root_item, pool);
+    
     // Check if we have a document structure with multiple children (XML declaration + root element)
-    if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
-        Element* root_element = (Element*)root_item.pointer;
-        if (root_element && root_element->type) {
-            TypeElmt* root_type = (TypeElmt*)root_element->type;
+    if (reader.isElement()) {
+        ElementReaderWrapper root_elem = reader.asElement();
+        const char* root_tag = root_elem.tagName();
+        
+        printf("format_xml: root element name='%s', children=%lld\n", 
+               root_tag, (long long)root_elem.childCount());
+        
+        // Check if this is a "document" element containing multiple children
+        if (strcmp(root_tag, "document") == 0 && root_elem.childCount() > 0) {
+            printf("format_xml: document element with %lld children\n", (long long)root_elem.childCount());
             
-            printf("format_xml: root element name='%.*s', length=%ld, content_length=%ld\n", 
-                   (int)root_type->name.length, root_type->name.str, root_type->name.length, root_type->content_length);
+            // Format all children in order (XML declaration, then actual elements)
+            auto child_iter = root_elem.children();
+            ItemReader child;
             
-            // Check if this is a "document" element containing multiple children
-            if (root_type->name.length == 8 && strncmp(root_type->name.str, "document", 8) == 0 && 
-                root_type->content_length > 0) {
-                
-                List* root_as_list = (List*)root_element;
-                printf("format_xml: document element with %ld children\n", root_as_list->length);
-                
-                // Format all children in order (XML declaration, then actual elements)
-                for (long i = 0; i < root_as_list->length; i++) {
-                    Item child = root_as_list->items[i];
-                    if (get_type_id(child) == LMD_TYPE_ELEMENT) {
-                        Element* child_elem = (Element*)child.pointer;
-                        if (child_elem && child_elem->type) {
-                            TypeElmt* child_type = (TypeElmt*)child_elem->type;
-                            
-                            // Check if this is XML declaration
-                            if (child_type->name.length == 4 && 
-                                strncmp(child_type->name.str, "?xml", 4) == 0) {
-                                printf("format_xml: formatting XML declaration\n");
-                                format_item(sb, child, NULL);
-                                stringbuf_append_char(sb, '\n');
-                            } else {
-                                // Format actual XML element with its proper name
-                                char* element_name = strndup(child_type->name.str, child_type->name.length);
-                                printf("format_xml: formatting element '%s'\n", element_name);
-                                format_item(sb, child, element_name);
-                                free(element_name);
-                            }
-                        }
+            while (child_iter.next(&child)) {
+                if (child.isElement()) {
+                    ElementReaderWrapper child_elem = child.asElement();
+                    const char* child_tag = child_elem.tagName();
+                    
+                    // Check if this is XML declaration
+                    if (strcmp(child_tag, "?xml") == 0) {
+                        printf("format_xml: formatting XML declaration\n");
+                        format_item_reader(sb, child, NULL);
+                        stringbuf_append_char(sb, '\n');
+                    } else {
+                        // Format actual XML element with its proper name
+                        printf("format_xml: formatting element '%s'\n", child_tag);
+                        format_item_reader(sb, child, child_tag);
                     }
                 }
-                
-                return stringbuf_to_string(sb);
             }
+            
+            return stringbuf_to_string(sb);
         }
     }
     
     // Fallback: format as single element
     const char* tag_name = NULL;
-    if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
-        Element* element = (Element*)root_item.pointer;
-        if (element && element->type) {
-            TypeElmt* elmt_type = (TypeElmt*)element->type;
-            if (elmt_type->name.length > 0 && elmt_type->name.str) {
-                char* element_name = strndup(elmt_type->name.str, elmt_type->name.length);
-                tag_name = element_name;
-                printf("format_xml: using element name '%s'\n", tag_name);
-            }
-        }
+    if (reader.isElement()) {
+        ElementReaderWrapper elem = reader.asElement();
+        tag_name = elem.tagName();
+        printf("format_xml: using element name '%s'\n", tag_name);
     }
     
     if (!tag_name) {
@@ -498,17 +432,13 @@ String* format_xml(Pool* pool, Item root_item) {
         printf("format_xml: using default name 'root'\n");
     }
     
-    format_item(sb, root_item, tag_name);
-    
-    // Free the allocated element name if we created one
-    if (tag_name && strcmp(tag_name, "root") != 0) {
-        free((char*)tag_name);
-    }
+    format_item_reader(sb, reader, tag_name);
     
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats XML to a provided StringBuf
 void format_xml_to_stringbuf(StringBuf* sb, Item root_item) {
-    format_item(sb, root_item, "root");
+    ItemReader reader(root_item, NULL);  // NULL pool for simple conversion
+    format_item_reader(sb, reader, "root");
 }

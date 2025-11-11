@@ -1,11 +1,12 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
-static Item parse_element(Input *input, const char **xml);
-static Item parse_comment(Input *input, const char **xml);
-static Item parse_cdata(Input *input, const char **xml);
-static Item parse_entity(Input *input, const char **xml);
-static Item parse_doctype(Input *input, const char **xml);
-static Item parse_dtd_declaration(Input *input, const char **xml);
+static Item parse_element(Input *input, MarkBuilder* builder, const char **xml);
+static Item parse_comment(Input *input, MarkBuilder* builder, const char **xml);
+static Item parse_cdata(Input *input, MarkBuilder* builder, const char **xml);
+static Item parse_entity(Input *input, MarkBuilder* builder, const char **xml);
+static Item parse_doctype(Input *input, MarkBuilder* builder, const char **xml);
+static Item parse_dtd_declaration(Input *input, MarkBuilder* builder, const char **xml);
 
 // Simple entity resolution - for now just handle common predefined ones
 static const char* resolve_entity(const char* entity_name, size_t length) {
@@ -25,8 +26,9 @@ static void skip_whitespace(const char **xml) {
     }
 }
 
-static String* parse_string_content(Input *input, const char **xml, char end_char) {
-    StringBuf* sb = input->sb;
+static String* parse_string_content(Input *input, MarkBuilder* builder, const char **xml, char end_char) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
     
     while (**xml && **xml != end_char) {
         if (**xml == '&') {
@@ -132,8 +134,9 @@ static String* parse_string_content(Input *input, const char **xml, char end_cha
     return stringbuf_to_string(sb);
 }
 
-static String* parse_tag_name(Input *input, const char **xml) {
-    StringBuf* sb = input->sb;
+static String* parse_tag_name(Input *input, MarkBuilder* builder, const char **xml) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
     
     while (**xml && (isalnum(**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
         stringbuf_append_char(sb, **xml);
@@ -145,11 +148,11 @@ static String* parse_tag_name(Input *input, const char **xml) {
     return stringbuf_to_string(sb);
 }
 
-static bool parse_attributes(Input *input, Element *element, const char **xml) {
+static bool parse_attributes(Input *input, MarkBuilder* builder, ElementBuilder& element, const char **xml) {
     skip_whitespace(xml);
     while (**xml && **xml != '>' && **xml != '/' && **xml != '?') {
         // parse attribute name
-        String* attr_name = parse_tag_name(input, xml);
+        String* attr_name = parse_tag_name(input, builder, xml);
         if (!attr_name) return false;
 
         skip_whitespace(xml);
@@ -162,21 +165,20 @@ static bool parse_attributes(Input *input, Element *element, const char **xml) {
         char quote_char = **xml;
         (*xml)++; // skip opening quote
 
-        String* attr_value = parse_string_content(input, xml, quote_char);
+        String* attr_value = parse_string_content(input, builder, xml, quote_char);
         if (!attr_value) return false;
 
         if (**xml == quote_char) { (*xml)++; } // skip closing quote
         
-        // Add to map using shared function
-        Item value = {.item = s2it(attr_value)};
-        elmt_put(element, attr_name, value, input->pool);
+        // Add attribute to element (wrap String* in Item)
+        element.attr(attr_name->chars, Item{.item = s2it(attr_value)});
 
         skip_whitespace(xml);
     }
     return true;
 }
 
-static Item parse_comment(Input *input, const char **xml) {
+static Item parse_comment(Input *input, MarkBuilder* builder, const char **xml) {
     // Skip past the "!--" part (already consumed by caller)
     
     // Find comment content
@@ -188,12 +190,11 @@ static Item parse_comment(Input *input, const char **xml) {
     }
     
     // Create comment element
-    Element* element = input_create_element(input, "!--");
-    if (!element) return {.item = ITEM_ERROR};
+    ElementBuilder element = builder->element("!--");
     
     // Add comment content as text
     if (comment_end > comment_start) {
-        StringBuf* sb = input->sb;
+        StringBuf* sb = builder->stringBuf();
         stringbuf_reset(sb);
         while (comment_start < comment_end) {
             stringbuf_append_char(sb, *comment_start);
@@ -201,8 +202,7 @@ static Item parse_comment(Input *input, const char **xml) {
         }
         String* comment_text = stringbuf_to_string(sb);
         if (comment_text && comment_text->len > 0) {
-            list_push((List*)element, {.item = s2it(comment_text)});
-            ((TypeElmt*)element->type)->content_length = 1;
+            element.child(Item{.item = s2it(comment_text)});
         }
     }
     
@@ -212,10 +212,10 @@ static Item parse_comment(Input *input, const char **xml) {
     } else {
         *xml = comment_end;
     }
-    return {.item = (uint64_t)element};
+    return element.build();
 }
 
-static Item parse_cdata(Input *input, const char **xml) {
+static Item parse_cdata(Input *input, MarkBuilder* builder, const char **xml) {
     // Skip past the "![CDATA[" part (already consumed by caller)
     
     const char* cdata_start = *xml;
@@ -226,7 +226,7 @@ static Item parse_cdata(Input *input, const char **xml) {
     }
     
     // Create CDATA content string
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
     while (cdata_start < *xml) {
         stringbuf_append_char(sb, *cdata_start);
@@ -237,10 +237,11 @@ static Item parse_cdata(Input *input, const char **xml) {
         *xml += 3; // skip ]]>
     }
     
-    return {.item = s2it(stringbuf_to_string(sb))};
+    String* cdata_text = stringbuf_to_string(sb);
+    return Item{.item = s2it(cdata_text)};
 }
 
-static Item parse_entity(Input *input, const char **xml) {
+static Item parse_entity(Input *input, MarkBuilder* builder, const char **xml) {
     // Skip past the "!ENTITY" part (already consumed by caller)
     skip_whitespace(xml);
     
@@ -291,12 +292,11 @@ static Item parse_entity(Input *input, const char **xml) {
     }
     
     // Create entity element
-    Element* element = input_create_element(input, "!ENTITY");
-    if (!element) return {.item = ITEM_ERROR};
+    ElementBuilder element = builder->element("!ENTITY");
     
     // Add entity name as "name" attribute
     if (entity_name_end > entity_name_start) {
-        StringBuf* sb = input->sb;
+        StringBuf* sb = builder->stringBuf();
         stringbuf_reset(sb);
         const char* temp = entity_name_start;
         while (temp < entity_name_end) {
@@ -304,21 +304,12 @@ static Item parse_entity(Input *input, const char **xml) {
             temp++;
         }
         String* name_str = stringbuf_to_string(sb);
-        
-        String* attr_name = (String*)pool_calloc(input->pool, sizeof(String) + 5);
-        if (attr_name) {
-            attr_name->len = 4;
-            memcpy(attr_name->chars, "name", 4);
-            attr_name->chars[4] = '\0';
-            
-            Item value = {.item = s2it(name_str)};
-            elmt_put(element, attr_name, value, input->pool);
-        }
+        element.attr("name", Item{.item = s2it(name_str)});
     }
             
     // Add entity value/reference as "value" attribute
     if (entity_value_end > entity_value_start) {
-        StringBuf* sb = input->sb;
+        StringBuf* sb = builder->stringBuf();
         stringbuf_reset(sb);
         const char* temp = entity_value_start;
         while (temp < entity_value_end) {
@@ -326,42 +317,16 @@ static Item parse_entity(Input *input, const char **xml) {
             temp++;
         }
         String* value_str = stringbuf_to_string(sb);
-        String* attr_name = (String*)pool_calloc(input->pool, sizeof(String) + 6);
-        if (attr_name) {
-            attr_name->len = 5;
-            memcpy(attr_name->chars, "value", 5);
-            attr_name->chars[5] = '\0';
-            Item value = {.item = s2it(value_str)};
-            elmt_put(element, attr_name, value, input->pool);
-        }
+        element.attr("value", Item{.item = s2it(value_str)});
     }
             
     // Add type attribute (internal/external)
-    String* type_attr_name = (String*)pool_calloc(input->pool, sizeof(String) + 5);
-    if (type_attr_name) {
-        type_attr_name->len = 4;
-        memcpy(type_attr_name->chars, "type", 4);
-        type_attr_name->chars[4] = '\0';
-        
-        String* type_value = (String*)pool_calloc(input->pool, sizeof(String) + 9);
-        if (type_value) {
-            if (is_external) {
-                type_value->len = 8;
-                memcpy(type_value->chars, "external", 8);
-                type_value->chars[8] = '\0';
-            } else {
-                type_value->len = 8;
-                memcpy(type_value->chars, "internal", 8);
-                type_value->chars[8] = '\0';
-            }
-            Item value = {.item = s2it(type_value)};
-            elmt_put(element, type_attr_name, value, input->pool);
-        }
-    }
-    return {.item = (uint64_t)element};
+    element.attr("type", is_external ? "external" : "internal");
+    
+    return element.build();
 }
 
-static Item parse_dtd_declaration(Input *input, const char **xml) {
+static Item parse_dtd_declaration(Input *input, MarkBuilder* builder, const char **xml) {
     // Parse DTD declarations like ELEMENT, ATTLIST, NOTATION
     const char* decl_start = *xml;
     const char* decl_name_end = decl_start;
@@ -377,7 +342,7 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
     if (decl_name_len == 0) return {.item = ITEM_ERROR};
     
     // Create declaration element name with "!" prefix
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
     stringbuf_append_char(sb, '!');
     const char* temp = decl_start;
@@ -404,8 +369,7 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
     }
     
     // Create DTD declaration element
-    Element* element = input_create_element(input, decl_element_name->chars);
-    if (!element) return {.item = ITEM_ERROR};
+    ElementBuilder element = builder->element(decl_element_name->chars);
     
     // Add declaration content as text
     if (content_end > content_start) {
@@ -417,14 +381,13 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
         }
         String* content_text = stringbuf_to_string(sb);
         if (content_text && content_text->len > 0) {
-            list_push((List*)element, {.item = s2it(content_text)});
-            ((TypeElmt*)element->type)->content_length = 1;
+            element.child(Item{.item = s2it(content_text)});
         }
     }
-    return {.item = (uint64_t)element};
+    return element.build();
 }
 
-static Item parse_doctype(Input *input, const char **xml) {
+static Item parse_doctype(Input *input, MarkBuilder* builder, const char **xml) {
     // Skip past the "!DOCTYPE" part (already consumed by caller)
     skip_whitespace(xml);
     
@@ -438,8 +401,7 @@ static Item parse_doctype(Input *input, const char **xml) {
         (*xml)++; // skip [
         
         // Create a document fragment to hold DTD declarations
-        Element* dt_elmt = input_create_element(input, "!DOCTYPE");
-        if (!dt_elmt) return {.item = ITEM_ERROR};
+        ElementBuilder dt_elmt = builder->element("!DOCTYPE");
 
         // Parse internal subset content
         while (**xml && **xml != ']') {
@@ -451,34 +413,30 @@ static Item parse_doctype(Input *input, const char **xml) {
                     // Check for specific DTD declarations
                     if (strncmp(*xml, "ENTITY", 6) == 0) {
                         *xml += 6;
-                        Item entity = parse_entity(input, xml);
-                        if (entity .item != ITEM_ERROR) {
-                            list_push((List*)dt_elmt, entity);
-                            ((TypeElmt*)dt_elmt->type)->content_length++;
+                        Item entity = parse_entity(input, builder, xml);
+                        if (entity.item != ITEM_ERROR) {
+                            dt_elmt.child(entity);
                         }
                     } else if (strncmp(*xml, "ELEMENT", 7) == 0 || 
                                strncmp(*xml, "ATTLIST", 7) == 0 || 
                                strncmp(*xml, "NOTATION", 8) == 0) {
-                        Item decl = parse_dtd_declaration(input, xml);
-                        if (decl .item != ITEM_ERROR) {
-                            list_push((List*)dt_elmt, decl);
-                            ((TypeElmt*)dt_elmt->type)->content_length++;
+                        Item decl = parse_dtd_declaration(input, builder, xml);
+                        if (decl.item != ITEM_ERROR) {
+                            dt_elmt.child(decl);
                         }
                     } else {
                         // Generic DTD declaration
-                        Item decl = parse_dtd_declaration(input, xml);
-                        if (decl .item != ITEM_ERROR) {
-                            list_push((List*)dt_elmt, decl);
-                            ((TypeElmt*)dt_elmt->type)->content_length++;
+                        Item decl = parse_dtd_declaration(input, builder, xml);
+                        if (decl.item != ITEM_ERROR) {
+                            dt_elmt.child(decl);
                         }
                     }
                 } else {
                     // Other elements (shouldn't happen in DTD, but handle gracefully)
                     (*xml)--; // back up to <
-                    Item element = parse_element(input, xml);
-                    if (element .item != ITEM_ERROR) {
-                        list_push((List*)dt_elmt, element);
-                        ((TypeElmt*)dt_elmt->type)->content_length++;
+                    Item element = parse_element(input, builder, xml);
+                    if (element.item != ITEM_ERROR) {
+                        dt_elmt.child(element);
                     }
                 }
             } else {
@@ -498,7 +456,7 @@ static Item parse_doctype(Input *input, const char **xml) {
             (*xml)++; // skip >
         }
         
-        return {.item = (uint64_t)dt_elmt};
+        return dt_elmt.build();
     } else {
         // No internal subset, just skip to end
         while (**xml && **xml != '>') {
@@ -507,11 +465,11 @@ static Item parse_doctype(Input *input, const char **xml) {
         if (**xml == '>') {
             (*xml)++; // skip >
         }
-        return parse_element(input, xml); // parse next element
+        return parse_element(input, builder, xml); // parse next element
     }
 }
 
-static Item parse_element(Input *input, const char **xml) {
+static Item parse_element(Input *input, MarkBuilder* builder, const char **xml) {
     skip_whitespace(xml);
     
     if (**xml != '<') return {.item = ITEM_ERROR};
@@ -520,25 +478,25 @@ static Item parse_element(Input *input, const char **xml) {
     // Handle comments - create element with name "!--"
     if (strncmp(*xml, "!--", 3) == 0) {
         *xml += 3; // skip !--
-        return parse_comment(input, xml);
+        return parse_comment(input, builder, xml);
     }
     
     // Handle CDATA sections
     if (strncmp(*xml, "![CDATA[", 8) == 0) {
         *xml += 8;
-        return parse_cdata(input, xml);
+        return parse_cdata(input, builder, xml);
     }
     
     // Handle ENTITY declarations - create element with name "!ENTITY"
     if (strncmp(*xml, "!ENTITY", 7) == 0) {
         *xml += 7; // skip !ENTITY
-        return parse_entity(input, xml);
+        return parse_entity(input, builder, xml);
     }
     
     // Handle DOCTYPE declarations - parse internal subset for entities
     if (strncmp(*xml, "!DOCTYPE", 8) == 0) {
         *xml += 8; // skip !DOCTYPE
-        return parse_doctype(input, xml);
+        return parse_doctype(input, builder, xml);
     }
     
     // Handle other DTD declarations (ELEMENT, ATTLIST, NOTATION, etc.)
@@ -546,7 +504,7 @@ static Item parse_element(Input *input, const char **xml) {
                         strncmp(*xml + 1, "ATTLIST", 7) == 0 || 
                         strncmp(*xml + 1, "NOTATION", 8) == 0)) {
         (*xml)++; // skip !
-        return parse_dtd_declaration(input, xml);
+        return parse_dtd_declaration(input, builder, xml);
     }
     
     // Handle processing instructions - create element with name "?target"
@@ -555,11 +513,11 @@ static Item parse_element(Input *input, const char **xml) {
         (*xml)++; // skip ?
         
         // Parse target name
-        String* target_name = parse_tag_name(input, xml);
+        String* target_name = parse_tag_name(input, builder, xml);
         if (!target_name) return {.item = ITEM_ERROR};
         
         // Create processing instruction element name "?target"
-        StringBuf* sb = input->sb;
+        StringBuf* sb = builder->stringBuf();
         stringbuf_reset(sb);
         stringbuf_append_char(sb, '?');
         stringbuf_append_str(sb, target_name->chars);
@@ -579,7 +537,7 @@ static Item parse_element(Input *input, const char **xml) {
         }
         
         // Create processing instruction element
-        Element* element = input_create_element(input, pi_name->chars);
+        ElementBuilder element = builder->element(pi_name->chars);
         
         // Add PI data as text content
         if (pi_data_end > pi_data_start) {
@@ -590,23 +548,21 @@ static Item parse_element(Input *input, const char **xml) {
             }
             String* pi_data = stringbuf_to_string(sb);
             if (pi_data && pi_data->len > 0) {
-                list_push((List*)element, {.item = s2it(pi_data)});
-                ((TypeElmt*)element->type)->content_length = 1;
+                element.child(Item{.item = s2it(pi_data)});
             }
         }
-        return {.item = (uint64_t)element};
+        return element.build();
     }
 
     // parse tag name
-    String* tag_name = parse_tag_name(input, xml);
+    String* tag_name = parse_tag_name(input, builder, xml);
     if (!tag_name) return {.item = ITEM_ERROR};
 
-        // Create element
-    Element* element = input_create_element(input, tag_name->chars);
-    if (!element) return {.item = ITEM_ERROR};
+    // Create element
+    ElementBuilder element = builder->element(tag_name->chars);
 
     // parse attributes
-    if (!parse_attributes(input, element, xml)) return {.item = ITEM_ERROR};
+    if (!parse_attributes(input, builder, element, xml)) return {.item = ITEM_ERROR};
 
     skip_whitespace(xml);
 
@@ -627,10 +583,9 @@ static Item parse_element(Input *input, const char **xml) {
         while (**xml && !(**xml == '<' && *(*xml + 1) == '/')) {
             if (**xml == '<') {
                 // Child element (could be regular element, comment, or PI)
-                Item child = parse_element(input, xml);
-                if (child .item != ITEM_ERROR) {
-                    list_push((List*)element, child);
-                    ((TypeElmt*)element->type)->content_length++;
+                Item child = parse_element(input, builder, xml);
+                if (child.item != ITEM_ERROR) {
+                    element.child(child);
                 }
             } else {
                 // Text content - trim leading/trailing whitespace for better handling
@@ -641,7 +596,7 @@ static Item parse_element(Input *input, const char **xml) {
                 
                 if (*xml > text_start) {
                     // Create text content
-                    StringBuf* sb = input->sb;
+                    StringBuf* sb = builder->stringBuf();
                     stringbuf_reset(sb);
                     
                     // Trim leading whitespace
@@ -703,8 +658,7 @@ static Item parse_element(Input *input, const char **xml) {
                         
                         String* processed_text = stringbuf_to_string(sb);
                         if (processed_text && processed_text->len > 0) {
-                            list_push((List*)element, {.item = s2it(processed_text)});
-                            ((TypeElmt*)element->type)->content_length++;
+                            element.child(Item{.item = s2it(processed_text)});
                         }
                     }
                 }
@@ -721,18 +675,18 @@ static Item parse_element(Input *input, const char **xml) {
             if (**xml == '>') (*xml)++; // Skip >
         }
     }    
-    return {.item = (uint64_t)element};
+    return element.build();
 }
 
 void parse_xml(Input* input, const char* xml_string) {
     input->sb = stringbuf_new(input->pool);
+    MarkBuilder builder(input);
 
     const char* xml = xml_string;
     skip_whitespace(&xml);
     
     // Create a document root element to contain all top-level elements
-    Element* doc_element = input_create_element(input, "document");
-    if (!doc_element) { input->root = {.item = ITEM_ERROR};  return; }
+    ElementBuilder doc_element = builder.element("document");
 
     int actual_element_count = 0;  // Count only actual XML elements (not PIs, comments, etc.)
     Item actual_root_element = {.item = ITEM_ERROR};
@@ -745,10 +699,9 @@ void parse_xml(Input* input, const char* xml_string) {
         const char* old_xml = xml; // Save position to detect infinite loops
         
         if (*xml == '<') {
-            Item element = parse_element(input, &xml);
-            if (element .item != ITEM_ERROR) {
-                list_push((List*)doc_element, element);
-                ((TypeElmt*)doc_element->type)->content_length++;
+            Item element = parse_element(input, &builder, &xml);
+            if (element.item != ITEM_ERROR) {
+                doc_element.child(element);
                 
                 // Check if this is an actual XML element (not processing instruction, comment, DTD, etc.)
                 Element* elem = (Element*)element.item;
@@ -779,5 +732,5 @@ void parse_xml(Input* input, const char* xml_string) {
     
     // Always return the document wrapper to maintain consistent structure
     // This ensures all XML content is wrapped in a <document> element
-    input->root = {.item = (uint64_t)doc_element};
+    input->root = doc_element.build();
 }
