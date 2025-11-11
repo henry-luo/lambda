@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 #include "../../lib/stringbuf.h"
 
 // Helper: detect separator character (comma or tab)
@@ -7,14 +8,14 @@ char detect_csv_separator(const char* csv_string) {
     const char* ptr = csv_string;
     int comma_count = 0;
     int tab_count = 0;
-    
+
     // Count separators in first line
     while (*ptr && *ptr != '\n' && *ptr != '\r') {
         if (*ptr == ',') comma_count++;
         else if (*ptr == '\t') tab_count++;
         ptr++;
     }
-    
+
     // Return the separator with higher count, default to comma
     return (tab_count > comma_count) ? '\t' : ',';
 }
@@ -24,7 +25,7 @@ bool is_header_line(const char* csv_string, char separator) {
     const char* ptr = csv_string;
     bool has_letters = false;
     bool all_numeric = true;
-    
+
     // Check first field for letters (indicating header)
     while (*ptr && *ptr != separator && *ptr != '\n' && *ptr != '\r') {
         if ((*ptr >= 'A' && *ptr <= 'Z') || (*ptr >= 'a' && *ptr <= 'z')) {
@@ -35,7 +36,7 @@ bool is_header_line(const char* csv_string, char separator) {
         }
         ptr++;
     }
-    
+
     return has_letters || !all_numeric;
 }
 
@@ -69,82 +70,97 @@ String* parse_csv_field(Input *input, const char **csv, char separator) {
 // CSV parser
 void parse_csv(Input* input, const char* csv_string) {
     input->sb = stringbuf_new(input->pool);
-    
+    MarkBuilder builder(input);
+
     // Detect separator and header
     char separator = detect_csv_separator(csv_string);
     bool has_header = is_header_line(csv_string, separator);
-    
+
     const char *csv = csv_string;
     Array *headers = NULL;
-    Array *rows = array_pooled(input->pool);
-    if (!rows) { return; }
-    
+    ArrayBuilder rows_builder = builder.array();
+
     // Parse header row if present
     if (has_header) {
         headers = array_pooled(input->pool);
         if (!headers) { return; }
-        
+
         while (*csv && *csv != '\n' && *csv != '\r') {
             String *field = parse_csv_field(input, &csv, separator);
             Item item = field ? (field == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(field)}) : (Item){.item = 0};
             array_append(headers, item, input->pool);
             if (*csv == separator) csv++;
         }
-        
+
         // Skip newline after header
         if (*csv == '\r') csv++;
         if (*csv == '\n') csv++;
         if (*csv == '\r' && *(csv+1) == '\n') csv += 2;
     }
-    
+
     // Parse data rows
     while (*csv) {
         if (has_header) {
-            // Create a map for each row
-            Map* row_map = map_pooled(input->pool);
-            if (!row_map) { break; }
-            
+            // Create a map for each row using MapBuilder
+            MapBuilder row_builder = builder.map();
+
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
                 String *field = parse_csv_field(input, &csv, separator);
-                Item item = field ? (field == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(field)}) : (Item){.item = 0};
-                
+
                 // Get header name for this field
                 if (field_index < headers->length) {
                     Item header_item = headers->items[field_index];
-                    if (header_item .item != ITEM_NULL) {
+                    if (header_item.item != ITEM_NULL) {
                         String* key = (String*)header_item.pointer;
                         if (key && key != &EMPTY_STRING) {
-                            map_put(row_map, key, item, input);
+                            // Add field to map - handles NULL and empty strings appropriately
+                            if (field == &EMPTY_STRING || !field) {
+                                row_builder.putNull(key->chars);
+                            } else {
+                                row_builder.put(key, (Item){.item = s2it(field)});
+                            }
                         }
                     }
                 }
-                
+
                 field_index++;
                 if (*csv == separator) csv++;
             }
-            array_append(rows, {.item = (uint64_t)row_map}, input->pool);
+
+            // Build the map and append to rows
+            rows_builder.append(row_builder.final());
         } else {
-            // Create an array for each row (original behavior)
-            Array *fields = array_pooled(input->pool);
-            if (!fields) { break; }
-            
+            // Create an array for each row using ArrayBuilder
+            ArrayBuilder fields_builder = builder.array();
+
             while (*csv && *csv != '\n' && *csv != '\r') {
                 String *field = parse_csv_field(input, &csv, separator);
-                Item item = field ? (field == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(field)}) : (Item){.item = 0};
-                array_append(fields, item, input->pool);
+
+                // Append field to array - handles NULL and empty strings
+                if (field == &EMPTY_STRING || !field) {
+                    fields_builder.append(builder.createNull());
+                } else {
+                    fields_builder.append((Item){.item = s2it(field)});
+                }
+
                 if (*csv == separator) csv++;
             }
-            array_append(rows, {.item = (uint64_t)fields}, input->pool);
+
+            // Build the array and append to rows
+            rows_builder.append(fields_builder.final());
         }
-        
+
         // Skip newline
         if (*csv == '\r') csv++;
         if (*csv == '\n') csv++;
         if (*csv == '\r' && *(csv+1) == '\n') csv += 2;
     }
-    
-    input->root = {.item = (uint64_t)rows};
-    printf("CSV parsed with %ld rows, root type: %d\n", rows->length, 
-        input->root.item == 0 ? 0 : ((Array*)input->root.item)->type_id);
+
+    // Build final rows array and set as root
+    Item rows = rows_builder.final();
+    input->root = rows;
+
+    printf("CSV parsed with %ld rows, root type: %d\n",
+        rows.array->length, rows.array->type_id);
 }
