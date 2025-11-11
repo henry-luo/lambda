@@ -9,17 +9,17 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
 
 // Helper function to check if a type is simple (can be output as XML attribute)
 static bool is_simple_type(TypeId type) {
-    return type == LMD_TYPE_STRING || type == LMD_TYPE_INT || 
-           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT || 
+    return type == LMD_TYPE_STRING || type == LMD_TYPE_INT ||
+           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
            type == LMD_TYPE_BOOL;
 }
 
 static void format_xml_string(StringBuf* sb, String* str) {
     if (!str || !str->chars) return;
-    
+
     const char* s = str->chars;
     size_t len = str->len;
-    
+
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         switch (c) {
@@ -70,7 +70,7 @@ static void format_xml_string(StringBuf* sb, String* str) {
 
 static void format_array_reader(StringBuf* sb, const ArrayReader& arr, const char* tag_name) {
     printf("format_array_reader: arr with %lld items\n", (long long)arr.length());
-    
+
     auto iter = arr.items();
     ItemReader item;
     while (iter.next(&item)) {
@@ -82,13 +82,13 @@ static void format_map_attributes(StringBuf* sb, const MapReader& map_reader) {
     auto iter = map_reader.entries();
     const char* key;
     ItemReader value;
-    
+
     while (iter.next(&key, &value)) {
         // Only output simple types as attributes
         if (value.isString() || value.isInt() || value.isFloat() || value.isBool()) {
             stringbuf_append_char(sb, ' ');
             stringbuf_append_format(sb, "%s=\"", key);
-            
+
             if (value.isString()) {
                 String* str = value.asString();
                 if (str) {
@@ -108,7 +108,7 @@ static void format_map_attributes(StringBuf* sb, const MapReader& map_reader) {
                 bool bool_val = value.asBool();
                 stringbuf_append_str(sb, bool_val ? "true" : "false");
             }
-            
+
             stringbuf_append_char(sb, '"');
         }
     }
@@ -116,17 +116,17 @@ static void format_map_attributes(StringBuf* sb, const MapReader& map_reader) {
 
 static void format_attributes(StringBuf* sb, const MapReader& map_reader) {
     printf("format_attributes: formatting map attributes\n");
-    
+
     auto iter = map_reader.entries();
     const char* key;
     ItemReader value;
-    
+
     while (iter.next(&key, &value)) {
         // Only output simple types as attributes, skip null values
         if (!value.isNull() && (value.isString() || value.isInt() || value.isFloat() || value.isBool())) {
             stringbuf_append_char(sb, ' ');
             stringbuf_append_format(sb, "%s=\"", key);
-            
+
             if (value.isString()) {
                 String* str = value.asString();
                 if (str && str != &EMPTY_STRING) {
@@ -151,7 +151,7 @@ static void format_attributes(StringBuf* sb, const MapReader& map_reader) {
                 bool bool_val = value.asBool();
                 stringbuf_append_str(sb, bool_val ? "true" : "false");
             }
-            
+
             stringbuf_append_char(sb, '"');
         }
     }
@@ -159,11 +159,11 @@ static void format_attributes(StringBuf* sb, const MapReader& map_reader) {
 
 static void format_map_elements(StringBuf* sb, const MapReader& map_reader) {
     printf("format_map_elements: formatting map elements\n");
-    
+
     auto iter = map_reader.entries();
     const char* key;
     ItemReader value;
-    
+
     while (iter.next(&key, &value)) {
         // Only output complex types as child elements (not simple attributes)
         if (!value.isString() && !value.isInt() && !value.isFloat() && !value.isBool()) {
@@ -180,15 +180,15 @@ static void format_map_elements(StringBuf* sb, const MapReader& map_reader) {
 
 static void format_map_reader(StringBuf* sb, const MapReader& map_reader, const char* tag_name) {
     printf("format_map_reader: formatting map\n");
-    
+
     if (!tag_name) tag_name = "object";
-    
+
     stringbuf_append_char(sb, '<');
     stringbuf_append_str(sb, tag_name);
-    
+
     // Add simple types as attributes for better XML structure
     format_map_attributes(sb, map_reader);
-    
+
     // Check if there are complex child elements
     bool has_children = false;
     auto check_iter = map_reader.entries();
@@ -200,13 +200,13 @@ static void format_map_reader(StringBuf* sb, const MapReader& map_reader, const 
             break;
         }
     }
-    
+
     if (has_children) {
         stringbuf_append_char(sb, '>');
-        
+
         // Add complex types as child elements
         format_map_elements(sb, map_reader);
-        
+
         stringbuf_append_str(sb, "</");
         stringbuf_append_str(sb, tag_name);
         stringbuf_append_char(sb, '>');
@@ -219,17 +219,17 @@ static void format_map_reader(StringBuf* sb, const MapReader& map_reader, const 
 static void format_item_reader(StringBuf* sb, const ItemReader& item, const char* tag_name) {
     // Safety check for null pointer
     if (!sb) return;
-    
+
     if (!tag_name) tag_name = "value";
-    
+
     // Check if item is null
     if (item.isNull()) {
         stringbuf_append_format(sb, "<%s/>", tag_name);
         return;
     }
-    
+
     printf("format_item_reader: formatting item, tag_name '%s'\n", tag_name);
-    
+
     if (item.isBool()) {
         bool val = item.asBool();
         stringbuf_append_format(sb, "<%s>%s</%s>", tag_name, val ? "true" : "false", tag_name);
@@ -271,23 +271,23 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
     else if (item.isElement()) {
         printf("format_item_reader: handling element\n");
         ElementReaderWrapper elem = item.asElement();
-        
+
         const char* elem_name = elem.tagName();
         if (!elem_name || elem_name[0] == '\0') {
             printf("format_item_reader: element has no name\n");
             stringbuf_append_format(sb, "<%s/>", tag_name);
             return;
         }
-        
-        printf("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld\n", 
+
+        printf("format_item_reader: element name='%s', attr_count=%lld, child_count=%lld\n",
                elem_name, (long long)elem.attrCount(), (long long)elem.childCount());
-        
+
         // Special handling for XML declaration
         if (strcmp(elem_name, "?xml") == 0) {
             stringbuf_append_str(sb, "<?xml");
-            
+
             // Handle XML declaration content as attributes
-            auto child_iter = elem.children();
+            auto child_iter = elem.children(item.pool());
             ItemReader child;
             while (child_iter.next(&child)) {
                 if (child.isString()) {
@@ -298,27 +298,27 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
                     }
                 }
             }
-            
+
             stringbuf_append_str(sb, "?>");
             return; // Early return for XML declaration
         }
-        
+
         stringbuf_append_char(sb, '<');
         stringbuf_append_str(sb, elem_name);
-        
+
         // Handle attributes
         if (elem.attrCount() > 0) {
             printf("format_item_reader: element has attributes, formatting\n");
             AttributeReaderWrapper attrs(elem);
-            auto attr_iter = attrs.iterator();
+            auto attr_iter = attrs.iterator(item.pool());
             const char* key;
             ItemReader value;
-            
+
             while (attr_iter.next(&key, &value)) {
                 stringbuf_append_char(sb, ' ');
                 stringbuf_append_str(sb, key);
                 stringbuf_append_str(sb, "=\"");
-                
+
                 if (value.isString()) {
                     String* str = value.asString();
                     if (str && str != &EMPTY_STRING) {
@@ -331,18 +331,18 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
                 } else if (value.isBool()) {
                     stringbuf_append_str(sb, value.asBool() ? "true" : "false");
                 }
-                
+
                 stringbuf_append_char(sb, '"');
             }
         }
-        
+
         stringbuf_append_char(sb, '>');
-        
+
         // Handle element content (text/child elements)
         if (elem.childCount() > 0) {
             printf("format_item_reader: element has %lld children\n", (long long)elem.childCount());
-            
-            auto child_iter = elem.children();
+
+            auto child_iter = elem.children(item.pool());
             ItemReader child;
             while (child_iter.next(&child)) {
                 if (child.isString()) {
@@ -361,7 +361,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
                 }
             }
         }
-        
+
         stringbuf_append_str(sb, "</");
         stringbuf_append_str(sb, elem_name);
         stringbuf_append_char(sb, '>');
@@ -376,32 +376,32 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
 String* format_xml(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
-    
+
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
-    
+
     ItemReader reader(root_item, pool);
-    
+
     // Check if we have a document structure with multiple children (XML declaration + root element)
     if (reader.isElement()) {
         ElementReaderWrapper root_elem = reader.asElement();
         const char* root_tag = root_elem.tagName();
-        
-        printf("format_xml: root element name='%s', children=%lld\n", 
+
+        printf("format_xml: root element name='%s', children=%lld\n",
                root_tag, (long long)root_elem.childCount());
-        
+
         // Check if this is a "document" element containing multiple children
         if (strcmp(root_tag, "document") == 0 && root_elem.childCount() > 0) {
             printf("format_xml: document element with %lld children\n", (long long)root_elem.childCount());
-            
+
             // Format all children in order (XML declaration, then actual elements)
-            auto child_iter = root_elem.children();
+            auto child_iter = root_elem.children(pool);
             ItemReader child;
-            
+
             while (child_iter.next(&child)) {
                 if (child.isElement()) {
                     ElementReaderWrapper child_elem = child.asElement();
                     const char* child_tag = child_elem.tagName();
-                    
+
                     // Check if this is XML declaration
                     if (strcmp(child_tag, "?xml") == 0) {
                         printf("format_xml: formatting XML declaration\n");
@@ -414,11 +414,11 @@ String* format_xml(Pool* pool, Item root_item) {
                     }
                 }
             }
-            
+
             return stringbuf_to_string(sb);
         }
     }
-    
+
     // Fallback: format as single element
     const char* tag_name = NULL;
     if (reader.isElement()) {
@@ -426,14 +426,14 @@ String* format_xml(Pool* pool, Item root_item) {
         tag_name = elem.tagName();
         printf("format_xml: using element name '%s'\n", tag_name);
     }
-    
+
     if (!tag_name) {
         tag_name = "root";
         printf("format_xml: using default name 'root'\n");
     }
-    
+
     format_item_reader(sb, reader, tag_name);
-    
+
     return stringbuf_to_string(sb);
 }
 
