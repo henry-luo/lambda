@@ -30,6 +30,7 @@ extern "C" {
 #include "../lambda/element_reader.h"
 #include "../lambda/input/input.h"
 }
+#include "../lambda/mark_reader.hpp"
 
 
 
@@ -1074,10 +1075,11 @@ TEST_F(ElementReaderTest, RealWorldHTML) {
 }
 
 // ========================================================================
-// Convenience Macro Tests
+// C++ API Iteration Tests
 // ========================================================================
 
-TEST_F(ElementReaderTest, ConvenienceMacros) {
+TEST_F(ElementReaderTest, CppApiChildIteration) {
+    // Build element using C++ API
     Element* parent = create_mock_element("ul");
     Element* li1 = create_mock_element("li");
     Element* li2 = create_mock_element("li");
@@ -1086,24 +1088,36 @@ TEST_F(ElementReaderTest, ConvenienceMacros) {
     add_child_to_element(parent, create_text_item("Text"));
     add_child_to_element(parent, create_element_item(li2));
     
-    ElementReader* reader = element_reader_create(parent, pool);
-    ASSERT_NE(reader, nullptr);
+    // Use C++ ElementReaderWrapper API
+    Item parent_item = create_element_item(parent);
+    ItemReader item_reader(parent_item, pool);
+    ASSERT_TRUE(item_reader.isElement());
     
-    // Test ELEMENT_READER_FOR_EACH_CHILD macro
+    ElementReaderWrapper elem_reader = item_reader.asElement();
+    ASSERT_TRUE(elem_reader.isValid());
+    EXPECT_STREQ(elem_reader.tagName(), "ul");
+    
+    // Test iterating all children (any type)
     int child_count = 0;
-    Item child_item;
-    ELEMENT_READER_FOR_EACH_CHILD(reader, child_item) {
+    auto child_iter = elem_reader.children();
+    ItemReader child;
+    while (child_iter.next(&child)) {
         child_count++;
-        EXPECT_NE(child_item.item, ItemNull.item);
+        EXPECT_FALSE(child.isNull());
     }
-    EXPECT_EQ(child_count, 3);
+    EXPECT_EQ(child_count, 3);  // 2 elements + 1 text
     
-    // Test ELEMENT_READER_FOR_EACH_CHILD_ELEMENT macro
+    // Test iterating only element children
     int element_count = 0;
-    ELEMENT_READER_FOR_EACH_CHILD_ELEMENT(reader, child_element, pool) {
-        element_count++;
-        EXPECT_NE(child_element, nullptr);
-        EXPECT_NE(element_reader_tag_name(child_element), nullptr);
-    } ELEMENT_READER_FOR_EACH_END
+    auto elem_iter = elem_reader.children();
+    ItemReader child_item;
+    while (elem_iter.next(&child_item)) {
+        if (child_item.isElement()) {
+            element_count++;
+            ElementReaderWrapper child_elem = child_item.asElement();
+            EXPECT_TRUE(child_elem.isValid());
+            EXPECT_STREQ(child_elem.tagName(), "li");
+        }
+    }
     EXPECT_EQ(element_count, 2);  // Only the li elements
 }

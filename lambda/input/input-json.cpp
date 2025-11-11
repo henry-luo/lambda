@@ -1,6 +1,7 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
-static Item parse_value(Input *input, const char **json);
+static Item parse_value(Input *input, MarkBuilder* builder, const char **json);
 
 static void skip_whitespace(const char **json) {
     while (**json && (**json == ' ' || **json == '\n' || **json == '\r' || **json == '\t')) {
@@ -8,7 +9,7 @@ static void skip_whitespace(const char **json) {
     }
 }
 
-static String* parse_string(Input *input, const char **json) {
+static String* parse_string(Input *input, MarkBuilder* builder, const char **json) {
     if (**json != '"') return NULL;
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);
@@ -58,112 +59,131 @@ static String* parse_string(Input *input, const char **json) {
     return stringbuf_to_string(sb);
 }
 
-static Item parse_number(Input *input, const char **json) {
-    double *dval;
-    dval = (double*)pool_calloc(input->pool, sizeof(double));
-    if (dval == NULL) return {.item = ITEM_ERROR};
+static Item parse_number(Input *input, MarkBuilder* builder, const char **json) {
     char* end;
-    *dval = strtod(*json, &end);
+    double value = strtod(*json, &end);
     *json = end;
-    return {.item = d2it(dval)};
+    
+    // Check if it's an integer
+    if (value == (int64_t)value) {
+        return builder->createInt((int64_t)value);
+    } else {
+        return builder->createFloat(value);
+    }
 }
 
-static Array* parse_array(Input *input, const char **json) {
-    if (**json != '[') return NULL;
-    Array* arr = array_pooled(input->pool);
-    if (!arr) return NULL;
+static Item parse_array(Input *input, MarkBuilder* builder, const char **json) {
+    if (**json != '[') return builder->createNull();
+    
+    ArrayBuilder arr_builder = builder->array();
 
     (*json)++; // skip [
     skip_whitespace(json);
-    if (**json == ']') { (*json)++;  return arr; }
+    if (**json == ']') { 
+        (*json)++;
+        return arr_builder.build();
+    }
 
     while (**json) {
-        Item item = parse_value(input, json);
-        array_append(arr, item, input->pool);
+        Item item = parse_value(input, builder, json);
+        arr_builder.append(item);
 
         skip_whitespace(json);
-        if (**json == ']') { (*json)++;  break; }
+        if (**json == ']') { 
+            (*json)++;
+            break;
+        }
         if (**json != ',') {
             printf("Expected ',' or ']', got '%c'\n", **json);
-            return NULL; // invalid format
+            return builder->createNull();
         }
         (*json)++;
         skip_whitespace(json);
     }
-    return arr;
+    return arr_builder.build();
 }
 
-static Map* parse_object(Input *input, const char **json) {
-    if (**json != '{') return NULL;
-    Map* mp = map_pooled(input->pool);
-    if (!mp) return NULL;
+static Item parse_object(Input *input, MarkBuilder* builder, const char **json) {
+    if (**json != '{') return builder->createNull();
+    
+    MapBuilder map_builder = builder->map();
 
     (*json)++; // skip '{'
     skip_whitespace(json);
     if (**json == '}') { // empty map
-        (*json)++;  return mp;
+        (*json)++;
+        return map_builder.build();
     }
 
     while (**json) {
-        String* key = parse_string(input, json);
-        if (!key) return mp;
+        String* key = parse_string(input, builder, json);
+        if (!key) return map_builder.build();
 
         skip_whitespace(json);
-        if (**json != ':') return mp;
+        if (**json != ':') return map_builder.build();
         (*json)++;
         skip_whitespace(json);
 
-        Item value = parse_value(input, json);
-        map_put(mp, key, value, input);
+        Item value = parse_value(input, builder, json);
+        // Use the String* directly
+        map_builder.put(key, value);
 
         skip_whitespace(json);
-        if (**json == '}') { (*json)++;  break; }
-        if (**json != ',') return mp;
+        if (**json == '}') { 
+            (*json)++;
+            break;
+        }
+        if (**json != ',') return map_builder.build();
         (*json)++;
         skip_whitespace(json);
     }
-    return mp;
+    return map_builder.build();
 }
 
-static Item parse_value(Input *input, const char **json) {
+static Item parse_value(Input *input, MarkBuilder* builder, const char **json) {
     skip_whitespace(json);
     switch (**json) {
         case '{':
-            return {.raw_pointer = parse_object(input, json)};
+            return parse_object(input, builder, json);
         case '[':
-            return {.raw_pointer = parse_array(input, json)};
+            return parse_array(input, builder, json);
         case '"': {
-            String* str = parse_string(input, json);
-            return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = 0};
+            String* str = parse_string(input, builder, json);
+            if (!str) return builder->createNull();
+            if (str == &EMPTY_STRING) return builder->createNull();
+            // String is already allocated, just wrap it in an Item
+            return (Item){.item = s2it(str)};
         }
         case 't':
             if (strncmp(*json, "true", 4) == 0) {
                 *json += 4;
-                return {.item = b2it(true)};
+                return builder->createBool(true);
             }
-            return {.item = ITEM_ERROR};
+            return builder->createNull();
         case 'f':
             if (strncmp(*json, "false", 5) == 0) {
                 *json += 5;
-                return {.item = b2it(false)};
+                return builder->createBool(false);
             }
-            return {.item = ITEM_ERROR};
+            return builder->createNull();
         case 'n':
             if (strncmp(*json, "null", 4) == 0) {
                 *json += 4;
-                return {.item = ITEM_NULL};
+                return builder->createNull();
             }
-            return {.item = ITEM_ERROR};
+            return builder->createNull();
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {
-                return parse_number(input, json);
+                return parse_number(input, builder, json);
             }
-            return {.item = ITEM_ERROR};
+            return builder->createNull();
     }
 }
 
 void parse_json(Input* input, const char* json_string) {
     printf("json_parse\n");
     input->sb = stringbuf_new(input->pool);
-    input->root = parse_value(input, &json_string);
+    
+    MarkBuilder builder(input);
+    input->root = parse_value(input, &builder, &json_string);
 }

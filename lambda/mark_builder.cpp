@@ -358,6 +358,20 @@ MapBuilder& MapBuilder::put(const char* key, Item value) {
     return *this;
 }
 
+MapBuilder& MapBuilder::put(String* key, Item value) {
+    if (!key) return *this;
+    
+    // Use the existing string directly
+    map_put(map_, key, value, builder_->input());
+    
+    // cache the type for convenience
+    if (!map_type_) {
+        map_type_ = (TypeMap*)map_->type;
+    }
+    
+    return *this;
+}
+
 MapBuilder& MapBuilder::put(const char* key, const char* value) {
     return put(key, builder_->createStringItem(value));
 }
