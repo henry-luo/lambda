@@ -330,6 +330,9 @@
                 "lambda/validator/error_reporting.cpp",
                 "lambda/format/format.cpp",
                 "lambda/mark_builder.cpp",
+                "lambda/mark_reader.cpp",
+                "lambda/element_reader_utils.cpp",
+                "lambda/element_reader.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/css/css_tokenizer.cpp",
@@ -1064,6 +1067,19 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_builder_gtest.exe"
+                    },
+                    {
+                        "source": "test_mark_reader_gtest.cpp",
+                        "name": "📖 MarkReader API Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_mark_reader_gtest.exe"
                     },
                     {
                         "source": "test_math_gtest.cpp",

@@ -180,7 +180,7 @@ private:
     MarkBuilder* builder_;      // parent builder
     String* tag_name_;          // element tag name
     ArrayList* children_;       // child items (temp storage)
-    Map* attributes_;           // attribute map (pool-allocated)
+    Element* attributes_;       // element being built (pool-allocated)
     TypeMap* attr_type_;        // attribute type descriptor
     ElementBuilder* parent_;    // for nested elements (stack reference)
     
