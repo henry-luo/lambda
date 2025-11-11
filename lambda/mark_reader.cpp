@@ -214,9 +214,14 @@ ItemReader MapReader::get(const char* key) const {
             TypeId field_type = field->type->type_id;
             Item value;
             
-            if (field_type == LMD_TYPE_INT) {
-                value.int_val = *((int32_t*)data_ptr);
-                value.type_id = LMD_TYPE_INT;
+            if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
+                value.int_val = *((int64_t*)data_ptr);
+                value.type_id = field_type;
+            } else if (field_type == LMD_TYPE_FLOAT) {
+                // Float is stored inline in the map data, but Item expects a pointer
+                // So we point to the location in the map's data
+                value.pointer = (uint64_t)data_ptr;
+                value.type_id = LMD_TYPE_FLOAT;
             } else if (field_type == LMD_TYPE_BOOL) {
                 value.bool_val = *((bool*)data_ptr);
                 value.type_id = LMD_TYPE_BOOL;
