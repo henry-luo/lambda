@@ -213,8 +213,8 @@
         },
         {
             "name": "freetype",
-            "include": "/opt/homebrew/Cellar/freetype/2.14.1_1/include/freetype2",
-            "lib": "/opt/homebrew/Cellar/freetype/2.14.1_1/lib/libfreetype.a",
+            "include": "/opt/homebrew/opt/freetype/include/freetype2",
+            "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
             "link": "static"
         },
         {
@@ -779,7 +779,7 @@
         },
         "macos": {
             "includes": [
-                "/opt/homebrew/Cellar/freetype/2.14.1_1/include/freetype2",
+                "/opt/homebrew/opt/freetype/include/freetype2",
                 "/opt/homebrew/include/fontconfig",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/libpng16"
