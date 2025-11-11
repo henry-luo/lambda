@@ -321,6 +321,11 @@ public:
     MapBuilder& put(const char* key, Item value);
     
     /**
+     * Put key-value pair with existing String* key (for parsers)
+     */
+    MapBuilder& put(String* key, Item value);
+    
+    /**
      * Put key-value pair with string value (convenience)
      */
     MapBuilder& put(const char* key, const char* value);
