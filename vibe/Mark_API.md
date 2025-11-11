@@ -1,7 +1,7 @@
 # Mark API Proposal: MarkBuilder and MarkReader
 
-**Version:** 1.0  
-**Date:** November 11, 2025  
+**Version:** 1.0
+**Date:** November 11, 2025
 **Status:** Proposal
 
 ## Executive Summary
@@ -93,7 +93,7 @@ if (type == LMD_TYPE_ELEMENT) {
     Element* elem = item.element;
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     const char* tag = elem_type->name.str;
-    
+
     // Traverse children
     for (int i = 0; i < elem->length; i++) {
         Item child = elem->items[i];
@@ -236,14 +236,14 @@ class ArrayBuilder;
 
 /**
  * Main builder context for constructing Mark documents
- * 
+ *
  * MEMORY MODEL:
  * - MarkBuilder itself is STACK-ALLOCATED in the parser function scope
  * - Automatically destroyed when parser function exits (RAII)
  * - Only the FINAL Mark data (Element, Map, Array, String) is pool-allocated
  * - Pool allocation happens only when build() is called
  * - No manual memory management needed for the builder
- * 
+ *
  * USAGE PATTERN:
  *   void parse_json(Input* input, const char* json) {
  *       MarkBuilder builder(input);  // Stack allocation
@@ -260,12 +260,12 @@ private:
     NamePool* name_pool_;       // String interning pool
     ArrayList* type_list_;      // Type registry
     StringBuf* sb_;             // Shared string buffer for temp work
-    
+
     // Builder state (stack-allocated, transient)
     Element* current_element_;  // Current element being built (for nesting)
     Map* current_map_;          // Current map being built
     Array* current_array_;      // Current array being built
-    
+
     // Configuration
     bool auto_string_merge_;    // Auto-merge adjacent strings in lists
     bool intern_strings_;       // Use name pool for string deduplication
@@ -274,28 +274,28 @@ public:
     // Lifecycle (stack-based RAII)
     explicit MarkBuilder(Input* input);
     ~MarkBuilder();  // Auto cleanup when out of scope
-    
+
     // Disable copy and move (stack-only, no transfer)
     MarkBuilder(const MarkBuilder&) = delete;
     MarkBuilder& operator=(const MarkBuilder&) = delete;
     MarkBuilder(MarkBuilder&&) = delete;
     MarkBuilder& operator=(MarkBuilder&&) = delete;
-    
+
     // Finalization
     Item finalize();
-    
+
     // String creation (pool-allocated for final Mark data)
     String* createString(const char* str);
     String* createString(const char* str, size_t len);
     String* createStringFromBuf(StringBuf* sb);
     static String* emptyString();
-    
+
     // Sub-builder creation (returns stack references, not heap allocated)
     // These are lightweight wrappers that borrow the MarkBuilder context
     ElementBuilder element(const char* tag_name);
     MapBuilder map();
     ArrayBuilder array();
-    
+
     // Direct Item creation (convenience - pool-allocates final data)
     Item createElement(const char* tag_name);
     Item createMap();
@@ -305,11 +305,11 @@ public:
     Item createFloat(double value);
     Item createBool(bool value);
     Item createNull();
-    
+
     // Configuration
     void setAutoStringMerge(bool enabled) { auto_string_merge_ = enabled; }
     void setInternStrings(bool enabled) { intern_strings_ = enabled; }
-    
+
     // Accessors
     Pool* pool() const { return pool_; }
     Input* input() const { return input_; }
@@ -317,13 +317,13 @@ public:
 
 /**
  * Fluent builder for Element construction
- * 
+ *
  * MEMORY MODEL:
  * - ElementBuilder is VALUE TYPE, returned by value from MarkBuilder
  * - Lives on the STACK within the calling scope
  * - No heap allocation for the builder itself
  * - Only the final Element is pool-allocated when build() is called
- * 
+ *
  * USAGE PATTERN:
  *   ElementBuilder elem = builder.element("div");
  *   elem.attr("class", "container").text("Hello");
@@ -339,33 +339,33 @@ private:
 public:
     explicit ElementBuilder(MarkBuilder* builder, const char* tag_name);
     ~ElementBuilder() = default;  // Stack cleanup only
-    
+
     // Value type - can be copied/moved on stack
     ElementBuilder(const ElementBuilder&) = default;
     ElementBuilder& operator=(const ElementBuilder&) = default;
     ElementBuilder(ElementBuilder&&) = default;
     ElementBuilder& operator=(ElementBuilder&&) = default;
-    
+
     // Attribute setters (fluent interface - returns reference for chaining)
     ElementBuilder& attr(const char* key, Item value);
     ElementBuilder& attr(const char* key, const char* value);
     ElementBuilder& attr(const char* key, int64_t value);
     ElementBuilder& attr(const char* key, double value);
     ElementBuilder& attr(const char* key, bool value);
-    
+
     // Child management (fluent interface - returns reference for chaining)
     ElementBuilder& child(Item child);
     ElementBuilder& text(const char* text);
     ElementBuilder& text(const char* text, size_t len);
     ElementBuilder& children(std::initializer_list<Item> items);
-    
+
     // Nested element building
     ElementBuilder beginChild(const char* tag_name);
     ElementBuilder& end();
-    
+
     // Finalization (pool-allocates final Element)
     Item build();
-    
+
     // Accessors
     Element* element() const { return element_; }
     MarkBuilder* builder() const { return builder_; }
@@ -373,7 +373,7 @@ public:
 
 /**
  * Fluent builder for Map construction
- * 
+ *
  * MEMORY MODEL:
  * - MapBuilder is VALUE TYPE, returned by value from MarkBuilder
  * - Lives on the STACK within the calling scope
@@ -388,13 +388,13 @@ private:
 public:
     explicit MapBuilder(MarkBuilder* builder);
     ~MapBuilder() = default;  // Stack cleanup only
-    
+
     // Value type - can be copied/moved on stack
     MapBuilder(const MapBuilder&) = default;
     MapBuilder& operator=(const MapBuilder&) = default;
     MapBuilder(MapBuilder&&) = default;
     MapBuilder& operator=(MapBuilder&&) = default;
-    
+
     // Key-value setters (fluent interface - returns reference for chaining)
     MapBuilder& put(const char* key, Item value);
     MapBuilder& put(const char* key, const char* value);
@@ -402,10 +402,10 @@ public:
     MapBuilder& put(const char* key, double value);
     MapBuilder& put(const char* key, bool value);
     MapBuilder& putNull(const char* key);
-    
+
     // Finalization (pool-allocates final Map)
     Item build();
-    
+
     // Accessors
     Map* map() const { return map_; }
     MarkBuilder* builder() const { return builder_; }
@@ -413,7 +413,7 @@ public:
 
 /**
  * Fluent builder for Array construction
- * 
+ *
  * MEMORY MODEL:
  * - ArrayBuilder is VALUE TYPE, returned by value from MarkBuilder
  * - Lives on the STACK within the calling scope
@@ -427,13 +427,13 @@ private:
 public:
     explicit ArrayBuilder(MarkBuilder* builder);
     ~ArrayBuilder() = default;  // Stack cleanup only
-    
+
     // Value type - can be copied/moved on stack
     ArrayBuilder(const ArrayBuilder&) = default;
     ArrayBuilder& operator=(const ArrayBuilder&) = default;
     ArrayBuilder(ArrayBuilder&&) = default;
     ArrayBuilder& operator=(ArrayBuilder&&) = default;
-    
+
     // Append operations (fluent interface - returns reference for chaining)
     ArrayBuilder& append(Item item);
     ArrayBuilder& append(const char* str);
@@ -441,10 +441,10 @@ public:
     ArrayBuilder& append(double value);
     ArrayBuilder& append(bool value);
     ArrayBuilder& appendItems(std::initializer_list<Item> items);
-    
+
     // Finalization (pool-allocates final Array)
     Item build();
-    
+
     // Accessors
     Array* array() const { return array_; }
     MarkBuilder* builder() const { return builder_; }
@@ -459,11 +459,11 @@ The MarkBuilder API uses C++ classes with member functions. All builders are **s
 ```cpp
 void parse_document(Input* input, const char* data) {
     MarkBuilder builder(input);     // Stack-allocated, auto-destroyed at scope exit
-    
+
     // Sub-builders are also stack-allocated (returned by value)
     ElementBuilder elem = builder.element("doc");  // Stack value
     elem.attr("version", "1.0");
-    
+
     Item result = elem.build();     // Pool-allocates final Element here
     input->root = result;
 }  // builder, elem automatically destroyed (stack unwind)
@@ -477,7 +477,7 @@ void parse_document(Input* input, const char* data) {
 /**
  * Create a new MarkBuilder from Input context
  * Stack-allocated, inherits pool, type_list, name_pool from Input
- * 
+ *
  * USAGE:
  *   MarkBuilder builder(input);  // Stack allocation
  */
@@ -668,15 +668,15 @@ Item arr = builder.array()
 void parse_xml_element(MarkBuilder& builder, const char** xml) {
     // Parse opening tag
     String* tag_name = parse_tag_name(xml);
-    
+
     // ElementBuilder lives on stack
     ElementBuilder elem = builder.element(tag_name->chars);
-    
+
     // Parse attributes
     while (parse_attribute(xml, &attr_name, &attr_value)) {
         elem.attr(attr_name, attr_value);  // Chaining by reference
     }
-    
+
     // Parse children
     while (!is_closing_tag(*xml)) {
         if (is_text(*xml)) {
@@ -688,7 +688,7 @@ void parse_xml_element(MarkBuilder& builder, const char** xml) {
             // Child automatically added to current element
         }
     }
-    
+
     Item result = elem.build();  // Pool-allocates final Element
     // elem destroyed when function returns
 }
@@ -700,53 +700,64 @@ void parse_xml_element(MarkBuilder& builder, const char** xml) {
 
 ### Overview
 
-MarkReader provides a read-only, type-safe interface for traversing and extracting data from Mark documents in formatters. It consists of three main components:
+MarkReader provides a read-only, type-safe interface for traversing and extracting data from Mark documents in formatters. It consists of several reader components:
 
 - **MarkReader**: Root document reader with iteration and query capabilities
 - **ItemReader**: Type-safe wrapper for individual Items
-- **ElementReader**: Enhanced element traversal (already exists, will be extended)
+- **ElementReaderWrapper**: Stack-based element traversal (no pool required)
+- **AttributeReaderWrapper**: Stack-based attribute access (no pool required)
+- **MapReader**: Stack-based map traversal (no pool required)
+- **ArrayReader**: Stack-based array traversal (no pool required)
+
+**All readers are completely pool-free for traversal operations.** Pool is only needed when extracting text content into a StringBuf.
 
 ### Architecture
 
 ```
-MarkReader (Document Root - stack-allocated value type)
+MarkReader (Document Root - stack-allocated, NO POOL)
+    ├── MarkReader(Item root)  // Constructor - no pool needed
     ├── getRoot() → ItemReader (by value)
     ├── findAll(selector) → Iterator<ItemReader>
-    └── query(xpath) → ItemReader[]
-    
-ItemReader (Type-Safe Item Wrapper - stack-allocated value type)
+    └── root() → Item
+
+ItemReader (Type-Safe Item Wrapper - stack-allocated, NO POOL)
+    ├── ItemReader(Item item)  // Constructor - no pool needed
     ├── getType() → TypeId
     ├── asString() → String*
     ├── asInt() → int64_t
-    ├── asElement() → ElementReader (by value)
+    ├── asElement() → ElementReaderWrapper (by value)
     ├── asMap() → MapReader (by value)
     ├── asArray() → ArrayReader (by value)
     └── isNull() → bool
-    
-ElementReader (Element-Specific - stack-allocated value type)
+
+ElementReaderWrapper (Element-Specific - stack-allocated, NO POOL)
+    ├── ElementReaderWrapper(const Element*)  // Constructor - no pool needed
     ├── tagName() → const char*
-    ├── hasTag(name) → bool
-    ├── attributes() → AttributeReader (by value)
-    ├── children() → Iterator<ItemReader>
-    ├── findChildren(tag) → Iterator<ElementReader>
-    ├── textContent() → String*
+    ├── attrCount() → int64_t
+    ├── childCount() → int64_t
+    ├── childAt(index) → ItemReader (by value)
+    ├── children() → Iterator<ItemReader>  // No pool needed
+    ├── findChild(tag) → ItemReader (by value)
+    ├── textContent(StringBuf* sb) → void  // Caller provides StringBuf
     └── isEmpty() → bool
 
-AttributeReader (Attribute Access - stack-allocated value type)
-    ├── get(key) → ItemReader (by value)
+AttributeReaderWrapper (Attribute Access - stack-allocated, NO POOL)
+    ├── AttributeReaderWrapper(const ElementReaderWrapper&)  // No pool
+    ├── getItem(key) → ItemReader (by value)
     ├── getString(key) → const char*
-    ├── getInt(key) → int64_t
     ├── has(key) → bool
-    └── names() → Iterator<const char*>
+    └── iterator() → Iterator<key, ItemReader>  // No pool needed
 
-MapReader (Map Traversal - stack-allocated value type)
+MapReader (Map Traversal - stack-allocated, NO POOL)
+    ├── MapReader(Map* map)  // Constructor - no pool needed
     ├── get(key) → ItemReader (by value)
     ├── has(key) → bool
-    ├── keys() → Iterator<String*>
+    ├── keys() → Iterator<const char*>
     ├── values() → Iterator<ItemReader>
     └── size() → int64_t
 
-ArrayReader (Array Traversal - stack-allocated value type)
+ArrayReader (Array Traversal - stack-allocated, NO POOL)
+    ├── ArrayReader(Array* array)  // Constructor - no pool needed
     ├── get(index) → ItemReader (by value)
     ├── length() → int64_t
     └── items() → Iterator<ItemReader>
@@ -760,43 +771,42 @@ ArrayReader (Array Traversal - stack-allocated value type)
 // ==============================================================================
 
 /**
- * MEMORY MODEL: Stack-allocated value type
- * - Readers are lightweight wrappers around Item + Pool pointer
- * - No heap allocation, no manual cleanup needed
- * - RAII: Automatic destruction when scope ends
- * - Copyable and movable (default semantics)
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Lightweight wrapper around Item root
+ * - No heap allocation for the reader itself
+ * - NO POOL NEEDED - completely pool-free for traversal
+ * - Automatic cleanup when scope ends (RAII)
  */
 class MarkReader {
 private:
     Item root_;
-    Pool* pool_;
 
 public:
     /**
-     * Create MarkReader from root Item
-     * Stack-allocated, copyable
+     * Create reader from root Item
+     * @param root The root Item to read from
+     * NO POOL PARAMETER - completely pool-free!
      */
-    MarkReader(Item root, Pool* pool);
+    explicit MarkReader(Item root);
     ~MarkReader() = default;
     MarkReader(const MarkReader&) = default;
     MarkReader& operator=(const MarkReader&) = default;
     MarkReader(MarkReader&&) = default;
     MarkReader& operator=(MarkReader&&) = default;
-    
+
     /**
      * Get root item as ItemReader (returned by value)
      */
     ItemReader getRoot() const;
-    
+
     /**
      * Find all elements matching selector (simple tag name for now)
      * Returns iterator over ElementReader instances
      */
     ElementIterator findAll(const char* selector) const;
-    
+
     // Accessors
     Item root() const { return root_; }
-    Pool* pool() const { return pool_; }
 };
 
 // ==============================================================================
@@ -804,34 +814,35 @@ public:
 // ==============================================================================
 
 /**
- * MEMORY MODEL: Stack-allocated value type
- * - Lightweight wrapper (just Item + Pool pointer + cached TypeId)
- * - No ownership of underlying Item data
- * - Cheap to copy, prefer pass-by-value or const reference
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Lightweight wrapper (16 bytes: Item + TypeId)
+ * - No heap allocation
+ * - NO POOL NEEDED - completely pool-free!
  */
 class ItemReader {
 private:
     Item item_;
-    Pool* pool_;
     TypeId cached_type_;
 
 public:
     /**
-     * Create ItemReader from Item
-     * Stack-allocated, copyable
+     * Create reader from Item
+     * @param item The Item to read
+     * NO POOL PARAMETER - pool-free!
      */
-    ItemReader(Item item, Pool* pool);
+    ItemReader();  // Default constructor for null item
+    explicit ItemReader(Item item);
     ~ItemReader() = default;
     ItemReader(const ItemReader&) = default;
     ItemReader& operator=(const ItemReader&) = default;
     ItemReader(ItemReader&&) = default;
     ItemReader& operator=(ItemReader&&) = default;
-    
+
     /**
      * Get the type of the item
      */
     TypeId getType() const { return cached_type_; }
-    
+
     /**
      * Type checking predicates
      */
@@ -843,201 +854,349 @@ public:
     bool isElement() const;
     bool isMap() const;
     bool isArray() const;
-    
+    bool isList() const;
+
     /**
      * Safe type conversion (returns by value for readers)
      * Returns default-constructed reader if type mismatch
      */
     String* asString() const;
     int64_t asInt() const;
+    int32_t asInt32() const;
     double asFloat() const;
     bool asBool() const;
-    ElementReader asElement() const;  // Value type
-    MapReader asMap() const;          // Value type
-    ArrayReader asArray() const;      // Value type
-    
+    ElementReaderWrapper asElement() const;  // Returns by value
+    MapReader asMap() const;                 // Returns by value
+    ArrayReader asArray() const;             // Returns by value
+
     /**
      * Convenience: Get C string directly (returns nullptr if not a string)
      */
     const char* cstring() const;
-    
+
     // Accessors
     Item item() const { return item_; }
-    Pool* pool() const { return pool_; }
 };
 
 // ==============================================================================
-// ElementReader Extensions (Enhance Existing API)
+// ElementReaderWrapper - Stack-Based Element Reader (NO POOL)
 // ==============================================================================
 
 /**
- * MEMORY MODEL: Stack-allocated value type
- * Note: ElementReader already exists in element_reader.h
- * We extend it with additional convenience methods as member functions
- * Existing implementation likely needs refactoring to value type
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Wraps Element* pointer
+ * - Caches element metadata (tag name, child count, etc.)
+ * - NO POOL STORED - completely pool-free for traversal
  */
-class ElementReader {
-    // ... existing members ...
-    
+class ElementReaderWrapper {
+class ElementReaderWrapper {
+private:
+    const Element* element_;         // Underlying element (read-only)
+    const TypeElmt* element_type_;   // Cached element type info
+    const char* tag_name_;           // Cached tag name (null-terminated)
+    int64_t tag_name_len_;           // Tag name length
+    int64_t child_count_;            // Number of child items
+    int64_t attr_count_;             // Number of attributes
+
 public:
-    // Ensure value type semantics
-    ~ElementReader() = default;
-    ElementReader(const ElementReader&) = default;
-    ElementReader& operator=(const ElementReader&) = default;
-    ElementReader(ElementReader&&) = default;
-    ElementReader& operator=(ElementReader&&) = default;
-    
+    // Constructors - NO POOL PARAMETER
+    ElementReaderWrapper();  // Default constructor for invalid element
+    explicit ElementReaderWrapper(const Element* element);
+    explicit ElementReaderWrapper(Item item);
+
+    ~ElementReaderWrapper() = default;
+
+    // Copyable and movable (shallow copy - just pointers)
+    ElementReaderWrapper(const ElementReaderWrapper&) = default;
+    ElementReaderWrapper& operator=(const ElementReaderWrapper&) = default;
+    ElementReaderWrapper(ElementReaderWrapper&&) = default;
+    ElementReaderWrapper& operator=(ElementReaderWrapper&&) = default;
+
+    /**
+     * Element properties
+     */
+    const char* tagName() const { return tag_name_; }
+    int64_t tagNameLen() const { return tag_name_len_; }
+    bool hasTag(const char* tag_name) const;
+    int64_t childCount() const { return child_count_; }
+    int64_t attrCount() const { return attr_count_; }
+    bool isEmpty() const;
+    bool isTextOnly() const;
+
+    /**
+     * Child access - NO POOL NEEDED
+     */
+    ItemReader childAt(int64_t index) const;
+    ItemReader findChild(const char* tag_name) const;
+
+    /**
+     * Text extraction - ONLY operation that needs external StringBuf
+     * Caller must provide a StringBuf for text accumulation
+     */
+    void textContent(StringBuf* sb) const;  // Caller provides StringBuf
+    void allText(StringBuf* sb) const;      // Alias for textContent
+
     /**
      * Get child element by tag name (first match)
      * Returns by value
      */
-    ElementReader findChildElement(const char* tag_name) const;
-    
-    /**
-     * Get all child elements (filter out text nodes)
-     */
-    ElementIterator childElements() const;
-    
-    /**
-     * Get all text children concatenated
-     */
-    String* allText() const;
-    
+    ElementReaderWrapper findChildElement(const char* tag_name) const;
+
     /**
      * Check if element has any child elements (not just text)
      */
     bool hasChildElements() const;
-    
+
     /**
-     * Get child ItemReader by index (returned by value)
+     * Iteration - NO POOL NEEDED
      */
-    ItemReader childItem(int64_t index) const;
+    class ChildIterator {
+    private:
+        const ElementReaderWrapper* reader_;
+        int64_t index_;
+    public:
+        explicit ChildIterator(const ElementReaderWrapper* reader);
+        bool next(ItemReader* item);
+        void reset();
+    };
+
+    class ElementChildIterator {
+    private:
+        const ElementReaderWrapper* reader_;
+        int64_t index_;
+    public:
+        explicit ElementChildIterator(const ElementReaderWrapper* reader);
+        bool next(ElementReaderWrapper* elem);
+        void reset();
+    };
+
+    ChildIterator children() const;         // NO POOL PARAMETER
+    ElementChildIterator childElements() const;
+
+    /**
+     * Attributes access
+     */
+    AttributeReaderWrapper attributes() const;
+
+    // Accessors
+    bool isValid() const { return element_ != nullptr; }
+    const Element* element() const { return element_; }
 };
 
 // ==============================================================================
-// AttributeReader Extensions
+// AttributeReaderWrapper - Stack-Based Attribute Reader (NO POOL)
 // ==============================================================================
 
 /**
- * MEMORY MODEL: Stack-allocated value type
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Stores map type and data pointers directly
+ * - NO POOL STORED - completely pool-free
  */
-class AttributeReader {
-    // ... existing members ...
-    
+class AttributeReaderWrapper {
+private:
+    const ElementReaderWrapper* element_reader_;  // Reference to parent element
+    const TypeMap* map_type_;        // Cached map type info
+    const void* attr_data_;          // Packed attribute data
+    const ShapeEntry* shape_;        // Attribute shape definition
+
 public:
-    // Ensure value type semantics
-    ~AttributeReader() = default;
-    AttributeReader(const AttributeReader&) = default;
-    AttributeReader& operator=(const AttributeReader&) = default;
-    AttributeReader(AttributeReader&&) = default;
-    AttributeReader& operator=(AttributeReader&&) = default;
-    
+    // Constructors - NO POOL PARAMETER
+    AttributeReaderWrapper();  // Default constructor
+    explicit AttributeReaderWrapper(const ElementReaderWrapper& elem);
+
+    ~AttributeReaderWrapper() = default;
+
+    // Copyable and movable (shallow copy - just pointers)
+    AttributeReaderWrapper(const AttributeReaderWrapper&) = default;
+    AttributeReaderWrapper& operator=(const AttributeReaderWrapper&) = default;
+    AttributeReaderWrapper(AttributeReaderWrapper&&) = default;
+    AttributeReaderWrapper& operator=(AttributeReaderWrapper&&) = default;
+
     /**
-     * Get attribute as ItemReader (for complex attribute values)
-     * Returned by value
+     * Attribute access - NO POOL NEEDED
      */
+    bool has(const char* key) const;
+    const char* getString(const char* key) const;
     ItemReader getItem(const char* key) const;
-    
+
     /**
      * Get attribute with default value
      */
     const char* getStringOr(const char* key, const char* default_value) const;
     int64_t getIntOr(const char* key, int64_t default_value) const;
-    
+
     /**
-     * Iterate over all attributes
+     * Iterate over all attributes - NO POOL NEEDED
      */
-    class AttributeIterator {
+    class Iterator {
     private:
-        const AttributeReader* reader_;
-        // ... implementation details ...
+        const AttributeReaderWrapper* reader_;
+        const ShapeEntry* current_field_;
     public:
-        bool next(const char** key, ItemReader* value);  // Value by value
+        explicit Iterator(const AttributeReaderWrapper* reader);
+        bool next(const char** key, ItemReader* value);
+        void reset();
     };
-    
-    AttributeIterator iterator() const;
+
+    Iterator iterator() const;  // NO POOL PARAMETER
+
+    // Accessors
+    bool isValid() const { return element_reader_ != nullptr && element_reader_->isValid(); }
 };
 
 // ==============================================================================
-// MapReader - Map Traversal
+// MapReader - Map Traversal (NO POOL)
 // ==============================================================================
 
 /**
- * MEMORY MODEL: Stack-allocated value type
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Wraps Map* and TypeMap* pointers
+ * - NO POOL STORED - completely pool-free
  */
 class MapReader {
 private:
     Map* map_;
     TypeMap* map_type_;
-    Pool* pool_;
 
 public:
     /**
-     * Create MapReader from Map pointer
-     * Stack-allocated, copyable
+     * Create from Map pointer
+     * @param map Map to read from
+     * NO POOL PARAMETER - pool-free!
      */
-    MapReader(Map* map, Pool* pool);
-    
+    MapReader();  // Default constructor for null map
+    explicit MapReader(Map* map);
+
     /**
      * Create MapReader from Item (validates type)
      * Returns by value
      */
-    static MapReader fromItem(Item item, Pool* pool);
-    
+    static MapReader fromItem(Item item);
+
     ~MapReader() = default;
     MapReader(const MapReader&) = default;
     MapReader& operator=(const MapReader&) = default;
     MapReader(MapReader&&) = default;
     MapReader& operator=(MapReader&&) = default;
-    
+
     /**
      * Get value by key as ItemReader (returned by value)
+     * NO POOL NEEDED
      */
     ItemReader get(const char* key) const;
-    
+
     /**
      * Check if key exists
      */
     bool has(const char* key) const;
-    
+
     /**
      * Get map size (number of entries)
      */
     int64_t size() const;
-    
+    bool isEmpty() const { return size() == 0; }
+
     /**
-     * Iterator classes for map traversal
+     * Iterator classes for map traversal - NO POOL NEEDED
      */
     class KeyIterator {
     private:
         const MapReader* reader_;
-        // ... implementation details ...
+        ShapeEntry* current_field_;
     public:
+        explicit KeyIterator(const MapReader* reader);
         bool next(const char** key);
+        void reset();
     };
-    
+
     class ValueIterator {
     private:
         const MapReader* reader_;
-        // ... implementation details ...
+        ShapeEntry* current_field_;
     public:
-        bool next(ItemReader* value);  // Value by value
+        explicit ValueIterator(const MapReader* reader);
+        bool next(ItemReader* value);
+        void reset();
     };
-    
+
     class EntryIterator {
     private:
         const MapReader* reader_;
-        // ... implementation details ...
+        ShapeEntry* current_field_;
     public:
-        bool next(const char** key, ItemReader* value);  // Value by value
+        explicit EntryIterator(const MapReader* reader);
+        bool next(const char** key, ItemReader* value);
+        void reset();
     };
-    
+
     KeyIterator keys() const;
     ValueIterator values() const;
     EntryIterator entries() const;
-    
+
     // Accessors
     Map* map() const { return map_; }
+    bool isValid() const { return map_ != nullptr; }
+};
+
+// ==============================================================================
+// ArrayReader - Array Traversal (NO POOL)
+// ==============================================================================
+
+/**
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Wraps Array* pointer
+ * - NO POOL STORED - completely pool-free
+ */
+class ArrayReader {
+private:
+    Array* array_;
+
+public:
+    /**
+     * Create from Array pointer
+     * @param array Array to read from
+     * NO POOL PARAMETER - pool-free!
+     */
+    ArrayReader();  // Default constructor for null array
+    explicit ArrayReader(Array* array);
+
+    /**
+     * Create from Item with type validation
+     */
+    static ArrayReader fromItem(Item item);
+
+    ~ArrayReader() = default;
+    ArrayReader(const ArrayReader&) = default;
+    ArrayReader& operator=(const ArrayReader&) = default;
+    ArrayReader(ArrayReader&&) = default;
+    ArrayReader& operator=(ArrayReader&&) = default;
+
+    /**
+     * Array access - NO POOL NEEDED
+     */
+    ItemReader get(int64_t index) const;
+    int64_t length() const;
+    bool isEmpty() const { return length() == 0; }
+
+    /**
+     * Iterator for array traversal - NO POOL NEEDED
+     */
+    class Iterator {
+    private:
+        const ArrayReader* reader_;
+        int64_t index_;
+    public:
+        explicit Iterator(const ArrayReader* reader);
+        bool next(ItemReader* item);
+        void reset();
+        int64_t currentIndex() const { return index_; }
+    };
+
+    Iterator items() const;
+
+    // Accessors
+    Array* array() const { return array_; }
+    bool isValid() const { return array_ != nullptr; }
 };
 
 // ==============================================================================
@@ -1045,62 +1204,60 @@ public:
 // ==============================================================================
 
 /**
- * MEMORY MODEL: Stack-allocated value type
+ * MEMORY MODEL: Stack-allocated value type, POOL-FREE
+ * - Wraps Array* pointer
+ * - NO POOL STORED - completely pool-free
  */
 class ArrayReader {
 private:
     Array* array_;
-    Pool* pool_;
 
 public:
     /**
-     * Create ArrayReader from Array pointer
-     * Stack-allocated, copyable
+     * Create from Array pointer
+     * @param array Array to read from
+     * NO POOL PARAMETER - pool-free!
      */
-    ArrayReader(Array* array, Pool* pool);
-    
+    ArrayReader();  // Default constructor for null array
+    explicit ArrayReader(Array* array);
+
     /**
-     * Create ArrayReader from Item (validates type)
-     * Returns by value
+     * Create from Item with type validation
      */
-    static ArrayReader fromItem(Item item, Pool* pool);
-    
+    static ArrayReader fromItem(Item item);
+
     ~ArrayReader() = default;
     ArrayReader(const ArrayReader&) = default;
     ArrayReader& operator=(const ArrayReader&) = default;
     ArrayReader(ArrayReader&&) = default;
     ArrayReader& operator=(ArrayReader&&) = default;
-    
+
     /**
-     * Get item by index as ItemReader (returned by value)
+     * Array access - NO POOL NEEDED
      */
     ItemReader get(int64_t index) const;
-    
-    /**
-     * Get array length
-     */
     int64_t length() const;
-    
+    bool isEmpty() const { return length() == 0; }
+
     /**
-     * Check if array is empty
-     */
-    bool isEmpty() const;
-    
-    /**
-     * Iterator for array items
+     * Iterator for array traversal - NO POOL NEEDED
      */
     class Iterator {
     private:
         const ArrayReader* reader_;
         int64_t index_;
     public:
-        bool next(ItemReader* item);  // Value by value
+        explicit Iterator(const ArrayReader* reader);
+        bool next(ItemReader* item);
+        void reset();
+        int64_t currentIndex() const { return index_; }
     };
-    
+
     Iterator items() const;
-    
+
     // Accessors
     Array* array() const { return array_; }
+    bool isValid() const { return array_ != nullptr; }
 };
 ```
 
@@ -1116,8 +1273,8 @@ if (type == LMD_TYPE_STRING) {
     // Use str
 }
 
-// New way (reader is stack-allocated)
-ItemReader reader(item, pool);
+// New way (reader is stack-allocated, NO POOL NEEDED)
+ItemReader reader(item);  // No pool parameter!
 if (reader.isString()) {
     const char* str = reader.cstring();
     // Use str
@@ -1138,10 +1295,11 @@ for (int i = 0; i < elem->length; i++) {
     }
 }
 
-// New way (stack-allocated readers)
-ElementReader elem(item, pool);
-ElementIterator iter = elem.childElements();
-ElementReader child;
+// New way (stack-allocated readers, NO POOL)
+ItemReader reader(item);  // No pool
+ElementReaderWrapper elem = reader.asElement();
+ElementReaderWrapper::ElementChildIterator iter = elem.childElements();  // No pool!
+ElementReaderWrapper child;
 while (iter.next(&child)) {
     // Process child (stack-allocated)
 }
@@ -1164,8 +1322,8 @@ while (field) {
     field = field->next;
 }
 
-// New way (stack-allocated readers)
-MapReader map = MapReader::fromItem(item, pool);
+// New way (stack-allocated readers, NO POOL)
+MapReader map = MapReader::fromItem(item);  // No pool
 ItemReader value = map.get("name");  // Returned by value
 if (value.isString()) {
     const char* str = value.cstring();
@@ -1174,7 +1332,7 @@ if (value.isString()) {
 // Readers automatically cleaned up
 ```
 
-#### Example 4: Practical JSON Formatter
+#### Example 4: Practical JSON Formatter (POOL-FREE)
 
 ```cpp
 void format_json_value(StringBuf* sb, const ItemReader& reader) {
@@ -1189,7 +1347,7 @@ void format_json_value(StringBuf* sb, const ItemReader& reader) {
     } else if (reader.isString()) {
         format_json_string(sb, reader.cstring());
     } else if (reader.isArray()) {
-        // ArrayReader returned by value, lives on stack
+        // ArrayReader returned by value, lives on stack - NO POOL NEEDED
         ArrayReader arr = reader.asArray();
         stringbuf_append_char(sb, '[');
         ArrayReader::Iterator iter = arr.items();
@@ -1225,10 +1383,10 @@ void format_json_value(StringBuf* sb, const ItemReader& reader) {
 ```cpp
 void format_html_element(StringBuf* sb, const ElementReader& elem) {
     const char* tag = elem.tagName();
-    
+
     // Opening tag
     stringbuf_append_format(sb, "<%s", tag);
-    
+
     // Attributes (returned by value)
     AttributeReader attrs = elem.attributes();
     AttributeReader::AttributeIterator attr_iter = attrs.iterator();
@@ -1239,9 +1397,9 @@ void format_html_element(StringBuf* sb, const ElementReader& elem) {
         format_html_string(sb, attr_value.cstring());
         stringbuf_append_char(sb, '"');
     }
-    
+
     stringbuf_append_char(sb, '>');
-    
+
     // Children
     ElementReader::Iterator child_iter = elem.children();
     ItemReader child;
@@ -1253,7 +1411,7 @@ void format_html_element(StringBuf* sb, const ElementReader& elem) {
             format_html_element(sb, child_elem);
         }
     }
-    
+
     // Closing tag
     stringbuf_append_format(sb, "</%s>", tag);
 }
@@ -1470,7 +1628,7 @@ static Map* parse_object(Input *input, const char **json) {
     if (**json != '{') return NULL;
     Map* mp = map_pooled(input->pool);
     (*json)++; // skip '{'
-    
+
     while (**json) {
         String* key = parse_string(input, json);
         skip_whitespace(json);
@@ -1505,17 +1663,17 @@ static Item parse_value(MarkBuilder& builder, const char **json) {
 
 static Item parse_object(MarkBuilder& builder, const char **json) {
     if (**json != '{') return builder.createNull();
-    
+
     MapBuilder map = builder.map();  // Stack-allocated
     (*json)++; // skip '{'
-    
+
     while (**json) {
         String* key = parse_string(builder, json);
         skip_whitespace(json);
         if (**json != ':') return map.build();
         (*json)++;
         skip_whitespace(json);
-        
+
         Item value = parse_value(builder, json);
         map.put(key->chars, value);  // Fluent API by reference
         // ... handle commas
@@ -1540,10 +1698,10 @@ static Item parse_object(MarkBuilder& builder, const char **json) {
 static Item parse_element(Input *input, const char **xml) {
     String* tag_name = parse_tag_name(input, xml);
     Element* element = input_create_element(input, tag_name->chars);
-    
+
     // Parse attributes
     parse_attributes(input, element, xml);
-    
+
     // Parse children
     while (**xml && !is_closing_tag(*xml)) {
         if (is_text(*xml)) {
@@ -1554,7 +1712,7 @@ static Item parse_element(Input *input, const char **xml) {
             list_push((List*)element, child);
         }
     }
-    
+
     return (Item){.raw_pointer = element};
 }
 ```
@@ -1565,12 +1723,12 @@ static Item parse_element(Input *input, const char **xml) {
 static Item parse_element(MarkBuilder& builder, const char **xml) {
     String* tag_name = parse_tag_name(builder, xml);
     ElementBuilder elem = builder.element(tag_name->chars);  // Stack-allocated
-    
+
     // Parse attributes
     while (parse_attribute(xml, &attr_name, &attr_value)) {
         elem.attr(attr_name, attr_value);  // Fluent API by reference
     }
-    
+
     // Parse children
     while (**xml && !is_closing_tag(*xml)) {
         if (is_text(*xml)) {
@@ -1581,7 +1739,7 @@ static Item parse_element(MarkBuilder& builder, const char **xml) {
             elem.child(child);
         }
     }
-    
+
     return elem.build();  // Pool-allocates final Element
     // elem automatically destroyed
 }
@@ -1637,7 +1795,7 @@ static void format_item(StringBuf* sb, const ItemReader& reader) {
     } else if (reader.isMap()) {
         MapReader map = reader.asMap();  // Stack-allocated
         stringbuf_append_char(sb, '{');
-        
+
         MapReader::EntryIterator iter = map.entries();
         const char* key;
         ItemReader value;
@@ -1648,7 +1806,7 @@ static void format_item(StringBuf* sb, const ItemReader& reader) {
             format_item(sb, value);
             first = false;
         }
-        
+
         stringbuf_append_char(sb, '}');
         // map and iter automatically destroyed
     }
@@ -1669,29 +1827,29 @@ static void format_item(StringBuf* sb, const ItemReader& reader) {
 ```cpp
 static void format_element(StringBuf* sb, Item item) {
     if (get_type_id(item) != LMD_TYPE_ELEMENT) return;
-    
+
     Element* elem = item.element;
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     const char* tag = elem_type->name.str;
-    
+
     stringbuf_append_format(sb, "<%s", tag);
-    
+
     // Attributes
     TypeMap* map_type = (TypeMap*)elem_type;
     ShapeEntry* field = map_type->shape;
     while (field) {
         void* data = ((char*)elem->data) + field->byte_offset;
         if (is_simple_type(field->type->type_id)) {
-            stringbuf_append_format(sb, " %.*s=\"", 
+            stringbuf_append_format(sb, " %.*s=\"",
                 (int)field->name->length, field->name->str);
             format_attribute_value(sb, data, field->type->type_id);
             stringbuf_append_char(sb, '"');
         }
         field = field->next;
     }
-    
+
     stringbuf_append_char(sb, '>');
-    
+
     // Children
     for (int i = 0; i < elem->length; i++) {
         Item child = elem->items[i];
@@ -1702,7 +1860,7 @@ static void format_element(StringBuf* sb, Item item) {
             format_element(sb, child);
         }
     }
-    
+
     stringbuf_append_format(sb, "</%s>", tag);
 }
 ```
@@ -1712,9 +1870,9 @@ static void format_element(StringBuf* sb, Item item) {
 ```cpp
 static void format_element(StringBuf* sb, const ElementReader& elem) {
     const char* tag = elem.tagName();
-    
+
     stringbuf_append_format(sb, "<%s", tag);
-    
+
     // Attributes (returned by value)
     AttributeReader attrs = elem.attributes();
     AttributeReader::AttributeIterator iter = attrs.iterator();
@@ -1727,9 +1885,9 @@ static void format_element(StringBuf* sb, const ElementReader& elem) {
             stringbuf_append_char(sb, '"');
         }
     }
-    
+
     stringbuf_append_char(sb, '>');
-    
+
     // Children
     ElementReader::Iterator child_iter = elem.children();
     ItemReader child;
@@ -1741,7 +1899,7 @@ static void format_element(StringBuf* sb, const ElementReader& elem) {
             format_element(sb, child_elem);
         }
     }
-    
+
     stringbuf_append_format(sb, "</%s>", tag);
 }
 ```
@@ -1964,7 +2122,7 @@ The implementation plan spans 12 weeks with clear milestones and deliverables. P
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** November 11, 2025  
-**Authors:** Lambda Development Team  
+**Document Version:** 1.0
+**Last Updated:** November 11, 2025
+**Authors:** Lambda Development Team
 **Status:** Awaiting Approval
