@@ -300,37 +300,6 @@ int64_t element_reader_tree_depth(const ElementReader* root);
  */
 String* element_reader_debug_string(const ElementReader* root, Pool* pool);
 
-// ==============================================================================
-// Convenience Macros
-// ==============================================================================
-
-/**
- * Iterate over all child elements
- * Usage: ELEMENT_READER_FOR_EACH_CHILD(reader, child_item) { ... }
- */
-#define ELEMENT_READER_FOR_EACH_CHILD(reader, child_var) \
-    for (int64_t _i = 0; _i < element_reader_child_count(reader); _i++) \
-        if ((child_var = element_reader_child_at(reader, _i)).item != ITEM_NULL)
-
-/**
- * Iterate over all child elements of specific type
- */
-#define ELEMENT_READER_FOR_EACH_CHILD_ELEMENT(reader, child_element, pool) \
-    for (int64_t _i = 0; _i < element_reader_child_count(reader); _i++) { \
-        Item _child_item = element_reader_child_at(reader, _i); \
-        if (get_type_id(_child_item) == LMD_TYPE_ELEMENT) { \
-            ElementReader* child_element = element_reader_from_item(_child_item, pool); \
-            if (child_element) {
-
-/**
- * End the child element iteration
- */
-#define ELEMENT_READER_FOR_EACH_END \
-                element_reader_free(child_element, pool); \
-            } \
-        } \
-    }
-
 #ifdef __cplusplus
 }
 #endif
