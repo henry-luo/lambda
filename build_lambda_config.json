@@ -46,6 +46,7 @@
         "lambda/lambda-proc.cpp",
         "lambda/utf_string.cpp",
         "lambda/lambda-mem.cpp",
+        "lambda/mark_builder.cpp",
         "lambda/validate.cpp",
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
@@ -328,6 +329,7 @@
                 "lambda/validator/ast_validate.cpp",
                 "lambda/validator/error_reporting.cpp",
                 "lambda/format/format.cpp",
+                "lambda/mark_builder.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/css/css_tokenizer.cpp",
@@ -1049,6 +1051,19 @@
                             "gtest_main"
                         ],
                         "binary": "test_mime_detect_gtest.exe"
+                    },
+                    {
+                        "source": "test_mark_builder_gtest.cpp",
+                        "name": "🏗️  MarkBuilder API Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_mark_builder_gtest.exe"
                     },
                     {
                         "source": "test_math_gtest.cpp",
