@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../name_pool.h"
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mime-detect.h"
@@ -229,6 +230,7 @@ Input* input_new(Url* abs_url) {
     size_t tolerance_percent = 20;
     input->pool = pool_create();
     if (input->pool == NULL) { free(input);  return NULL; }
+    input->name_pool = name_pool_create(input->pool, NULL);  // Initialize name pool for string interning
     input->type_list = arraylist_new(16);
     input->root = {.item = ITEM_NULL};
     input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
