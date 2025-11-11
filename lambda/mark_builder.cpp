@@ -168,23 +168,31 @@ ElementBuilder::~ElementBuilder() {
 ElementBuilder& ElementBuilder::attr(const char* key, Item value) {
     if (!key) return *this;
     
-    // lazy initialization of attributes map
+    // lazy initialization of element with TypeElmt
     if (!attributes_) {
-        // allocate map from pool
-        attributes_ = (Map*)pool_calloc(builder_->pool(), sizeof(Map));
-        attributes_->type = &EmptyMap;  // Will be replaced by map_put
-        attributes_->data = nullptr;
-        attributes_->data_cap = 0;
+        // allocate element from pool
+        Pool* pool = builder_->pool();
+        attributes_ = elmt_pooled(pool);
+        
+        // create TypeElmt descriptor
+        TypeElmt* element_type = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        attributes_->type = element_type;
+        
+        // register type in type list
+        arraylist_append(builder_->typeList(), element_type);
+        element_type->type_index = builder_->typeList()->length - 1;
+        
+        // set element name (tag name)
+        element_type->name.str = tag_name_->chars;
+        element_type->name.length = tag_name_->len;
+        
+        // cache the type for convenience
+        attr_type_ = (TypeMap*)element_type;
     }
     
-    // use map_put to add the attribute
+    // use elmt_put to add the attribute to the element
     String* key_str = builder_->createString(key);
-    map_put(attributes_, key_str, value, builder_->input());
-    
-    // cache the type for convenience
-    if (!attr_type_) {
-        attr_type_ = (TypeMap*)attributes_->type;
-    }
+    elmt_put((Element*)attributes_, key_str, value, builder_->pool());
     
     return *this;
 }
@@ -261,31 +269,27 @@ ElementBuilder& ElementBuilder::end() {
 //------------------------------------------------------------------------------
 
 Item ElementBuilder::build() {
-    // allocate Element from pool
     Pool* pool = builder_->pool();
-    Element* element = elmt_pooled(pool);
+    Element* element;
     
-    // create type descriptor
-    TypeElmt* element_type = (TypeElmt*)alloc_type(
-        pool, 
-        LMD_TYPE_ELEMENT, 
-        sizeof(TypeElmt)
-    );
-    element->type = element_type;
-    
-    // register type in type list
-    arraylist_append(builder_->typeList(), element_type);
-    element_type->type_index = builder_->typeList()->length - 1;
-    
-    // set element name (tag name)
-    element_type->name.str = tag_name_->chars;
-    element_type->name.length = tag_name_->len;
-    
-    // set attributes (Element uses type/data for attributes)
+    // if we have attributes, the element was already created in attr()
     if (attributes_) {
-        element->type = attributes_->type;
-        element->data = attributes_->data;
-        element->data_cap = attributes_->data_cap;
+        element = (Element*)attributes_;
+    } else {
+        // no attributes, create element now
+        element = elmt_pooled(pool);
+        
+        // create TypeElmt descriptor
+        TypeElmt* element_type = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        element->type = element_type;
+        
+        // register type in type list
+        arraylist_append(builder_->typeList(), element_type);
+        element_type->type_index = builder_->typeList()->length - 1;
+        
+        // set element name (tag name)
+        element_type->name.str = tag_name_->chars;
+        element_type->name.length = tag_name_->len;
     }
     
     // convert children arraylist to array
