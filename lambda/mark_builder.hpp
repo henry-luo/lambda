@@ -178,9 +178,8 @@ class ElementBuilder {
 private:
     MarkBuilder* builder_;      // parent builder
     String* tag_name_;          // element tag name
-    Array* children_;           // child items (direct array allocation)
-    Element* attributes_;       // element being built (pool-allocated)
-    TypeMap* attr_type_;        // attribute type descriptor
+    Element* elmt_;             // element being built (pool-allocated)
+    // TypeMap* attr_type_;        // attribute type descriptor
     ElementBuilder* parent_;    // for nested elements (stack reference)
 
     friend class MarkBuilder;
