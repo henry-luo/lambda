@@ -15,20 +15,31 @@
  * - All readers are VALUE TYPES (stack-allocated, copyable)
  * - No heap allocation for readers themselves
  * - Lightweight wrappers around raw Element/Map/Array pointers
- * - No Pool* needed (except in ItemReader for string operations that require pool)
+ * - NO Pool* required - readers are completely pool-free!
  * - Automatic cleanup when scope ends (RAII)
  * - No manual memory management required
  *
  * USAGE PATTERN:
- *   void format_document(Item root, Pool* pool) {
- *       MarkReader reader(root, pool);     // Stack-allocated
+ *   void format_document(Item root) {
+ *       MarkReader reader(root);            // Stack-allocated, no pool needed
  *       ItemReader item = reader.getRoot(); // Returned by value
  *
  *       if (item.isElement()) {
- *           ElementReaderWrapper elem = item.asElement(); // By value, no pool needed
- *           // Use elem...
+ *           ElementReaderWrapper elem = item.asElement(); // By value, no pool
+ *           // Traverse children
+ *           auto iter = elem.children();     // No pool needed
+ *           ItemReader child;
+ *           while (iter.next(&child)) {
+ *               // Process child...
+ *           }
  *       }
  *   }  // All readers automatically destroyed
+ *
+ * TEXT EXTRACTION:
+ *   Pool* pool = ...;  // Pool only needed for text extraction
+ *   StringBuf* sb = stringbuf_new(pool);
+ *   elem.textContent(sb);  // Extracts text into provided StringBuf
+ *   String* text = stringbuf_to_string(sb);
  */
 
 // Forward declarations
@@ -49,11 +60,10 @@ class AttributeReaderWrapper;  // Forward declaration
 class MarkReader {
 private:
     Item root_;
-    Pool* pool_;
 
 public:
     // Lifecycle (value type semantics)
-    explicit MarkReader(Item root, Pool* pool);
+    explicit MarkReader(Item root);
     ~MarkReader() = default;
 
     // Copyable and movable
@@ -85,7 +95,6 @@ public:
 
     // Accessors
     Item root() const { return root_; }
-    Pool* pool() const { return pool_; }
 };
 
 // ==============================================================================
@@ -99,13 +108,12 @@ public:
 class ItemReader {
 private:
     Item item_;
-    Pool* pool_;
     TypeId cached_type_;
 
 public:
     // Lifecycle (value type semantics)
     ItemReader();  // Default constructor for null item
-    ItemReader(Item item, Pool* pool);
+    explicit ItemReader(Item item);
     ~ItemReader() = default;
 
     // Copyable and movable
@@ -142,7 +150,6 @@ public:
 
     // Accessors
     Item item() const { return item_; }
-    Pool* pool() const { return pool_; }
 };
 
 // ==============================================================================
@@ -157,15 +164,14 @@ class MapReader {
 private:
     Map* map_;
     TypeMap* map_type_;
-    Pool* pool_;
 
 public:
     // Lifecycle (value type semantics)
     MapReader();  // Default constructor for null map
-    MapReader(Map* map, Pool* pool);
+    explicit MapReader(Map* map);
 
     // Create from Item with type validation
-    static MapReader fromItem(Item item, Pool* pool);
+    static MapReader fromItem(Item item);
 
     ~MapReader() = default;
 
@@ -221,7 +227,6 @@ public:
 
     // Accessors
     Map* map() const { return map_; }
-    Pool* pool() const { return pool_; }
     bool isValid() const { return map_ != nullptr; }
 };
 
@@ -236,15 +241,14 @@ public:
 class ArrayReader {
 private:
     Array* array_;
-    Pool* pool_;
 
 public:
     // Lifecycle (value type semantics)
     ArrayReader();  // Default constructor for null array
-    ArrayReader(Array* array, Pool* pool);
+    explicit ArrayReader(Array* array);
 
     // Create from Item with type validation
-    static ArrayReader fromItem(Item item, Pool* pool);
+    static ArrayReader fromItem(Item item);
 
     ~ArrayReader() = default;
 
@@ -276,7 +280,6 @@ public:
 
     // Accessors
     Array* array() const { return array_; }
-    Pool* pool() const { return pool_; }
     bool isValid() const { return array_ != nullptr; }
 };
 
@@ -320,25 +323,24 @@ public:
     bool isEmpty() const;
     bool isTextOnly() const;
 
-    // Child access (needs pool for ItemReader construction)
-    ItemReader childAt(int64_t index, Pool* pool) const;
-    ItemReader findChild(const char* tag_name, Pool* pool) const;
-    String* textContent(Pool* pool) const;
+    // Child access (no longer needs pool)
+    ItemReader childAt(int64_t index) const;
+    ItemReader findChild(const char* tag_name) const;
+    void textContent(StringBuf* sb) const;
 
     // New methods from proposal
     ElementReaderWrapper findChildElement(const char* tag_name) const;
     bool hasChildElements() const;
-    String* allText(Pool* pool) const;
+    void allText(StringBuf* sb) const;
 
-    // Iteration (needs pool for ItemReader construction)
+    // Iteration (no longer needs pool)
     class ChildIterator {
     private:
         const ElementReaderWrapper* reader_;
-        Pool* pool_;
         int64_t index_;
 
     public:
-        ChildIterator(const ElementReaderWrapper* reader, Pool* pool);
+        explicit ChildIterator(const ElementReaderWrapper* reader);
         bool next(ItemReader* item);
         void reset();
     };
@@ -354,7 +356,7 @@ public:
         void reset();
     };
 
-    ChildIterator children(Pool* pool) const;
+    ChildIterator children() const;
     ElementChildIterator childElements() const;
 
     // Attributes access
@@ -396,7 +398,7 @@ public:
     // Attribute access
     bool has(const char* key) const;
     const char* getString(const char* key) const;
-    ItemReader getItem(const char* key, Pool* pool) const;  // Needs pool for ItemReader
+    ItemReader getItem(const char* key) const;  // No longer needs pool
 
     // With defaults
     const char* getStringOr(const char* key, const char* default_value) const;
@@ -406,16 +408,15 @@ public:
     class Iterator {
     private:
         const AttributeReaderWrapper* reader_;
-        Pool* pool_;
         const ShapeEntry* current_field_;
 
     public:
-        Iterator(const AttributeReaderWrapper* reader, Pool* pool);
+        explicit Iterator(const AttributeReaderWrapper* reader);
         bool next(const char** key, ItemReader* value);
         void reset();
     };
 
-    Iterator iterator(Pool* pool) const;
+    Iterator iterator() const;
 
     // Accessors
     bool isValid() const { return element_reader_ != nullptr && element_reader_->isValid(); }

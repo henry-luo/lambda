@@ -287,7 +287,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
             stringbuf_append_str(sb, "<?xml");
 
             // Handle XML declaration content as attributes
-            auto child_iter = elem.children(item.pool());
+            auto child_iter = elem.children();
             ItemReader child;
             while (child_iter.next(&child)) {
                 if (child.isString()) {
@@ -310,7 +310,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
         if (elem.attrCount() > 0) {
             printf("format_item_reader: element has attributes, formatting\n");
             AttributeReaderWrapper attrs(elem);
-            auto attr_iter = attrs.iterator(item.pool());
+            auto attr_iter = attrs.iterator();
             const char* key;
             ItemReader value;
 
@@ -342,7 +342,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
         if (elem.childCount() > 0) {
             printf("format_item_reader: element has %lld children\n", (long long)elem.childCount());
 
-            auto child_iter = elem.children(item.pool());
+            auto child_iter = elem.children();
             ItemReader child;
             while (child_iter.next(&child)) {
                 if (child.isString()) {
@@ -379,7 +379,7 @@ String* format_xml(Pool* pool, Item root_item) {
 
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
 
-    ItemReader reader(root_item, pool);
+    ItemReader reader(root_item);
 
     // Check if we have a document structure with multiple children (XML declaration + root element)
     if (reader.isElement()) {
@@ -394,7 +394,7 @@ String* format_xml(Pool* pool, Item root_item) {
             printf("format_xml: document element with %lld children\n", (long long)root_elem.childCount());
 
             // Format all children in order (XML declaration, then actual elements)
-            auto child_iter = root_elem.children(pool);
+            auto child_iter = root_elem.children();
             ItemReader child;
 
             while (child_iter.next(&child)) {
@@ -439,6 +439,6 @@ String* format_xml(Pool* pool, Item root_item) {
 
 // Convenience function that formats XML to a provided StringBuf
 void format_xml_to_stringbuf(StringBuf* sb, Item root_item) {
-    ItemReader reader(root_item, NULL);  // NULL pool for simple conversion
+    ItemReader reader(root_item);
     format_item_reader(sb, reader, "root");
 }

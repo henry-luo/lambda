@@ -7,7 +7,7 @@ static void format_item_reader_with_indent(StringBuf* sb, const ItemReader& item
 static void format_string(StringBuf* sb, String* str);
 static void format_array_reader_with_indent(StringBuf* sb, const ArrayReader& arr, int indent);
 static void format_map_reader_with_indent(StringBuf* sb, const MapReader& mp, int indent);
-static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent, Pool* pool);
+static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent);
 
 // Helper function to add indentation
 static void add_indent(StringBuf* sb, int indent) {
@@ -145,13 +145,13 @@ static void format_map_reader_with_indent(StringBuf* sb, const MapReader& mp, in
     stringbuf_append_char(sb, '}');
 }
 
-static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent, Pool* pool) {
+static void format_element_reader_with_indent(StringBuf* sb, const ElementReaderWrapper& elem, int indent) {
     stringbuf_append_format(sb, "\n{\"$\":\"%s\"", elem.tagName());
 
     // Add attributes as direct properties
     if (elem.attrCount() > 0) {
         AttributeReaderWrapper attrs(elem);
-        auto iter = attrs.iterator(pool);
+        auto iter = attrs.iterator();
         const char* key;
         ItemReader value;
 
@@ -171,7 +171,7 @@ static void format_element_reader_with_indent(StringBuf* sb, const ElementReader
 
         // Format children as an array
         stringbuf_append_char(sb, '[');
-        auto child_iter = elem.children(pool);
+        auto child_iter = elem.children();
         ItemReader child;
         bool first = true;
 
@@ -222,7 +222,7 @@ static void format_item_reader_with_indent(StringBuf* sb, const ItemReader& item
         format_map_reader_with_indent(sb, mp, indent);
     } else if (item.isElement()) {
         ElementReaderWrapper elem = item.asElement();
-        format_element_reader_with_indent(sb, elem, indent, item.pool());
+        format_element_reader_with_indent(sb, elem, indent);
     } else {
         // Unknown type
         stringbuf_append_str(sb, "null");
@@ -233,7 +233,7 @@ String* format_json(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
-    ItemReader reader(root_item, pool);
+    ItemReader reader(root_item);
     format_item_reader_with_indent(sb, reader, 0);
 
     return stringbuf_to_string(sb);
@@ -241,10 +241,6 @@ String* format_json(Pool* pool, Item root_item) {
 
 // Convenience function that formats JSON to a provided StringBuf
 void format_json_to_strbuf(StringBuf* sb, Item root_item) {
-    // We need a pool to create the ItemReader, but StringBuf doesn't provide one
-    // For now, use a temporary pool (this is a limitation of the current API)
-    Pool* temp_pool = pool_create();
-    ItemReader reader(root_item, temp_pool);
+    ItemReader reader(root_item);
     format_item_reader_with_indent(sb, reader, 0);
-    pool_destroy(temp_pool);
 }

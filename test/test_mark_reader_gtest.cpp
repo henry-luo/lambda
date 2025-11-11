@@ -37,7 +37,7 @@ protected:
 
 TEST_F(MarkReaderTest, ItemReaderNull) {
     Item null_item = builder->createNull();
-    ItemReader reader(null_item, pool);
+    ItemReader reader(null_item);
     
     EXPECT_TRUE(reader.isNull());
     EXPECT_FALSE(reader.isString());
@@ -51,7 +51,7 @@ TEST_F(MarkReaderTest, ItemReaderNull) {
 
 TEST_F(MarkReaderTest, ItemReaderString) {
     Item str_item = builder->createStringItem("Hello, World!");
-    ItemReader reader(str_item, pool);
+    ItemReader reader(str_item);
     
     EXPECT_FALSE(reader.isNull());
     EXPECT_TRUE(reader.isString());
@@ -68,7 +68,7 @@ TEST_F(MarkReaderTest, ItemReaderString) {
 
 TEST_F(MarkReaderTest, ItemReaderInt) {
     Item int_item = builder->createInt(42);
-    ItemReader reader(int_item, pool);
+    ItemReader reader(int_item);
     
     EXPECT_TRUE(reader.isInt());
     EXPECT_FALSE(reader.isFloat());
@@ -82,7 +82,7 @@ TEST_F(MarkReaderTest, ItemReaderInt) {
 
 TEST_F(MarkReaderTest, ItemReaderFloat) {
     Item float_item = builder->createFloat(3.14159);
-    ItemReader reader(float_item, pool);
+    ItemReader reader(float_item);
     
     EXPECT_TRUE(reader.isFloat());
     EXPECT_FALSE(reader.isInt());
@@ -95,8 +95,8 @@ TEST_F(MarkReaderTest, ItemReaderBool) {
     Item true_item = builder->createBool(true);
     Item false_item = builder->createBool(false);
     
-    ItemReader true_reader(true_item, pool);
-    ItemReader false_reader(false_item, pool);
+    ItemReader true_reader(true_item);
+    ItemReader false_reader(false_item);
     
     EXPECT_TRUE(true_reader.isBool());
     EXPECT_TRUE(false_reader.isBool());
@@ -107,7 +107,7 @@ TEST_F(MarkReaderTest, ItemReaderBool) {
 
 TEST_F(MarkReaderTest, ItemReaderTypeMismatch) {
     Item str_item = builder->createStringItem("test");
-    ItemReader reader(str_item, pool);
+    ItemReader reader(str_item);
     
     // Type mismatches should return defaults
     EXPECT_EQ(reader.asInt(), 0);
@@ -126,7 +126,7 @@ TEST_F(MarkReaderTest, ArrayReaderBasic) {
         .append((int64_t)3)
         .final();
     
-    ItemReader item_reader(array_item, pool);
+    ItemReader item_reader(array_item);
     EXPECT_TRUE(item_reader.isArray());
     
     ArrayReader arr = item_reader.asArray();
@@ -148,7 +148,7 @@ TEST_F(MarkReaderTest, ArrayReaderBasic) {
 TEST_F(MarkReaderTest, ArrayReaderEmpty) {
     Item array_item = builder->array().final();
     
-    ArrayReader arr = ArrayReader::fromItem(array_item, pool);
+    ArrayReader arr = ArrayReader::fromItem(array_item);
     EXPECT_TRUE(arr.isValid());
     EXPECT_EQ(arr.length(), 0);
     EXPECT_TRUE(arr.isEmpty());
@@ -160,7 +160,7 @@ TEST_F(MarkReaderTest, ArrayReaderOutOfBounds) {
         .append("b")
         .final();
     
-    ArrayReader arr = ArrayReader::fromItem(array_item, pool);
+    ArrayReader arr = ArrayReader::fromItem(array_item);
     
     ItemReader invalid = arr.get(10);  // Out of bounds
     EXPECT_TRUE(invalid.isNull());
@@ -176,7 +176,7 @@ TEST_F(MarkReaderTest, ArrayReaderIteration) {
         .append("cherry")
         .final();
     
-    ArrayReader arr = ArrayReader::fromItem(array_item, pool);
+    ArrayReader arr = ArrayReader::fromItem(array_item);
     
     ArrayReader::Iterator iter = arr.items();
     ItemReader item;
@@ -203,7 +203,7 @@ TEST_F(MarkReaderTest, ArrayReaderMixedTypes) {
         .append(true)
         .final();
     
-    ArrayReader arr = ArrayReader::fromItem(array_item, pool);
+    ArrayReader arr = ArrayReader::fromItem(array_item);
     
     ItemReader item0 = arr.get(0);
     EXPECT_TRUE(item0.isInt());
@@ -233,7 +233,7 @@ TEST_F(MarkReaderTest, MapReaderBasic) {
         .put("active", true)
         .final();
     
-    ItemReader item_reader(map_item, pool);
+    ItemReader item_reader(map_item);
     EXPECT_TRUE(item_reader.isMap());
     
     MapReader map = item_reader.asMap();
@@ -262,7 +262,7 @@ TEST_F(MarkReaderTest, MapReaderBasic) {
 TEST_F(MarkReaderTest, MapReaderEmpty) {
     Item map_item = builder->map().final();
     
-    MapReader map = MapReader::fromItem(map_item, pool);
+    MapReader map = MapReader::fromItem(map_item);
     EXPECT_TRUE(map.isValid());
     EXPECT_EQ(map.size(), 0);
     EXPECT_TRUE(map.isEmpty());
@@ -273,7 +273,7 @@ TEST_F(MarkReaderTest, MapReaderMissingKey) {
         .put("existing", "value")
         .final();
     
-    MapReader map = MapReader::fromItem(map_item, pool);
+    MapReader map = MapReader::fromItem(map_item);
     
     ItemReader missing = map.get("missing");
     EXPECT_TRUE(missing.isNull());
@@ -286,7 +286,7 @@ TEST_F(MarkReaderTest, MapReaderKeyIteration) {
         .put("key3", "val3")
         .final();
     
-    MapReader map = MapReader::fromItem(map_item, pool);
+    MapReader map = MapReader::fromItem(map_item);
     
     MapReader::KeyIterator iter = map.keys();
     const char* key;
@@ -311,7 +311,7 @@ TEST_F(MarkReaderTest, MapReaderValueIteration) {
         .put("c", (int64_t)3)
         .final();
     
-    MapReader map = MapReader::fromItem(map_item, pool);
+    MapReader map = MapReader::fromItem(map_item);
     
     MapReader::ValueIterator iter = map.values();
     ItemReader value;
@@ -331,7 +331,7 @@ TEST_F(MarkReaderTest, MapReaderEntryIteration) {
         .put("y", (int64_t)20)
         .final();
     
-    MapReader map = MapReader::fromItem(map_item, pool);
+    MapReader map = MapReader::fromItem(map_item);
     
     MapReader::EntryIterator iter = map.entries();
     const char* key;
@@ -361,7 +361,7 @@ TEST_F(MarkReaderTest, MapReaderNestedStructures) {
         .put("map", nested_map)
         .final();
     
-    MapReader map = MapReader::fromItem(map_item, pool);
+    MapReader map = MapReader::fromItem(map_item);
     
     ItemReader array_item = map.get("array");
     EXPECT_TRUE(array_item.isArray());
@@ -384,7 +384,7 @@ TEST_F(MarkReaderTest, ElementReaderBasic) {
         .text("Hello")
         .final();
     
-    ItemReader item_reader(elem_item, pool);
+    ItemReader item_reader(elem_item);
     EXPECT_TRUE(item_reader.isElement());
     
     ElementReaderWrapper elem = item_reader.asElement();
@@ -410,7 +410,7 @@ TEST_F(MarkReaderTest, ElementReaderChildren) {
     EXPECT_EQ(elem.childCount(), 2);
     EXPECT_TRUE(elem.hasChildElements());
     
-    ItemReader first_child = elem.childAt(0, pool);
+    ItemReader first_child = elem.childAt(0);
     EXPECT_TRUE(first_child.isElement());
     
     ElementReaderWrapper first_elem = first_child.asElement();
@@ -426,7 +426,7 @@ TEST_F(MarkReaderTest, ElementReaderChildIteration) {
     
     ElementReaderWrapper elem(elem_item);
     
-    ElementReaderWrapper::ChildIterator iter = elem.children(pool);
+    ElementReaderWrapper::ChildIterator iter = elem.children();
     ItemReader child;
     int count = 0;
     
@@ -471,7 +471,7 @@ TEST_F(MarkReaderTest, ElementReaderFindChild) {
     
     ElementReaderWrapper elem(elem_item);
     
-    ItemReader found_h1 = elem.findChild("h1", pool);
+    ItemReader found_h1 = elem.findChild("h1");
     EXPECT_TRUE(found_h1.isElement());
     
     ElementReaderWrapper h1_elem = found_h1.asElement();
@@ -481,7 +481,7 @@ TEST_F(MarkReaderTest, ElementReaderFindChild) {
     EXPECT_TRUE(found_p.isValid());
     EXPECT_STREQ(found_p.tagName(), "p");
     
-    ItemReader not_found = elem.findChild("div", pool);
+    ItemReader not_found = elem.findChild("div");
     EXPECT_TRUE(not_found.isNull());
 }
 
@@ -568,7 +568,7 @@ TEST_F(MarkReaderTest, AttributeReaderIteration) {
     ElementReaderWrapper elem(elem_item);
     AttributeReaderWrapper attrs(elem);
     
-    AttributeReaderWrapper::Iterator iter = attrs.iterator(pool);
+    AttributeReaderWrapper::Iterator iter = attrs.iterator();
     const char* key;
     ItemReader value;
     int count = 0;
@@ -590,7 +590,7 @@ TEST_F(MarkReaderTest, MarkReaderBasic) {
         .child(builder->element("body").text("Content").final())
         .final();
     
-    MarkReader reader(root, pool);
+    MarkReader reader(root);
     
     ItemReader root_item = reader.getRoot();
     EXPECT_TRUE(root_item.isElement());
@@ -610,7 +610,7 @@ TEST_F(MarkReaderTest, MarkReaderFindAll) {
         .child(p2)
         .final();
     
-    MarkReader reader(root, pool);
+    MarkReader reader(root);
     
     MarkReader::ElementIterator iter = reader.findAll("p");
     ItemReader found;
@@ -654,7 +654,7 @@ TEST_F(MarkReaderTest, InvalidArrayReader) {
 
 TEST_F(MarkReaderTest, CopySemantics) {
     Item str_item = builder->createStringItem("test");
-    ItemReader reader1(str_item, pool);
+    ItemReader reader1(str_item);
     
     // Copy constructor
     ItemReader reader2 = reader1;
@@ -662,7 +662,7 @@ TEST_F(MarkReaderTest, CopySemantics) {
     EXPECT_STREQ(reader2.cstring(), "test");
     
     // Copy assignment
-    ItemReader reader3(builder->createNull(), pool);
+    ItemReader reader3(builder->createNull());
     reader3 = reader1;
     EXPECT_TRUE(reader3.isString());
     EXPECT_STREQ(reader3.cstring(), "test");
@@ -689,7 +689,7 @@ TEST_F(MarkReaderTest, ComplexNestedDocument) {
         )
         .final();
     
-    MarkReader reader(article, pool);
+    MarkReader reader(article);
     ItemReader root = reader.getRoot();
     
     EXPECT_TRUE(root.isElement());
