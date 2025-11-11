@@ -1,6 +1,7 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
-static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent);
+static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines, int* current_line, int total_lines, int target_indent);
 
 // Helper function to strip comments from YAML lines
 static char* strip_yaml_comments(const char* line) {
@@ -38,17 +39,9 @@ static char* strip_yaml_comments(const char* line) {
 }
 
 // Helper function to create String* from char*
-static String* create_string_from_cstr(Input *input, const char* str) {
+static String* create_string_from_cstr(MarkBuilder& builder, const char* str) {
     if (!str) return NULL;
-    int len = strlen(str);
-    String* string;
-    void* ptr = pool_calloc(input->pool, sizeof(String) + len + 1);
-    if (ptr == NULL) return NULL;
-    string = (String*)ptr;
-    string->len = len;
-    string->ref_cnt = 0;
-    strcpy(string->chars, str);
-    return string;
+    return builder.createString(str);
 }
 
 // Utility functions
@@ -68,102 +61,68 @@ void trim_string_inplace(char* str) {
     }
 }
 
-Item parse_scalar_value(Input *input, const char* str) {
-    if (!str) return {.item = ITEM_NULL};
+Item parse_scalar_value(MarkBuilder& builder, const char* str) {
+    if (!str) return builder.createNull();
 
     char* copy = strdup(str);
     trim_string_inplace(copy);
 
     if (strlen(copy) == 0) {
         free(copy);
-        return {.item = ITEM_NULL};
+        return builder.createNull();
     }
 
     // Check for null
     if (strcmp(copy, "null") == 0 || strcmp(copy, "~") == 0) {
         free(copy);
-        return {.item = ITEM_NULL};
+        return builder.createNull();
     }
 
     // Check for boolean
     if (strcmp(copy, "true") == 0 || strcmp(copy, "yes") == 0) {
         free(copy);
-        return {.item = b2it(true)};
+        return builder.createBool(true);
     }
     if (strcmp(copy, "false") == 0 || strcmp(copy, "no") == 0) {
         free(copy);
-        return {.item = b2it(false)};
+        return builder.createBool(false);
     }
 
     // Check for number
     char* end;
     int64_t int_val = strtol(copy, &end, 10);
     if (*end == '\0') {
-        // Allocate long on pool
-        int64_t *lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
-        if (lval == NULL) {
-            free(copy);
-            return {.item = ITEM_ERROR};
-        }
-        *lval = int_val;
         free(copy);
-        return {.item = l2it(lval)};
+        return builder.createInt(int_val);
     }
 
     double float_val = strtod(copy, &end);
     if (*end == '\0') {
-        // Allocate double on pool
-        double *dval = (double*)pool_calloc(input->pool, sizeof(double));
-        if (dval == NULL) {
-            free(copy);
-            return {.item = ITEM_ERROR};
-        }
-        *dval = float_val;
         free(copy);
-        return {.item = d2it(dval)};
+        return builder.createFloat(float_val);
     }
 
     // Handle quoted strings
     if (copy[0] == '"' && copy[strlen(copy) - 1] == '"') {
         copy[strlen(copy) - 1] = '\0';
-
-        // Create String object
-        int len = strlen(copy + 1);
-        String* str_result = (String*)pool_calloc(input->pool, sizeof(String) + len + 1);
-        if (str_result == NULL) {
-            free(copy);
-            return {.item = ITEM_ERROR};
-        }
-        str_result->len = len;
-        str_result->ref_cnt = 0;
-        strcpy(str_result->chars, copy + 1);
-
+        String* str_result = builder.createString(copy + 1);
         free(copy);
-        return {.item = s2it(str_result)};
+        return (Item){.item = s2it(str_result)};
     }
 
     // Default to string
-    int len = strlen(copy);
-    String* str_result;
-    str_result = (String*)pool_calloc(input->pool, sizeof(String) + len + 1);
-    if (str_result == NULL) {
-        free(copy);
-        return {.item = ITEM_ERROR};
-    }
-    str_result->len = len;
-    str_result->ref_cnt = 0;
-    strcpy(str_result->chars, copy);
-
+    String* str_result = builder.createString(copy);
     free(copy);
-    return {.item = s2it(str_result)};
+    return (Item){.item = s2it(str_result)};
 }
 
 // Parse flow array like [item1, item2, item3]
-Array* parse_flow_array(Input *input, const char* str) {
-    Array* array = array_pooled(input->pool);
-    if (!array) return NULL;
+Array* parse_flow_array(MarkBuilder& builder, const char* str) {
+    ArrayBuilder array_builder = builder.array();
 
-    if (!str || strlen(str) < 2) return array;
+    if (!str || strlen(str) < 2) {
+        return array_builder.final().array;
+    }
 
     // Make a copy and remove brackets
     char* copy = strdup(str);
@@ -174,7 +133,7 @@ Array* parse_flow_array(Input *input, const char* str) {
 
     if (strlen(copy) == 0) {
         free(copy - (str[0] == '[' ? 1 : 0));
-        return array;
+        return array_builder.final().array;
     }
 
     // Split by comma
@@ -190,20 +149,20 @@ Array* parse_flow_array(Input *input, const char* str) {
 
         trim_string_inplace(token);
         if (strlen(token) > 0) {
-            Item item = parse_scalar_value(input, token);
-            array_append(array, item, input->pool);
+            Item item = parse_scalar_value(builder, token);
+            array_builder.append(item);
         }
 
         token = next;
     }
 
     free(copy - (str[0] == '[' ? 1 : 0));
-    return array;
+    return array_builder.final().array;
 }
 
 // Parse YAML content
-static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent) {
-    if (*current_line >= total_lines) { return {.item = ITEM_NULL}; }
+static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines, int* current_line, int total_lines, int target_indent) {
+    if (*current_line >= total_lines) { return builder.createNull(); }
 
     char* line = lines[*current_line];
 
@@ -213,15 +172,14 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
 
     // If we've dedented, return
     if (indent < target_indent) {
-        return {.item = ITEM_NULL};
+        return builder.createNull();
     }
 
     char* content = line + indent;
 
     // Check for array item
     if (content[0] == '-' && (content[1] == ' ' || content[1] == '\0')) {
-        Array* array = array_pooled(input->pool);
-        if (!array) return {.item = ITEM_ERROR};
+        ArrayBuilder array_builder = builder.array();
 
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -246,23 +204,22 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             Item item;
             if (strlen(item_content) > 0) {
                 // Item on same line
-                item = parse_scalar_value(input, item_content);
+                item = parse_scalar_value(builder, item_content);
             } else {
                 // Item on following lines
-                item = parse_yaml_content(input, lines, current_line, total_lines, target_indent + 2);
+                item = parse_yaml_content(input, builder, lines, current_line, total_lines, target_indent + 2);
             }
 
-            array_append(array, item, input->pool);
+            array_builder.append(item);
         }
 
-        return {.item = (uint64_t)array};
+        return array_builder.final();
     }
 
     // Check for object (key: value)
     char* colon_pos = strstr(content, ":");
     if (colon_pos && (colon_pos[1] == ' ' || colon_pos[1] == '\0')) {
-        Map* map = map_pooled(input->pool);
-        if (!map) return {.item = ITEM_ERROR};
+        MapBuilder map_builder = builder.map();
 
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -289,7 +246,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             trim_string_inplace(key_str);
 
             // Create String object for key
-            String* key = create_string_from_cstr(input, key_str);
+            String* key = create_string_from_cstr(builder, key_str);
             free(key_str);
             if (!key) continue;
 
@@ -302,30 +259,31 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
                 // Value on same line
                 if (value_content[0] == '[') {
                     // Flow array
-                    Array* flow_array = parse_flow_array(input, value_content);
+                    Array* flow_array = parse_flow_array(builder, value_content);
                     value = {.item = (uint64_t)flow_array};
                 } else {
                     // Scalar value
-                    value = parse_scalar_value(input, value_content);
+                    value = parse_scalar_value(builder, value_content);
                 }
             } else {
                 // Value on following lines
-                value = parse_yaml_content(input, lines, current_line, total_lines, target_indent + 2);
+                value = parse_yaml_content(input, builder, lines, current_line, total_lines, target_indent + 2);
             }
 
-            // Add to map using shared function
-            map_put(map, key, value, input);
+            // Add to map using builder
+            map_builder.put(key, value);
         }
-        return {.item = (uint64_t)map};
+        return map_builder.final();
     }
 
     // Single scalar value
     (*current_line)++;
-    return parse_scalar_value(input, content);
+    return parse_scalar_value(builder, content);
 }
 
 void parse_yaml(Input *input, const char* yaml_str) {
     input->sb = stringbuf_new(input->pool);
+    MarkBuilder builder(input);
 
     // Split into lines
     char* yaml_copy = strdup(yaml_str);
@@ -383,8 +341,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
     }
 
     // Parse each document
-    Array* documents = NULL;
-    Item final_result = {.item = ITEM_NULL};
+    ArrayBuilder documents_builder = builder.array();
+    Item final_result = builder.createNull();
     int parsed_doc_count = 0;
 
     for (int doc_idx = 0; doc_idx < doc_count; doc_idx++) {
@@ -408,34 +366,21 @@ void parse_yaml(Input *input, const char* yaml_str) {
         // Parse this document if it has content
         if (doc_line_count > 0) {
             int current_line = 0;
-            Item doc_result = parse_yaml_content(input, doc_lines, &current_line, doc_line_count, 0);
+            Item doc_result = parse_yaml_content(input, builder, doc_lines, &current_line, doc_line_count, 0);
 
             if (parsed_doc_count == 0) {
                 // Store first document
                 final_result = doc_result;
                 parsed_doc_count++;
             } else if (parsed_doc_count == 1) {
-                // Second document found - create array and add both documents
-                documents = array_pooled(input->pool);
-                if (!documents) {
-                    // cleanup and return
-                    for (int j = 0; j < doc_line_count; j++) { free(doc_lines[j]); }
-                    free(doc_lines);
-                    for (int j = 0; j < total_line_count; j++) { free(all_lines[j]); }
-                    free(all_lines);
-                    free(doc_starts);
-                    return;
-                }
-
-                // Add first document to array
-                array_append(documents, final_result, input->pool);
-
+                // Second document found - add first document to array
+                documents_builder.append(final_result);
                 // Add current document to array
-                array_append(documents, doc_result, input->pool);
+                documents_builder.append(doc_result);
                 parsed_doc_count++;
             } else {
                 // Third+ document - add to existing array
-                array_append(documents, doc_result, input->pool);
+                documents_builder.append(doc_result);
                 parsed_doc_count++;
             }
         }
@@ -446,8 +391,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
     }
 
     // Set the final result
-    if (documents) {
-        input->root = {.item = (uint64_t)documents};
+    if (parsed_doc_count > 1) {
+        input->root = documents_builder.final();
     } else {
         input->root = final_result;
     }
