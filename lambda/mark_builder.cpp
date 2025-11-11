@@ -145,13 +145,11 @@ Item MarkBuilder::createNull() {
 ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     : builder_(builder)
     , tag_name_(builder->createString(tag_name))
-    , children_(nullptr)
-    , attributes_(nullptr)
-    , attr_type_(nullptr)
+    , elmt_(nullptr)
     , parent_(nullptr)
 {
     // allocate Array directly from pool for children
-    children_ = array_pooled(builder_->pool());
+    elmt_ = input_create_element(builder_->input(), tag_name);
 }
 
 ElementBuilder::~ElementBuilder() {
@@ -165,33 +163,9 @@ ElementBuilder::~ElementBuilder() {
 
 ElementBuilder& ElementBuilder::attr(const char* key, Item value) {
     if (!key) return *this;
-
-    // lazy initialization of element with TypeElmt
-    if (!attributes_) {
-        // allocate element from pool
-        Pool* pool = builder_->pool();
-        attributes_ = elmt_pooled(pool);
-
-        // create TypeElmt descriptor
-        TypeElmt* element_type = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        attributes_->type = element_type;
-
-        // register type in type list
-        arraylist_append(builder_->typeList(), element_type);
-        element_type->type_index = builder_->typeList()->length - 1;
-
-        // set element name (tag name)
-        element_type->name.str = tag_name_->chars;
-        element_type->name.length = tag_name_->len;
-
-        // cache the type for convenience
-        attr_type_ = (TypeMap*)element_type;
-    }
-
     // use elmt_put to add the attribute to the element
     String* key_str = builder_->createString(key);
-    elmt_put((Element*)attributes_, key_str, value, builder_->pool());
-
+    elmt_put(elmt_, key_str, value, builder_->pool());
     return *this;
 }
 
@@ -216,9 +190,7 @@ ElementBuilder& ElementBuilder::attr(const char* key, bool value) {
 //------------------------------------------------------------------------------
 
 ElementBuilder& ElementBuilder::child(Item item) {
-    if (children_) {
-        array_append(children_, item, builder_->pool());
-    }
+    array_append((Array*)elmt_, item, builder_->pool());
     return *this;
 }
 
@@ -262,49 +234,8 @@ ElementBuilder& ElementBuilder::end() {
     return *this;
 }
 
-//------------------------------------------------------------------------------
-// Finalization
-//------------------------------------------------------------------------------
-
 Item ElementBuilder::final() {
-    Pool* pool = builder_->pool();
-    Element* element;
-
-    // if we have attributes, the element was already created in attr()
-    if (attributes_) {
-        element = (Element*)attributes_;
-    } else {
-        // no attributes, create element now
-        element = elmt_pooled(pool);
-
-        // create TypeElmt descriptor
-        TypeElmt* element_type = (TypeElmt*)alloc_type(pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        element->type = element_type;
-
-        // register type in type list
-        arraylist_append(builder_->typeList(), element_type);
-        element_type->type_index = builder_->typeList()->length - 1;
-
-        // set element name (tag name)
-        element_type->name.str = tag_name_->chars;
-        element_type->name.length = tag_name_->len;
-    }
-
-    // use the children array directly - no copying needed!
-    if (children_ && children_->length > 0) {
-        element->length = children_->length;
-        element->capacity = children_->capacity;
-        element->extra = children_->extra;
-        element->items = children_->items;
-    } else {
-        element->length = 0;
-        element->capacity = 0;
-        element->extra = 0;
-        element->items = nullptr;
-    }
-
-    // return as Item
-    return (Item){.raw_pointer = element};
+    return (Item){.raw_pointer = elmt_};
 }
 
 //==============================================================================
@@ -327,10 +258,6 @@ MapBuilder::MapBuilder(MarkBuilder* builder)
 MapBuilder::~MapBuilder() {
     // map_ is pool-allocated, no cleanup needed
 }
-
-//------------------------------------------------------------------------------
-// Key-Value Setters
-//------------------------------------------------------------------------------
 
 MapBuilder& MapBuilder::put(const char* key, Item value) {
     if (!key) return *this;
@@ -380,10 +307,6 @@ MapBuilder& MapBuilder::putNull(const char* key) {
     return put(key, builder_->createNull());
 }
 
-//------------------------------------------------------------------------------
-// Finalization
-//------------------------------------------------------------------------------
-
 Item MapBuilder::final() {
     return (Item){.raw_pointer = map_};
 }
@@ -403,10 +326,6 @@ ArrayBuilder::ArrayBuilder(MarkBuilder* builder)
 ArrayBuilder::~ArrayBuilder() {
     // array_ is pool-allocated, no cleanup needed
 }
-
-//------------------------------------------------------------------------------
-// Append Operations
-//------------------------------------------------------------------------------
 
 ArrayBuilder& ArrayBuilder::append(Item item) {
     if (array_) {
@@ -437,10 +356,6 @@ ArrayBuilder& ArrayBuilder::appendItems(std::initializer_list<Item> items) {
     }
     return *this;
 }
-
-//------------------------------------------------------------------------------
-// Finalization
-//------------------------------------------------------------------------------
 
 Item ArrayBuilder::final() {
     // Array is already built - just wrap it in an Item
