@@ -47,7 +47,6 @@ class ItemReader;
 class ElementReader;  // Forward declaration
 class MapReader;
 class ArrayReader;
-class AttributeReader;  // Forward declaration
 
 // ==============================================================================
 // MarkReader - Document Root Reader
@@ -359,61 +358,12 @@ public:
     ChildIterator children() const;
     ElementChildIterator childElements() const;
 
-    // Attributes access
-    AttributeReader attributes() const;
+    // Attribute access (consolidated from AttributeReader)
+    bool has_attr(const char* key) const;
+    const char* get_attr_string(const char* key) const;
+    ItemReader get_attr(const char* key) const;
 
     // Accessors
     bool isValid() const { return element_ != nullptr; }
     const Element* element() const { return element_; }
-};
-
-// ==============================================================================
-// AttributeReader Extensions (C++ API additions)
-// ==============================================================================
-
-/**
- * Pure stack-based attribute reader (no pool allocation)
- * Stores map type and data pointers directly
- */
-class AttributeReader {
-private:
-    const ElementReader* element_reader_;  // Reference to parent element
-    const TypeMap* map_type_;        // Cached map type info
-    const void* attr_data_;          // Packed attribute data
-    const ShapeEntry* shape_;        // Attribute shape definition
-
-public:
-    // Lifecycle
-    AttributeReader();  // Default constructor
-    explicit AttributeReader(const ElementReader& elem);
-
-    ~AttributeReader() = default;
-
-    // Copyable and movable (shallow copy - just pointers)
-    AttributeReader(const AttributeReader&) = default;
-    AttributeReader& operator=(const AttributeReader&) = default;
-    AttributeReader(AttributeReader&&) = default;
-    AttributeReader& operator=(AttributeReader&&) = default;
-
-    // Attribute access
-    bool has(const char* key) const;
-    const char* getString(const char* key) const;
-    ItemReader getItem(const char* key) const;  // No longer needs pool
-
-    // Iterator
-    class Iterator {
-    private:
-        const AttributeReader* reader_;
-        const ShapeEntry* current_field_;
-
-    public:
-        explicit Iterator(const AttributeReader* reader);
-        bool next(const char** key, ItemReader* value);
-        void reset();
-    };
-
-    Iterator iterator() const;
-
-    // Accessors
-    bool isValid() const { return element_reader_ != nullptr && element_reader_->isValid(); }
 };

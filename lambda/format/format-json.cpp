@@ -150,16 +150,20 @@ static void format_element_reader_with_indent(StringBuf* sb, const ElementReader
 
     // Add attributes as direct properties
     if (elem.attrCount() > 0) {
-        AttributeReader attrs(elem);
-        auto iter = attrs.iterator();
-        const char* key;
-        ItemReader value;
+        // Access attributes directly from ElementReader
+        const TypeMap* map_type = (const TypeMap*)elem.element()->type;
+        const ShapeEntry* field = map_type->shape;
 
-        while (iter.next(&key, &value)) {
+        while (field) {
+            const char* key = field->name->str;
+            ItemReader value = elem.get_attr(key);
+
             stringbuf_append_str(sb, ",\n");
             add_indent(sb, indent + 1);
             stringbuf_append_format(sb, "\"%s\":", key);
             format_item_reader_with_indent(sb, value, indent + 1);
+
+            field = field->next;
         }
     }
 
