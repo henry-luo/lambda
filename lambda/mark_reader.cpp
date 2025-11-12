@@ -13,7 +13,7 @@ MarkReader::MarkReader(Item root)
 }
 
 ItemReader MarkReader::getRoot() const {
-    return ItemReader(root_);
+    return ItemReader(root_.to_const());
 }
 
 MarkReader::ElementIterator MarkReader::findAll(const char* selector) const {
@@ -39,11 +39,11 @@ bool MarkReader::ElementIterator::next(ItemReader* out) {
     ItemReader root = reader_->getRoot();
 
     if (root.isElement()) {
-        ElementReaderWrapper elem = root.asElement();
+        ElementReader elem = root.asElement();
         while (current_index_ < elem.childCount()) {
             ItemReader child = elem.childAt(current_index_++);
             if (child.isElement()) {
-                ElementReaderWrapper child_elem = child.asElement();
+                ElementReader child_elem = child.asElement();
                 if (selector_ == nullptr || child_elem.hasTag(selector_)) {
                     *out = child;
                     return true;
@@ -67,8 +67,8 @@ ItemReader::ItemReader()
     : item_({.item = ITEM_NULL}), cached_type_(LMD_TYPE_NULL) {
 }
 
-ItemReader::ItemReader(Item item)
-    : item_(item), cached_type_(get_type_id(item)) {
+ItemReader::ItemReader(ConstItem item)
+    : item_(*(Item*)&item), cached_type_(item.type_id()) {
 }
 
 bool ItemReader::isNull() const {
@@ -147,11 +147,11 @@ bool ItemReader::asBool() const {
     return false;
 }
 
-ElementReaderWrapper ItemReader::asElement() const {
+ElementReader ItemReader::asElement() const {
     if (isElement()) {
-        return ElementReaderWrapper(item_.element);
+        return ElementReader(item_.element);
     }
-    return ElementReaderWrapper();  // Invalid element
+    return ElementReader();  // Invalid element
 }
 
 MapReader ItemReader::asMap() const {
@@ -199,50 +199,13 @@ MapReader MapReader::fromItem(Item item) {
 }
 
 ItemReader MapReader::get(const char* key) const {
-    if (!map_ || !map_type_) {
-        return ItemReader();
-    }
-
-    // Walk the shape to find the field
-    ShapeEntry* field = map_type_->shape;
-    while (field) {
-        if (strcmp(field->name->str, key) == 0) {
-            // Found the field, extract value
-            void* data_ptr = ((char*)map_->data) + field->byte_offset;
-
-            // Unpack the value based on type
-            TypeId field_type = field->type->type_id;
-            Item value;
-
-            if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
-                value.int_val = *((int64_t*)data_ptr);
-                value._type_id = field_type;
-            } else if (field_type == LMD_TYPE_FLOAT) {
-                // Float is stored inline in the map data, but Item expects a pointer
-                // So we point to the location in the map's data
-                value.pointer = (uint64_t)data_ptr;
-                value._type_id = LMD_TYPE_FLOAT;
-            } else if (field_type == LMD_TYPE_BOOL) {
-                value.bool_val = *((bool*)data_ptr);
-                value._type_id = LMD_TYPE_BOOL;
-            } else {
-                // Pointer type - store as raw pointer
-                void* ptr_val = *((void**)data_ptr);
-                value.item = *(uint64_t*)&ptr_val;
-            }
-
-            return ItemReader(value);
-        }
-        field = field->next;
-    }
-
-    return ItemReader();  // Key not found
+    if (!map_ || !map_type_) { return ItemReader(); }
+    ConstItem value = map_->get(key);
+    return ItemReader(value);
 }
 
 bool MapReader::has(const char* key) const {
-    if (!map_ || !map_type_) {
-        return false;
-    }
+    if (!map_ || !map_type_) { return false; }
 
     ShapeEntry* field = map_type_->shape;
     while (field) {
@@ -256,9 +219,7 @@ bool MapReader::has(const char* key) const {
 }
 
 int64_t MapReader::size() const {
-    if (!map_ || !map_type_) {
-        return 0;
-    }
+    if (!map_ || !map_type_) { return 0; }
     return map_type_->length;
 }
 
@@ -375,8 +336,7 @@ ItemReader ArrayReader::get(int64_t index) const {
     if (!array_ || index < 0 || index >= array_->length) {
         return ItemReader();
     }
-
-    return ItemReader(array_->items[index]);
+    return ItemReader(array_->items[index].to_const());
 }
 
 int64_t ArrayReader::length() const {
@@ -409,12 +369,12 @@ void ArrayReader::Iterator::reset() {
 // ElementReaderWrapper Implementation (Stack-Based, No Pool)
 // ==============================================================================
 
-ElementReaderWrapper::ElementReaderWrapper()
+ElementReader::ElementReader()
     : element_(nullptr), element_type_(nullptr), tag_name_(nullptr),
       tag_name_len_(0), child_count_(0), attr_count_(0) {
 }
 
-ElementReaderWrapper::ElementReaderWrapper(const Element* element)
+ElementReader::ElementReader(const Element* element)
     : element_(element) {
     if (element) {
         element_type_ = (const TypeElmt*)element->type;
@@ -446,20 +406,20 @@ ElementReaderWrapper::ElementReaderWrapper(const Element* element)
     }
 }
 
-ElementReaderWrapper::ElementReaderWrapper(Item item) {
+ElementReader::ElementReader(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        *this = ElementReaderWrapper(item.element);
+        *this = ElementReader(item.element);
     } else {
-        *this = ElementReaderWrapper();
+        *this = ElementReader();
     }
 }
 
-bool ElementReaderWrapper::hasTag(const char* tag_name) const {
+bool ElementReader::hasTag(const char* tag_name) const {
     if (!tag_name_ || !tag_name) return false;
     return strcmp(tag_name_, tag_name) == 0;
 }
 
-bool ElementReaderWrapper::isEmpty() const {
+bool ElementReader::isEmpty() const {
     if (!element_) return true;
 
     // Check if has no children
@@ -486,7 +446,7 @@ bool ElementReaderWrapper::isEmpty() const {
     return true;
 }
 
-bool ElementReaderWrapper::isTextOnly() const {
+bool ElementReader::isTextOnly() const {
     if (!element_ || child_count_ == 0) return false;
 
     const List* list = (const List*)element_;
@@ -502,15 +462,15 @@ bool ElementReaderWrapper::isTextOnly() const {
     return true; // only text/non-element content
 }
 
-ItemReader ElementReaderWrapper::childAt(int64_t index) const {
+ItemReader ElementReader::childAt(int64_t index) const {
     if (!element_ || index < 0 || index >= child_count_) {
         return ItemReader();
     }
     Item child = ((const List*)element_)->items[index];
-    return ItemReader(child);
+    return ItemReader(child.to_const());
 }
 
-ItemReader ElementReaderWrapper::findChild(const char* tag_name) const {
+ItemReader ElementReader::findChild(const char* tag_name) const {
     if (!element_ || !tag_name) return ItemReader();
 
     const List* list = (const List*)element_;
@@ -523,7 +483,7 @@ ItemReader ElementReaderWrapper::findChild(const char* tag_name) const {
 
             if (child_type && child_type->name.str &&
                 strcmp(child_type->name.str, tag_name) == 0) {
-                return ItemReader(child);
+                return ItemReader(child.to_const());
             }
         }
     }
@@ -534,13 +494,13 @@ ItemReader ElementReaderWrapper::findChild(const char* tag_name) const {
 // Forward declaration for recursive helper
 static void _extract_text_recursive_inline(const Element* element, StringBuf* sb);
 
-void ElementReaderWrapper::textContent(StringBuf* sb) const {
+void ElementReader::textContent(StringBuf* sb) const {
     if (!element_ || !sb) return;
     _extract_text_recursive_inline(element_, sb);
 }
 
-ElementReaderWrapper ElementReaderWrapper::findChildElement(const char* tag_name) const {
-    if (!element_ || !tag_name) return ElementReaderWrapper();
+ElementReader ElementReader::findChildElement(const char* tag_name) const {
+    if (!element_ || !tag_name) return ElementReader();
 
     const List* list = (const List*)element_;
     for (int64_t i = 0; i < list->length; i++) {
@@ -552,15 +512,15 @@ ElementReaderWrapper ElementReaderWrapper::findChildElement(const char* tag_name
 
             if (child_type && child_type->name.str &&
                 strcmp(child_type->name.str, tag_name) == 0) {
-                return ElementReaderWrapper(child_elem);
+                return ElementReader(child_elem);
             }
         }
     }
 
-    return ElementReaderWrapper();
+    return ElementReader();
 }
 
-bool ElementReaderWrapper::hasChildElements() const {
+bool ElementReader::hasChildElements() const {
     if (!element_) return false;
 
     const List* list = (const List*)element_;
@@ -574,12 +534,12 @@ bool ElementReaderWrapper::hasChildElements() const {
     return false;
 }
 
-void ElementReaderWrapper::allText(StringBuf* sb) const {
+void ElementReader::allText(StringBuf* sb) const {
     textContent(sb);  // Alias for textContent
 }
 
-AttributeReaderWrapper ElementReaderWrapper::attributes() const {
-    return AttributeReaderWrapper(*this);
+AttributeReader ElementReader::attributes() const {
+    return AttributeReader(*this);
 }
 
 // Helper function for recursive text extraction
@@ -604,11 +564,11 @@ static void _extract_text_recursive_inline(const Element* element, StringBuf* sb
 }
 
 // ElementReaderWrapper::ChildIterator implementation
-ElementReaderWrapper::ChildIterator::ChildIterator(const ElementReaderWrapper* reader)
+ElementReader::ChildIterator::ChildIterator(const ElementReader* reader)
     : reader_(reader), index_(0) {
 }
 
-bool ElementReaderWrapper::ChildIterator::next(ItemReader* item) {
+bool ElementReader::ChildIterator::next(ItemReader* item) {
     if (!reader_->element_ || index_ >= reader_->childCount()) {
         return false;
     }
@@ -617,16 +577,16 @@ bool ElementReaderWrapper::ChildIterator::next(ItemReader* item) {
     return true;
 }
 
-void ElementReaderWrapper::ChildIterator::reset() {
+void ElementReader::ChildIterator::reset() {
     index_ = 0;
 }
 
 // ElementReaderWrapper::ElementChildIterator implementation
-ElementReaderWrapper::ElementChildIterator::ElementChildIterator(const ElementReaderWrapper* reader)
+ElementReader::ElementChildIterator::ElementChildIterator(const ElementReader* reader)
     : reader_(reader), index_(0) {
 }
 
-bool ElementReaderWrapper::ElementChildIterator::next(ElementReaderWrapper* elem) {
+bool ElementReader::ElementChildIterator::next(ElementReader* elem) {
     if (!reader_->element_) {
         return false;
     }
@@ -635,7 +595,7 @@ bool ElementReaderWrapper::ElementChildIterator::next(ElementReaderWrapper* elem
     while (index_ < reader_->childCount()) {
         Item child = list->items[index_++];
         if (get_type_id(child) == LMD_TYPE_ELEMENT) {
-            *elem = ElementReaderWrapper(child.element);
+            *elem = ElementReader(child.element);
             return true;
         }
     }
@@ -643,27 +603,27 @@ bool ElementReaderWrapper::ElementChildIterator::next(ElementReaderWrapper* elem
     return false;
 }
 
-void ElementReaderWrapper::ElementChildIterator::reset() {
+void ElementReader::ElementChildIterator::reset() {
     index_ = 0;
 }
 
-ElementReaderWrapper::ChildIterator ElementReaderWrapper::children() const {
+ElementReader::ChildIterator ElementReader::children() const {
     return ChildIterator(this);
 }
 
-ElementReaderWrapper::ElementChildIterator ElementReaderWrapper::childElements() const {
+ElementReader::ElementChildIterator ElementReader::childElements() const {
     return ElementChildIterator(this);
 }
 
 // ==============================================================================
-// AttributeReaderWrapper Implementation (Stack-Based, No Pool)
+// AttributeReader Implementation (Stack-Based, No Pool)
 // ==============================================================================
 
-AttributeReaderWrapper::AttributeReaderWrapper()
+AttributeReader::AttributeReader()
     : element_reader_(nullptr), map_type_(nullptr), attr_data_(nullptr), shape_(nullptr) {
 }
 
-AttributeReaderWrapper::AttributeReaderWrapper(const ElementReaderWrapper& elem)
+AttributeReader::AttributeReader(const ElementReader& elem)
     : element_reader_(&elem) {
     if (elem.isValid() && elem.element()) {
         const Element* element = elem.element();
@@ -685,7 +645,7 @@ AttributeReaderWrapper::AttributeReaderWrapper(const ElementReaderWrapper& elem)
     }
 }
 
-bool AttributeReaderWrapper::has(const char* key) const {
+bool AttributeReader::has(const char* key) const {
     if (!shape_ || !key) return false;
 
     const ShapeEntry* field = shape_;
@@ -702,7 +662,7 @@ bool AttributeReaderWrapper::has(const char* key) const {
     return false;
 }
 
-const char* AttributeReaderWrapper::getString(const char* key) const {
+const char* AttributeReader::getString(const char* key) const {
     if (!shape_ || !key || !attr_data_) {
         return nullptr;
     }
@@ -727,7 +687,7 @@ const char* AttributeReaderWrapper::getString(const char* key) const {
     return nullptr;
 }
 
-ItemReader AttributeReaderWrapper::getItem(const char* key) const {
+ItemReader AttributeReader::getItem(const char* key) const {
     if (!shape_ || !key || !attr_data_) {
         return ItemReader();
     }
@@ -771,7 +731,7 @@ ItemReader AttributeReaderWrapper::getItem(const char* key) const {
                         break;
                 }
 
-                return ItemReader(value);
+                return ItemReader(value.to_const());
             }
             break;
         }
@@ -781,12 +741,12 @@ ItemReader AttributeReaderWrapper::getItem(const char* key) const {
     return ItemReader();
 }
 
-const char* AttributeReaderWrapper::getStringOr(const char* key, const char* default_value) const {
+const char* AttributeReader::getStringOr(const char* key, const char* default_value) const {
     const char* val = getString(key);
     return val ? val : default_value;
 }
 
-int64_t AttributeReaderWrapper::getIntOr(const char* key, int64_t default_value) const {
+int64_t AttributeReader::getIntOr(const char* key, int64_t default_value) const {
     if (!shape_ || !key || !attr_data_) {
         return default_value;
     }
@@ -815,19 +775,19 @@ int64_t AttributeReaderWrapper::getIntOr(const char* key, int64_t default_value)
     return default_value;
 }
 
-AttributeReaderWrapper::Iterator AttributeReaderWrapper::iterator() const {
+AttributeReader::Iterator AttributeReader::iterator() const {
     return Iterator(this);
 }
 
 // AttributeReaderWrapper::Iterator implementation
-AttributeReaderWrapper::Iterator::Iterator(const AttributeReaderWrapper* reader)
+AttributeReader::Iterator::Iterator(const AttributeReader* reader)
     : reader_(reader), current_field_(nullptr) {
     if (reader_->shape_) {
         current_field_ = reader_->shape_;
     }
 }
 
-bool AttributeReaderWrapper::Iterator::next(const char** key, ItemReader* value) {
+bool AttributeReader::Iterator::next(const char** key, ItemReader* value) {
     if (!current_field_) {
         return false;
     }
@@ -839,7 +799,7 @@ bool AttributeReaderWrapper::Iterator::next(const char** key, ItemReader* value)
     return true;
 }
 
-void AttributeReaderWrapper::Iterator::reset() {
+void AttributeReader::Iterator::reset() {
     if (reader_->shape_) {
         current_field_ = reader_->shape_;
     }

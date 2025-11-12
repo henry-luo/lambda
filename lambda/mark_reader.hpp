@@ -44,10 +44,10 @@
 
 // Forward declarations
 class ItemReader;
-class ElementReaderWrapper;  // Forward declaration
+class ElementReader;  // Forward declaration
 class MapReader;
 class ArrayReader;
-class AttributeReaderWrapper;  // Forward declaration
+class AttributeReader;  // Forward declaration
 
 // ==============================================================================
 // MarkReader - Document Root Reader
@@ -113,7 +113,7 @@ private:
 public:
     // Lifecycle (value type semantics)
     ItemReader();  // Default constructor for null item
-    explicit ItemReader(Item item);
+    explicit ItemReader(ConstItem item);
     ~ItemReader() = default;
 
     // Copyable and movable
@@ -141,7 +141,7 @@ public:
     int32_t asInt32() const;
     double asFloat() const;
     bool asBool() const;
-    ElementReaderWrapper asElement() const;  // No pool needed - returns stack-based wrapper
+    ElementReader asElement() const;  // No pool needed - returns stack-based wrapper
     MapReader asMap() const;
     ArrayReader asArray() const;
 
@@ -291,7 +291,7 @@ public:
  * Pure stack-based element reader (no pool allocation)
  * Stores element pointer and cached metadata directly as members
  */
-class ElementReaderWrapper {
+class ElementReader {
 private:
     const Element* element_;         // Underlying element (read-only)
     const TypeElmt* element_type_;   // Cached element type info
@@ -302,17 +302,17 @@ private:
 
 public:
     // Lifecycle
-    ElementReaderWrapper();  // Default constructor for invalid element
-    explicit ElementReaderWrapper(const Element* element);
-    explicit ElementReaderWrapper(Item item);
+    ElementReader();  // Default constructor for invalid element
+    explicit ElementReader(const Element* element);
+    explicit ElementReader(Item item);
 
-    ~ElementReaderWrapper() = default;
+    ~ElementReader() = default;
 
     // Copyable and movable (shallow copy - just pointers)
-    ElementReaderWrapper(const ElementReaderWrapper&) = default;
-    ElementReaderWrapper& operator=(const ElementReaderWrapper&) = default;
-    ElementReaderWrapper(ElementReaderWrapper&&) = default;
-    ElementReaderWrapper& operator=(ElementReaderWrapper&&) = default;
+    ElementReader(const ElementReader&) = default;
+    ElementReader& operator=(const ElementReader&) = default;
+    ElementReader(ElementReader&&) = default;
+    ElementReader& operator=(ElementReader&&) = default;
 
     // Element properties
     const char* tagName() const { return tag_name_; }
@@ -329,30 +329,30 @@ public:
     void textContent(StringBuf* sb) const;
 
     // New methods from proposal
-    ElementReaderWrapper findChildElement(const char* tag_name) const;
+    ElementReader findChildElement(const char* tag_name) const;
     bool hasChildElements() const;
     void allText(StringBuf* sb) const;
 
     // Iteration (no longer needs pool)
     class ChildIterator {
     private:
-        const ElementReaderWrapper* reader_;
+        const ElementReader* reader_;
         int64_t index_;
 
     public:
-        explicit ChildIterator(const ElementReaderWrapper* reader);
+        explicit ChildIterator(const ElementReader* reader);
         bool next(ItemReader* item);
         void reset();
     };
 
     class ElementChildIterator {
     private:
-        const ElementReaderWrapper* reader_;
+        const ElementReader* reader_;
         int64_t index_;
 
     public:
-        ElementChildIterator(const ElementReaderWrapper* reader);
-        bool next(ElementReaderWrapper* elem);
+        ElementChildIterator(const ElementReader* reader);
+        bool next(ElementReader* elem);
         void reset();
     };
 
@@ -360,7 +360,7 @@ public:
     ElementChildIterator childElements() const;
 
     // Attributes access
-    AttributeReaderWrapper attributes() const;
+    AttributeReader attributes() const;
 
     // Accessors
     bool isValid() const { return element_ != nullptr; }
@@ -375,25 +375,25 @@ public:
  * Pure stack-based attribute reader (no pool allocation)
  * Stores map type and data pointers directly
  */
-class AttributeReaderWrapper {
+class AttributeReader {
 private:
-    const ElementReaderWrapper* element_reader_;  // Reference to parent element
+    const ElementReader* element_reader_;  // Reference to parent element
     const TypeMap* map_type_;        // Cached map type info
     const void* attr_data_;          // Packed attribute data
     const ShapeEntry* shape_;        // Attribute shape definition
 
 public:
     // Lifecycle
-    AttributeReaderWrapper();  // Default constructor
-    explicit AttributeReaderWrapper(const ElementReaderWrapper& elem);
+    AttributeReader();  // Default constructor
+    explicit AttributeReader(const ElementReader& elem);
 
-    ~AttributeReaderWrapper() = default;
+    ~AttributeReader() = default;
 
     // Copyable and movable (shallow copy - just pointers)
-    AttributeReaderWrapper(const AttributeReaderWrapper&) = default;
-    AttributeReaderWrapper& operator=(const AttributeReaderWrapper&) = default;
-    AttributeReaderWrapper(AttributeReaderWrapper&&) = default;
-    AttributeReaderWrapper& operator=(AttributeReaderWrapper&&) = default;
+    AttributeReader(const AttributeReader&) = default;
+    AttributeReader& operator=(const AttributeReader&) = default;
+    AttributeReader(AttributeReader&&) = default;
+    AttributeReader& operator=(AttributeReader&&) = default;
 
     // Attribute access
     bool has(const char* key) const;
@@ -407,11 +407,11 @@ public:
     // Iterator
     class Iterator {
     private:
-        const AttributeReaderWrapper* reader_;
+        const AttributeReader* reader_;
         const ShapeEntry* current_field_;
 
     public:
-        explicit Iterator(const AttributeReaderWrapper* reader);
+        explicit Iterator(const AttributeReader* reader);
         bool next(const char** key, ItemReader* value);
         void reset();
     };

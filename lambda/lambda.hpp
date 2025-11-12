@@ -1,6 +1,8 @@
 
 #include "lambda.h"
 
+typedef struct ConstItem ConstItem;
+
 typedef struct Item {
     union {
         // packed values with type_id tagging
@@ -44,10 +46,13 @@ typedef struct Item {
         }
         return LMD_TYPE_NULL; // fallback for null items
     }
+
+    inline ConstItem to_const() const;
 } Item;
 
 // const read-only item
-typedef struct ConstItem {
+// ConstItem, instead of const Item, to hide fields from Item
+struct ConstItem {
     union {
         // raw 64-bit value
         const uint64_t item;
@@ -71,14 +76,21 @@ typedef struct ConstItem {
     ConstItem& operator=(const ConstItem &) = default;
 
     inline TypeId type_id() const {
-        Item* itm = (Item*)this;
-        return itm->type_id();
+        return ((Item*)this)->type_id();
     }
+
     inline String* string() const {
         Item* itm = (Item*)this;
         return (itm->_type_id == LMD_TYPE_STRING) ? (String*)itm->pointer : nullptr;
     }
-} ConstItem;
+
+    // inline Item item() { return *(Item*)this; }
+};
+
+// define Item::to_const() after ConstItem is complete
+inline ConstItem Item::to_const() const {
+    return *(ConstItem*)this;
+}
 
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) { return value.type_id(); }
@@ -97,6 +109,8 @@ struct List : Container {
     int64_t length;
     int64_t extra;  // count of extra items stored at the end of the list
     int64_t capacity;
+
+    ConstItem get(int index) const;
 };
 
 struct ArrayInt : Container {
@@ -124,6 +138,12 @@ struct Map : Container {
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
     int data_cap;  // capacity of the data struct
+
+    ConstItem get(const Item key) const;
+
+    inline ConstItem get(const char* key_str) const {
+        return get((Item){.item = s2it(key_str)});
+    }
 };
 
 struct Element : List {
@@ -133,5 +153,10 @@ struct Element : List {
     int data_cap;  // capacity of the data struct
     // member functions
     bool has_attr(const char* attr_name);
-    // ConstItem get_attr(const char* attr_name);
+
+    ConstItem get_attr(const Item attr_name) const;
+
+    ConstItem get_attr(const char* attr_name) const {
+        return get_attr((Item){.item = s2it(attr_name)});
+    }
 };
