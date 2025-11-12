@@ -556,7 +556,7 @@ Item typeditem_to_item(TypedItem *titem) {
     }
 }
 
-ConstItem _map_get_const(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
+ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
     ShapeEntry *field = map_type->shape;
     while (field) {
         if (!field->name) { // nested map, skip
@@ -649,6 +649,13 @@ ConstItem Map::get(const Item key) const {
     return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found);
 }
 
+ConstItem Map::get(const char* key_str) const {
+    log_debug("map_get_const %p", this);
+    if (!this || !key_str) { return null_result; }
+    bool is_found;
+    return _map_get_const((TypeMap*)this->type, this->data, (char*)key_str, &is_found);
+}
+
 Element* elmt_pooled(Pool *pool) {
     Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
     elmt->type_id = LMD_TYPE_ELEMENT;
@@ -666,6 +673,12 @@ ConstItem Element::get_attr(const Item key) const {
         return null_result;  // only string or symbol keys are supported
     }
     return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found);
+}
+
+ConstItem Element::get_attr(const char* attr_name) const {
+    if (!this || !attr_name) { return null_result;}
+    bool is_found;
+    return _map_get_const((TypeMap*)this->type, this->data, attr_name, &is_found);
 }
 
 bool Element::has_attr(const char* attr_name) {

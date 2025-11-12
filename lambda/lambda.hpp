@@ -83,8 +83,6 @@ struct ConstItem {
         Item* itm = (Item*)this;
         return (itm->_type_id == LMD_TYPE_STRING) ? (String*)itm->pointer : nullptr;
     }
-
-    // inline Item item() { return *(Item*)this; }
 };
 
 // define Item::to_const() after ConstItem is complete
@@ -140,10 +138,7 @@ struct Map : Container {
     int data_cap;  // capacity of the data struct
 
     ConstItem get(const Item key) const;
-
-    inline ConstItem get(const char* key_str) const {
-        return get((Item){.item = s2it(key_str)});
-    }
+    ConstItem get(const char* key_str) const;
 };
 
 struct Element : List {
@@ -155,8 +150,5 @@ struct Element : List {
     bool has_attr(const char* attr_name);
 
     ConstItem get_attr(const Item attr_name) const;
-
-    ConstItem get_attr(const char* attr_name) const {
-        return get_attr((Item){.item = s2it(attr_name)});
-    }
+    ConstItem get_attr(const char* attr_name) const;
 };

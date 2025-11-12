@@ -523,19 +523,18 @@ TEST_F(MarkReaderTest, AttributeReaderBasic) {
         .final();
 
     ElementReader elem(elem_item);
-    AttributeReader attrs(elem);
 
-    EXPECT_TRUE(attrs.isValid());
-    EXPECT_TRUE(attrs.has("id"));
-    EXPECT_TRUE(attrs.has("class"));
-    EXPECT_TRUE(attrs.has("width"));
-    EXPECT_FALSE(attrs.has("height"));
+    EXPECT_TRUE(elem.isValid());
+    EXPECT_TRUE(elem.has_attr("id"));
+    EXPECT_TRUE(elem.has_attr("class"));
+    EXPECT_TRUE(elem.has_attr("width"));
+    EXPECT_FALSE(elem.has_attr("height"));
 
-    const char* id = attrs.getString("id");
+    const char* id = elem.get_attr_string("id");
     ASSERT_NE(id, nullptr);
     EXPECT_STREQ(id, "main");
 
-    const char* cls = attrs.getString("class");
+    const char* cls = elem.get_attr_string("class");
     ASSERT_NE(cls, nullptr);
     EXPECT_STREQ(cls, "container");
 }
@@ -548,16 +547,18 @@ TEST_F(MarkReaderTest, AttributeReaderIteration) {
         .final();
 
     ElementReader elem(elem_item);
-    AttributeReader attrs(elem);
 
-    AttributeReader::Iterator iter = attrs.iterator();
-    const char* key;
-    ItemReader value;
+    // Iterate through attributes manually using shape
+    const TypeMap* map_type = (const TypeMap*)elem.element()->type;
+    const ShapeEntry* field = map_type->shape;
     int count = 0;
 
-    while (iter.next(&key, &value)) {
+    while (field) {
+        const char* key = field->name->str;
+        ItemReader value = elem.get_attr(key);
         EXPECT_NE(key, nullptr);
         count++;
+        field = field->next;
     }
 
     EXPECT_EQ(count, 3);
