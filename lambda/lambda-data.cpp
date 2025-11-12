@@ -595,19 +595,19 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
                 result = {.item = d2it(field_ptr)};  // points to double directly
                 break;
             case LMD_TYPE_DTIME:
-                result = {.item = k2it(field_ptr)};
+                result = {.item = k2it(field_ptr)};  // points to datetime directly
                 break;
             case LMD_TYPE_DECIMAL:
-                result = {.item = c2it(field_ptr)};
+                result = {.item = c2it(*(Decimal**)field_ptr)};
                 break;
             case LMD_TYPE_STRING:
-                result = {.item = s2it(field_ptr)};
+                result = {.item = s2it(*(String**)field_ptr)};
                 break;
             case LMD_TYPE_SYMBOL:
-                result = {.item = y2it(field_ptr)};
+                result = {.item = y2it(*(String**)field_ptr)};
                 break;
             case LMD_TYPE_BINARY:
-                result = {.item = x2it(field_ptr)};
+                result = {.item = x2it(*(String**)field_ptr)};
                 break;
 
             case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
