@@ -270,7 +270,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
     }
     else if (item.isElement()) {
         printf("format_item_reader: handling element\n");
-        ElementReaderWrapper elem = item.asElement();
+        ElementReader elem = item.asElement();
 
         const char* elem_name = elem.tagName();
         if (!elem_name || elem_name[0] == '\0') {
@@ -309,7 +309,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
         // Handle attributes
         if (elem.attrCount() > 0) {
             printf("format_item_reader: element has attributes, formatting\n");
-            AttributeReaderWrapper attrs(elem);
+            AttributeReader attrs(elem);
             auto attr_iter = attrs.iterator();
             const char* key;
             ItemReader value;
@@ -379,11 +379,11 @@ String* format_xml(Pool* pool, Item root_item) {
 
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
 
-    ItemReader reader(root_item);
+    ItemReader reader(root_item.to_const());
 
     // Check if we have a document structure with multiple children (XML declaration + root element)
     if (reader.isElement()) {
-        ElementReaderWrapper root_elem = reader.asElement();
+        ElementReader root_elem = reader.asElement();
         const char* root_tag = root_elem.tagName();
 
         printf("format_xml: root element name='%s', children=%lld\n",
@@ -399,7 +399,7 @@ String* format_xml(Pool* pool, Item root_item) {
 
             while (child_iter.next(&child)) {
                 if (child.isElement()) {
-                    ElementReaderWrapper child_elem = child.asElement();
+                    ElementReader child_elem = child.asElement();
                     const char* child_tag = child_elem.tagName();
 
                     // Check if this is XML declaration
@@ -422,7 +422,7 @@ String* format_xml(Pool* pool, Item root_item) {
     // Fallback: format as single element
     const char* tag_name = NULL;
     if (reader.isElement()) {
-        ElementReaderWrapper elem = reader.asElement();
+        ElementReader elem = reader.asElement();
         tag_name = elem.tagName();
         printf("format_xml: using element name '%s'\n", tag_name);
     }
@@ -439,6 +439,6 @@ String* format_xml(Pool* pool, Item root_item) {
 
 // Convenience function that formats XML to a provided StringBuf
 void format_xml_to_stringbuf(StringBuf* sb, Item root_item) {
-    ItemReader reader(root_item);
+    ItemReader reader(root_item.to_const());
     format_item_reader(sb, reader, "root");
 }

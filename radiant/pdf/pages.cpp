@@ -25,10 +25,7 @@ static String* create_string_key(Pool* pool, const char* str) {
 
 // Helper to get map value with string key
 static Item map_get_str(Map* map, const char* key_str, Pool* pool) {
-    String* key = create_string_key(pool, key_str);
-    if (!key) return {.item = ITEM_NULL};
-    Item key_item = {.item = s2it(key)};
-    ConstItem result = map_get_const(map, key_item);
+    ConstItem result = map->get(key_str);
     fprintf(stderr, "DEBUG: map_get_str key='%s', type_id=%d\n", key_str, result.type_id());
     return *(Item*)&result;
 }

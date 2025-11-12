@@ -110,7 +110,7 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
             ConstItem array_item;
             switch (item_type) {
                 case LMD_TYPE_ARRAY:
-                    array_item = list_get_const(array_data, i);
+                    array_item = array_data->get(i);
                     break;
                 case LMD_TYPE_ARRAY_INT: {
                     ArrayInt* array_int = (ArrayInt*)item.array;
@@ -136,7 +136,7 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
                     break;
                 }
                 case LMD_TYPE_LIST:
-                    array_item = list_get_const(array_data, i);
+                    array_item = array_data->get(i);
                     break;
             }
 

@@ -10,7 +10,7 @@ Item create_item_from_field_data(void* field_data, TypeId type_id);
 void format_number(StringBuf* sb, Item item);
 
 // Format function declarations
-String* format_json(Pool* pool, Item root_item);
+String* format_json(Pool* pool, const Item root_item);
 void format_json_to_strbuf(StringBuf* sb, Item root_item);
 void format_markdown(StringBuf* sb, Item root_item);
 String* format_xml(Pool* pool, Item root_item);

@@ -405,10 +405,8 @@ extern "C" {
 Array* array_pooled(Pool* pool);
 void array_append(Array* arr, Item itm, Pool* pool);
 Map* map_pooled(Pool* pool);
-ConstItem map_get_const(const Map* map, Item key);
-ConstItem list_get_const(const List* list, int index);
 Element* elmt_pooled(Pool* pool);
-ConstItem elmt_get_const(const Element* elmt, Item key);
+
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
 #ifdef __cplusplus

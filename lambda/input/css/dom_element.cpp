@@ -10,7 +10,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
 #include "../../lambda.h"
-#include "../../lambda-data.hpp"  // For get_type_id, elmt_get_const, and proper type definitions
+#include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
 
 /**
  * Convert HTML tag name string to Lexbor tag ID
@@ -1473,18 +1473,7 @@ const char* dom_comment_get_content(DomComment* comment_node) {
  */
 const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool) {
     if (!elem || !attr_name) return nullptr;
-
-    // Create a string key for the attribute
-    String* key_str = (String*)pool_alloc(pool, sizeof(String) + strlen(attr_name) + 1);
-    if (!key_str) return nullptr;
-
-    key_str->len = strlen(attr_name);
-    strcpy(key_str->chars, attr_name);
-
-    Item key;
-    key.item = s2it(key_str);
-
-    ConstItem attr_value = elmt_get_const(elem, key);
+    ConstItem attr_value = elem->get_attr(attr_name);
     String* string_value = attr_value.string();
     return string_value ? string_value->chars : nullptr;
 }

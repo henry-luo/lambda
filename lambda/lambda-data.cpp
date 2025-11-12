@@ -388,14 +388,14 @@ void list_push(List *list, Item item) {
     // log_item({.list = list}, "list_after_push");
 }
 
-ConstItem list_get_const(const List* list, int index) {
-    log_debug("list_get_const %p, index: %d", list, index);
-    if (!list) { return null_result; }
-    if (index < 0 || index >= list->length) {
+ConstItem List::get(int index) const {
+    log_debug("list_get_const %p, index: %d", this, index);
+    if (!this) { return null_result; }
+    if (index < 0 || index >= this->length) {
         log_error("list_get_const: index out of bounds: %d", index);
         return null_result;
     }
-    return *(ConstItem*)&list->items[index];
+    return this->items[index].to_const();
 }
 
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
@@ -633,9 +633,9 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, char *key, bool *is_
     return null_result;
 }
 
-ConstItem map_get_const(const Map* map, Item key) {
-    log_debug("map_get_const %p", map);
-    if (!map || !key.item) { return null_result; }
+ConstItem Map::get(const Item key) const {
+    log_debug("map_get_const %p", this);
+    if (!this || !key.item) { return null_result; }
 
     bool is_found;
     char *key_str = NULL;
@@ -646,7 +646,7 @@ ConstItem map_get_const(const Map* map, Item key) {
         return null_result;  // only string or symbol keys are supported
     }
     log_debug("map_get_const key: %s", key_str);
-    return _map_get_const((TypeMap*)map->type, map->data, key_str, &is_found);
+    return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found);
 }
 
 Element* elmt_pooled(Pool *pool) {
@@ -656,8 +656,8 @@ Element* elmt_pooled(Pool *pool) {
     return elmt;
 }
 
-extern "C" ConstItem elmt_get_const(const Element* elmt, Item key) {
-    if (!elmt || !key.item) { return null_result;}
+ConstItem Element::get_attr(const Item key) const {
+    if (!this || !key.item) { return null_result;}
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
@@ -665,7 +665,7 @@ extern "C" ConstItem elmt_get_const(const Element* elmt, Item key) {
     } else {
         return null_result;  // only string or symbol keys are supported
     }
-    return _map_get_const((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
+    return _map_get_const((TypeMap*)this->type, this->data, key_str, &is_found);
 }
 
 bool Element::has_attr(const char* attr_name) {
@@ -684,22 +684,3 @@ bool Element::has_attr(const char* attr_name) {
     }
     return false;
 }
-
-/*
-ConstItem Element::get_attr(const char* attr_name) {
-    if (!this || !this->type) return null_result;
-
-    TypeElmt* type = (TypeElmt*)this->type;
-    if (!type->shape) return null_result;
-
-    ShapeEntry* shape = type->shape;
-    // Iterate through the shape to find the attribute
-    while (shape) {
-        if (shape->name && strview_equal(shape->name, attr_name)) {
-            return shape->value;
-        }
-        shape = shape->next;
-    }
-    return null_result;
-}
-*/
