@@ -1,77 +1,78 @@
 #include "validator.hpp"
 
-ValidationResult* validate_against_primitive_type(AstValidator* validator, TypedItem item, Type* type) {
-    log_debug("[AST_VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id);
+ValidationResult* validate_against_primitive_type(AstValidator* validator, ConstItem item, Type* type) {
+    log_debug("[AST_VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id());
     ValidationResult* result = create_validation_result(validator->pool);
     // todo: match literal values
-    if (type->type_id == item.type_id) {
+    if (type->type_id == item.type_id()) {
         result->valid = true;
     } else {
         result->valid = false;
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
                 "Type mismatch: expected %s, got type %d",
-                type_to_string(type), item.type_id);
+                type_to_string(type), item.type_id());
 
         ValidationError* error = create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool);
         if (error) {
             error->expected = type;
-            error->actual = (Item){.pointer = (uint64_t)(uintptr_t)item.pointer, .type_id = item.type_id};
+            error->actual = {.item = item.item};
             add_validation_error(result, error);
         }
     }
     return result;
 }
 
-ValidationResult* validate_against_base_type(AstValidator* validator, TypedItem item, TypeType* type) {
+ValidationResult* validate_against_base_type(AstValidator* validator, ConstItem item, TypeType* type) {
     ValidationResult* result = create_validation_result(validator->pool);
     Type *base_type = type->type;
-    log_debug("[AST_VALIDATOR] Validating base type: expected=%d, actual=%d", base_type->type_id, item.type_id);
+    log_debug("[AST_VALIDATOR] Validating base type: expected=%d, actual=%d", base_type->type_id, item.type_id());
     if (LMD_TYPE_INT <= base_type->type_id && base_type->type_id <= LMD_TYPE_NUMBER) {
         // number promotion - allow int/float/decimal interchangeably
-        if (LMD_TYPE_INT <= item.type_id && item.type_id <= base_type->type_id) {
+        if (LMD_TYPE_INT <= item.type_id() && item.type_id() <= base_type->type_id) {
             result->valid = true;
         }
         else { result->valid = false; }
     }
-    else if (base_type->type_id == item.type_id) {
+    else if (base_type->type_id == item.type_id()) {
         result->valid = true;
     } else {
         result->valid = false;
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
                 "Type mismatch: expected %s, got type %d",
-                type_to_string(base_type), item.type_id);
+                type_to_string(base_type), item.type_id());
 
         ValidationError* error = create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool);
         if (error) {
             error->expected = base_type;
-            error->actual = (Item){.pointer = (uint64_t)(uintptr_t)item.pointer, .type_id = item.type_id};
+            error->actual = (Item){.item = item.item};
             add_validation_error(result, error);
         }
     }
     return result;
 }
 
-ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type) {
+ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem item, TypeArray* array_type) {
     log_debug("Validating array type");
     ValidationResult* result = create_validation_result(validator->pool);
 
     // Check if item is actually an array/list
-    if (item.type_id != LMD_TYPE_ARRAY && item.type_id != LMD_TYPE_LIST && item.type_id != LMD_TYPE_RANGE &&
-        item.type_id != LMD_TYPE_ARRAY_INT && item.type_id != LMD_TYPE_ARRAY_INT64 && item.type_id != LMD_TYPE_ARRAY_FLOAT) {
+    TypeId item_type = item.type_id();
+    if (item_type != LMD_TYPE_ARRAY && item_type != LMD_TYPE_LIST && item_type != LMD_TYPE_RANGE &&
+        item_type != LMD_TYPE_ARRAY_INT && item_type != LMD_TYPE_ARRAY_INT64 && item_type != LMD_TYPE_ARRAY_FLOAT) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
-            "Type mismatch: expected array, got type %d", item.type_id);
+            "Type mismatch: expected array, got type %d", item_type);
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool));
         return result;
     }
 
     // Get the actual array data
-    List* array_data = item.list;
+    const List* array_data = item.list;
     if (!array_data) {
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Array data is null", validator->current_path, validator->pool));
@@ -105,41 +106,46 @@ ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem
             }
             validator->current_path = path;
 
-            // Get array element (convert Item to TypedItem)
-            TypedItem array_item;
-            switch (item.type_id) {
+            // Get array element (convert Item to ConstItem)
+            ConstItem array_item;
+            switch (item_type) {
                 case LMD_TYPE_ARRAY:
-                    array_item = list_get_typed(array_data, i);
+                    array_item = list_get_const(array_data, i);
                     break;
                 case LMD_TYPE_ARRAY_INT: {
                     ArrayInt* array_int = (ArrayInt*)item.array;
-                    array_item = (TypedItem){.type_id = LMD_TYPE_INT, .int_val = array_int->items[i]};
+                    Item item = {.item = i2it(array_int->items[i])};
+                    array_item = *(ConstItem*)&item;
                     break;
                 }
                 case LMD_TYPE_ARRAY_INT64: {
                     ArrayInt64* array_int64 = (ArrayInt64*)item.array;
-                    array_item = (TypedItem){.type_id = LMD_TYPE_INT64, .long_val = array_int64->items[i]};
+                    Item item = {.item = d2it(array_int64->items + i)};
+                    array_item = *(ConstItem*)&item;
                     break;
                 }
-                case LMD_TYPE_ARRAY_FLOAT: {
-                    ArrayFloat* array_float = (ArrayFloat*)item.array;
-                    array_item = (TypedItem){.type_id = LMD_TYPE_FLOAT, .double_val = array_float->items[i]};
+                // todo: handle LMD_TYPE_ARRAY_FLOAT
+                // case LMD_TYPE_ARRAY_FLOAT: {
+                //     ArrayFloat* array_float = (ArrayFloat*)item.array;
+                //     array_item = (ConstItem){.type_id = LMD_TYPE_FLOAT, .double_val = array_float->items[i]};
+                //     break;
+                // }
+                case LMD_TYPE_RANGE: {
+                    Item item = {.item = i2it((int)(item.range->start + i))};
+                    array_item = *(ConstItem*)&item;
                     break;
                 }
-                case LMD_TYPE_RANGE:
-                    array_item = (TypedItem){.type_id = LMD_TYPE_INT, .int_val = (int)(item.range->start + i)};
-                    break;
                 case LMD_TYPE_LIST:
-                    array_item = list_get_typed(array_data, i);
+                    array_item = list_get_const(array_data, i);
                     break;
             }
 
             // Recursively validate element
-            log_debug("validating array item at index %ld, type %d", i, array_item.type_id);
+            log_debug("validating array item at index %ld, type %d", i, array_item.type_id());
             ValidationResult* item_result = validate_against_type(
                 validator, array_item, array_type->nested);
 
-            // Merge element validation results
+            // Merge validation results
             if (item_result && !item_result->valid) {
                 result->valid = false;
                 // Add all element errors to main result
@@ -160,21 +166,21 @@ ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem
     return result;
 }
 
-ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type) {
+ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem item, TypeMap* map_type) {
     ValidationResult* result = create_validation_result(validator->pool);
 
     // Check if item is actually a map
-    if (item.type_id != LMD_TYPE_MAP) {
+    if (item.type_id() != LMD_TYPE_MAP) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
-                "Type mismatch: expected map, got type %d", item.type_id);
+                "Type mismatch: expected map, got type %d", item.type_id());
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool));
         return result;
     }
 
     // Get the actual map data (assuming it's stored as a struct with typed fields)
-    void* map_data = item.pointer;
+    void* map_data = (void*)item.container;
     if (!map_data) {
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Map data is null", validator->current_path, validator->pool));
@@ -200,14 +206,18 @@ ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem i
         // Extract field value from map data using byte offset
         void* field_data = (char*)map_data + shape_entry->byte_offset;
 
-        // Create TypedItem for the field (this is simplified - would need proper type detection)
-        TypedItem field_item;
-        field_item.type_id = shape_entry->type->type_id;
-        field_item.pointer = field_data;
+        // Create ConstItem for the field (this is simplified - would need proper type detection)
+        Item field_item;
+        if (shape_entry->type->type_id <= LMD_TYPE_RANGE) {
+            field_item.item = *(uint64_t*)field_data;
+            field_item._type_id = shape_entry->type->type_id;
+        } else {
+            // todo: handle TYPE_ANY
+            field_item.container = *(Container**)field_data;
+        }
 
         // Recursively validate field
-        ValidationResult* field_result = validate_against_type(
-            validator, field_item, shape_entry->type);
+        ValidationResult* field_result = validate_against_type(validator, *(ConstItem*)&field_item, shape_entry->type);
 
         // Merge field validation results
         if (field_result && !field_result->valid) {
@@ -233,21 +243,21 @@ ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem i
     return result;
 }
 
-ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type) {
+ValidationResult* validate_against_element_type(AstValidator* validator, ConstItem item, TypeElmt* element_type) {
     ValidationResult* result = create_validation_result(validator->pool);
 
     // Check if item is actually an element
-    if (item.type_id != LMD_TYPE_ELEMENT) {
+    if (item.type_id() != LMD_TYPE_ELEMENT) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
-                "Type mismatch: expected element, got type %d", item.type_id);
+                "Type mismatch: expected element, got type %d", item.type_id());
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool));
         return result;
     }
 
     // Get the actual element data
-    Element* element_data = (Element*)item.pointer;
+    const Element* element_data = item.element;
     if (!element_data) {
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Element data is null", validator->current_path, validator->pool));
@@ -277,10 +287,9 @@ ValidationResult* validate_against_element_type(AstValidator* validator, TypedIt
     // TypeElmt inherits from TypeMap, so we can validate attributes as map fields
     TypeMap* map_part = (TypeMap*)element_type;
     if (map_part->shape) {
-        // Create a TypedItem for the element's attribute data
-        TypedItem attr_item;
-        attr_item.type_id = LMD_TYPE_MAP;
-        attr_item.pointer = element_data->data;
+        // Create a ConstItem for the element's attribute data
+        Map map;
+        map.type_id = LMD_TYPE_MAP;  map.data = element_data->data;  map.type = element_data->type;
 
         // Create path segment for attributes
         PathSegment* attr_path = nullptr;
@@ -295,7 +304,7 @@ ValidationResult* validate_against_element_type(AstValidator* validator, TypedIt
         validator->current_path = attr_path;
 
         // Validate attributes using map validation
-        ValidationResult* attr_result = validate_against_map_type(validator, attr_item, map_part);
+        ValidationResult* attr_result = validate_against_map_type(validator, *(ConstItem*)&map, map_part);
 
         // Merge attribute validation results
         if (attr_result && !attr_result->valid) {
@@ -339,7 +348,7 @@ ValidationResult* validate_against_element_type(AstValidator* validator, TypedIt
     return result;
 }
 
-ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count) {
+ValidationResult* validate_against_union_type(AstValidator* validator, ConstItem item, Type** union_types, int type_count) {
     ValidationResult* result = create_validation_result(validator->pool);
 
     if (!union_types || type_count <= 0) {
@@ -409,7 +418,7 @@ ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem
     return result;
 }
 
-ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op) {
+ValidationResult* validate_against_occurrence(AstValidator* validator, ConstItem* items, long item_count, Type* expected_type, Operator occurrence_op) {
     ValidationResult* result = create_validation_result(validator->pool);
 
     if (!expected_type) {
@@ -489,7 +498,7 @@ ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem
 }
 
 /*
-ValidationResult* validate_against_reference(SchemaValidator* validator, TypedItem typed_item, Type* schema, AstValidationContext* ctx) {
+ValidationResult* validate_against_reference(SchemaValidator* validator, ConstItem typed_item, Type* schema, AstValidationContext* ctx) {
     ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Starting reference validation for '%.*s'\n",
     //       (int)schema->name.length, schema->name.str);
     ValidationResult* result = create_validation_result(ctx->pool);
@@ -547,7 +556,7 @@ ValidationResult* validate_against_reference(SchemaValidator* validator, TypedIt
 }
 */
 
-ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type) {
+ValidationResult* validate_against_type(AstValidator* validator, ConstItem item, Type* type) {
     if (!validator || !type) {
         ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
         if (result) {

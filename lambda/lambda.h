@@ -90,7 +90,7 @@ typedef struct Decimal Decimal;
 #ifndef __cplusplus
 typedef uint64_t Item;
 #else
-typedef union Item Item;
+typedef struct Item Item;
 #endif
 
 // a fat string with prefixed length and flags
@@ -292,9 +292,6 @@ double it2d(Item item);
 bool it2b(Item item);
 int it2i(Item item);
 String* it2s(Item item);
-
-// item type access
-#define item_type(item) ((TypeId)(item).type_id)
 
 // generic field access function
 Item fn_index(Item item, Item index);

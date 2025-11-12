@@ -242,8 +242,8 @@ static void process_pdf_object(Input* input, ViewBlock* parent, Item obj_item) {
     }
 
     // Only process maps (type_id 0 means raw pointer to Map or other complex type)
-    if (obj_item.type_id != 0 && actual_type != LMD_TYPE_MAP) {
-        log_debug("Skipping non-map object (type_id=%d, actual_type=%d)", obj_item.type_id, actual_type);
+    if (obj_item._type_id != 0 && actual_type != LMD_TYPE_MAP) {
+        log_debug("Skipping non-map object (type_id=%d, actual_type=%d)", obj_item._type_id, actual_type);
         return;
     }
 
@@ -871,7 +871,7 @@ static void create_text_array_views(Input* input, ViewBlock* parent,
         Item item = text_array->items[i];
 
         // Check if it's a string (text to show)
-        if (item.type_id == LMD_TYPE_STRING) {
+        if (item._type_id == LMD_TYPE_STRING) {
             String* text = (String*)item.item;
             if (text && text->len > 0) {
                 // Temporarily adjust text matrix for this text segment
@@ -888,10 +888,10 @@ static void create_text_array_views(Input* input, ViewBlock* parent,
             }
         }
         // Check if it's a number (kerning adjustment)
-        else if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_FLOAT) {
+        else if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_FLOAT) {
             // Kerning is in 1/1000 of an em, negative values move to the right
             double kerning = 0.0;
-            if (item.type_id == LMD_TYPE_INT) {
+            if (item._type_id == LMD_TYPE_INT) {
                 kerning = -(double)item.int_val / 1000.0 * parser->state.font_size;
             } else {
                 // For float, need to dereference pointer

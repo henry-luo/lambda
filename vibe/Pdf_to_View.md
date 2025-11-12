@@ -34,7 +34,7 @@
 - Line width tracking in graphics state
 - **Multi-page support**: Page tree navigation, page counting, page info extraction
 - **PDF viewer**: Interactive OpenGL viewer with keyboard navigation (cmd_view_pdf.cpp)
-- **Context-free map access**: Using map_get_typed() to avoid Lambda runtime dependency
+- **Context-free map access**: Using map_get_const() to avoid Lambda runtime dependency
 - **PDF compatibility**: Fallback detection for pages without Type fields
 - **Array handling**: Proper page collection with array_append()
 
@@ -1472,7 +1472,7 @@ Handle compressed streams, images, and complex layouts.
 - MediaBox extraction with parent inheritance
 - Content stream extraction per page
 - Integration with pdf_to_view.cpp (`pdf_page_to_view_tree`)
-- **CRITICAL BUG FIX**: Replaced `map_get()` with `map_get_typed()` to avoid Lambda context crashes
+- **CRITICAL BUG FIX**: Replaced `map_get()` with `map_get_const()` to avoid Lambda context crashes
 - **PDF COMPATIBILITY**: Added fallback detection for pages without explicit Type fields
 - **ARRAY HANDLING**: Fixed page collection using `array_append()` instead of manual manipulation
 - **VIEWER INTEGRATION**: Successfully integrated with cmd_view_pdf.cpp (773 lines)
@@ -1565,19 +1565,9 @@ int pdf_get_page_count(Item pdf_root) {
 1. **Lambda Context Crash**:
    - Problem: `map_get()` requires Lambda execution context (`context->num_stack`), but pages.cpp runs in pure C++ without Lambda runtime
    - Symptom: Segmentation fault at `EXC_BAD_ACCESS (code=1, address=0x8)`
-   - Solution: Replaced all `map_get()` calls with `map_get_typed()` which doesn't require context
-   - Impact: Helper function `map_get_str()` completely rewritten to handle `TypedItem` structure
+   - Solution: Replaced all `map_get()` calls with `map_get_const()` which doesn't require context
+   - Impact: Helper function `map_get_str()` completely rewritten to handle `ConstItem` structure
    - Files Modified: `radiant/pdf/pages.cpp` (lines 26-50)
-
-2. **TypedItem Conversion**:
-   - Challenge: `map_get_typed()` returns `TypedItem` structure with named union fields, not generic `Item`
-   - Solution: Implemented type-based conversion switch:
-     - `LMD_TYPE_MAP (18)` → cast map pointer to uint64_t
-     - `LMD_TYPE_ARRAY (17)` → cast array pointer to uint64_t
-     - `LMD_TYPE_STRING (10)` → use `s2it()` macro
-     - `LMD_TYPE_FLOAT/NUMBER (5/6)` → allocate double in pool, use `d2it()`
-     - `LMD_TYPE_NULL (1)` → return `ITEM_NULL`
-   - Impact: All map lookups now work without Lambda context
 
 3. **PDF Compatibility Issue**:
    - Problem: Test PDF (advanced_test.pdf) doesn't include explicit "Type" fields on Page objects

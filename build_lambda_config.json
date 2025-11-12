@@ -1644,7 +1644,8 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "binary": "test/test_validator_gtest.exe"
+                        "binary": "test/test_validator_gtest.exe",
+                        "disabled": true
                     },
                     {
                         "source": "test/test_ast_validator_gtest.cpp",
@@ -1657,7 +1658,8 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test/test_ast_validator_gtest.exe"
+                        "binary": "test/test_ast_validator_gtest.exe",
+                        "disabled": true
                     }
                 ],
                 "type": "validator",

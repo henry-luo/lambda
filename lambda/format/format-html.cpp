@@ -272,24 +272,10 @@ static void format_map(StringBuf* sb, Map* mp, int depth) {
 
 static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode) {
     // Safety check for null pointer
-    if (!sb) {
-        return;
-    }
+    if (!sb) { return; }
+    if (!item.item) { stringbuf_append_str(sb, "null");  return; }
 
-    // Check if item is null (0)
-    if (!item.item) {
-        stringbuf_append_str(sb, "null");
-        return;
-    }
-
-    // Additional safety check for Item structure
-    if (item.type_id == 0 && item.raw_pointer == NULL) {
-        stringbuf_append_str(sb, "null");
-        return;
-    }
-
-    TypeId type = get_type_id(item);
-
+    TypeId type = item.type_id();
     switch (type) {
     case LMD_TYPE_NULL:
         stringbuf_append_str(sb, "null");

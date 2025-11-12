@@ -216,20 +216,19 @@ ItemReader MapReader::get(const char* key) const {
 
             if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
                 value.int_val = *((int64_t*)data_ptr);
-                value.type_id = field_type;
+                value._type_id = field_type;
             } else if (field_type == LMD_TYPE_FLOAT) {
                 // Float is stored inline in the map data, but Item expects a pointer
                 // So we point to the location in the map's data
                 value.pointer = (uint64_t)data_ptr;
-                value.type_id = LMD_TYPE_FLOAT;
+                value._type_id = LMD_TYPE_FLOAT;
             } else if (field_type == LMD_TYPE_BOOL) {
                 value.bool_val = *((bool*)data_ptr);
-                value.type_id = LMD_TYPE_BOOL;
+                value._type_id = LMD_TYPE_BOOL;
             } else {
                 // Pointer type - store as raw pointer
                 void* ptr_val = *((void**)data_ptr);
-                value.raw_pointer = ptr_val;
-                value.type_id = field_type;
+                value.item = *(uint64_t*)&ptr_val;
             }
 
             return ItemReader(value);
@@ -735,7 +734,6 @@ ItemReader AttributeReaderWrapper::getItem(const char* key) const {
 
     const ShapeEntry* field = shape_;
     size_t key_len = strlen(key);
-
     while (field) {
         if (field->name && field->name->length == key_len &&
             strncmp(field->name->str, key, key_len) == 0) {
@@ -749,28 +747,27 @@ ItemReader AttributeReaderWrapper::getItem(const char* key) const {
 
                 switch (field_type) {
                     case LMD_TYPE_STRING:
-                        value.raw_pointer = *(void**)data;
-                        value.type_id = LMD_TYPE_STRING;
+                        value.item = *(uint64_t*)data;
+                        value._type_id = LMD_TYPE_STRING;
                         break;
                     case LMD_TYPE_INT:
                         value.int_val = *(int*)data;
-                        value.type_id = LMD_TYPE_INT;
+                        value._type_id = LMD_TYPE_INT;
                         break;
                     case LMD_TYPE_INT64:
                         value.int_val = *(int64_t*)data;
-                        value.type_id = LMD_TYPE_INT64;
+                        value._type_id = LMD_TYPE_INT64;
                         break;
                     case LMD_TYPE_FLOAT:
-                        value.raw_pointer = *(void**)data;  // Float is stored as pointer to double
-                        value.type_id = LMD_TYPE_FLOAT;
+                        value.item = *(uint64_t*)data;  // Float is stored as pointer to double
+                        value._type_id = LMD_TYPE_FLOAT;
                         break;
                     case LMD_TYPE_BOOL:
                         value.bool_val = *(bool*)data;
-                        value.type_id = LMD_TYPE_BOOL;
+                        value._type_id = LMD_TYPE_BOOL;
                         break;
                     default:
-                        value.raw_pointer = *(void**)data;
-                        value.type_id = field_type;
+                        value.item = *(uint64_t*)data;
                         break;
                 }
 

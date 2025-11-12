@@ -116,11 +116,11 @@ DomElement* lambda_element_to_dom_element(Element* elem, Pool* pool) {
 
         // Handle both typed and raw pointer items
         void* child_ptr = nullptr;
-        if (child_item.type_id == LMD_TYPE_ELEMENT) {
+        if (child_item.type_id() == LMD_TYPE_ELEMENT) {
             child_ptr = (void*)child_item.pointer;
-        } else if (child_item.type_id == LMD_TYPE_RAW_POINTER) {
+        } else if (child_item.type_id() == LMD_TYPE_RAW_POINTER) {
             // Raw pointer - need to check what it points to
-            child_ptr = child_item.raw_pointer;
+            child_ptr = child_item.container;
         }
 
         if (child_ptr) {
@@ -162,7 +162,7 @@ std::string extract_css_from_html(Element* root) {
         List* list = (List*)root;
         for (int64_t i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
-            if (child_item.type_id == LMD_TYPE_STRING) {
+            if (child_item.type_id() == LMD_TYPE_STRING) {
                 String* text = (String*)child_item.pointer;
                 css_content += text->chars;
             }
@@ -177,11 +177,11 @@ std::string extract_css_from_html(Element* root) {
 
         // Handle both typed and raw pointer items
         Element* child_elem = nullptr;
-        if (child_item.type_id == LMD_TYPE_ELEMENT) {
+        if (child_item.type_id() == LMD_TYPE_ELEMENT) {
             child_elem = (Element*)child_item.pointer;
-        } else if (child_item.type_id == LMD_TYPE_RAW_POINTER && child_item.raw_pointer) {
+        } else if (child_item.type_id() == LMD_TYPE_RAW_POINTER && child_item.container) {
             // Check if it's an Element
-            Element* potential_elem = (Element*)child_item.raw_pointer;
+            Element* potential_elem = (Element*)child_item.container;
             if (potential_elem->type_id == LMD_TYPE_ELEMENT) {
                 child_elem = potential_elem;
             }
@@ -323,10 +323,10 @@ protected:
                 Item item = potential_list->items[i];
 
                 void* item_ptr = nullptr;
-                if (item.type_id == LMD_TYPE_ELEMENT) {
+                if (item.type_id() == LMD_TYPE_ELEMENT) {
                     item_ptr = (void*)item.pointer;
-                } else if (item.type_id == LMD_TYPE_RAW_POINTER) {
-                    item_ptr = item.raw_pointer;
+                } else if (item.type_id() == LMD_TYPE_RAW_POINTER) {
+                    item_ptr = item.container;
                 }
 
                 if (item_ptr) {
@@ -740,10 +740,10 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
         List* root_list = (List*)root_elem;
         if (root_list->length > 0) {
             Item first_item = root_list->items[0];
-            printf("DEBUG: First item type_id=%d\n", first_item.type_id);
-            if (first_item.type_id == LMD_TYPE_ELEMENT || first_item.type_id == LMD_TYPE_RAW_POINTER) {
-                void* elem_ptr = (first_item.type_id == LMD_TYPE_ELEMENT) ?
-                                 (void*)first_item.pointer : first_item.raw_pointer;
+            printf("DEBUG: First item type_id=%d\n", first_item.type_id());
+            if (first_item.type_id() == LMD_TYPE_ELEMENT || first_item.type_id() == LMD_TYPE_RAW_POINTER) {
+                void* elem_ptr = (first_item.type_id() == LMD_TYPE_ELEMENT) ?
+                                 (void*)first_item.pointer : first_item.container;
                 Element* potential_elem = (Element*)elem_ptr;
                 if (potential_elem && potential_elem->type_id == LMD_TYPE_ELEMENT) {
                     root_elem = potential_elem;

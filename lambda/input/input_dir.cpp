@@ -97,9 +97,7 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
         Element* elmt = create_entry_element(input, entry->d_name, full_path, &st, is_dir, is_link);
         if (!elmt) continue;
         // Add as child content, not attribute
-        Item elmt_item = {0};
-        elmt_item.type_id = LMD_TYPE_ELEMENT;
-        elmt_item.element = elmt;
+        Item elmt_item = {.element = elmt};
         list_push((List*)parent, elmt_item);
         ((TypeElmt*)parent->type)->content_length++;
         // Recurse if directory

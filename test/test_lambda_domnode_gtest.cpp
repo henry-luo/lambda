@@ -72,7 +72,7 @@ protected:
         if (root_list->type_id == LMD_TYPE_LIST) {
             for (int64_t i = 0; i < root_list->length; i++) {
                 Item item = root_list->items[i];
-                if (item.type_id == LMD_TYPE_ELEMENT) {
+                if (item.type_id() == LMD_TYPE_ELEMENT) {
                     Element* elem = (Element*)item.pointer;
                     TypeElmt* type = (TypeElmt*)elem->type;
 

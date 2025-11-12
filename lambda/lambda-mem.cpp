@@ -3,17 +3,6 @@
 
 extern __thread EvalContext* context;
 
-int dataowner_compare(const void *a, const void *b, void *udata) {
-    const DataOwner *da = (const DataOwner *)a;
-    const DataOwner *db = (const DataOwner *)b;
-    return da->data == db->data;
-}
-
-uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const DataOwner *dataowner = (const DataOwner *)item;
-    return hashmap_xxhash3(dataowner->data, sizeof(dataowner->data), seed0, seed1);
-}
-
 void heap_init() {
     log_debug("heap init: %p", context);
     context->heap = (Heap*)calloc(1, sizeof(Heap));
@@ -98,9 +87,9 @@ void print_heap_entries() {
     for (int i = 0; i < entries->length; i++) {
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
-        Item itm = {.raw_pointer = data};
-        log_debug("heap entry index: %d, type: %d, data: %p", i, itm.type_id, data);
-        if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+        Item itm = *(Item*)&data;
+        log_debug("heap entry index: %d, type: %d, data: %p", i, itm._type_id, data);
+        if (itm._type_id == LMD_TYPE_RAW_POINTER) {
             TypeId type_id = *((uint8_t*)data);
             log_debug("heap entry data: type: %s", type_info[type_id].name);
             if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_ELEMENT) {
@@ -117,12 +106,12 @@ void check_memory_leak() {
     ArrayList *entries = context->heap->entries;
     log_debug("check heap entries: %d", entries->length);
     for (int i = 0; i < entries->length; i++) {
-        void *data = entries->data[i];
-        Item itm = {.raw_pointer = data};
-        log_debug("heap entry index: %d, type: %s, data: %p", i, type_info[itm.type_id].name, data);
+        void* data = entries->data[i];
+        Item itm = *(Item*)&data;
+        log_debug("heap entry index: %d, type: %s, data: %p", i, type_info[itm._type_id].name, data);
         if (!data) { continue; }  // skip NULL entries
-        if (itm.type_id == LMD_TYPE_RAW_POINTER) {
-            TypeId type_id = *((uint8_t*)itm.raw_pointer);
+        if (itm._type_id == LMD_TYPE_RAW_POINTER) {
+            TypeId type_id = *((uint8_t*)itm.item);
             log_debug("heap entry data: type: %s", type_info[type_id].name);
             if (type_id == LMD_TYPE_LIST) {
                 List *list = (List*)data;
@@ -230,7 +219,7 @@ void free_container(Container* cont, bool clear_entry) {
             // free array items
             log_debug("freeing array items, length=%ld", arr->length);
             for (int j = 0; j < arr->length; j++) {
-                log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id, arr->items[j].pointer);
+                log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id(), arr->items[j].pointer);
                 free_item(arr->items[j], clear_entry);
             }
             if (arr->items) {
@@ -308,20 +297,19 @@ void free_container(Container* cont, bool clear_entry) {
 }
 
 void free_item(Item item, bool clear_entry) {
-    if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL ||
-        item.type_id == LMD_TYPE_BINARY) {
+    if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL || item._type_id == LMD_TYPE_BINARY) {
         String *str = (String*)item.pointer;
         if (str && !str->ref_cnt) {
             pool_free(context->heap->pool, str);
         }
     }
-    else if (item.type_id == LMD_TYPE_DECIMAL) {
+    else if (item._type_id == LMD_TYPE_DECIMAL) {
         Decimal *dec = (Decimal*)item.pointer;
         if (dec && !dec->ref_cnt) {
             pool_free(context->heap->pool, dec);
         }
     }
-    else if (item.type_id == LMD_TYPE_RAW_POINTER) {
+    else if (item._type_id == LMD_TYPE_RAW_POINTER) {
         Container* container = item.container;
         if (container) {
             // delink with the container
@@ -334,7 +322,7 @@ void free_item(Item item, bool clear_entry) {
         // remove the entry from heap entries
         for (int i = entries->length - 1; i >= 0; i--) {
             void *data = entries->data[i];
-            if (data == item.raw_pointer) {
+            if (data == (void*)item.item) {
                 entries->data[i] = NULL;  break;
             }
         }
@@ -345,7 +333,7 @@ void frame_start() {
     size_t stack_pos = context->num_stack->total_length;
     log_debug("entering frame_start with num stack position: %zu", stack_pos);
     arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
-    arraylist_append(context->heap->entries, HEAP_ENTRY_START.raw_pointer);
+    arraylist_append(context->heap->entries, (void*) HEAP_ENTRY_START.item);
 }
 
 void frame_end() {
@@ -365,24 +353,24 @@ void frame_end() {
         log_debug("free heap entry index: %d", i);
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
-        Item itm = {.raw_pointer = data};
-        if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
-            itm.type_id == LMD_TYPE_BINARY) {
+        Item itm = {.item = *(uint64_t*)&data};
+        if (itm._type_id == LMD_TYPE_STRING || itm._type_id == LMD_TYPE_SYMBOL ||
+            itm._type_id == LMD_TYPE_BINARY) {
             String *str = (String*)itm.pointer;
             if (str && !str->ref_cnt) {
                 log_debug("freeing heap string: %s", str->chars);
                 pool_free(context->heap->pool, (void*)str);
             }
         }
-        else if (itm.type_id == LMD_TYPE_DECIMAL) {
+        else if (itm._type_id == LMD_TYPE_DECIMAL) {
             Decimal *dec = (Decimal*)itm.pointer;
             if (dec && !dec->ref_cnt) {
                 log_debug("freeing heap decimal");
                 pool_free(context->heap->pool, (void*)dec);
             }
         }
-        else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
-            Container* cont = (Container*)itm.raw_pointer;
+        else if (itm._type_id == LMD_TYPE_RAW_POINTER) {
+            Container* cont = itm.container;
             if (cont) {
                 if (cont->ref_cnt > 0) {
                     // clear the heap entry, and keep the container to be freed by ref_cnt
@@ -391,7 +379,7 @@ void frame_end() {
                 else free_container(cont, false);
             }
         }
-        else if (itm.type_id == LMD_CONTAINER_HEAP_START) {
+        else if (itm._type_id == LMD_CONTAINER_HEAP_START) {
             log_debug("reached container start: %d", i);
             size_t stack_pos = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
             num_stack_reset_to_index((num_stack_t*)context->num_stack, stack_pos);

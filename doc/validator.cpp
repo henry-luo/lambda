@@ -22,7 +22,6 @@
  }
 
  // Runtime function declarations
- // Note: Removed typeditem_to_item() - now working directly with TypedItem
 
  // ==================== Hashmap Entry Structures ====================
 
@@ -208,7 +207,7 @@
 
  // ==================== Validation Engine ====================
 
- ValidationResult* validate_item(SchemaValidator* validator, TypedItem typed_item,
+ ValidationResult* validate_item(SchemaValidator* validator, ConstItem typed_item,
                                  TypeSchema* schema, ValidationContext* context) {
      // ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: -1);
 
@@ -311,7 +310,7 @@
 
  // ==================== Primitive Type Validation ====================
 
- ValidationResult* validate_primitive(TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_primitive(ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_primitive: Starting primitive validation\n");
      ValidationResult* result = create_validation_result(ctx->pool);
 
@@ -349,7 +348,7 @@
              VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->path, ctx->pool);
          if (error) {
              error->expected = schema;
-             // Convert TypedItem back to Item for error reporting
+             // Convert ConstItem back to Item for error reporting
              Item actual_item;
              actual_item.raw_pointer = typed_item.pointer;
              error->actual = actual_item;
@@ -370,7 +369,7 @@
                      VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->path, ctx->pool);
                  if (error) {
                      error->expected = schema;
-                     // Convert TypedItem back to Item for error reporting
+                     // Convert ConstItem back to Item for error reporting
                      Item actual_item;
                      actual_item.raw_pointer = typed_item.pointer;
                      error->actual = actual_item;
@@ -386,7 +385,7 @@
 
  // ==================== Array Validation ====================
 
- ValidationResult* validate_array(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_array(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      ValidationResult* result = create_validation_result(ctx->pool);
 
      if (schema->schema_type != LMD_SCHEMA_ARRAY) {
@@ -418,7 +417,7 @@
      // Validate each element
      if (array_schema->element_type) {
          for (long i = 0; i < list->length; i++) {
-             TypedItem element_typed = list_get_typed(list, i);
+             ConstItem element_typed = list_get_const(list, i);
 
              // Create path for this element
              PathSegment* element_path = path_push_index(ctx->path, i, ctx->pool);
@@ -439,7 +438,7 @@
 
  // ==================== Map Validation ====================
 
- ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_map(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      // //printf("[TRACE] validate_map: depth=%d, entering\n", ctx->current_depth);
      // //fflush(stdout);
 
@@ -456,7 +455,7 @@
          return result;
      }
 
-     TypeId actual_type = typed_item.type_id;
+     TypeId actual_type = typed_item.type_id();
      //printf("[TRACE] validate_map: actual_type=%d\n", actual_type);
      //fflush(stdout);
      ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: %d\n", actual_type);
@@ -481,7 +480,7 @@
          return result;
      }
 
-     Map* map = (Map*)typed_item.pointer;
+     const Map* map = typed_item.map;
 
      // Safety check: ensure map pointer is valid
      if (!map) {
@@ -532,13 +531,11 @@
              break;
          }
 
-         TypedItem field_value_typed;
-         Item field_value;
+         ConstItem field_value;
          if (map->type_id == LMD_TYPE_ELEMENT) {
              // For Elements, first try to get from attributes
              Element* element = (Element*)map;
-             field_value_typed = elmt_get_typed(element, field_key);
-             field_value.item = (uint64_t)field_value_typed.pointer;
+             field_value = elmt_get_const(element, field_key);
 
              // If attribute not found, check if this field matches a child element with text content
              if (field_value.item == ITEM_NULL) {
@@ -587,20 +584,17 @@
                  }
              }
          } else {
-             // For Maps, use map_get_typed with safety checks
-             //printf("[TRACE] validate_map: calling map_get_typed for map\n");
+             // For Maps, use map_get_const with safety checks
+             //printf("[TRACE] validate_map: calling map_get_const for map\n");
              //fflush(stdout);
 
              // Safety check: ensure map and field_key are valid
              if (!map || !map->type || !map->data || field_key.item == ITEM_NULL) {
                  //printf("[TRACE] validate_map: SAFETY CHECK FAILED - invalid map or key\n");
                  //fflush(stdout);
-                 field_value.item = ITEM_NULL;
-                 field_value_typed.type_id = LMD_TYPE_NULL;
-                 field_value_typed.pointer = nullptr;
+                 field_value = *(ConstItem*)&ItemNull;
              } else {
-                 field_value_typed = map_get_typed(map, field_key);
-                 field_value.item = (uint64_t)field_value_typed.pointer;
+                 field_value = map_get_const(map, field_key);
              }
          }
 
@@ -707,7 +701,7 @@
 
  // ==================== Element Validation ====================
 
- ValidationResult* validate_element(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_element(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      printf("[TRACE] validate_element: depth=%d, entering\n", ctx->current_depth);
      fflush(stdout);
 
@@ -764,10 +758,10 @@
 
              if (actual_element) {
                  printf("[TRACE] validate_element: Found actual XML element, validating it instead\n");
-                 // Create a new TypedItem for the actual element and validate it
+                 // Create a new ConstItem for the actual element and validate it
                  // Temporarily increment depth to prevent recursive unwrapping
                  ctx->current_depth++;
-                 TypedItem actual_typed;
+                 ConstItem actual_typed;
                  actual_typed.type_id = LMD_TYPE_ELEMENT;
                  actual_typed.pointer = actual_element;
                  ValidationResult* unwrapped_result = validate_element(validator, actual_typed, schema, ctx);
@@ -809,7 +803,7 @@
          while (required_attr) {
              // Check if required attribute exists
              Item attr_key = {.item = s2it(string_from_strview(required_attr->name, ctx->pool))};
-             TypedItem attr_value_typed = elmt_get_typed(element, attr_key);
+             ConstItem attr_value_typed = elmt_get_const(element, attr_key);
              Item attr_value;
              attr_value.item = (uint64_t)attr_value_typed.pointer;
 
@@ -884,7 +878,7 @@
                  ValidationContext content_ctx = *ctx;
                  content_ctx.path = content_path;
 
-                 TypedItem content_typed;
+                 ConstItem content_typed;
                  content_typed.type_id = get_type_id(content_item);
                  content_typed.pointer = content_item.raw_pointer;
                  ValidationResult* content_result = validate_item(
@@ -936,7 +930,7 @@
 
  // ==================== Union Validation ====================
 
- ValidationResult* validate_union(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_union(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      //printf("[TRACE] validate_union: depth=%d, entering\n", ctx->current_depth);
      //fflush(stdout);
 
@@ -998,7 +992,7 @@
 
  // ==================== Occurrence Validation ====================
 
- ValidationResult* validate_occurrence(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_occurrence(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      ValidationResult* result = create_validation_result(ctx->pool);
 
      if (schema->schema_type != LMD_SCHEMA_OCCURRENCE) {
@@ -1050,7 +1044,7 @@
 
                      // Validate each element against the base type
                      for (long i = 0; i < list->length; i++) {
-                         TypedItem element_typed = list_get_typed(list, i);
+                         ConstItem element_typed = list_get_const(list, i);
 
                          // Create path for this element
                          PathSegment* element_path = path_push_index(ctx->path, i, ctx->pool);
@@ -1079,7 +1073,7 @@
 
  // ==================== Reference Validation ====================
 
- ValidationResult* validate_reference(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_reference(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Starting reference validation for '%.*s'\n",
      //       (int)schema->name.length, schema->name.str);
      ValidationResult* result = create_validation_result(ctx->pool);
@@ -1152,7 +1146,7 @@
 
  // ==================== Literal Validation ====================
 
- ValidationResult* validate_literal(TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
+ ValidationResult* validate_literal(ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx) {
      ValidationResult* result = create_validation_result(ctx->pool);
 
      if (schema->schema_type != LMD_SCHEMA_LITERAL) {
@@ -1164,7 +1158,7 @@
 
      SchemaLiteral* literal_schema = (SchemaLiteral*)schema->schema_data;
 
-     // Compare items directly - need to implement proper comparison for TypedItem
+     // Compare items directly - need to implement proper comparison for ConstItem
      // For now, compare pointers as a basic check
      if (typed_item.pointer != literal_schema->literal_value.raw_pointer) {
          add_validation_error(result, create_validation_error(
@@ -1710,14 +1704,14 @@
          if (!fallback_schema) {
              return nullptr;
          }
-         TypedItem document_typed;
+         ConstItem document_typed;
          document_typed.type_id = get_type_id(document);
          document_typed.pointer = document.raw_pointer;
          return validate_item(validator, document_typed, fallback_schema, validator->context);
      }
 
      // Use the actual loaded schema for validation
-     TypedItem document_typed;
+     ConstItem document_typed;
      document_typed.type_id = get_type_id(document);
      document_typed.pointer = document.raw_pointer;
 

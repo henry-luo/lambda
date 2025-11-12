@@ -5,7 +5,7 @@
  * @brief Lambda Schema Validator - C/C++ Implementation
  * @author Henry Luo
  * @license MIT
- * 
+ *
  * Schema validation library for Lambda data structures.
  * Integrates with existing Lambda transpiler infrastructure.
  */
@@ -25,7 +25,7 @@ extern "C" {
 enum SchemaTypeId {
     LMD_SCHEMA_TYPE_START = LMD_TYPE_ERROR + 1,
     LMD_SCHEMA_PRIMITIVE,     // Built-in types (int, string, etc.)
-    LMD_SCHEMA_UNION,         // Type1 | Type2 
+    LMD_SCHEMA_UNION,         // Type1 | Type2
     LMD_SCHEMA_INTERSECTION,  // Type1 & Type2
     LMD_SCHEMA_ARRAY,         // [Type*] or [Type+] etc.
     LMD_SCHEMA_MAP,           // {field: Type, ...}
@@ -76,7 +76,7 @@ typedef struct SchemaMap {
 typedef struct SchemaElement {
     StrView tag;               // Element tag name
     SchemaMapField* attributes; // Element attributes
-    TypeSchema** content_types; // Content type array  
+    TypeSchema** content_types; // Content type array
     int content_count;         // Number of content types
     bool is_open;              // Allows additional attributes
 } SchemaElement;
@@ -166,7 +166,7 @@ typedef struct ValidationOptions {
 typedef struct ValidationContext ValidationContext;
 
 // Custom validator function type
-typedef ValidationResult* (*CustomValidatorFunc)(TypedItem typed_item, TypeSchema* schema, 
+typedef ValidationResult* (*CustomValidatorFunc)(ConstItem typed_item, TypeSchema* schema,
                                                 ValidationContext* context);
 
 // Custom validator registration
@@ -284,28 +284,28 @@ typedef struct SchemaValidator {
 // Validator lifecycle
 SchemaValidator* schema_validator_create(VariableMemPool* pool);
 void schema_validator_destroy(SchemaValidator* validator);
-int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source, 
+int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source,
                                 const char* schema_name);
 int schema_validator_load_schema_file(SchemaValidator* validator, const char* schema_path);
 
 // Validation functions
-ValidationResult* validate_item(SchemaValidator* validator, TypedItem typed_item, 
+ValidationResult* validate_item(SchemaValidator* validator, ConstItem typed_item,
                                TypeSchema* schema, ValidationContext* context);
-ValidationResult* validate_document(SchemaValidator* validator, Item document, 
+ValidationResult* validate_document(SchemaValidator* validator, Item document,
                                    const char* schema_name);
 ValidationResult* validate_with_options(SchemaValidator* validator, Item item,
-                                       const char* schema_name, 
+                                       const char* schema_name,
                                        ValidationOptions* options);
 
 // Type-specific validation functions
-ValidationResult* validate_primitive(TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_union(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_array(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_element(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_occurrence(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_reference(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_literal(TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_primitive(ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_union(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_array(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_map(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_element(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_occurrence(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_reference(SchemaValidator* validator, ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_literal(ConstItem typed_item, TypeSchema* schema, ValidationContext* ctx);
 
 // Custom validator registration
 void register_custom_validator(SchemaValidator* validator, const char* name,
@@ -355,7 +355,7 @@ void register_doc_schema_validators(SchemaValidator* validator);
 // Citation validation helpers
 List* find_citations_in_element(Element* element, VariableMemPool* pool);
 List* extract_references_from_meta(Item meta, VariableMemPool* pool);
-ValidationResult* validate_single_citation(Item citation, List* references, 
+ValidationResult* validate_single_citation(Item citation, List* references,
                                           ValidationContext* context);
 
 // Header hierarchy helpers
@@ -390,7 +390,7 @@ typedef struct LambdaValidationResult {
 } LambdaValidationResult;
 
 // Validation interface
-LambdaValidationResult* lambda_validate_file(LambdaValidator* validator, 
+LambdaValidationResult* lambda_validate_file(LambdaValidator* validator,
                                            const char* document_file,
                                            const char* schema_name);
 LambdaValidationResult* lambda_validate_string(LambdaValidator* validator,
@@ -408,7 +408,7 @@ typedef struct LambdaValidationOptions {
     char** disabled_rules;        // Null-terminated array
 } LambdaValidationOptions;
 
-void lambda_validator_set_options(LambdaValidator* validator, 
+void lambda_validator_set_options(LambdaValidator* validator,
                                  LambdaValidationOptions* options);
 LambdaValidationOptions* lambda_validator_get_options(LambdaValidator* validator);
 
@@ -476,9 +476,3 @@ SchemaMapField* find_map_field_by_name(SchemaMap* map_schema, StrView field_name
  * @return List of suggested field names
  */
 List* generate_field_name_suggestions(const char* field_name, SchemaMap* map_schema, VariableMemPool* pool);
-
-
-
-
-
-

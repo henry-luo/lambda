@@ -6,36 +6,7 @@ extern __thread EvalContext* context;
 void array_set(Array* arr, int index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
-
-Item typeditem_to_item(TypedItem *titem) {
-    switch (titem->type_id) {
-    case LMD_TYPE_NULL:  return ItemNull;
-    case LMD_TYPE_BOOL:
-        return {.item = b2it(titem->bool_val)};
-    case LMD_TYPE_INT:
-        return {.item = i2it(titem->int_val)};
-    case LMD_TYPE_INT64:
-        return push_l(titem->long_val);
-    case LMD_TYPE_FLOAT:
-        return push_d(titem->double_val);
-    case LMD_TYPE_DTIME:
-        return push_k(titem->datetime_val);
-    case LMD_TYPE_DECIMAL:
-        return {.item = c2it(titem->decimal)};
-    case LMD_TYPE_STRING:
-        return {.item = s2it(titem->string)};
-    case LMD_TYPE_SYMBOL:
-        return {.item = y2it(titem->string)};
-    case LMD_TYPE_BINARY:
-        return {.item = x2it(titem->string)};
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
-        return {.raw_pointer = titem->pointer};
-    default:
-        log_error("map_get ANY type is UNKNOWN: %d", titem->type_id);
-        return ItemError;
-    }
-}
+Item typeditem_to_item(TypedItem *titem);
 
 Array* array() {
     Array *arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
@@ -68,7 +39,7 @@ Item array_get(Array *array, int index) {
         return ItemNull;  // return null instead of error
     }
     Item item = array->items[index];
-    switch (item.type_id) {
+    switch (item._type_id) {
     case LMD_TYPE_INT64: {
         int64_t lval = *(int64_t*)item.pointer;
         return push_l(lval); // need to push to num_stack, as long values are not ref counted
@@ -82,7 +53,7 @@ Item array_get(Array *array, int index) {
         return push_k(dtval); // need to push to num_stack, as datetime values are not ref counted
     }
     default:
-        log_debug("array_get returning: type: %d, item: %p", item.type_id, item.raw_pointer);
+        log_debug("array_get returning: type: %d, item: %p", item._type_id, item.item);
         return item;
     }
 }
@@ -127,7 +98,7 @@ Item array_int_get(ArrayInt *array, int index) {
     }
     int val = array->items[index];
     Item item = (Item){.int_val = val, ._type = LMD_TYPE_INT};
-    log_debug("array_int_get returning: type: %d, int_val: %d", item.type_id, item.int_val);
+    log_debug("array_int_get returning: type: %d, int_val: %d", item._type_id, item.int_val);
     return item;
 }
 
@@ -308,7 +279,7 @@ Item list_fill(List *list, int count, ...) {
 Item list_get(List *list, int index) {
     if (index < 0 || index >= list->length) { return ItemNull; }
     Item item = list->items[index];
-    switch (item.type_id) {
+    switch (item._type_id) {
     case LMD_TYPE_INT64: {
         int64_t lval = *(int64_t*)item.pointer;
         return push_l(lval);
@@ -403,10 +374,12 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 Container* container = *(Container**)field_ptr;
                 log_debug("map_get container: %p, type_id: %d", container, container->type_id);
                 // assert(container->type_id == type_id);
-                return {.raw_pointer = container};
+                return {.container = container};
             }
-            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
-                return {.raw_pointer = *(void**)field_ptr};
+            case LMD_TYPE_TYPE:
+                return {.type = (Type*)field_ptr};
+            case LMD_TYPE_FUNC:
+                return {.function = (Function*)field_ptr};
             case LMD_TYPE_ANY: {
                 log_debug("map_get ANY type, pointer: %p", field_ptr);
                 return typeditem_to_item((TypedItem*)field_ptr);
@@ -428,10 +401,10 @@ Item map_get(Map* map, Item key) {
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
-    if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
+    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
         key_str = ((String*)key.pointer)->chars;
     } else {
-        log_error("map_get: key must be string or symbol, got type %d", key.type_id);
+        log_error("map_get: key must be string or symbol, got type %d", key._type_id);
         return ItemNull;  // only string or symbol keys are supported
     }
     log_debug("map_get key:'%s'", key_str);
@@ -472,7 +445,7 @@ Item elmt_get(Element* elmt, Item key) {
     if (!elmt || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
-    if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
+    if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
         key_str = ((String*)key.pointer)->chars;
     } else {
         return ItemNull;  // only string or symbol keys are supported

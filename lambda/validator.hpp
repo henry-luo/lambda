@@ -155,12 +155,12 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
 /**
  * Validate a typed item against a type name
  */
-ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name);
+ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item, const char* type_name);
 
 /**
  * Validate a typed item against a specific Type*
  */
-ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type);
+ValidationResult* ast_validator_validate_type(AstValidator* validator, ConstItem item, Type* type);
 
 // ==================== Type Extraction ====================
 
@@ -179,37 +179,37 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name);
 /**
  * Main validation dispatcher
  */
-ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type);
+ValidationResult* validate_against_type(AstValidator* validator, ConstItem item, Type* type);
 
 /**
  * Validate against primitive type
  */
-ValidationResult* validate_against_primitive_type(TypedItem item, Type* type);
+ValidationResult* validate_against_primitive_type(ConstItem item, Type* type);
 
 /**
  * Validate against array type
  */
-ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type);
+ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem item, TypeArray* array_type);
 
 /**
  * Validate against map type
  */
-ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type);
+ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem item, TypeMap* map_type);
 
 /**
  * Validate against element type
  */
-ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type);
+ValidationResult* validate_against_element_type(AstValidator* validator, ConstItem item, TypeElmt* element_type);
 
 /**
  * Validate against union type (multiple valid types)
  */
-ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count);
+ValidationResult* validate_against_union_type(AstValidator* validator, ConstItem item, Type** union_types, int type_count);
 
 /**
  * Validate occurrence constraints (?, *, +, min/max)
  */
-ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op);
+ValidationResult* validate_against_occurrence(AstValidator* validator, ConstItem* items, long item_count, Type* expected_type, Operator occurrence_op);
 
 // ==================== Error Handling ====================
 
@@ -277,9 +277,9 @@ void validation_result_destroy(ValidationResult* result);
 // ==================== Utility Functions ====================
 
 /**
- * Check if TypedItem is compatible with Type*
+ * Check if ConstItem is compatible with Type*
  */
-bool is_item_compatible_with_type(TypedItem item, Type* type);
+bool is_item_compatible_with_type(ConstItem item, Type* type);
 
 /**
  * Get string representation of Type*

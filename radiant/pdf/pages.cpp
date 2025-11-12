@@ -28,32 +28,12 @@ static Item map_get_str(Map* map, const char* key_str, Pool* pool) {
     String* key = create_string_key(pool, key_str);
     if (!key) return {.item = ITEM_NULL};
     Item key_item = {.item = s2it(key)};
-    TypedItem typed_result = map_get_typed(map, key_item);
+    ConstItem result = map_get_const(map, key_item);
+    fprintf(stderr, "DEBUG: map_get_str key='%s', type_id=%d\n", key_str, result.type_id());
+    return *(Item*)&result;
+}
 
-    fprintf(stderr, "DEBUG: map_get_str key='%s', type_id=%d\n", key_str, typed_result.type_id);
-
-    // Convert TypedItem back to Item
-    if (typed_result.type_id == LMD_TYPE_MAP) {
-        return {.item = (uint64_t)typed_result.map};
-    } else if (typed_result.type_id == LMD_TYPE_ARRAY) {
-        return {.item = (uint64_t)typed_result.array};
-    } else if (typed_result.type_id == LMD_TYPE_STRING) {
-        return {.item = s2it(typed_result.string)};
-    } else if (typed_result.type_id == LMD_TYPE_FLOAT || typed_result.type_id == LMD_TYPE_NUMBER) {
-        // Need to allocate space for the double value
-        double* dptr = (double*)pool_calloc(pool, sizeof(double));
-        if (dptr) {
-            *dptr = typed_result.double_val;
-            return {.item = d2it(dptr)};
-        }
-        return {.item = ITEM_NULL};
-    } else if (typed_result.type_id == LMD_TYPE_NULL) {
-        return {.item = ITEM_NULL};
-    } else {
-        // For other types, use the pointer field
-        return {.item = (uint64_t)typed_result.pointer};
-    }
-}/**
+/**
  * Resolve an indirect reference to an actual object
  */
 Item pdf_resolve_reference(Map* pdf_data, Item ref_obj, Pool* pool) {

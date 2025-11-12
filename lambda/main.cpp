@@ -248,6 +248,7 @@ void run_assertions() {
     static_assert(sizeof(int32_t) == 4, "int32_t size == 4 bytes");
     static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
     static_assert(sizeof(Item) == 8, "Item size == 8 bytes");
+    static_assert(sizeof(ConstItem) == 8, "ConstItem size == 8 bytes");
     static_assert(sizeof(TypedItem) == 9, "TypedItem size == 9 bytes");
     static_assert(sizeof(DateTime) == 8, "DateTime size == 8 bytes");
 #else
@@ -261,7 +262,7 @@ void run_assertions() {
     _Static_assert(sizeof(Item) == 8, "Item size == 8 bytes");
 #endif
     Item itm = {.item = ITEM_ERROR};
-    assert(itm.type_id == LMD_TYPE_ERROR);
+    assert(itm._type_id == LMD_TYPE_ERROR);
     assert(1.0/0.0 == INFINITY);
     assert(-1.0/0.0 == -INFINITY);
 }
@@ -405,14 +406,14 @@ int exec_convert(int argc, char* argv[]) {
         }
 
         // Check if parsing was successful
-        if (input->root.type_id == LMD_TYPE_ERROR) {
+        if (input->root.type_id() == LMD_TYPE_ERROR) {
             printf("Error: Failed to parse input file\n");
             pool_destroy(temp_pool);
             return 1;
         }
 
         printf("Successfully parsed input file\n");
-        printf("DEBUG: input->root type_id: %d, pointer: %p\n", input->root.type_id, input->root.pointer);
+        printf("DEBUG: input->root type_id: %d, pointer: %p\n", input->root.type_id(), input->root.pointer);
 
         // Capture the effective type by checking if LaTeX parsing was used
         bool is_latex_input = false;

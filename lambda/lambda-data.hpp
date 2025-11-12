@@ -101,12 +101,6 @@ extern TypeInfo type_info[];
 // const_index, type_index - 32-bit, there should not be more than 4G types and consts in a single Lambda runtime
 // list item count, map size - 64-bit, to support large data files
 
-// mapping from data to its owner
-typedef struct DataOwner {
-    void* data;
-    void* owner;  // element/map/list/array that contains/owns the data
-} DataOwner;
-
 typedef struct mpd_t mpd_t;
 struct Decimal {
     uint16_t ref_cnt;
@@ -114,6 +108,7 @@ struct Decimal {
 };
 
 #pragma pack(push, 1)
+// TypedItem for storing data in map with type_id
 typedef struct TypedItem {
     TypeId type_id;
     union {
@@ -124,39 +119,29 @@ typedef struct TypedItem {
         // float float_val;
         double double_val;
         DateTime datetime_val;
+        uint64_t item;
 
         // pointer types
+        void* pointer;
         Decimal* decimal;
         String* string;
+
+        // containers
+        Container* container;
         Range* range;
         Array* array;
         List* list;
         Map* map;
         Element* element;
-        void* pointer;
+        Type* type;
+        Function* function;
     };
 } TypedItem;
 #pragma pack(pop)
 
-struct Map : Container {
-    void* type;  // map type/shape
-    void* data;  // packed data struct of the map
-    int data_cap;  // capacity of the data struct
-};
-
-struct Element : List {
-    // attributes map
-    void* type;  // attr type/shape
-    void* data;  // packed data struct of the attrs
-    int data_cap;  // capacity of the data struct
-    // member functions
-    bool has_attr(const char* attr_name);
-    // TypedItem get_attr(const char* attr_name);
-};
-
 typedef struct Script Script;
 
-typedef struct : Type {
+typedef struct TypeConst : Type {
     int const_index;
 } TypeConst;
 
@@ -340,19 +325,6 @@ void* pack_alloc(Pack* pack, size_t size);
 void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
 
-// get type_id from an Item
-static inline TypeId get_type_id(Item value) {
-    if (value.type_id) {
-        return value.type_id;
-    }
-    if (value.raw_pointer) {
-        return *((TypeId*)value.raw_pointer);
-    }
-    return LMD_TYPE_NULL; // fallback for null items
-}
-
-TypedItem to_typed(Item item);
-
 extern Type TYPE_NULL;
 extern Type TYPE_BOOL;
 extern Type TYPE_INT;
@@ -433,10 +405,10 @@ extern "C" {
 Array* array_pooled(Pool* pool);
 void array_append(Array* arr, Item itm, Pool* pool);
 Map* map_pooled(Pool* pool);
-TypedItem map_get_typed(Map* map, Item key);
-TypedItem list_get_typed(List* list, int index);
+ConstItem map_get_const(const Map* map, Item key);
+ConstItem list_get_const(const List* list, int index);
 Element* elmt_pooled(Pool* pool);
-TypedItem elmt_get_typed(Element* elmt, Item key);
+ConstItem elmt_get_const(const Element* elmt, Item key);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
 #ifdef __cplusplus

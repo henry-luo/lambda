@@ -95,50 +95,50 @@ protected:
     }
 
     // Helper function to create typed items for testing
-    TypedItem create_test_string(const char* value) {
+    ConstItem create_test_string(const char* value) {
         size_t len = strlen(value);
         String* str = (String*)pool_calloc(test_pool, sizeof(String) + len + 1);
         str->len = len;
         strcpy(str->chars, value);
 
-        TypedItem item;
+        ConstItem item;
         item.type_id = LMD_TYPE_STRING;
         item.pointer = str;
         return item;
     }
 
-    TypedItem create_test_int(int64_t value) {
+    ConstItem create_test_int(int64_t value) {
         int64_t* int_ptr = (int64_t*)pool_calloc(test_pool, sizeof(int64_t));
         *int_ptr = value;
 
-        TypedItem item;
+        Item item = {.item = i2it()}
         item.type_id = LMD_TYPE_INT;
         item.pointer = int_ptr;
         return item;
     }
 
-    TypedItem create_test_float(double value) {
+    ConstItem create_test_float(double value) {
         double* float_ptr = (double*)pool_calloc(test_pool, sizeof(double));
         *float_ptr = value;
 
-        TypedItem item;
+        ConstItem item;
         item.type_id = LMD_TYPE_FLOAT;
         item.pointer = float_ptr;
         return item;
     }
 
-    TypedItem create_test_bool(bool value) {
+    ConstItem create_test_bool(bool value) {
         bool* bool_ptr = (bool*)pool_calloc(test_pool, sizeof(bool));
         *bool_ptr = value;
 
-        TypedItem item;
+        ConstItem item;
         item.type_id = LMD_TYPE_BOOL;
         item.pointer = bool_ptr;
         return item;
     }
 
-    TypedItem create_test_null() {
-        TypedItem item;
+    ConstItem create_test_null() {
+        ConstItem item;
         item.type_id = LMD_TYPE_NULL;
         item.pointer = nullptr;
         return item;
@@ -201,7 +201,7 @@ TEST(AstValidatorCreation, CreateValidatorNullPool) {
 // ==================== Phase 1 Tests: Primitive Type Validation ====================
 
 TEST_F(AstValidatorTest, ValidateStringSuccess) {
-    TypedItem string_item = create_test_string("hello world");
+    ConstItem string_item = create_test_string("hello world");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     ValidationResult* result = ast_validator_validate_type(validator, string_item, string_type);
@@ -213,7 +213,7 @@ TEST_F(AstValidatorTest, ValidateStringSuccess) {
 }
 
 TEST_F(AstValidatorTest, ValidateStringTypeMismatch) {
-    TypedItem string_item = create_test_string("hello world");
+    ConstItem string_item = create_test_string("hello world");
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
     ValidationResult* result = ast_validator_validate_type(validator, string_item, int_type);
@@ -225,7 +225,7 @@ TEST_F(AstValidatorTest, ValidateStringTypeMismatch) {
 }
 
 TEST_F(AstValidatorTest, ValidateIntSuccess) {
-    TypedItem int_item = create_test_int(42);
+    ConstItem int_item = create_test_int(42);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
     ValidationResult* result = ast_validator_validate_type(validator, int_item, int_type);
@@ -236,7 +236,7 @@ TEST_F(AstValidatorTest, ValidateIntSuccess) {
 }
 
 TEST_F(AstValidatorTest, ValidateFloatSuccess) {
-    TypedItem float_item = create_test_float(3.14);
+    ConstItem float_item = create_test_float(3.14);
     Type* float_type = create_test_type(LMD_TYPE_FLOAT);
 
     ValidationResult* result = ast_validator_validate_type(validator, float_item, float_type);
@@ -247,7 +247,7 @@ TEST_F(AstValidatorTest, ValidateFloatSuccess) {
 }
 
 TEST_F(AstValidatorTest, ValidateBoolSuccess) {
-    TypedItem bool_item = create_test_bool(true);
+    ConstItem bool_item = create_test_bool(true);
     Type* bool_type = create_test_type(LMD_TYPE_BOOL);
 
     ValidationResult* result = ast_validator_validate_type(validator, bool_item, bool_type);
@@ -258,7 +258,7 @@ TEST_F(AstValidatorTest, ValidateBoolSuccess) {
 }
 
 TEST_F(AstValidatorTest, ValidateNullSuccess) {
-    TypedItem null_item = create_test_null();
+    ConstItem null_item = create_test_null();
     Type* null_type = create_test_type(LMD_TYPE_NULL);
 
     ValidationResult* result = ast_validator_validate_type(validator, null_item, null_type);
@@ -271,7 +271,7 @@ TEST_F(AstValidatorTest, ValidateNullSuccess) {
 // ==================== Phase 1 Tests: Error Handling ====================
 
 TEST_F(AstValidatorTest, ValidateWithNullValidator) {
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     ValidationResult* result = ast_validator_validate_type(nullptr, string_item, string_type);
@@ -283,7 +283,7 @@ TEST_F(AstValidatorTest, ValidateWithNullValidator) {
 }
 
 TEST_F(AstValidatorTest, ValidateWithNullType) {
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
 
     ValidationResult* result = ast_validator_validate_type(validator, string_item, nullptr);
 
@@ -306,7 +306,7 @@ TEST_F(AstValidatorTest, CreateValidationError) {
 // ==================== Phase 1 Tests: Utility Functions ====================
 
 TEST_F(AstValidatorTest, IsItemCompatibleWithTypeSuccess) {
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     bool result = is_item_compatible_with_type(string_item, string_type);
@@ -315,7 +315,7 @@ TEST_F(AstValidatorTest, IsItemCompatibleWithTypeSuccess) {
 }
 
 TEST_F(AstValidatorTest, IsItemCompatibleWithTypeFailure) {
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
     bool result = is_item_compatible_with_type(string_item, int_type);
@@ -346,8 +346,8 @@ TEST_F(AstValidatorTest, TypeToString) {
 // ==================== Phase 1 Tests: Integration Tests ====================
 
 TEST_F(AstValidatorTest, MultipleValidations) {
-    TypedItem string_item = create_test_string("test");
-    TypedItem int_item = create_test_int(42);
+    ConstItem string_item = create_test_string("test");
+    ConstItem int_item = create_test_int(42);
     Type* string_type = create_test_type(LMD_TYPE_STRING);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
@@ -362,7 +362,7 @@ TEST_F(AstValidatorTest, MultipleValidations) {
 
 TEST_F(AstValidatorTest, ValidationDepthCheck) {
     // Create a complex nested structure to test validation depth
-    TypedItem string_item = create_test_string("deep_test");
+    ConstItem string_item = create_test_string("deep_test");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     // Create a path with multiple segments
@@ -386,9 +386,7 @@ TEST_F(AstValidatorTest, ValidElementValidation) {
     Element* test_element = create_test_element("testElement", "Hello World");
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
 
-    TypedItem item;
-    item.type_id = LMD_TYPE_ELEMENT;
-    item.pointer = test_element;
+    Item item = {.element = test_element};
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -396,7 +394,7 @@ TEST_F(AstValidatorTest, ValidElementValidation) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
 
-    AstValidationResult* result = validate_against_element_type(&ctx, item, element_type);
+    AstValidationResult* result = validate_against_element_type(&ctx, *(ConstItem*)&item, element_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Valid element should pass validation";
@@ -406,7 +404,7 @@ TEST_F(AstValidatorTest, ElementContentLengthViolation) {
     Element* test_element = create_test_element("testElement", "This content is too long for the constraint");
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
 
-    TypedItem item;
+    ConstItem item;
     item.type_id = LMD_TYPE_ELEMENT;
     item.pointer = test_element;
 
@@ -426,7 +424,7 @@ TEST_F(AstValidatorTest, ElementContentLengthViolation) {
 TEST_F(AstValidatorTest, ElementTypeMismatch) {
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
 
-    TypedItem item;
+    ConstItem item;
     item.type_id = LMD_TYPE_STRING;
     item.pointer = (void*)"not an element";
 
@@ -457,7 +455,7 @@ TEST_F(AstValidatorTest, ValidStringInUnion) {
     union_types[0] = string_type;
     union_types[1] = int_type;
 
-    TypedItem item;
+    ConstItem item;
     item.type_id = LMD_TYPE_STRING;
     item.pointer = (void*)"test string";
 
@@ -486,7 +484,7 @@ TEST_F(AstValidatorTest, ValidIntInUnion) {
     union_types[1] = int_type;
 
     int test_int = 42;
-    TypedItem item;
+    ConstItem item;
     item.type_id = LMD_TYPE_INT;
     item.pointer = &test_int;
 
@@ -515,7 +513,7 @@ TEST_F(AstValidatorTest, InvalidTypeNotInUnion) {
     union_types[1] = int_type;
 
     float test_float = 3.14f;
-    TypedItem item;
+    ConstItem item;
     item.type_id = LMD_TYPE_FLOAT;
     item.pointer = &test_float;
 
@@ -554,7 +552,7 @@ TEST_F(AstValidatorTest, OptionalConstraintTooManyItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
-    TypedItem items[2];
+    ConstItem items[2];
     items[0].type_id = LMD_TYPE_STRING;
     items[0].pointer = (void*)"item1";
     items[1].type_id = LMD_TYPE_STRING;
@@ -594,7 +592,7 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintMultipleItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
-    TypedItem items[3];
+    ConstItem items[3];
     items[0].type_id = LMD_TYPE_STRING;
     items[0].pointer = (void*)"item1";
     items[1].type_id = LMD_TYPE_STRING;
@@ -618,7 +616,7 @@ TEST_F(AstValidatorTest, ZeroOrMoreConstraintAnyItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
-    TypedItem items[5];
+    ConstItem items[5];
     for (int i = 0; i < 5; i++) {
         items[i].type_id = LMD_TYPE_STRING;
         items[i].pointer = (void*)"item";
@@ -640,7 +638,7 @@ TEST_F(AstValidatorTest, ZeroOrMoreConstraintAnyItems) {
 
 TEST_F(AstValidatorTest, NullPointerHandling) {
     // Test null context handling
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
     // Type* string_type = create_test_type(LMD_TYPE_STRING); // Unused
 
     AstValidationResult* result = ast_validator_validate_type(validator, string_item, nullptr);
@@ -651,7 +649,7 @@ TEST_F(AstValidatorTest, NullPointerHandling) {
 }
 
 TEST_F(AstValidatorTest, EmptyStringHandling) {
-    TypedItem empty_string_item;
+    ConstItem empty_string_item;
     empty_string_item.type_id = LMD_TYPE_STRING;
     empty_string_item.pointer = (void*)"";
 
@@ -665,7 +663,7 @@ TEST_F(AstValidatorTest, EmptyStringHandling) {
 
 TEST_F(AstValidatorTest, UnicodeStringHandling) {
     const char* unicode_string = "Hello 世界 🌍 Ñoël";
-    TypedItem unicode_item;
+    ConstItem unicode_item;
     unicode_item.type_id = LMD_TYPE_STRING;
     unicode_item.pointer = (void*)unicode_string;
 
@@ -680,7 +678,7 @@ TEST_F(AstValidatorTest, UnicodeStringHandling) {
 TEST_F(AstValidatorTest, NumericBoundaryConditions) {
     // Test with maximum integer value
     int max_int = 2147483647; // INT_MAX value to avoid macro issues
-    TypedItem max_int_item = create_test_int(max_int);
+    ConstItem max_int_item = create_test_int(max_int);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
     AstValidationResult* result = ast_validator_validate_type(validator, max_int_item, int_type);
@@ -690,7 +688,7 @@ TEST_F(AstValidatorTest, NumericBoundaryConditions) {
 
     // Test with minimum integer value
     int min_int = -2147483648; // INT_MIN value to avoid macro issues
-    TypedItem min_int_item = create_test_int(min_int);
+    ConstItem min_int_item = create_test_int(min_int);
 
     result = ast_validator_validate_type(validator, min_int_item, int_type);
 
@@ -700,7 +698,7 @@ TEST_F(AstValidatorTest, NumericBoundaryConditions) {
 
 TEST_F(AstValidatorTest, ZeroValues) {
     // Test zero integer
-    TypedItem zero_int_item = create_test_int(0);
+    ConstItem zero_int_item = create_test_int(0);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
     AstValidationResult* result = ast_validator_validate_type(validator, zero_int_item, int_type);
@@ -709,7 +707,7 @@ TEST_F(AstValidatorTest, ZeroValues) {
     EXPECT_TRUE(result->valid) << "Zero integer should be valid";
 
     // Test zero float
-    TypedItem zero_float_item = create_test_float(0.0);
+    ConstItem zero_float_item = create_test_float(0.0);
     Type* float_type = create_test_type(LMD_TYPE_FLOAT);
 
     result = ast_validator_validate_type(validator, zero_float_item, float_type);
@@ -719,7 +717,7 @@ TEST_F(AstValidatorTest, ZeroValues) {
 }
 
 TEST_F(AstValidatorTest, DepthLimitBoundary) {
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     // Test at maximum depth boundary
@@ -735,7 +733,7 @@ TEST_F(AstValidatorTest, DepthLimitBoundary) {
 
 TEST_F(AstValidatorTest, MultipleErrorAccumulation) {
     // Create a scenario that generates multiple errors
-    TypedItem int_item = create_test_int(42);
+    ConstItem int_item = create_test_int(42);
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     AstValidationResult* result = ast_validator_validate_type(validator, int_item, string_type);
@@ -750,7 +748,7 @@ TEST_F(AstValidatorTest, MultipleErrorAccumulation) {
 }
 
 TEST_F(AstValidatorTest, ErrorMessageContent) {
-    TypedItem float_item = create_test_float(3.14);
+    ConstItem float_item = create_test_float(3.14);
     Type* bool_type = create_test_type(LMD_TYPE_BOOL);
 
     AstValidationResult* result = ast_validator_validate_type(validator, float_item, bool_type);
@@ -764,8 +762,8 @@ TEST_F(AstValidatorTest, ErrorMessageContent) {
 
 TEST_F(AstValidatorTest, ValidationStateIsolation) {
     // Test that multiple validations don't interfere with each other
-    TypedItem valid_item = create_test_string("valid");
-    TypedItem invalid_item = create_test_int(42);
+    ConstItem valid_item = create_test_string("valid");
+    ConstItem invalid_item = create_test_int(42);
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     // First validation (should pass)
@@ -785,7 +783,7 @@ TEST_F(AstValidatorTest, ValidationStateIsolation) {
 // ==================== Performance and Stress Tests ====================
 
 TEST_F(AstValidatorTest, RepeatedValidationStability) {
-    TypedItem string_item = create_test_string("test");
+    ConstItem string_item = create_test_string("test");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     const int ITERATIONS = 1000;
@@ -803,7 +801,7 @@ TEST_F(AstValidatorTest, RepeatedValidationStability) {
 
 TEST_F(AstValidatorTest, LargeErrorMessageHandling) {
     // Create a scenario that might generate a large error message
-    TypedItem item;
+    ConstItem item;
     item.type_id = LMD_TYPE_STRING;
     item.pointer = nullptr; // This might generate an error about null pointer
 
