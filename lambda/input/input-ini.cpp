@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
 static void skip_whitespace(const char **ini) {
     while (**ini && (**ini == ' ' || **ini == '\t')) {
@@ -25,9 +26,9 @@ static bool is_comment(const char *ini) {
     return *ini == ';' || *ini == '#';
 }
 
-static String* parse_section_name(Input *input, const char **ini) {
+static String* parse_section_name(Input *input, MarkBuilder* builder, const char **ini) {
     if (**ini != '[') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     (*ini)++; // skip '['
@@ -39,14 +40,14 @@ static String* parse_section_name(Input *input, const char **ini) {
         (*ini)++; // skip ']'
     }
 
-    if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+    if (sb->length > 0) {
+        return builder->createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
 
-static String* parse_key(Input *input, const char **ini) {
-    StringBuf* sb = input->sb;
+static String* parse_key(Input *input, MarkBuilder* builder, const char **ini) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     // Read until '=' or whitespace
@@ -55,14 +56,14 @@ static String* parse_key(Input *input, const char **ini) {
         (*ini)++;
     }
 
-    if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+    if (sb->length > 0) {
+        return builder->createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
 
-static String* parse_raw_value(Input *input, const char **ini) {
-    StringBuf* sb = input->sb;
+static String* parse_raw_value(Input *input, MarkBuilder* builder, const char **ini) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     skip_whitespace(ini);
@@ -94,13 +95,13 @@ static String* parse_raw_value(Input *input, const char **ini) {
             (*ini)++;
         }
         // trim trailing whitespace
-        while (sb->str && sb->str->len > 0 && isspace(sb->str->chars[sb->str->len - 1])) {
-            sb->str->len--;
+        while (sb->length > 0 && isspace(sb->str->chars[sb->length - 1])) {
+            sb->length--;
         }
     }
 
-    if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+    if (sb->length > 0) {
+        return builder->createString(sb->str->chars, sb->length);
     }
     return &EMPTY_STRING;
 }
@@ -202,7 +203,7 @@ static Item parse_typed_value(Input *input, String* value_str) {
     return {.item = s2it(value_str)};
 }
 
-static Map* parse_section(Input *input, const char **ini, String* section_name) {
+static Map* parse_section(Input *input, MarkBuilder* builder, const char **ini, String* section_name) {
     printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
 
     Map* section_map = map_pooled(input->pool);
@@ -224,7 +225,7 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
         if (is_section_start(*ini)) { break; }
 
         // parse key-value pair
-        String* key = parse_key(input, ini);
+        String* key = parse_key(input, builder, ini);
         if (!key || key->len == 0) {
             // todo: raise error for empty key
             skip_to_newline(ini);  continue;
@@ -234,7 +235,7 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
         if (**ini != '=') { skip_to_newline(ini);  continue; }
         (*ini)++; // skip '='
 
-        String* value_str = parse_raw_value(input, ini);
+        String* value_str = parse_raw_value(input, builder, ini);
         Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(input, value_str)) : (Item){.item = 0};
         map_put(section_map, key, value, input);
 
@@ -244,7 +245,8 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
 }
 
 void parse_ini(Input* input, const char* ini_string) {
-    input->sb = stringbuf_new(input->pool);
+    // Create MarkBuilder for memory-safe string handling
+    MarkBuilder builder(input);
 
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);
@@ -270,12 +272,12 @@ void parse_ini(Input* input, const char* ini_string) {
 
         // check for section header
         if (is_section_start(current)) {
-            current_section_name = parse_section_name(input, &current);
+            current_section_name = parse_section_name(input, &builder, &current);
             if (!current_section_name) { skip_to_newline(&current);  continue; }
 
             skip_to_newline(&current);
             // parse the section content
-            Map* section_map = parse_section(input, &current, current_section_name);
+            Map* section_map = parse_section(input, &builder, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
                 map_put(root_map, current_section_name,
@@ -293,7 +295,7 @@ void parse_ini(Input* input, const char* ini_string) {
                     memcpy(global_name->chars, "global", 6);
                     global_name->chars[6] = '\0';
 
-                    global_section = parse_section(input, &current, global_name);
+                    global_section = parse_section(input, &builder, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
                         map_put(root_map, global_name,
