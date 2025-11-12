@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 // Avoid conflicts with C++ headers by undefining after including lambda.h
-#include "lambda.h"
+#include "lambda.hpp"
 #undef max
 #undef min
 typedef struct NamePool NamePool;
