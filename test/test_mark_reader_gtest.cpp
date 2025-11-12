@@ -540,24 +540,6 @@ TEST_F(MarkReaderTest, AttributeReaderBasic) {
     EXPECT_STREQ(cls, "container");
 }
 
-TEST_F(MarkReaderTest, AttributeReaderWithDefaults) {
-    Item elem_item = builder->element("img")
-        .attr("src", "image.jpg")
-        .final();
-
-    ElementReader elem(elem_item);
-    AttributeReader attrs(elem);
-
-    const char* src = attrs.getStringOr("src", "default.jpg");
-    EXPECT_STREQ(src, "image.jpg");
-
-    const char* alt = attrs.getStringOr("alt", "No alt text");
-    EXPECT_STREQ(alt, "No alt text");
-
-    int64_t width = attrs.getIntOr("width", 100);
-    EXPECT_EQ(width, 100);  // Default value
-}
-
 TEST_F(MarkReaderTest, AttributeReaderIteration) {
     Item elem_item = builder->element("a")
         .attr("href", "https://example.com")

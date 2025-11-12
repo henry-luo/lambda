@@ -400,10 +400,6 @@ public:
     const char* getString(const char* key) const;
     ItemReader getItem(const char* key) const;  // No longer needs pool
 
-    // With defaults
-    const char* getStringOr(const char* key, const char* default_value) const;
-    int64_t getIntOr(const char* key, int64_t default_value) const;
-
     // Iterator
     class Iterator {
     private:

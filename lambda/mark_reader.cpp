@@ -741,40 +741,6 @@ ItemReader AttributeReader::getItem(const char* key) const {
     return ItemReader();
 }
 
-const char* AttributeReader::getStringOr(const char* key, const char* default_value) const {
-    const char* val = getString(key);
-    return val ? val : default_value;
-}
-
-int64_t AttributeReader::getIntOr(const char* key, int64_t default_value) const {
-    if (!shape_ || !key || !attr_data_) {
-        return default_value;
-    }
-
-    const ShapeEntry* field = shape_;
-    size_t key_len = strlen(key);
-
-    while (field) {
-        if (field->name && field->name->length == key_len &&
-            strncmp(field->name->str, key, key_len) == 0) {
-
-            if (field->type) {
-                const void* data = ((const char*)attr_data_) + field->byte_offset;
-
-                if (field->type->type_id == LMD_TYPE_INT) {
-                    return *(int*)data;
-                } else if (field->type->type_id == LMD_TYPE_INT64) {
-                    return *(int64_t*)data;
-                }
-            }
-            break;
-        }
-        field = field->next;
-    }
-
-    return default_value;
-}
-
 AttributeReader::Iterator AttributeReader::iterator() const {
     return Iterator(this);
 }
