@@ -40,7 +40,7 @@ Item push_c(int64_t cval) {
 }
 
 mpd_t* convert_to_decimal(Item item, mpd_context_t* ctx) {
-    if (item.type_id == LMD_TYPE_DECIMAL) {
+    if (item._type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_ptr = (Decimal*)item.pointer;
         return dec_ptr->dec_val;
     }
@@ -48,14 +48,14 @@ mpd_t* convert_to_decimal(Item item, mpd_context_t* ctx) {
     mpd_t* result = mpd_new(ctx);
     if (!result) return NULL;
 
-    if (item.type_id == LMD_TYPE_INT) {
+    if (item._type_id == LMD_TYPE_INT) {
         mpd_set_ssize(result, item.int_val, ctx);
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         int64_t val = *(int64_t*)item.pointer;
         mpd_set_ssize(result, val, ctx);
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
         char str_buf[64];
         snprintf(str_buf, sizeof(str_buf), "%.17g", val);
@@ -119,23 +119,23 @@ Item fn_add(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
             log_error("decimal conversion failed in fn_add");
             return ItemError;
         }
 
         mpd_t* result = mpd_new(context->decimal_ctx);
         if (!result) {
-            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
         mpd_add(result, a_dec, b_dec, context->decimal_ctx);
 
-        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
 
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
@@ -193,7 +193,7 @@ Item fn_add(Item item_a, Item item_b) {
     }
     // todo: mixed array types
     else {
-        log_error("unknown add type: %d, %d", item_a.type_id, item_b.type_id);
+        log_error("unknown add type: %d, %d", item_a._type_id, item_b._type_id);
     }
     return ItemError;
 }
@@ -232,23 +232,23 @@ Item fn_mul(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
             log_error("decimal conversion failed in fn_mul");
             return ItemError;
         }
 
         mpd_t* result = mpd_new(context->decimal_ctx);
         if (!result) {
-            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
         mpd_mul(result, a_dec, b_dec, context->decimal_ctx);
 
-        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
 
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
@@ -298,7 +298,7 @@ Item fn_mul(Item item_a, Item item_b) {
         return { .array_float = result };
     }
     else {
-        log_error("unknown mul type: %d, %d", item_a.type_id, item_b.type_id);
+        log_error("unknown mul type: %d, %d", item_a._type_id, item_b._type_id);
     }
     return ItemError;
 }
@@ -333,23 +333,23 @@ Item fn_sub(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
             log_error("decimal conversion failed in fn_sub");
             return ItemError;
         }
 
         mpd_t* result = mpd_new(context->decimal_ctx);
         if (!result) {
-            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
         mpd_sub(result, a_dec, b_dec, context->decimal_ctx);
 
-        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
 
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
@@ -399,7 +399,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return { .array_float = result };
     }
     else {
-        log_error("unknown sub type: %d, %d", item_a.type_id, item_b.type_id);
+        log_error("unknown sub type: %d, %d", item_a._type_id, item_b._type_id);
     }
     return ItemError;
 }
@@ -478,8 +478,8 @@ Item fn_div(Item item_a, Item item_b) {
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
 
         if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a._type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b._type_id);
             log_error("decimal conversion failed in fn_div");
             return ItemError;
         }
@@ -493,8 +493,8 @@ Item fn_div(Item item_a, Item item_b) {
             if (b_str) mpd_free(b_str);
         }
         if (b_dec && decimal_is_zero(b_dec)) {
-            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             log_error("decimal division by zero error");
             return ItemError;
         }
@@ -512,8 +512,8 @@ Item fn_div(Item item_a, Item item_b) {
 
         mpd_t* result = mpd_new(context->decimal_ctx);
         if (!result) {
-            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
@@ -521,8 +521,8 @@ Item fn_div(Item item_a, Item item_b) {
         mpd_div(result, a_dec, b_dec, context->decimal_ctx);
         log_debug(" mpd_div completed\n");
 
-        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(a_dec, item_a._type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b._type_id == LMD_TYPE_DECIMAL);
 
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
@@ -590,7 +590,7 @@ Item fn_div(Item item_a, Item item_b) {
         return { .array_float = result };
     }
     else {
-        log_error("unknown div type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown div type: %d, %d\n", item_a._type_id, item_b._type_id);
     }
     return ItemError;
 }
@@ -598,10 +598,10 @@ Item fn_div(Item item_a, Item item_b) {
 Item fn_idiv(Item item_a, Item item_b) {
     // Check for division by zero
     bool is_zero = false;
-    if (item_b.type_id == LMD_TYPE_INT) {
+    if (item_b._type_id == LMD_TYPE_INT) {
         is_zero = (item_b.int_val == 0);
     }
-    else if (item_b.type_id == LMD_TYPE_INT64 && *(int64_t*)item_b.pointer == 0) {
+    else if (item_b._type_id == LMD_TYPE_INT64 && *(int64_t*)item_b.pointer == 0) {
         is_zero = true;
     }
 
@@ -610,36 +610,36 @@ Item fn_idiv(Item item_a, Item item_b) {
         return ItemError;
     }
 
-    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+    if (item_a._type_id == LMD_TYPE_INT && item_b._type_id == LMD_TYPE_INT) {
         // Sign extend both values to proper signed longs
         int64_t a_val = item_a.int_val, b_val = item_b.int_val;
         return (Item) { .item = i2it(a_val / b_val) };
     }
-    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT64 && item_b._type_id == LMD_TYPE_INT64) {
         return push_l(*(int64_t*)item_a.pointer / *(int64_t*)item_b.pointer);
     }
-    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT && item_b._type_id == LMD_TYPE_INT64) {
         int64_t a_val = item_a.int_val;
         return push_l(a_val / *(int64_t*)item_b.pointer);
     }
-    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
+    else if (item_a._type_id == LMD_TYPE_INT64 && item_b._type_id == LMD_TYPE_INT) {
         int64_t b_val = item_b.int_val;
         return push_l(*(int64_t*)item_a.pointer / b_val);
     }
     else {
-        log_error("unknown idiv type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown idiv type: %d, %d\n", item_a._type_id, item_b._type_id);
     }
     return ItemError;
 }
 
 Item fn_pow(Item item_a, Item item_b) {
-    log_debug("fn_pow called with types: %d and %d", item_a.type_id, item_b.type_id);
-    if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+    log_debug("fn_pow called with types: %d and %d", item_a._type_id, item_b._type_id);
+    if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         // For now, convert decimals to double for power operations
         // This is a limitation of libmpdec - it doesn't have general power operations
         double base = 0.0, exponent = 0.0;
 
-        if (item_a.type_id == LMD_TYPE_DECIMAL) {
+        if (item_a._type_id == LMD_TYPE_DECIMAL) {
             Decimal* dec_ptr = (Decimal*)item_a.pointer;
             // Convert decimal to string then to double (preserves precision better)
             char* str = mpd_to_sci(dec_ptr->dec_val, 1);
@@ -648,22 +648,22 @@ Item fn_pow(Item item_a, Item item_b) {
         }
         else {
             // Convert non-decimal to double
-            if (item_a.type_id == LMD_TYPE_INT) {
+            if (item_a._type_id == LMD_TYPE_INT) {
                 base = item_a.int_val;
             }
-            else if (item_a.type_id == LMD_TYPE_INT64) {
+            else if (item_a._type_id == LMD_TYPE_INT64) {
                 base = *(int64_t*)item_a.pointer;
             }
-            else if (item_a.type_id == LMD_TYPE_FLOAT) {
+            else if (item_a._type_id == LMD_TYPE_FLOAT) {
                 base = *(double*)item_a.pointer;
             }
             else {
-                log_error("unsupported pow base type with decimal: %d", item_a.type_id);
+                log_error("unsupported pow base type with decimal: %d", item_a._type_id);
                 return ItemError;
             }
         }
 
-        if (item_b.type_id == LMD_TYPE_DECIMAL) {
+        if (item_b._type_id == LMD_TYPE_DECIMAL) {
             Decimal* dec_ptr = (Decimal*)item_b.pointer;
             char* str = mpd_to_sci(dec_ptr->dec_val, 1);
             exponent = strtod(str, NULL);
@@ -671,17 +671,17 @@ Item fn_pow(Item item_a, Item item_b) {
         }
         else {
             // Convert non-decimal to double
-            if (item_b.type_id == LMD_TYPE_INT) {
+            if (item_b._type_id == LMD_TYPE_INT) {
                 exponent = item_b.int_val;
             }
-            else if (item_b.type_id == LMD_TYPE_INT64) {
+            else if (item_b._type_id == LMD_TYPE_INT64) {
                 exponent = *(int64_t*)item_b.pointer;
             }
-            else if (item_b.type_id == LMD_TYPE_FLOAT) {
+            else if (item_b._type_id == LMD_TYPE_FLOAT) {
                 exponent = *(double*)item_b.pointer;
             }
             else {
-                log_error("unsupported pow exponent type with decimal: %d", item_b.type_id);
+                log_error("unsupported pow exponent type with decimal: %d", item_b._type_id);
                 return ItemError;
             }
         }
@@ -708,32 +708,32 @@ Item fn_pow(Item item_a, Item item_b) {
     double base = 0.0, exponent = 0.0;
 
     // convert first argument to double
-    if (item_a.type_id == LMD_TYPE_INT) {
+    if (item_a._type_id == LMD_TYPE_INT) {
         base = item_a.int_val;
     }
-    else if (item_a.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT64) {
         base = *(int64_t*)item_a.pointer;
     }
-    else if (item_a.type_id == LMD_TYPE_FLOAT) {
+    else if (item_a._type_id == LMD_TYPE_FLOAT) {
         base = *(double*)item_a.pointer;
     }
     else {
-        log_error("unknown pow base type: %d", item_a.type_id);
+        log_error("unknown pow base type: %d", item_a._type_id);
         return ItemError;
     }
 
     // convert second argument to double
-    if (item_b.type_id == LMD_TYPE_INT) {
+    if (item_b._type_id == LMD_TYPE_INT) {
         exponent = item_b.int_val;
     }
-    else if (item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_b._type_id == LMD_TYPE_INT64) {
         exponent = *(int64_t*)item_b.pointer;
     }
-    else if (item_b.type_id == LMD_TYPE_FLOAT) {
+    else if (item_b._type_id == LMD_TYPE_FLOAT) {
         exponent = *(double*)item_b.pointer;
     }
     else {
-        log_error("unknown pow exponent type: %d", item_b.type_id);
+        log_error("unknown pow exponent type: %d", item_b._type_id);
         return ItemError;
     }
     log_debug("calculating pow base=%g, exponent=%g", base, exponent);
@@ -742,36 +742,36 @@ Item fn_pow(Item item_a, Item item_b) {
 
 Item fn_mod(Item item_a, Item item_b) {
     // Handle decimal types first
-    if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+    if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         mpd_t* val_a = convert_to_decimal(item_a, context->decimal_ctx);
         if (!val_a) return ItemError;
 
         mpd_t* val_b = convert_to_decimal(item_b, context->decimal_ctx);
         if (!val_b) {
-            cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
         // Check for division by zero
         if (decimal_is_zero(val_b)) {
             log_error("modulo by zero error");
-            cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_b, item_b._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
         mpd_t* result = mpd_new(context->decimal_ctx);
         if (!result) {
-            cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_b, item_b._type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
 
         mpd_rem(result, val_a, val_b, context->decimal_ctx);
 
         // Clean up temporary decimals
-        cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(val_a, item_a._type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(val_b, item_b._type_id == LMD_TYPE_DECIMAL);
 
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
@@ -783,7 +783,7 @@ Item fn_mod(Item item_a, Item item_b) {
     }
 
     // Original non-decimal logic for integer mod
-    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+    if (item_a._type_id == LMD_TYPE_INT && item_b._type_id == LMD_TYPE_INT) {
         // Sign extend both values to proper signed longs
         int64_t a_val = item_a.int_val, b_val = item_b.int_val;
         if (b_val == 0) {
@@ -792,7 +792,7 @@ Item fn_mod(Item item_a, Item item_b) {
         }
         return (Item) { .item = i2it(a_val % b_val) };
     }
-    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT64 && item_b._type_id == LMD_TYPE_INT64) {
         int64_t a_val = *(int64_t*)item_a.pointer, b_val = *(int64_t*)item_b.pointer;
         if (b_val == 0) {
             log_error("modulo by zero error");
@@ -800,7 +800,7 @@ Item fn_mod(Item item_a, Item item_b) {
         }
         return push_l(a_val % b_val);
     }
-    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT && item_b._type_id == LMD_TYPE_INT64) {
         int64_t a_val = item_a.int_val, b_val = *(int64_t*)item_b.pointer;
         if (b_val == 0) {
             log_error("modulo by zero error");
@@ -808,7 +808,7 @@ Item fn_mod(Item item_a, Item item_b) {
         }
         return push_l(a_val % b_val);
     }
-    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
+    else if (item_a._type_id == LMD_TYPE_INT64 && item_b._type_id == LMD_TYPE_INT) {
         int64_t a_val = *(int64_t*)item_a.pointer, b_val = item_b.int_val;
         if (b_val == 0) {
             log_error("modulo by zero error");
@@ -816,12 +816,12 @@ Item fn_mod(Item item_a, Item item_b) {
         }
         return push_l(a_val % b_val);
     }
-    else if (item_a.type_id == LMD_TYPE_FLOAT || item_b.type_id == LMD_TYPE_FLOAT) {
+    else if (item_a._type_id == LMD_TYPE_FLOAT || item_b._type_id == LMD_TYPE_FLOAT) {
         log_debug("modulo not supported for float types");
         return ItemError;
     }
     else {
-        log_error("unknown mod type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown mod type: %d, %d\n", item_a._type_id, item_b._type_id);
         return ItemError;
     }
 }
@@ -830,113 +830,113 @@ Item fn_mod(Item item_a, Item item_b) {
 
 Item fn_abs(Item item) {
     // abs() - absolute value of a number
-    if (item.type_id == LMD_TYPE_INT) {
+    if (item._type_id == LMD_TYPE_INT) {
         int64_t val = item.int_val;
         return (Item) { .item = i2it(val < 0 ? -val : val) };
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         int64_t val = *(int64_t*)item.pointer;
         return push_l(val < 0 ? -val : val);
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
         return push_d(fabs(val));
     }
     else {
-        log_error("abs not supported for type: %d", item.type_id);
+        log_error("abs not supported for type: %d", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_round(Item item) {
     // round() - round to nearest integer
-    if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
+    if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_INT64) {
         // Already an integer, return as-is
         return item;
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
         return push_d(round(val));
     }
     else {
-        log_debug("round not supported for type: %d", item.type_id);
+        log_debug("round not supported for type: %d", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_floor(Item item) {
     // floor() - round down to nearest integer
-    if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
+    if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_INT64) {
         return item;  // return as-is
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
         return push_d(floor(val));
     }
     else {
-        log_debug("floor not supported for type: %d", item.type_id);
+        log_debug("floor not supported for type: %d", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_ceil(Item item) {
     // ceil() - round up to nearest integer
-    if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
+    if (item._type_id == LMD_TYPE_INT || item._type_id == LMD_TYPE_INT64) {
         return item;  // return as-is
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
         return push_d(ceil(val));
     }
     else {
-        log_debug("ceil not supported for type: %d", item.type_id);
+        log_debug("ceil not supported for type: %d", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_min2(Item item_a, Item item_b) {
-    log_debug("fn_min called with types: %d, %d", item_a.type_id, item_b.type_id);
+    log_debug("fn_min called with types: %d, %d", item_a._type_id, item_b._type_id);
     // two argument scalar min case
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
 
     // Convert first argument
-    if (item_a.type_id == LMD_TYPE_INT) {
+    if (item_a._type_id == LMD_TYPE_INT) {
         a_val = item_a.int_val;
     }
-    else if (item_a.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT64) {
         a_val = (double)(*(int64_t*)item_a.pointer);
     }
-    else if (item_a.type_id == LMD_TYPE_FLOAT) {
+    else if (item_a._type_id == LMD_TYPE_FLOAT) {
         a_val = *(double*)item_a.pointer;
         is_float = true;
     }
-    else if (item_a.type_id == LMD_TYPE_DECIMAL) {
+    else if (item_a._type_id == LMD_TYPE_DECIMAL) {
         log_error("decimal not supported yet in fn_min");
         return ItemError;
     }
     else {
-        log_debug("min not supported for type: %d", item_a.type_id);
+        log_debug("min not supported for type: %d", item_a._type_id);
         return ItemError;
     }
 
     // convert second argument
-    if (item_b.type_id == LMD_TYPE_INT) {
+    if (item_b._type_id == LMD_TYPE_INT) {
         b_val = item_b.int_val;
     }
-    else if (item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_b._type_id == LMD_TYPE_INT64) {
         b_val = *(int64_t*)item_b.pointer;
     }
-    else if (item_b.type_id == LMD_TYPE_FLOAT) {
+    else if (item_b._type_id == LMD_TYPE_FLOAT) {
         b_val = *(double*)item_b.pointer;
         is_float = true;
     }
-    else if (item_a.type_id == LMD_TYPE_DECIMAL) {
+    else if (item_a._type_id == LMD_TYPE_DECIMAL) {
         log_error("decimal not supported yet in fn_min");
         return ItemError;
     }
     else {
-        log_debug("min not supported for type: %d", item_b.type_id);
+        log_debug("min not supported for type: %d", item_b._type_id);
         return ItemError;
     }
 
@@ -1004,22 +1004,22 @@ Item fn_min1(Item item_a) {
         bool is_float = false;
 
         // Convert first element
-        if (min_item.type_id == LMD_TYPE_INT) {
+        if (min_item._type_id == LMD_TYPE_INT) {
             min_val = (double)min_item.int_val;
         }
-        else if (min_item.type_id == LMD_TYPE_INT64) {
+        else if (min_item._type_id == LMD_TYPE_INT64) {
             min_val = (double)(*(int64_t*)min_item.pointer);
         }
-        else if (min_item.type_id == LMD_TYPE_FLOAT) {
+        else if (min_item._type_id == LMD_TYPE_FLOAT) {
             min_val = *(double*)min_item.pointer;
             is_float = true;
         }
-        else if (min_item.type_id == LMD_TYPE_DECIMAL) {
+        else if (min_item._type_id == LMD_TYPE_DECIMAL) {
             log_error("decimal not supported yet in fn_min");
             return ItemError;
         }
         else {
-            log_error("non-numeric array element type: %d", min_item.type_id);
+            log_error("non-numeric array element type: %d", min_item._type_id);
             return ItemError;
         }
 
@@ -1028,17 +1028,17 @@ Item fn_min1(Item item_a) {
             Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
-            if (elem_item.type_id == LMD_TYPE_INT) {
+            if (elem_item._type_id == LMD_TYPE_INT) {
                 elem_val = (double)elem_item.int_val;
             }
-            else if (elem_item.type_id == LMD_TYPE_INT64) {
+            else if (elem_item._type_id == LMD_TYPE_INT64) {
                 elem_val = (double)(*(int64_t*)elem_item.pointer);
             }
-            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 elem_val = *(double*)elem_item.pointer;
                 is_float = true;
             }
-            else if (elem_item.type_id == LMD_TYPE_DECIMAL) {
+            else if (elem_item._type_id == LMD_TYPE_DECIMAL) {
                 log_error("decimal not supported yet in fn_min");
                 return ItemError;
             }
@@ -1072,34 +1072,34 @@ Item fn_max2(Item item_a, Item item_b) {
     bool is_float = false;
 
     // Convert first argument
-    if (item_a.type_id == LMD_TYPE_INT) {
+    if (item_a._type_id == LMD_TYPE_INT) {
         a_val = item_a.int_val;
     }
-    else if (item_a.type_id == LMD_TYPE_INT64) {
+    else if (item_a._type_id == LMD_TYPE_INT64) {
         a_val = *(int64_t*)item_a.pointer;
     }
-    else if (item_a.type_id == LMD_TYPE_FLOAT) {
+    else if (item_a._type_id == LMD_TYPE_FLOAT) {
         a_val = *(double*)item_a.pointer;
         is_float = true;
     }
     else {
-        log_debug("max not supported for type: %d", item_a.type_id);
+        log_debug("max not supported for type: %d", item_a._type_id);
         return ItemError;
     }
 
     // Convert second argument
-    if (item_b.type_id == LMD_TYPE_INT) {
+    if (item_b._type_id == LMD_TYPE_INT) {
         b_val = item_b.int_val;
     }
-    else if (item_b.type_id == LMD_TYPE_INT64) {
+    else if (item_b._type_id == LMD_TYPE_INT64) {
         b_val = *(int64_t*)item_b.pointer;
     }
-    else if (item_b.type_id == LMD_TYPE_FLOAT) {
+    else if (item_b._type_id == LMD_TYPE_FLOAT) {
         b_val = *(double*)item_b.pointer;
         is_float = true;
     }
     else {
-        log_debug("max not supported for type: %d", item_b.type_id);
+        log_debug("max not supported for type: %d", item_b._type_id);
         return ItemError;
     }
 
@@ -1167,13 +1167,13 @@ Item fn_max1(Item item_a) {
         bool is_float = false;
 
         // Convert first element
-        if (max_item.type_id == LMD_TYPE_INT) {
+        if (max_item._type_id == LMD_TYPE_INT) {
             max_val = (double)max_item.int_val;
         }
-        else if (max_item.type_id == LMD_TYPE_INT64) {
+        else if (max_item._type_id == LMD_TYPE_INT64) {
             max_val = (double)(*(int64_t*)max_item.pointer);
         }
-        else if (max_item.type_id == LMD_TYPE_FLOAT) {
+        else if (max_item._type_id == LMD_TYPE_FLOAT) {
             max_val = *(double*)max_item.pointer;
             is_float = true;
         }
@@ -1186,13 +1186,13 @@ Item fn_max1(Item item_a) {
             Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
             double elem_val = 0.0;
 
-            if (elem_item.type_id == LMD_TYPE_INT) {
+            if (elem_item._type_id == LMD_TYPE_INT) {
                 elem_val = (double)elem_item.int_val;
             }
-            else if (elem_item.type_id == LMD_TYPE_INT64) {
+            else if (elem_item._type_id == LMD_TYPE_INT64) {
                 elem_val = (double)(*(int64_t*)elem_item.pointer);
             }
-            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 elem_val = *(double*)elem_item.pointer;
                 is_float = true;
             }
@@ -1224,7 +1224,7 @@ Item fn_max1(Item item_a) {
 Item fn_sum(Item item) {
     // sum() - sum of all elements in an array or list
     TypeId type_id = get_type_id(item);
-    log_debug("DEBUG fn_sum: called with type_id: %d, pointer: %p", type_id, item.raw_pointer);
+    log_debug("DEBUG fn_sum: called with type_id: %d", type_id);
     if (type_id == LMD_TYPE_ARRAY) {
         log_debug("DEBUG fn_sum: Processing LMD_TYPE_ARRAY");
         Array* arr = item.array;  // Use item.array, not item.pointer
@@ -1237,26 +1237,26 @@ Item fn_sum(Item item) {
         bool is_float = false;
         for (size_t i = 0; i < arr->length; i++) {
             Item elem_item = array_get(arr, i);
-            if (elem_item.type_id == LMD_TYPE_INT) {
+            if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.int_val;
                 log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
                 is_float = true;
                 // todo: keep as int if within range
             }
-            else if (elem_item.type_id == LMD_TYPE_INT64) {
+            else if (elem_item._type_id == LMD_TYPE_INT64) {
                 int64_t val = *(int64_t*)elem_item.pointer;
                 log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
-            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 double val = *(double*)elem_item.pointer;
                 log_error("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 is_float = true;
             }
             else {
-                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
@@ -1316,24 +1316,24 @@ Item fn_sum(Item item) {
         bool has_float = false;
         for (size_t i = 0; i < list->length; i++) {
             Item elem_item = list_get(list, i);
-            if (elem_item.type_id == LMD_TYPE_INT) {
+            if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.int_val;
                 log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
-            else if (elem_item.type_id == LMD_TYPE_INT64) {
+            else if (elem_item._type_id == LMD_TYPE_INT64) {
                 int64_t val = *(int64_t*)elem_item.pointer;
                 log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
-            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 double val = *(double*)elem_item.pointer;
                 log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
             else {
-                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
@@ -1372,18 +1372,18 @@ Item fn_avg(Item item) {
         double sum = 0.0;
         for (size_t i = 0; i < arr->length; i++) {
             Item elem_item = array_get(arr, i);
-            if (elem_item.type_id == LMD_TYPE_INT) {
+            if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = elem_item.int_val;
                 sum += (double)val;
             }
-            else if (elem_item.type_id == LMD_TYPE_INT64) {
+            else if (elem_item._type_id == LMD_TYPE_INT64) {
                 sum += (double)(*(int64_t*)elem_item.pointer);
             }
-            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
@@ -1430,18 +1430,18 @@ Item fn_avg(Item item) {
         double sum = 0.0;
         for (size_t i = 0; i < list->length; i++) {
             Item elem_item = list_get(list, i);
-            if (elem_item.type_id == LMD_TYPE_INT) {
+            if (elem_item._type_id == LMD_TYPE_INT) {
                 int64_t val = (int64_t)elem_item.int_val;
                 sum += (double)val;
             }
-            else if (elem_item.type_id == LMD_TYPE_INT64) {
+            else if (elem_item._type_id == LMD_TYPE_INT64) {
                 sum += (double)(*(int64_t*)elem_item.pointer);
             }
-            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+            else if (elem_item._type_id == LMD_TYPE_FLOAT) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item._type_id);
                 return ItemError;
             }
         }
@@ -1459,19 +1459,19 @@ Item fn_avg(Item item) {
 
 Item fn_pos(Item item) {
     // Unary + operator - return the item as-is for numeric types, or cast strings/symbols to numbers
-    if (item.type_id == LMD_TYPE_INT) {
+    if (item._type_id == LMD_TYPE_INT) {
         return item;  // Already in correct format
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         return item;  // Already in correct format
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         return item;  // Already in correct format
     }
-    else if (item.type_id == LMD_TYPE_DECIMAL) {
+    else if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // For decimal, unary + returns the same value
     }
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
@@ -1500,33 +1500,33 @@ Item fn_pos(Item item) {
     }
     else {
         // For other types (bool, datetime, etc.), unary + is an error
-        log_debug("unary + not supported for type: %d", item.type_id);
+        log_debug("unary + not supported for type: %d", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_neg(Item item) {
     // Unary - operator - negate numeric values or cast and negate strings/symbols
-    if (item.type_id == LMD_TYPE_INT) {
+    if (item._type_id == LMD_TYPE_INT) {
         // Sign extend the 56-bit long_val to a proper signed long, then negate
         int val = item.int_val;
         return (Item) { .item = i2it(-val) };
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         int64_t val = *(int64_t*)item.pointer;
         return push_l(-val);
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
         return push_d(-val);
     }
-    else if (item.type_id == LMD_TYPE_DECIMAL) {
+    else if (item._type_id == LMD_TYPE_DECIMAL) {
         // For decimal types, we'd need to negate the libmpdec value
         // This would require more complex decimal arithmetic with libmpdec
         log_debug("unary - for decimal type not yet implemented");
         return ItemError;
     }
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
@@ -1555,37 +1555,37 @@ Item fn_neg(Item item) {
     }
     else {
         // For other types (bool, datetime, etc.), unary - is an error
-        log_debug("unary - not supported for type: %d", item.type_id);
+        log_debug("unary - not supported for type: %d", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_int(Item item) {
     double dval;  int64_t ival;
-    if (item.type_id == LMD_TYPE_INT) {
+    if (item._type_id == LMD_TYPE_INT) {
         return item;
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         dval = *(int64_t*)item.pointer;
         goto CHECK_DVAL;
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         // cast down to int
         dval = *(double*)item.pointer;
         ival = (int64_t)dval;
         dval = (double)ival;  // truncate any fractional part
-    CHECK_DVAL:
+        CHECK_DVAL:
         if (dval > INT32_MAX || dval < INT32_MIN) {
             // keep as double
             return push_d(dval);
         }
-        return { .int_val = (int32_t)dval, ._type = LMD_TYPE_INT };
+        return {.item = i2it((int32_t)dval)};
     }
-    else if (item.type_id == LMD_TYPE_DECIMAL) {
+    else if (item._type_id == LMD_TYPE_DECIMAL) {
         // todo: truncate any fractional part
         return item;  // keep it as it is
     }
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
             return ItemError;
@@ -1618,7 +1618,7 @@ Item fn_int(Item item) {
         return { .int_val = val, ._type = LMD_TYPE_INT };
     }
     else {
-        log_debug("Cannot convert type %d to int", item.type_id);
+        log_debug("Cannot convert type %d to int", item._type_id);
         return ItemError;
     }
 }
@@ -1626,14 +1626,14 @@ Item fn_int(Item item) {
 int64_t fn_int64(Item item) {
     // convert item to int64
     int64_t val;
-    if (item.type_id == LMD_TYPE_INT) {
+    if (item._type_id == LMD_TYPE_INT) {
         log_debug("convert int to int64: %d", item.int_val);
         return item.int_val;
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         return *(int64_t*)item.pointer;
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         double dval = *(double*)item.pointer;
         double truncated = (double)(int64_t)dval;
         if (truncated > LAMBDA_INT64_MAX || truncated < INT64_MIN) {
@@ -1642,7 +1642,7 @@ int64_t fn_int64(Item item) {
         }
         return truncated;
     }
-    else if (item.type_id == LMD_TYPE_DECIMAL) {
+    else if (item._type_id == LMD_TYPE_DECIMAL) {
         // Convert decimal to int64
         Decimal* dec_ptr = (Decimal*)item.pointer;
         mpd_t* dec = dec_ptr->dec_val;
@@ -1665,7 +1665,7 @@ int64_t fn_int64(Item item) {
         }
         return val;
     }
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
             return 0;
@@ -1685,7 +1685,7 @@ int64_t fn_int64(Item item) {
         log_debug("converted string to int64: %" PRId64, val);
         return val;
     }
-    log_debug("Cannot convert type %d to int64", item.type_id);
+    log_debug("Cannot convert type %d to int64", item._type_id);
     return INT_ERROR;
 }
 
@@ -1693,10 +1693,10 @@ int64_t fn_int64(Item item) {
 
 Item fn_decimal(Item item) {
     // Convert item to decimal type
-    if (item.type_id == LMD_TYPE_DECIMAL) {
+    if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // Already a decimal
     }
-    else if (item.type_id == LMD_TYPE_INT) {
+    else if (item._type_id == LMD_TYPE_INT) {
         mpd_t* dec_val = mpd_new(context->decimal_ctx);
         if (!dec_val) {
             log_debug("Failed to allocate decimal");
@@ -1705,7 +1705,7 @@ Item fn_decimal(Item item) {
         mpd_set_i32(dec_val, item.int_val, context->decimal_ctx);
         return push_decimal(dec_val);
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         mpd_t* dec_val = mpd_new(context->decimal_ctx);
         if (!dec_val) {
             log_debug("Failed to allocate decimal");
@@ -1715,7 +1715,7 @@ Item fn_decimal(Item item) {
         mpd_set_i64(dec_val, val, context->decimal_ctx);
         return push_decimal(dec_val);
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         mpd_t* dec_val = mpd_new(context->decimal_ctx);
         if (!dec_val) {
             log_debug("Failed to allocate decimal");
@@ -1727,7 +1727,7 @@ Item fn_decimal(Item item) {
         mpd_set_string(dec_val, str_buf, context->decimal_ctx);
         return push_decimal(dec_val);
     }
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
             log_debug("Cannot convert empty string/symbol to decimal");
@@ -1762,17 +1762,17 @@ Item fn_decimal(Item item) {
         return push_decimal(dec_val);
     }
     else {
-        log_debug("Cannot convert type %d to decimal", item.type_id);
+        log_debug("Cannot convert type %d to decimal", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_binary(Item item) {
     // Convert item to binary (string) type
-    if (item.type_id == LMD_TYPE_STRING) {
+    if (item._type_id == LMD_TYPE_STRING) {
         return item;  // Already a string (binary is stored as string)
     }
-    else if (item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_SYMBOL) {
         // Convert symbol to string
         String* sym = (String*)item.pointer;
         if (!sym) {
@@ -1792,7 +1792,7 @@ Item fn_binary(Item item) {
 
         return (Item) { .item = s2it(str) };
     }
-    else if (item.type_id == LMD_TYPE_INT) {
+    else if (item._type_id == LMD_TYPE_INT) {
         // Convert int to binary string representation
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%d", item.int_val);
@@ -1813,7 +1813,7 @@ Item fn_binary(Item item) {
 
         return (Item) { .item = s2it(str) };
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         // Convert int64 to binary string representation
         int64_t val = *(int64_t*)item.pointer;
         char buf[32];
@@ -1835,7 +1835,7 @@ Item fn_binary(Item item) {
 
         return (Item) { .item = s2it(str) };
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         // Convert float to binary string representation
         double val = *(double*)item.pointer;
         char buf[64];
@@ -1858,17 +1858,17 @@ Item fn_binary(Item item) {
         return (Item) { .item = s2it(str) };
     }
     else {
-        log_debug("Cannot convert type %d to binary", item.type_id);
+        log_debug("Cannot convert type %d to binary", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_symbol(Item item) {
     // Convert item to symbol type
-    if (item.type_id == LMD_TYPE_SYMBOL) {
+    if (item._type_id == LMD_TYPE_SYMBOL) {
         return item;  // Already a symbol
     }
-    else if (item.type_id == LMD_TYPE_STRING) {
+    else if (item._type_id == LMD_TYPE_STRING) {
         // Convert string to symbol
         String* str = (String*)item.pointer;
         if (!str) {
@@ -1888,7 +1888,7 @@ Item fn_symbol(Item item) {
 
         return (Item) { .item = y2it(sym) };
     }
-    else if (item.type_id == LMD_TYPE_INT) {
+    else if (item._type_id == LMD_TYPE_INT) {
         // Convert int to symbol
         char buf[32];
         int len = snprintf(buf, sizeof(buf), "%d", item.int_val);
@@ -1909,7 +1909,7 @@ Item fn_symbol(Item item) {
 
         return (Item) { .item = y2it(sym) };
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         // Convert int64 to symbol
         int64_t val = *(int64_t*)item.pointer;
         char buf[32];
@@ -1931,7 +1931,7 @@ Item fn_symbol(Item item) {
 
         return (Item) { .item = y2it(sym) };
     }
-    else if (item.type_id == LMD_TYPE_FLOAT) {
+    else if (item._type_id == LMD_TYPE_FLOAT) {
         // Convert float to symbol
         double val = *(double*)item.pointer;
         char buf[64];
@@ -1954,17 +1954,17 @@ Item fn_symbol(Item item) {
         return (Item) { .item = y2it(sym) };
     }
     else {
-        log_debug("Cannot convert type %d to symbol", item.type_id);
+        log_debug("Cannot convert type %d to symbol", item._type_id);
         return ItemError;
     }
 }
 
 Item fn_float(Item item) {
     // Convert item to float type
-    if (item.type_id == LMD_TYPE_FLOAT) {
+    if (item._type_id == LMD_TYPE_FLOAT) {
         return item;  // Already a float
     }
-    else if (item.type_id == LMD_TYPE_INT) {
+    else if (item._type_id == LMD_TYPE_INT) {
         double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         if (!val) {
             log_debug("Failed to allocate float");
@@ -1974,7 +1974,7 @@ Item fn_float(Item item) {
 
         return (Item) { .item = d2it(val) };
     }
-    else if (item.type_id == LMD_TYPE_INT64) {
+    else if (item._type_id == LMD_TYPE_INT64) {
         int64_t int_val = *(int64_t*)item.pointer;
         double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         if (!val) {
@@ -1985,7 +1985,7 @@ Item fn_float(Item item) {
 
         return (Item) { .item = d2it(val) };
     }
-    else if (item.type_id == LMD_TYPE_DECIMAL) {
+    else if (item._type_id == LMD_TYPE_DECIMAL) {
         mpd_t* dec_val = (mpd_t*)item.pointer;
         char* dec_str = mpd_to_sci(dec_val, 1);
         if (!dec_str) {
@@ -2011,7 +2011,7 @@ Item fn_float(Item item) {
 
         return (Item) { .item = d2it(val) };
     }
-    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+    else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
             log_debug("Empty string/symbol cannot be converted to float");
@@ -2058,7 +2058,7 @@ Item fn_float(Item item) {
         return (Item) { .item = d2it(result_val) };
     }
     else {
-        log_debug("Cannot convert type %d to float", item.type_id);
+        log_debug("Cannot convert type %d to float", item._type_id);
         return ItemError;
     }
 }

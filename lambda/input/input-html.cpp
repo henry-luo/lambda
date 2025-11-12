@@ -106,8 +106,7 @@ static bool parse_attributes(Input *input, Element *element, const char **html, 
             // Type will be LMD_TYPE_NULL if str_value is NULL, LMD_TYPE_STRING otherwise
         } else {
             // Boolean attribute (no value) - store as boolean true
-            attr_value = (Item){.bool_val = true};
-            attr_value.type_id = LMD_TYPE_BOOL;
+            attr_value = (Item){.item = b2it(true)};
         }
 
         // Add attribute to element (including NULL values for empty attributes)

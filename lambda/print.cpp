@@ -7,6 +7,8 @@
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
+void print_typeditem(StrBuf *strbuf, TypedItem* citem, int depth, char* indent);
+
 // Static memory pool for DateTime formatting
 static Pool* datetime_format_pool = NULL;
 
@@ -369,7 +371,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
         // For complex types, create a temporary Item and use existing print_item logic
-        Item temp_item = {.raw_pointer = titem->pointer};
+        Item temp_item = {.item = titem->item};
         print_item(strbuf, temp_item, depth + 1, indent);
         break;
     }

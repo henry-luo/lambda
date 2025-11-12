@@ -134,10 +134,10 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         ((String*)value.pointer)->ref_cnt++;
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:
-        *(Map**)field_ptr = (Map*)value.raw_pointer;
+        *(Map**)field_ptr = value.map;
         break;
     default:
-        printf("unknown type %d\n", value.type_id);
+        printf("unknown type %d\n", value._type_id);
     }
 }
 
@@ -219,7 +219,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         break;
     }
     default:
-        printf("unknown type %d\n", value.type_id);
+        printf("unknown type %d\n", value._type_id);
     }
 }
 

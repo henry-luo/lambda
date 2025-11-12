@@ -77,8 +77,8 @@ Item pn_fetch(Item url, Item options) {
     log_debug("pn_fetch called");
     // Validate URL parameter
     String* url_str;
-    if (url.type_id != LMD_TYPE_STRING && url.type_id != LMD_TYPE_SYMBOL) {
-        log_debug("fetch url must be a string or symbol, got type %d", url.type_id);
+    if (url._type_id != LMD_TYPE_STRING && url._type_id != LMD_TYPE_SYMBOL) {
+        log_debug("fetch url must be a string or symbol, got type %d", url._type_id);
         return ItemError;
     }
     url_str = (String*)url.pointer;
@@ -100,7 +100,7 @@ Item pn_fetch(Item url, Item options) {
     // Helper to create Item from string literal
     auto create_string_item = [](const char* str) -> Item {
         String* string = heap_strcpy((char*)str, strlen(str));
-        return (Item){.pointer = (uint64_t)(uintptr_t)string, .type_id = LMD_TYPE_STRING};
+        return (Item){.pointer = (uint64_t)(uintptr_t)string, ._type_id = LMD_TYPE_STRING};
     };
 
     // Parse options if provided
@@ -111,7 +111,7 @@ Item pn_fetch(Item url, Item options) {
         // Extract method
         Item method_key = create_string_item("method");
         Item method_item = map_get(options_map, method_key);
-        if (method_item.item && (method_item.type_id == LMD_TYPE_STRING || method_item.type_id == LMD_TYPE_SYMBOL)) {
+        if (method_item.item && (method_item._type_id == LMD_TYPE_STRING || method_item._type_id == LMD_TYPE_SYMBOL)) {
             String* method_str = (String*)method_item.pointer;
             config.method = method_str->chars;
         }
@@ -120,7 +120,7 @@ Item pn_fetch(Item url, Item options) {
         Item body_key = create_string_item("body");
         Item body_item = map_get(options_map, body_key);
         if (body_item.item) {
-            if (body_item.type_id == LMD_TYPE_STRING || body_item.type_id == LMD_TYPE_SYMBOL) {
+            if (body_item._type_id == LMD_TYPE_STRING || body_item._type_id == LMD_TYPE_SYMBOL) {
                 String* body_str = (String*)body_item.pointer;
                 config.body = body_str->chars;
                 config.body_size = body_str->len;
@@ -137,7 +137,7 @@ Item pn_fetch(Item url, Item options) {
         // Extract headers
         Item headers_key = create_string_item("headers");
         Item headers_item = map_get(options_map, headers_key);
-        if (headers_item.item && headers_item.type_id == LMD_TYPE_MAP) {
+        if (headers_item.type_id() == LMD_TYPE_MAP) {
             // Convert headers map to curl header list
             // For now, we'll allocate a simple array (this could be enhanced)
             log_debug("fetch: headers map found but not fully implemented yet");
@@ -146,7 +146,7 @@ Item pn_fetch(Item url, Item options) {
         // Extract timeout
         Item timeout_key = create_string_item("timeout");
         Item timeout_item = map_get(options_map, timeout_key);
-        if (timeout_item.item && (timeout_item.type_id == LMD_TYPE_INT || timeout_item.type_id == LMD_TYPE_INT64)) {
+        if (timeout_item.item && (timeout_item._type_id == LMD_TYPE_INT || timeout_item._type_id == LMD_TYPE_INT64)) {
             config.timeout_seconds = it2l(timeout_item);
         }
     }
@@ -263,14 +263,14 @@ String* format_cmd_args(String* cmd, Item args) {
 
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
-                value_item.type_id = LMD_TYPE_NULL;
+                value_item._type_id = LMD_TYPE_NULL;
                 break;
             case LMD_TYPE_BOOL:
-                value_item.type_id = LMD_TYPE_BOOL;
+                value_item._type_id = LMD_TYPE_BOOL;
                 value_item.bool_val = *(bool*)field_ptr;
                 break;
             case LMD_TYPE_INT:
-                value_item.type_id = LMD_TYPE_INT;
+                value_item._type_id = LMD_TYPE_INT;
                 value_item.int_val = *(int*)field_ptr;
                 break;
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
@@ -289,7 +289,7 @@ String* format_cmd_args(String* cmd, Item args) {
 
             String* value_str = fn_string(value_item);
             if (value_str && value_str->len > 0) {
-                if (!(value_item.type_id == LMD_TYPE_BOOL && value_item.bool_val == true)) {
+                if (!(value_item._type_id == LMD_TYPE_BOOL && value_item.bool_val == true)) {
                     String* escaped = escape_shell_arg(value_str);
                     strbuf_append_char(sb, '=');
                     strbuf_append_str(sb, escaped->chars);

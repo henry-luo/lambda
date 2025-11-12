@@ -305,11 +305,11 @@ void free_ast_validation_result(ValidationResult* result) {
     (void)result;
 }
 
-bool is_item_compatible_with_type(TypedItem item, Type* type) {
+bool is_item_compatible_with_type(ConstItem item, Type* type) {
     if (!type) return false;
 
     // For Phase 1, simple type ID comparison
-    return item.type_id == type->type_id;
+    return item.type_id() == type->type_id;
 }
 
 const char* type_to_string(Type* type) {
@@ -361,7 +361,7 @@ void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
 // ==================== Validation Functions ====================
 
 // validate 'item' against type 'type'
-ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type) {
+ValidationResult* ast_validator_validate_type(AstValidator* validator, ConstItem item, Type* type) {
     if (!validator || !type) {
         ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
         ValidationError* error = create_validation_error(
@@ -377,7 +377,7 @@ ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem
 }
 
 // validate 'item' against type named 'type_name'
-ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name) {
+ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item, const char* type_name) {
     if (!validator || !type_name) {
         ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
         if (result) {

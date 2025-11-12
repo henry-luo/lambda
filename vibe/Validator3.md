@@ -35,7 +35,7 @@ Replace the existing schema-based validator with a new validator that uses the n
 - Support element type validation and occurrence constraints
 - Handle both `LMD_TYPE_ARRAY` and `LMD_TYPE_LIST`
 
-### 2.2 Map Validation  
+### 2.2 Map Validation
 - Implement `validate_against_map_type()` using `TypeMap*`
 - Support key-value type validation
 - Handle field requirements and optional fields
@@ -113,17 +113,17 @@ typedef struct AstValidator {
 // Core API
 AstValidator* ast_validator_create(VariableMemPool* pool);
 int ast_validator_load_schema(AstValidator* validator, const char* source, const char* root_type);
-ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name);
+ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item, const char* type_name);
 
 // AST Integration
 Type* extract_type_from_ast_node(AstNode* node);
-ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type);
+ValidationResult* validate_against_type(AstValidator* validator, ConstItem item, Type* type);
 
 // Type-specific validation
-ValidationResult* validate_against_primitive_type(TypedItem item, Type* type);
-ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* type);
-ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* type);
-ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* type);
+ValidationResult* validate_against_primitive_type(ConstItem item, Type* type);
+ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem item, TypeArray* type);
+ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem item, TypeMap* type);
+ValidationResult* validate_against_element_type(AstValidator* validator, ConstItem item, TypeElmt* type);
 ```
 
 ### Memory Management

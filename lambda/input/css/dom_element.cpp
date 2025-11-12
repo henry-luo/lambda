@@ -10,7 +10,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
 #include "../../lambda.h"
-#include "../../lambda-data.hpp"  // For get_type_id, elmt_get_typed, and proper type definitions
+#include "../../lambda-data.hpp"  // For get_type_id, elmt_get_const, and proper type definitions
 
 /**
  * Convert HTML tag name string to Lexbor tag ID
@@ -1484,15 +1484,9 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Pool
     Item key;
     key.item = s2it(key_str);
 
-    // Get the attribute value using elmt_get_typed
-    TypedItem attr_value = elmt_get_typed(elem, key);
-
-    // Check if it's a string
-    if (attr_value.type_id == LMD_TYPE_STRING && attr_value.string) {
-        return attr_value.string->chars;
-    }
-
-    return nullptr;
+    ConstItem attr_value = elmt_get_const(elem, key);
+    String* string_value = attr_value.string();
+    return string_value ? string_value->chars : nullptr;
 }
 
 DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {

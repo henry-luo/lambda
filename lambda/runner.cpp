@@ -56,8 +56,6 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void transpile_ast_root(Transpiler* tp, AstScript *script);
 void check_memory_leak();
 void print_heap_entries();
-int dataowner_compare(const void *a, const void *b, void *udata);
-uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
 
 // thread-specific runtime context
 __thread EvalContext* context = NULL;

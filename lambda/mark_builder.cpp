@@ -110,10 +110,16 @@ Item MarkBuilder::createStringItem(const char* str, size_t len) {
     return (Item){.item = s2it(createString(str, len))};
 }
 
-Item MarkBuilder::createInt(int64_t value) {
-    Item item = {0};
-    item.int_val = value;
-    item.type_id = LMD_TYPE_INT;
+Item MarkBuilder::createInt(int32_t value) {
+    Item item = {.item = i2it(value)};
+    return item;
+}
+
+Item MarkBuilder::createLong(int64_t value) {
+    // allocate double from pool
+    int64_t* long_ptr = (int64_t*)pool_alloc(pool_, sizeof(int64_t));
+    *long_ptr = value;
+    Item item = {.item = l2it(long_ptr)};
     return item;
 }
 
@@ -121,21 +127,16 @@ Item MarkBuilder::createFloat(double value) {
     // allocate double from pool
     double* float_ptr = (double*)pool_alloc(pool_, sizeof(double));
     *float_ptr = value;
-    Item item = {0};
-    item.pointer = (uint64_t)float_ptr;
-    item.type_id = LMD_TYPE_FLOAT;
+    Item item = {.item = d2it(float_ptr)};
     return item;
 }
 
 Item MarkBuilder::createBool(bool value) {
-    Item item = {0};
-    item.bool_val = value ? 1 : 0;
-    item.type_id = LMD_TYPE_BOOL;
-    return item;
+    return {.item = b2it(value)};
 }
 
 Item MarkBuilder::createNull() {
-    return (Item){.item = ITEM_NULL};
+    return ItemNull;
 }
 
 //==============================================================================
@@ -235,7 +236,7 @@ ElementBuilder& ElementBuilder::end() {
 }
 
 Item ElementBuilder::final() {
-    return (Item){.raw_pointer = elmt_};
+    return (Item){.element = elmt_};
 }
 
 //==============================================================================
@@ -308,7 +309,7 @@ MapBuilder& MapBuilder::putNull(const char* key) {
 }
 
 Item MapBuilder::final() {
-    return (Item){.raw_pointer = map_};
+    return (Item){.map = map_};
 }
 
 //==============================================================================
@@ -359,5 +360,5 @@ ArrayBuilder& ArrayBuilder::appendItems(std::initializer_list<Item> items) {
 
 Item ArrayBuilder::final() {
     // Array is already built - just wrap it in an Item
-    return (Item){.raw_pointer = array_};
+    return (Item){.array = array_};
 }
