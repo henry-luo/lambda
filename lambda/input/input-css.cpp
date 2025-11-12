@@ -1,28 +1,29 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
 // External declaration for thread-local input context
 extern __thread Context* input_context;
 
 // Forward declarations for CSS stylesheet parsing
-static Item parse_css_stylesheet(Input *input, const char **css);
-static Array* parse_css_rules(Input *input, const char **css);
-static Item parse_css_rule(Input *input, const char **css);
-static Item parse_css_at_rule(Input *input, const char **css);
-static Item parse_css_qualified_rule(Input *input, const char **css);
-static Array* parse_css_selectors(Input *input, const char **css);
-static Item parse_css_selector(Input *input, const char **css);
-static Array* parse_css_declarations(Input *input, const char **css);
-static Item parse_css_declaration(Input *input, const char **css);
-static Item parse_css_value(Input *input, const char **css);
-static Item parse_css_function(Input *input, const char **css);
-static Item parse_css_measure(Input *input, const char **css);
-static Item parse_css_color(Input *input, const char **css);
-static Item parse_css_string(Input *input, const char **css);
-static Item parse_css_url(Input *input, const char **css);
-static Item parse_css_number(Input *input, const char **css);
-static Item parse_css_identifier(Input *input, const char **css);
-static Array* parse_css_value_list(Input *input, const char **css);
-static Array* parse_css_function_params(Input *input, const char **css);
+static Item parse_css_stylesheet(Input *input, MarkBuilder* builder, const char **css);
+static Array* parse_css_rules(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_rule(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_at_rule(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_qualified_rule(Input *input, MarkBuilder* builder, const char **css);
+static Array* parse_css_selectors(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_selector(Input *input, MarkBuilder* builder, const char **css);
+static Array* parse_css_declarations(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_declaration(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_value(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_function(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_measure(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_color(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_string(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_url(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_number(Input *input, MarkBuilder* builder, const char **css);
+static Item parse_css_identifier(Input *input, MarkBuilder* builder, const char **css);
+static Array* parse_css_value_list(Input *input, MarkBuilder* builder, const char **css);
+static Array* parse_css_function_params(Input *input, MarkBuilder* builder, const char **css);
 static Item flatten_single_array(Array* arr);
 
 // Global array to collect all rules including nested ones
@@ -65,7 +66,7 @@ static bool is_css_hex_digit(char c) {
 }
 
 // CSS Stylesheet parsing functions
-static Item parse_css_stylesheet(Input *input, const char **css) {
+static Item parse_css_stylesheet(Input *input, MarkBuilder* builder, const char **css) {
     Element* stylesheet = input_create_element(input, "stylesheet");
     if (!stylesheet) return {.item = ITEM_ERROR};
 
@@ -117,7 +118,7 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
             }
         }
 
-        Item rule = parse_css_rule(input, css);
+        Item rule = parse_css_rule(input, builder, css);
         if (rule .item != ITEM_ERROR) {
 
             if (is_at_rule && at_rule_name) {
@@ -176,7 +177,7 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
     return {.item = (uint64_t)stylesheet};
 }
 
-static Array* parse_css_rules(Input *input, const char **css) {
+static Array* parse_css_rules(Input *input, MarkBuilder* builder, const char **css) {
     Array* rules = array_pooled(input->pool);
     if (!rules) return NULL;
 
@@ -185,7 +186,7 @@ static Array* parse_css_rules(Input *input, const char **css) {
         if (!**css) break;
 
         printf("Parsing CSS rule\n");
-        Item rule = parse_css_rule(input, css);
+        Item rule = parse_css_rule(input, builder, css);
         if (rule .item != ITEM_ERROR) {
             array_append(rules, rule, input->pool);
         } else {
@@ -204,30 +205,30 @@ static Array* parse_css_rules(Input *input, const char **css) {
     return rules;
 }
 
-static Item parse_css_rule(Input *input, const char **css) {
+static Item parse_css_rule(Input *input, MarkBuilder* builder, const char **css) {
     skip_css_comments(css);
 
     if (**css == '@') {
-        return parse_css_at_rule(input, css);
+        return parse_css_at_rule(input, builder, css);
     } else {
-        return parse_css_qualified_rule(input, css);
+        return parse_css_qualified_rule(input, builder, css);
     }
 }
 
-static Item parse_css_at_rule(Input *input, const char **css) {
+static Item parse_css_at_rule(Input *input, MarkBuilder* builder, const char **css) {
     if (**css != '@') return {.item = ITEM_ERROR};
 
     (*css)++; // Skip @
 
     // Parse at-rule name
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset buffer to avoid accumulating previous content
     while (is_css_identifier_char(**css)) {
         stringbuf_append_char(sb, **css);
         (*css)++;
     }
 
-    String* at_rule_name = stringbuf_to_string(sb);
+    String* at_rule_name = builder->createString(sb->str->chars, sb->length);
     if (!at_rule_name) return {.item = ITEM_ERROR};
 
     Element* at_rule = input_create_element(input, "at-rule");
@@ -286,7 +287,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                     skip_css_comments(css);
                     if (**css == '}') break;
 
-                    Item nested_rule = parse_css_rule(input, css);
+                    Item nested_rule = parse_css_rule(input, builder, css);
                     if (nested_rule .item != ITEM_ERROR) {
                         array_append(nested_rules, nested_rule, input->pool);
 
@@ -369,7 +370,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                                     skip_css_comments(css);
 
                                     // Parse value list
-                                    Array* values = parse_css_value_list(input, css);
+                                    Array* values = parse_css_value_list(input, builder, css);
                                     if (values) {
                                         Item values_item = flatten_single_array(values);
                                         input_add_attribute_item_to_element(input, keyframe_rule, property_str->chars, values_item);
@@ -429,7 +430,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                     skip_css_comments(css);
 
                     // Parse value list
-                    Array* values = parse_css_value_list(input, css);
+                    Array* values = parse_css_value_list(input, builder, css);
                     if (values) {
                         // Flatten single property value array
                         Item values_item = flatten_single_array(values);
@@ -462,13 +463,13 @@ static Item parse_css_at_rule(Input *input, const char **css) {
     return {.item = (uint64_t)at_rule};
 }
 
-static Item parse_css_qualified_rule(Input *input, const char **css) {
+static Item parse_css_qualified_rule(Input *input, MarkBuilder* builder, const char **css) {
     Element* rule = input_create_element(input, "rule");
     if (!rule) return {.item = ITEM_ERROR};
 
     // Parse selectors
     printf("Parsing CSS qualified rule\n");
-    Array* selectors = parse_css_selectors(input, css);
+    Array* selectors = parse_css_selectors(input, builder, css);
     if (selectors) {
         // Flatten single selector array
         Item selectors_item = flatten_single_array(selectors);
@@ -486,13 +487,13 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
             if (**css == '}') break;
 
             // Parse property name
-            StringBuf* sb = input->sb;
+            StringBuf* sb = builder->stringBuf();
             stringbuf_reset(sb);  // Reset the buffer before parsing each property
             while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
                 stringbuf_append_char(sb, **css);
                 (*css)++;
             }
-            String* property_str = stringbuf_to_string(sb);
+            String* property_str = builder->createString(sb->str->chars, sb->length);
             printf("got CSS property: %s\n", property_str ? property_str->chars : "NULL");
             if (!property_str) {
                 // Skip to next declaration
@@ -507,7 +508,7 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
                 skip_css_comments(css);
 
                 // Parse value list
-                Array* values = parse_css_value_list(input, css);
+                Array* values = parse_css_value_list(input, builder, css);
                 if (values) {
                     // Flatten single property value array
                     Item values_item = flatten_single_array(values);
@@ -553,7 +554,7 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
     return {.item = (uint64_t)rule};
 }
 
-static Array* parse_css_selectors(Input *input, const char **css) {
+static Array* parse_css_selectors(Input *input, MarkBuilder* builder, const char **css) {
     Array* selectors = array_pooled(input->pool);
     if (!selectors) return NULL;
 
@@ -561,7 +562,7 @@ static Array* parse_css_selectors(Input *input, const char **css) {
         skip_css_comments(css);
         if (**css == '{') break;
 
-        Item selector = parse_css_selector(input, css);
+        Item selector = parse_css_selector(input, builder, css);
         if (selector .item != ITEM_ERROR) {
             array_append(selectors, selector, input->pool);
         }
@@ -578,8 +579,8 @@ static Array* parse_css_selectors(Input *input, const char **css) {
     return selectors;
 }
 
-static Item parse_css_selector(Input* input, const char** css) {
-    StringBuf* sb = input->sb;
+static Item parse_css_selector(Input* input, MarkBuilder* builder, const char** css) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing each selector
 
     // Parse selector text until comma or opening brace
@@ -625,11 +626,10 @@ static Item parse_css_selector(Input* input, const char** css) {
         (*css)++;
     }
 
-    String* selector_str = stringbuf_to_string(sb);
-    if (selector_str) {
-        char* trimmed = input_trim_whitespace(selector_str->chars);
+    if (sb->length > 0) {
+        char* trimmed = input_trim_whitespace(sb->str->chars);
         if (trimmed) {
-            String* trimmed_str = input_create_string(input, trimmed);
+            String* trimmed_str = builder->createString(trimmed);
             free(trimmed);
             return trimmed_str ? (Item){.item = s2it(trimmed_str)} : (Item){.item = ITEM_ERROR};
         }
@@ -638,7 +638,7 @@ static Item parse_css_selector(Input* input, const char** css) {
     return {.item = ITEM_ERROR};
 }
 
-static Array* parse_css_declarations(Input *input, const char **css) {
+static Array* parse_css_declarations(Input *input, MarkBuilder* builder, const char **css) {
     Array* declarations = array_pooled(input->pool);
     if (!declarations) return NULL;
 
@@ -646,7 +646,7 @@ static Array* parse_css_declarations(Input *input, const char **css) {
         skip_css_comments(css);
         if (**css == '}') break;
 
-        Item declaration = parse_css_declaration(input, css);
+        Item declaration = parse_css_declaration(input, builder, css);
         if (declaration .item != ITEM_ERROR) {
             array_append(declarations, declaration, input->pool);
         }
@@ -661,18 +661,18 @@ static Array* parse_css_declarations(Input *input, const char **css) {
     return declarations;
 }
 
-static Item parse_css_declaration(Input *input, const char **css) {
+static Item parse_css_declaration(Input *input, MarkBuilder* builder, const char **css) {
     printf("Parsing CSS declaration\n");
     skip_css_comments(css);
 
     // Parse property name
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing property name
     while (**css && **css != ':' && **css != ';' && **css != '}') {
         stringbuf_append_char(sb, **css);
         (*css)++;
     }
-    String* property_str = stringbuf_to_string(sb);
+    String* property_str = builder->createString(sb->str->chars, sb->length);
     if (!property_str) return {.item = ITEM_ERROR};
     printf("Parsing CSS property: %s\n", property_str->chars);
 
@@ -698,7 +698,7 @@ static Item parse_css_declaration(Input *input, const char **css) {
         skip_css_comments(css);
 
         // Parse value
-        Array* values = parse_css_value_list(input, css);
+        Array* values = parse_css_value_list(input, builder, css);
         if (values) {
             input_add_attribute_item_to_element(input, declaration, "values", {.item = (uint64_t)values});
         }
@@ -714,7 +714,7 @@ static Item parse_css_declaration(Input *input, const char **css) {
     return {.item = (uint64_t)declaration};
 }
 
-static Item parse_css_string(Input *input, const char **css) {
+static Item parse_css_string(Input *input, MarkBuilder* builder, const char **css) {
     printf("Parsing CSS string\n");
     char quote = **css;
     if (quote != '"' && quote != '\'') return {.item = ITEM_ERROR};
@@ -722,14 +722,8 @@ static Item parse_css_string(Input *input, const char **css) {
     // Normalize: always use double quotes internally regardless of input quote style
     // This ensures 'Segoe UI' and "Segoe UI" both normalize to "Segoe UI"
 
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing string
-
-    // Ensure the StringBuf has a valid String allocated for empty strings
-    if (!sb->str || sb->capacity == 0) {
-        // Initialize buffer with minimal capacity for empty strings
-        stringbuf_ensure_cap(sb, 16);
-    }
 
     (*css)++; // Skip opening quote
 
@@ -782,21 +776,11 @@ static Item parse_css_string(Input *input, const char **css) {
         (*css)++; // Skip closing quote
     }
 
-    String* str = stringbuf_to_string(sb);
-    // Handle empty strings - create an empty String object if stringbuf returns NULL
-    if (!str) {
-        // Allocate a new empty string
-        str = (String*)pool_alloc(input->pool, sizeof(String) + 1);
-        if (str) {
-            str->len = 0;
-            str->ref_cnt = 1;
-            str->chars[0] = '\0';
-        }
-    }
+    String* str = builder->createString(sb->str->chars, sb->length);
     return str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
 }
 
-static Item parse_css_url(Input *input, const char **css) {
+static Item parse_css_url(Input *input, MarkBuilder* builder, const char **css) {
     if (strncmp(*css, "url(", 4) != 0) return {.item = ITEM_ERROR};
 
     *css += 4; // Skip "url("
@@ -806,10 +790,11 @@ static Item parse_css_url(Input *input, const char **css) {
 
     // Parse URL - can be quoted or unquoted
     if (**css == '"' || **css == '\'') {
-        url_value = parse_css_string(input, css);
+        url_value = parse_css_string(input, builder, css);
     } else {
         // Unquoted URL
-        StringBuf* sb = input->sb;
+        StringBuf* sb = builder->stringBuf();
+        stringbuf_reset(sb);
         while (**css && **css != ')' && !(**css == ' ' || **css == '\t' || **css == '\n' || **css == '\r')) {
             if (**css == '\\') {
                 (*css)++;
@@ -821,7 +806,7 @@ static Item parse_css_url(Input *input, const char **css) {
             }
             (*css)++;
         }
-        String* str = stringbuf_to_string(sb);
+        String* str = builder->createString(sb->str->chars, sb->length);
         url_value = str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
     }
 
@@ -840,8 +825,9 @@ static Item parse_css_url(Input *input, const char **css) {
     return url_element ? (Item){.item = (((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)url_element} : (Item){.item = ITEM_ERROR};
 }
 
-static Item parse_css_color(Input *input, const char **css) {
-    StringBuf* sb = input->sb;
+static Item parse_css_color(Input *input, MarkBuilder* builder, const char **css) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     if (**css == '#') {
         // Hex color
@@ -857,11 +843,9 @@ static Item parse_css_color(Input *input, const char **css) {
 
         // Valid hex colors are 3, 4, 6, or 8 digits
         if (hex_count == 3 || hex_count == 4 || hex_count == 6 || hex_count == 8) {
-            String* color_str = stringbuf_to_string(sb);
+            String* color_str = builder->createString(sb->str->chars, sb->length);
             return color_str ? (Item){.item = s2it(color_str)} : (Item){.item = ITEM_ERROR};
         }
-        // Clear buffer even on error path
-        stringbuf_to_string(sb);
         return {.item = ITEM_ERROR};
     }
 
@@ -875,7 +859,7 @@ static Item parse_css_color(Input *input, const char **css) {
             strncmp(*css, "rgb(", 4) == 0 ||
             strncmp(*css, "hsl(", 4) == 0) {
             // Parse as function
-            return parse_css_function(input, css);
+            return parse_css_function(input, builder, css);
         }
 
         // Check for named colors
@@ -884,27 +868,28 @@ static Item parse_css_color(Input *input, const char **css) {
             (*css)++;
         }
 
-        String* color_name = stringbuf_to_string(sb);
-        if (color_name) {
-            // Common CSS color names - return as symbol
-            const char* name = color_name->chars;
-            if (strcmp(name, "red") == 0 || strcmp(name, "blue") == 0 ||
-                strcmp(name, "green") == 0 || strcmp(name, "white") == 0 ||
-                strcmp(name, "black") == 0 || strcmp(name, "yellow") == 0 ||
-                strcmp(name, "transparent") == 0 || strcmp(name, "currentColor") == 0) {
-                return (Item){.item = y2it(color_name)};
+        if (sb->length > 0) {
+            String* color_name = builder->createString(sb->str->chars, sb->length);
+            if (color_name) {
+                // Common CSS color names - return as symbol
+                const char* name = color_name->chars;
+                if (strcmp(name, "red") == 0 || strcmp(name, "blue") == 0 ||
+                    strcmp(name, "green") == 0 || strcmp(name, "white") == 0 ||
+                    strcmp(name, "black") == 0 || strcmp(name, "yellow") == 0 ||
+                    strcmp(name, "transparent") == 0 || strcmp(name, "currentColor") == 0) {
+                    return (Item){.item = y2it(color_name)};
+                }
             }
         }
 
         // Reset if not a color
         *css = start;
-        stringbuf_to_string(sb); // Clear buffer
     }
 
     return {.item = ITEM_ERROR};
 }
 
-static Item parse_css_number(Input *input, const char **css) {
+static Item parse_css_number(Input *input, MarkBuilder* builder, const char **css) {
     double *dval;
     dval = (double*)pool_calloc(input->pool, sizeof(double));
     if (dval == NULL) return {.item = ITEM_ERROR};
@@ -916,8 +901,8 @@ static Item parse_css_number(Input *input, const char **css) {
     return {.item = d2it(dval)};
 }
 
-static Item parse_css_measure(Input *input, const char **css) {
-    StringBuf* sb = input->sb;
+static Item parse_css_measure(Input *input, MarkBuilder* builder, const char **css) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing measure
     const char* start = *css;
 
@@ -945,8 +930,6 @@ static Item parse_css_measure(Input *input, const char **css) {
     }
 
     if (!has_digits) {
-        // Clear buffer before returning error
-        stringbuf_to_string(sb);
         *css = start; // Reset
         return {.item = ITEM_ERROR};
     }
@@ -967,19 +950,19 @@ static Item parse_css_measure(Input *input, const char **css) {
     // If we have a unit, return the complete dimension token as a single string
     if (*css > unit_start) {
         // Create the complete dimension string (e.g., "10px")
-        String* dimension_str = stringbuf_to_string(sb);
+        String* dimension_str = builder->createString(sb->str->chars, sb->length);
         return (Item){.item = s2it(dimension_str)};
     } else {
         // Reset and parse as number only
         *css = start;
-        return parse_css_number(input, css);
+        return parse_css_number(input, builder, css);
     }
 }
 
-static Item parse_css_identifier(Input *input, const char **css) {
+static Item parse_css_identifier(Input *input, MarkBuilder* builder, const char **css) {
     if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
 
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing identifier
 
     // Handle CSS pseudo-elements (::) and pseudo-classes (:)
@@ -1014,7 +997,7 @@ static Item parse_css_identifier(Input *input, const char **css) {
         }
     }
 
-    String* id_str = stringbuf_to_string(sb);
+    String* id_str = builder->createString(sb->str->chars, sb->length);
     if (!id_str) {
         return {.item = ITEM_ERROR};
     }
@@ -1024,7 +1007,7 @@ static Item parse_css_identifier(Input *input, const char **css) {
     return (Item){.item = y2it(id_str)};
 }
 
-static Array* parse_css_function_params(Input *input, const char **css) {
+static Array* parse_css_function_params(Input *input, MarkBuilder* builder, const char **css) {
     Array* params = array_pooled(input->pool);
     if (!params) return NULL;
 
@@ -1040,7 +1023,7 @@ static Array* parse_css_function_params(Input *input, const char **css) {
 
         const char* start_pos = *css; // track position to detect infinite loops
 
-        Item param = parse_css_value(input, css);
+        Item param = parse_css_value(input, builder, css);
         if (param .item != ITEM_ERROR) {
             array_append(params, param, input->pool);
         } else {
@@ -1141,11 +1124,12 @@ static Item flatten_single_array(Array* arr) {
     return single_item;
 }
 
-static Item parse_css_function(Input *input, const char **css) {
+static Item parse_css_function(Input *input, MarkBuilder* builder, const char **css) {
     // Parse function name
     if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
 
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
     while (is_css_identifier_char(**css)) {
         stringbuf_append_char(sb, **css);
         (*css)++;
@@ -1154,11 +1138,11 @@ static Item parse_css_function(Input *input, const char **css) {
     skip_css_comments(css);
     if (**css != '(') {
         // Not a function, treat as identifier (symbol)
-        String* id_str = stringbuf_to_string(sb);
+        String* id_str = builder->createString(sb->str->chars, sb->length);
         return id_str ? (Item){.item = y2it(id_str)} : (Item){.item = ITEM_ERROR};
     }
 
-    String* func_name = stringbuf_to_string(sb);
+    String* func_name = builder->createString(sb->str->chars, sb->length);
     if (!func_name) return {.item = ITEM_ERROR};
 
     printf("Parsing CSS function: %s\n", func_name->chars);
@@ -1166,7 +1150,7 @@ static Item parse_css_function(Input *input, const char **css) {
     (*css)++; // Skip opening parenthesis
 
     // Parse function parameters
-    Array* params = parse_css_function_params(input, css);
+    Array* params = parse_css_function_params(input, builder, css);
 
     if (**css == ')') {
         (*css)++; // Skip closing parenthesis
@@ -1196,7 +1180,7 @@ static Item parse_css_function(Input *input, const char **css) {
     return {.item = func_element ? ((((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)func_element) : ITEM_ERROR};
 }
 
-static Array* parse_css_value_list(Input *input, const char **css) {
+static Array* parse_css_value_list(Input *input, MarkBuilder* builder, const char **css) {
     Array* values = array_pooled(input->pool);
     if (!values) return NULL;
 
@@ -1206,7 +1190,7 @@ static Array* parse_css_value_list(Input *input, const char **css) {
 
         const char* start_pos = *css; // Track position to detect infinite loops
 
-        Item value = parse_css_value(input, css);
+        Item value = parse_css_value(input, builder, css);
         if (value .item != ITEM_ERROR) {
             array_append(values, value, input->pool);
         } else {
@@ -1284,7 +1268,7 @@ static Array* parse_css_value_list(Input *input, const char **css) {
     return values;
 }
 
-static Item parse_css_value(Input *input, const char **css) {
+static Item parse_css_value(Input *input, MarkBuilder* builder, const char **css) {
     skip_css_comments(css);
 
     if (!**css) return {.item = ITEM_ERROR};
@@ -1293,28 +1277,28 @@ static Item parse_css_value(Input *input, const char **css) {
     switch (**css) {
         case '"':
         case '\'':
-            return parse_css_string(input, css);
+            return parse_css_string(input, builder, css);
 
         case '#':
-            return parse_css_color(input, css);
+            return parse_css_color(input, builder, css);
 
         case '+':
         case '-':
             // Check if this is a CSS custom property (starts with --)
             if (**css == '-' && *(*css + 1) == '-') {
-                return parse_css_identifier(input, css);
+                return parse_css_identifier(input, builder, css);
             }
             // Otherwise fall through to parse as number
-            return parse_css_measure(input, css);
+            return parse_css_measure(input, builder, css);
 
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
         case '.':
-            return parse_css_measure(input, css);
+            return parse_css_measure(input, builder, css);
 
         default:
             if (**css == 'u' && strncmp(*css, "url(", 4) == 0) {
-                return parse_css_url(input, css);
+                return parse_css_url(input, builder, css);
             } else if (is_css_identifier_start(**css)) {
                 // Look ahead to see if this is a function
                 const char* lookahead = *css;
@@ -1371,18 +1355,18 @@ static Item parse_css_value(Input *input, const char **css) {
                         strncmp(start, "minmax(", 7) == 0 ||
                         strncmp(start, "repeat(", 7) == 0 ||
                         strncmp(start, "fit-content(", 12) == 0) {
-                        return parse_css_function(input, css);
+                        return parse_css_function(input, builder, css);
                     } else {
-                        return parse_css_function(input, css);
+                        return parse_css_function(input, builder, css);
                     }
                 } else {
                     // Check if it's a color first
-                    Item color_result = parse_css_color(input, css);
+                    Item color_result = parse_css_color(input, builder, css);
                     if (color_result .item != ITEM_ERROR) {
                         return color_result;
                     }
                     // Otherwise parse as identifier
-                    return parse_css_identifier(input, css);
+                    return parse_css_identifier(input, builder, css);
                 }
             }
             return {.item = ITEM_ERROR};
@@ -1391,6 +1375,9 @@ static Item parse_css_value(Input *input, const char **css) {
 
 void parse_css(Input* input, const char* css_string) {
     printf("css_parse (stylesheet)\n");
+
+    // Create MarkBuilder for string management
+    MarkBuilder builder(input);
     input->sb = stringbuf_new(input->pool);
 
     const char* css = css_string;
@@ -1398,7 +1385,7 @@ void parse_css(Input* input, const char* css_string) {
 
     // Parse as complete CSS stylesheet
     if (*css) {
-        input->root = parse_css_stylesheet(input, &css);
+        input->root = parse_css_stylesheet(input, &builder, &css);
     } else {
         // Empty stylesheet
         Element* empty_stylesheet = input_create_element(input, "stylesheet");
