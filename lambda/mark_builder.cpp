@@ -236,6 +236,13 @@ ElementBuilder& ElementBuilder::end() {
 }
 
 Item ElementBuilder::final() {
+    // Set content_length to match the number of children in the element
+    // This is required for the formatter to properly access children
+    if (elmt_ && elmt_->type) {
+        TypeElmt* elmt_type = (TypeElmt*)elmt_->type;
+        List* list = (List*)elmt_;
+        elmt_type->content_length = list->length;
+    }
     return (Item){.element = elmt_};
 }
 

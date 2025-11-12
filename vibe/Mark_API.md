@@ -1,8 +1,8 @@
 # Mark API Proposal: MarkBuilder and MarkReader
 
-**Version:** 1.0
-**Date:** November 11, 2025
-**Status:** Proposal
+**Version:** 1.1
+**Date:** November 13, 2025
+**Status:** Implemented
 
 ## Executive Summary
 
@@ -704,8 +704,7 @@ MarkReader provides a read-only, type-safe interface for traversing and extracti
 
 - **MarkReader**: Root document reader with iteration and query capabilities
 - **ItemReader**: Type-safe wrapper for individual Items
-- **ElementReaderWrapper**: Stack-based element traversal (no pool required)
-- **AttributeReaderWrapper**: Stack-based attribute access (no pool required)
+- **ElementReader**: Stack-based element traversal with integrated attribute access (no pool required)
 - **MapReader**: Stack-based map traversal (no pool required)
 - **ArrayReader**: Stack-based array traversal (no pool required)
 
@@ -725,35 +724,31 @@ ItemReader (Type-Safe Item Wrapper - stack-allocated, NO POOL)
     ├── getType() → TypeId
     ├── asString() → String*
     ├── asInt() → int64_t
-    ├── asElement() → ElementReaderWrapper (by value)
+    ├── asElement() → ElementReader (by value)
     ├── asMap() → MapReader (by value)
     ├── asArray() → ArrayReader (by value)
     └── isNull() → bool
 
-ElementReaderWrapper (Element-Specific - stack-allocated, NO POOL)
-    ├── ElementReaderWrapper(const Element*)  // Constructor - no pool needed
+ElementReader (Element-Specific - stack-allocated, NO POOL)
+    ├── ElementReader(const Element*)  // Constructor - no pool needed
     ├── tagName() → const char*
     ├── attrCount() → int64_t
     ├── childCount() → int64_t
     ├── childAt(index) → ItemReader (by value)
     ├── children() → Iterator<ItemReader>  // No pool needed
     ├── findChild(tag) → ItemReader (by value)
-    ├── textContent(StringBuf* sb) → void  // Caller provides StringBuf
+    ├── textContent(StringBuf*) → void  // Pool only for StringBuf
+    ├── has_attr(key) → bool  // Attribute access (consolidated)
+    ├── get_attr_string(key) → const char*  // Attribute access
+    ├── get_attr(key) → ItemReader  // Attribute access
     └── isEmpty() → bool
-
-AttributeReaderWrapper (Attribute Access - stack-allocated, NO POOL)
-    ├── AttributeReaderWrapper(const ElementReaderWrapper&)  // No pool
-    ├── getItem(key) → ItemReader (by value)
-    ├── getString(key) → const char*
-    ├── has(key) → bool
-    └── iterator() → Iterator<key, ItemReader>  // No pool needed
 
 MapReader (Map Traversal - stack-allocated, NO POOL)
     ├── MapReader(Map* map)  // Constructor - no pool needed
     ├── get(key) → ItemReader (by value)
     ├── has(key) → bool
-    ├── keys() → Iterator<const char*>
-    ├── values() → Iterator<ItemReader>
+    ├── keys() → KeyIterator
+    ├── entries() → EntryIterator
     └── size() → int64_t
 
 ArrayReader (Array Traversal - stack-allocated, NO POOL)
@@ -865,9 +860,9 @@ public:
     int32_t asInt32() const;
     double asFloat() const;
     bool asBool() const;
-    ElementReaderWrapper asElement() const;  // Returns by value
-    MapReader asMap() const;                 // Returns by value
-    ArrayReader asArray() const;             // Returns by value
+    ElementReader asElement() const;  // Returns by value
+    MapReader asMap() const;
+    ArrayReader asArray() const;
 
     /**
      * Convenience: Get C string directly (returns nullptr if not a string)
@@ -879,7 +874,7 @@ public:
 };
 
 // ==============================================================================
-// ElementReaderWrapper - Stack-Based Element Reader (NO POOL)
+// ElementReader - Stack-Based Element Reader (NO POOL)
 // ==============================================================================
 
 /**
@@ -887,9 +882,9 @@ public:
  * - Wraps Element* pointer
  * - Caches element metadata (tag name, child count, etc.)
  * - NO POOL STORED - completely pool-free for traversal
+ * - Attributes consolidated into ElementReader (no separate AttributeReader)
  */
-class ElementReaderWrapper {
-class ElementReaderWrapper {
+class ElementReader {
 private:
     const Element* element_;         // Underlying element (read-only)
     const TypeElmt* element_type_;   // Cached element type info
@@ -900,17 +895,17 @@ private:
 
 public:
     // Constructors - NO POOL PARAMETER
-    ElementReaderWrapper();  // Default constructor for invalid element
-    explicit ElementReaderWrapper(const Element* element);
-    explicit ElementReaderWrapper(Item item);
+    ElementReader();  // Default constructor for invalid element
+    explicit ElementReader(const Element* element);
+    explicit ElementReader(Item item);
 
-    ~ElementReaderWrapper() = default;
+    ~ElementReader() = default;
 
     // Copyable and movable (shallow copy - just pointers)
-    ElementReaderWrapper(const ElementReaderWrapper&) = default;
-    ElementReaderWrapper& operator=(const ElementReaderWrapper&) = default;
-    ElementReaderWrapper(ElementReaderWrapper&&) = default;
-    ElementReaderWrapper& operator=(ElementReaderWrapper&&) = default;
+    ElementReader(const ElementReader&) = default;
+    ElementReader& operator=(const ElementReader&) = default;
+    ElementReader(ElementReader&&) = default;
+    ElementReader& operator=(ElementReader&&) = default;
 
     /**
      * Element properties
@@ -940,7 +935,7 @@ public:
      * Get child element by tag name (first match)
      * Returns by value
      */
-    ElementReaderWrapper findChildElement(const char* tag_name) const;
+    ElementReader findChildElement(const char* tag_name) const;
 
     /**
      * Check if element has any child elements (not just text)
@@ -948,72 +943,43 @@ public:
     bool hasChildElements() const;
 
     /**
+     * Attribute access - CONSOLIDATED INTO ElementReader
+     * No separate AttributeReader needed!
+     */
+    bool has_attr(const char* key) const;
+    const char* get_attr_string(const char* key) const;
+    ItemReader get_attr(const char* key) const;
+
+    /**
      * Iteration - NO POOL NEEDED
      */
     class ChildIterator {
     private:
-        const ElementReaderWrapper* reader_;
+        const ElementReader* reader_;
         int64_t index_;
     public:
-        explicit ChildIterator(const ElementReaderWrapper* reader);
+        explicit ChildIterator(const ElementReader* reader);
         bool next(ItemReader* item);
         void reset();
     };
 
     class ElementChildIterator {
     private:
-        const ElementReaderWrapper* reader_;
+        const ElementReader* reader_;
         int64_t index_;
     public:
-        explicit ElementChildIterator(const ElementReaderWrapper* reader);
-        bool next(ElementReaderWrapper* elem);
+        ElementChildIterator(const ElementReader* reader);
+        bool next(ElementReader* elem);
         void reset();
     };
 
     ChildIterator children() const;         // NO POOL PARAMETER
     ElementChildIterator childElements() const;
 
-    /**
-     * Attributes access
-     */
-    AttributeReaderWrapper attributes() const;
-
     // Accessors
     bool isValid() const { return element_ != nullptr; }
     const Element* element() const { return element_; }
 };
-
-// ==============================================================================
-// AttributeReaderWrapper - Stack-Based Attribute Reader (NO POOL)
-// ==============================================================================
-
-/**
- * MEMORY MODEL: Stack-allocated value type, POOL-FREE
- * - Stores map type and data pointers directly
- * - NO POOL STORED - completely pool-free
- */
-class AttributeReaderWrapper {
-private:
-    const ElementReaderWrapper* element_reader_;  // Reference to parent element
-    const TypeMap* map_type_;        // Cached map type info
-    const void* attr_data_;          // Packed attribute data
-    const ShapeEntry* shape_;        // Attribute shape definition
-
-public:
-    // Constructors - NO POOL PARAMETER
-    AttributeReaderWrapper();  // Default constructor
-    explicit AttributeReaderWrapper(const ElementReaderWrapper& elem);
-
-    ~AttributeReaderWrapper() = default;
-
-    // Copyable and movable (shallow copy - just pointers)
-    AttributeReaderWrapper(const AttributeReaderWrapper&) = default;
-    AttributeReaderWrapper& operator=(const AttributeReaderWrapper&) = default;
-    AttributeReaderWrapper(AttributeReaderWrapper&&) = default;
-    AttributeReaderWrapper& operator=(AttributeReaderWrapper&&) = default;
-
-    /**
-     * Attribute access - NO POOL NEEDED
      */
     bool has(const char* key) const;
     const char* getString(const char* key) const;
@@ -1023,25 +989,9 @@ public:
      * Get attribute with default value
      */
     const char* getStringOr(const char* key, const char* default_value) const;
-    int64_t getIntOr(const char* key, int64_t default_value) const;
-
-    /**
-     * Iterate over all attributes - NO POOL NEEDED
-     */
-    class Iterator {
-    private:
-        const AttributeReaderWrapper* reader_;
-        const ShapeEntry* current_field_;
-    public:
-        explicit Iterator(const AttributeReaderWrapper* reader);
-        bool next(const char** key, ItemReader* value);
-        void reset();
-    };
-
-    Iterator iterator() const;  // NO POOL PARAMETER
-
     // Accessors
-    bool isValid() const { return element_reader_ != nullptr && element_reader_->isValid(); }
+    bool isValid() const { return element_ != nullptr; }
+    const Element* element() const { return element_; }
 };
 
 // ==============================================================================
@@ -1297,9 +1247,9 @@ for (int i = 0; i < elem->length; i++) {
 
 // New way (stack-allocated readers, NO POOL)
 ItemReader reader(item);  // No pool
-ElementReaderWrapper elem = reader.asElement();
-ElementReaderWrapper::ElementChildIterator iter = elem.childElements();  // No pool!
-ElementReaderWrapper child;
+ElementReader elem = reader.asElement();
+ElementReader::ElementChildIterator iter = elem.childElements();  // No pool!
+ElementReader child;
 while (iter.next(&child)) {
     // Process child (stack-allocated)
 }
@@ -1387,21 +1337,27 @@ void format_html_element(StringBuf* sb, const ElementReader& elem) {
     // Opening tag
     stringbuf_append_format(sb, "<%s", tag);
 
-    // Attributes (returned by value)
-    AttributeReader attrs = elem.attributes();
-    AttributeReader::AttributeIterator attr_iter = attrs.iterator();
-    const char* attr_name;
-    ItemReader attr_value;
-    while (attr_iter.next(&attr_name, &attr_value)) {
-        stringbuf_append_format(sb, " %s=\"", attr_name);
-        format_html_string(sb, attr_value.cstring());
-        stringbuf_append_char(sb, '"');
+    // Attributes - directly accessed from ElementReader
+    if (elem.attrCount() > 0) {
+        const TypeMap* map_type = (const TypeMap*)elem.element()->type;
+        const ShapeEntry* field = map_type->shape;
+
+        while (field) {
+            const char* attr_name = field->name->str;
+            ItemReader attr_value = elem.get_attr(attr_name);
+
+            stringbuf_append_format(sb, " %s=\"", attr_name);
+            format_html_string(sb, attr_value.cstring());
+            stringbuf_append_char(sb, '"');
+
+            field = field->next;
+        }
     }
 
     stringbuf_append_char(sb, '>');
 
     // Children
-    ElementReader::Iterator child_iter = elem.children();
+    ElementReader::ChildIterator child_iter = elem.children();
     ItemReader child;
     while (child_iter.next(&child)) {
         if (child.isString()) {
@@ -1873,16 +1829,22 @@ static void format_element(StringBuf* sb, const ElementReader& elem) {
 
     stringbuf_append_format(sb, "<%s", tag);
 
-    // Attributes (returned by value)
-    AttributeReader attrs = elem.attributes();
-    AttributeReader::AttributeIterator iter = attrs.iterator();
-    const char* attr_name;
-    ItemReader attr_value;
-    while (iter.next(&attr_name, &attr_value)) {
-        if (attr_value.isSimple()) {
-            stringbuf_append_format(sb, " %s=\"", attr_name);
-            format_attribute_value(sb, attr_value);
-            stringbuf_append_char(sb, '"');
+    // Attributes - directly accessed from ElementReader
+    if (elem.attrCount() > 0) {
+        const TypeMap* map_type = (const TypeMap*)elem.element()->type;
+        const ShapeEntry* field = map_type->shape;
+
+        while (field) {
+            const char* attr_name = field->name->str;
+            ItemReader attr_value = elem.get_attr(attr_name);
+
+            if (attr_value.isString() || attr_value.isInt() || attr_value.isBool()) {
+                stringbuf_append_format(sb, " %s=\"", attr_name);
+                format_attribute_value(sb, attr_value);
+                stringbuf_append_char(sb, '"');
+            }
+
+            field = field->next;
         }
     }
 
