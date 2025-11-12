@@ -309,12 +309,14 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
         // Handle attributes
         if (elem.attrCount() > 0) {
             printf("format_item_reader: element has attributes, formatting\n");
-            AttributeReader attrs(elem);
-            auto attr_iter = attrs.iterator();
-            const char* key;
-            ItemReader value;
+            // Access attributes directly from ElementReader
+            const TypeMap* map_type = (const TypeMap*)elem.element()->type;
+            const ShapeEntry* field = map_type->shape;
 
-            while (attr_iter.next(&key, &value)) {
+            while (field) {
+                const char* key = field->name->str;
+                ItemReader value = elem.get_attr(key);
+
                 stringbuf_append_char(sb, ' ');
                 stringbuf_append_str(sb, key);
                 stringbuf_append_str(sb, "=\"");
@@ -333,6 +335,8 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, const char
                 }
 
                 stringbuf_append_char(sb, '"');
+
+                field = field->next;
             }
         }
 
