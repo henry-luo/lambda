@@ -11,6 +11,7 @@
 #include "ast.hpp"
 #include "lambda-data.hpp"
 #include "name_pool.h"
+#include "schema_ast.hpp"
 
 // External function declarations
 extern "C" {
@@ -20,6 +21,7 @@ extern "C" {
 
 // C++ function declarations (no extern "C" needed)
 void find_errors(TSNode node);
+void print_tree(TSNode node, int depth);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 ArrayList* arraylist_new(size_t initial_capacity);
 
@@ -27,6 +29,28 @@ ArrayList* arraylist_new(size_t initial_capacity);
 Transpiler* transpiler_create(Pool* pool);
 void transpiler_destroy(Transpiler* transpiler);
 AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
+
+// Helper to print tree structure for debugging
+void print_tree(TSNode node, int depth) {
+    if (ts_node_is_null(node)) return;
+    
+    const char *node_type = ts_node_type(node);
+    TSPoint start = ts_node_start_point(node);
+    TSPoint end = ts_node_end_point(node);
+    
+    for (int i = 0; i < depth; ++i) printf("  ");
+    printf("%s [%u:%u-%u:%u] %s%s\n", 
+           node_type,
+           start.row + 1, start.column + 1,
+           end.row + 1, end.column + 1,
+           ts_node_is_error(node) ? " ERROR" : "",
+           ts_node_is_missing(node) ? " MISSING" : "");
+    
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; ++i) {
+        print_tree(ts_node_child(node, i), depth + 1);
+    }
+}
 
 // Forward declarations for functions we need to implement
 Transpiler* transpiler_create(Pool* pool) {
@@ -88,6 +112,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
     TSNode root_node = ts_tree_root_node(transpiler->syntax_tree);
     if (ts_node_has_error(root_node)) {
         // Log syntax errors but continue - validator will handle them
+        log_error("Syntax tree has errors - parsing failed");
         find_errors(root_node);
         return nullptr;
     }
@@ -106,14 +131,9 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
 
 // ==================== Hash Functions for Type Registry ====================
 
-typedef struct TypeRegistryEntry {
-    StrView name;
-    Type* type;
-} TypeRegistryEntry;
-
 static uint64_t type_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const TypeRegistryEntry* entry = (const TypeRegistryEntry*)item;
-    return hashmap_sip(entry->name.str, entry->name.length, seed0, seed1);
+    return hashmap_sip(entry->name_key.str, entry->name_key.length, seed0, seed1);
 }
 
 static int type_entry_compare(const void *a, const void *b, void *udata) {
@@ -121,10 +141,10 @@ static int type_entry_compare(const void *a, const void *b, void *udata) {
     const TypeRegistryEntry* entry_a = (const TypeRegistryEntry*)a;
     const TypeRegistryEntry* entry_b = (const TypeRegistryEntry*)b;
 
-    if (entry_a->name.length != entry_b->name.length) {
-        return (int)entry_a->name.length - (int)entry_b->name.length;
+    if (entry_a->name_key.length != entry_b->name_key.length) {
+        return (int)entry_a->name_key.length - (int)entry_b->name_key.length;
     }
-    return memcmp(entry_a->name.str, entry_b->name.str, entry_a->name.length);
+    return memcmp(entry_a->name_key.str, entry_b->name_key.str, entry_a->name_key.length);
 }
 
 // Hash functions for circular reference detection
@@ -203,21 +223,27 @@ void ast_validator_destroy(AstValidator* validator) {
 int ast_validator_load_schema(AstValidator* validator, const char* source, const char* root_type) {
     if (!validator || !source || !root_type) return -1;
 
-    printf("[AST_VALIDATOR] Loading schema with root type: %s\n", root_type);
+    log_info("Loading schema with root type: %s", root_type);
 
     // Build AST using transpiler
     AstNode* ast = transpiler_build_ast(validator->transpiler, source);
     if (!ast) {
-        printf("[AST_VALIDATOR] Failed to build AST from source\n");
+        log_error("Failed to build AST from source");
         return -1;
     }
 
-    printf("[AST_VALIDATOR] AST built successfully, extracting type definitions\n");
+    log_debug("AST built successfully, extracting type definitions");
 
     // Extract type definitions from AST
     if (ast->node_type == AST_SCRIPT) {
         AstScript* script = (AstScript*)ast;
         AstNode* child = script->child;
+        
+        // If the script child is a content node, traverse into it
+        if (child && child->node_type == AST_NODE_CONTENT) {
+            AstListNode* content = (AstListNode*)child;
+            child = content->item;
+        }
         
         int type_count = 0;
         while (child) {
@@ -225,29 +251,49 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
                 // Type statement: type Name = TypeExpr
                 AstNamedNode* type_node = (AstNamedNode*)child;
                 
-                // Register type in validator's type_definitions map
+                if (!type_node->name || !type_node->type) {
+                    log_warn("Skipping type node without name or type");
+                    child = child->next;
+                    continue;
+                }
+                
+                // Create TypeDefinition
+                TypeDefinition* def = (TypeDefinition*)pool_calloc(validator->pool, sizeof(TypeDefinition));
+                if (!def) {
+                    log_error("Failed to allocate TypeDefinition");
+                    return -1;
+                }
+                
+                def->name.str = type_node->name->chars;
+                def->name.length = type_node->name->len;
+                def->runtime_type = type_node->type;
+                def->schema_type = nullptr;  // Can be filled in later if needed
+                def->is_exported = true;  // Assume exported by default
+                
+                // Create TypeRegistryEntry for hashmap
                 TypeRegistryEntry entry;
-                entry.name = (StrView){type_node->name->chars, type_node->name->len};
-                entry.type = type_node->type;
+                entry.definition = def;
+                entry.name_key = def->name;
                 
                 hashmap_set(validator->type_definitions, &entry);
                 
                 log_debug("Registered type: %.*s (type_id=%d)",
-                    (int)entry.name.length, entry.name.str,
+                    (int)def->name.length, def->name.str,
                     type_node->type ? type_node->type->type_id : -1);
                 type_count++;
             }
             child = child->next;
         }
         
-        printf("[AST_VALIDATOR] Registered %d type definitions\n", type_count);
+        log_info("Registered %d type definitions", type_count);
+        return 0;
     }
 
-    return 0;
+    log_error("AST root is not a script node");
+    return -1;
 }
 
 // ==================== Type Extraction ====================
-
 Type* extract_type_from_ast_node(AstNode* node) {
     if (!node) return nullptr;
 
@@ -268,10 +314,10 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name) {
     if (!validator || !type_name) return nullptr;
 
     StrView name_view = {.str = type_name, .length = strlen(type_name)};
-    TypeRegistryEntry key = {.name = name_view, .type = nullptr};
+    TypeRegistryEntry key = {.definition = nullptr, .name_key = name_view};
 
     const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(validator->type_definitions, &key);
-    return entry ? entry->type : nullptr;
+    return entry && entry->definition ? entry->definition->runtime_type : nullptr;
 }
 
 // Resolve a type reference with circular reference detection
@@ -472,13 +518,15 @@ ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item
         return result;
     }
 
-    Type* type = ast_validator_find_type(validator, type_name);
+    // Use resolve_type_reference for circular reference detection
+    Type* type = ast_validator_resolve_type_reference(validator, type_name);
     if (!type) {
         ValidationResult* result = create_validation_result(validator->pool);
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Type not found: %s", type_name);
+        snprintf(error_msg, sizeof(error_msg), 
+                "Type not found or circular reference detected: %s", type_name);
         ValidationError* error = create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, error_msg, nullptr, validator->pool);
+            AST_VALID_ERROR_REFERENCE_ERROR, error_msg, nullptr, validator->pool);
         add_validation_error(result, error);
         return result;
     }

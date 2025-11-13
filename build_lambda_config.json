@@ -1225,6 +1225,19 @@
                         "binary": "test_validator_features_gtest.exe"
                     },
                     {
+                        "source": "test_type_references_simple.cpp",
+                        "name": "🔗 Type References Tests (GTest) - Schema Loading & Resolution",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_type_references_gtest.exe"
+                    },
+                    {
                         "source": "test_graph_formatter_gtest.cpp",
                         "name": "\ud83c\udfa8 Graph Formatter Tests (GTest) - DOT, Mermaid, D2",
                         "dependencies": [

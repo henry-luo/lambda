@@ -58,7 +58,14 @@ void schema_validator_destroy(SchemaValidator* validator) {
 
 int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source,
                                 const char* schema_name) {
-    // Stub implementation - always succeeds
+    if (!validator || !schema_source) {
+        log_error("schema_validator_load_schema: invalid parameters");
+        return -1;
+    }
+
+    // For now, stub implementation that succeeds
+    // Full implementation will require AST parsing
+    log_info("Loaded schema: %s", schema_name ? schema_name : "<unnamed>");
     return 0;
 }
 

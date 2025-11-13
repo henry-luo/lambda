@@ -15,7 +15,11 @@
 
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator.hpp"
+#include "../lambda/mark_builder.hpp"
+#include "../lambda/input/input.h"
 #include "../lib/mempool.h"
+#include "../lib/arraylist.h"
+#include "../lib/stringbuf.h"
 
 // Forward declaration for path segment creation
 PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, Pool* pool);
@@ -73,6 +77,7 @@ class AstValidatorTest : public ::testing::Test {
 protected:
     Pool* test_pool = nullptr;
     AstValidator* validator = nullptr;
+    Input* input = nullptr;
 
     void SetUp() override {
         test_pool = pool_create();
@@ -80,9 +85,26 @@ protected:
 
         validator = ast_validator_create(test_pool);
         ASSERT_NE(validator, nullptr) << "Failed to create AST validator";
+
+        // Create Input context for MarkBuilder
+        NamePool* name_pool = name_pool_create(test_pool, nullptr);
+        ArrayList* type_list = arraylist_new(32);
+        StringBuf* sb = stringbuf_new_cap(test_pool, 256);
+
+        input = (Input*)pool_alloc(test_pool, sizeof(Input));
+        input->pool = test_pool;
+        input->name_pool = name_pool;
+        input->type_list = type_list;
+        input->sb = sb;
+        input->url = nullptr;
+        input->path = nullptr;
+        input->root = (Item){.item = 0};
     }
 
     void TearDown() override {
+        if (input) {
+            arraylist_free(input->type_list);
+        }
         if (validator) {
             ast_validator_destroy(validator);
             validator = nullptr;
@@ -101,47 +123,39 @@ protected:
         str->len = len;
         strcpy(str->chars, value);
 
-        ConstItem item;
-        item.type_id = LMD_TYPE_STRING;
-        item.pointer = str;
-        return item;
+        Item item;
+        item.item = s2it(str);
+        return item.to_const();
     }
 
     ConstItem create_test_int(int64_t value) {
-        int64_t* int_ptr = (int64_t*)pool_calloc(test_pool, sizeof(int64_t));
-        *int_ptr = value;
-
-        Item item = {.item = i2it()}
-        item.type_id = LMD_TYPE_INT;
-        item.pointer = int_ptr;
-        return item;
+        Item item;
+        item.item = i2it(value);
+        return item.to_const();
     }
 
     ConstItem create_test_float(double value) {
         double* float_ptr = (double*)pool_calloc(test_pool, sizeof(double));
         *float_ptr = value;
-
-        ConstItem item;
-        item.type_id = LMD_TYPE_FLOAT;
-        item.pointer = float_ptr;
-        return item;
+        
+        Item item;
+        item.pointer = (uint64_t)float_ptr;
+        item._type_id = LMD_TYPE_FLOAT;
+        return item.to_const();
     }
 
     ConstItem create_test_bool(bool value) {
-        bool* bool_ptr = (bool*)pool_calloc(test_pool, sizeof(bool));
-        *bool_ptr = value;
-
-        ConstItem item;
-        item.type_id = LMD_TYPE_BOOL;
-        item.pointer = bool_ptr;
-        return item;
+        Item item;
+        item.bool_val = value ? 1 : 0;
+        item._type_id = LMD_TYPE_BOOL;
+        return item.to_const();
     }
 
     ConstItem create_test_null() {
-        ConstItem item;
-        item.type_id = LMD_TYPE_NULL;
-        item.pointer = nullptr;
-        return item;
+        Item item;
+        item.item = 0;
+        item._type_id = LMD_TYPE_NULL;
+        return item.to_const();
     }
 
     // Helper function to create basic types for testing
@@ -149,24 +163,6 @@ protected:
         Type* type = (Type*)pool_calloc(test_pool, sizeof(Type));
         type->type_id = type_id;
         return type;
-    }
-
-    // Helper function to create test elements
-    Element* create_test_element(const char* name, const char* content) {
-        Element* element = (Element*)pool_calloc(test_pool, sizeof(Element));
-
-        // Element no longer has a name member - skip name setting
-        // The Element structure now inherits from List and has type/data members
-
-        // Set element content
-        if (content) {
-            size_t content_len = strlen(content);
-            element->data = (char*)pool_calloc(test_pool, content_len + 1);
-            strcpy((char*)element->data, content);
-            element->length = content_len;
-        }
-
-        return element;
     }
 
     // Helper function to create test element types
@@ -178,7 +174,7 @@ protected:
             element_type->name.str = name;
             element_type->name.length = strlen(name);
         }
-        element_type->content_length = 20; // Default content length
+        element_type->content_length = 0; // No content length constraint by default
 
         return element_type;
     }
@@ -383,10 +379,13 @@ TEST_F(AstValidatorTest, ValidationDepthCheck) {
 // ==================== Element Validation Tests ====================
 
 TEST_F(AstValidatorTest, ValidElementValidation) {
-    Element* test_element = create_test_element("testElement", "Hello World");
+    // Create element using MarkBuilder
+    MarkBuilder builder(input);
+    Item element = builder.element("testElement")
+        .text("Hello World")
+        .final();
+    
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
-
-    Item item = {.element = test_element};
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -394,19 +393,26 @@ TEST_F(AstValidatorTest, ValidElementValidation) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
 
-    AstValidationResult* result = validate_against_element_type(&ctx, *(ConstItem*)&item, element_type);
+    AstValidationResult* result = validate_against_element_type(&ctx, element.to_const(), element_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Valid element should pass validation";
 }
 
 TEST_F(AstValidatorTest, ElementContentLengthViolation) {
-    Element* test_element = create_test_element("testElement", "This content is too long for the constraint");
+    // Create element with content using MarkBuilder (1 text child)
+    MarkBuilder builder(input);
+    Item element = builder.element("testElement")
+        .text("This content is too long for the constraint")
+        .final();
+    
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
+    // Set a content_length constraint that expects 5 children, but we only have 1
+    element_type->content_length = 5;
 
-    ConstItem item;
-    item.type_id = LMD_TYPE_ELEMENT;
-    item.pointer = test_element;
+    Item item_mut;
+    item_mut.element = element.element;
+    ConstItem item = item_mut.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -417,16 +423,17 @@ TEST_F(AstValidatorTest, ElementContentLengthViolation) {
     AstValidationResult* result = validate_against_element_type(&ctx, item, element_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
-    EXPECT_FALSE(result->valid) << "Element with content too long should fail validation";
+    EXPECT_FALSE(result->valid) << "Element with wrong child count should fail validation";
     EXPECT_GT(result->error_count, 0) << "Should have validation errors";
 }
 
 TEST_F(AstValidatorTest, ElementTypeMismatch) {
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
 
-    ConstItem item;
-    item.type_id = LMD_TYPE_STRING;
-    item.pointer = (void*)"not an element";
+    String* str = create_string(test_pool, "not an element");
+    Item item_mut;
+    item_mut.item = s2it(str);
+    ConstItem item = item_mut.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -455,9 +462,10 @@ TEST_F(AstValidatorTest, ValidStringInUnion) {
     union_types[0] = string_type;
     union_types[1] = int_type;
 
-    ConstItem item;
-    item.type_id = LMD_TYPE_STRING;
-    item.pointer = (void*)"test string";
+    String* str = create_string(test_pool, "test string");
+    Item item_mut;
+    item_mut.item = s2it(str);
+    ConstItem item = item_mut.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -483,10 +491,9 @@ TEST_F(AstValidatorTest, ValidIntInUnion) {
     union_types[0] = string_type;
     union_types[1] = int_type;
 
-    int test_int = 42;
-    ConstItem item;
-    item.type_id = LMD_TYPE_INT;
-    item.pointer = &test_int;
+    Item item_mut;
+    item_mut.item = i2it(42);
+    ConstItem item = item_mut.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -512,10 +519,12 @@ TEST_F(AstValidatorTest, InvalidTypeNotInUnion) {
     union_types[0] = string_type;
     union_types[1] = int_type;
 
-    float test_float = 3.14f;
-    ConstItem item;
-    item.type_id = LMD_TYPE_FLOAT;
-    item.pointer = &test_float;
+    double* float_ptr = (double*)pool_calloc(test_pool, sizeof(double));
+    *float_ptr = 3.14;
+    Item item_mut;
+    item_mut.pointer = (uint64_t)float_ptr;
+    item_mut._type_id = LMD_TYPE_FLOAT;
+    ConstItem item = item_mut.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -552,11 +561,14 @@ TEST_F(AstValidatorTest, OptionalConstraintTooManyItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
+    String* str1 = create_string(test_pool, "item1");
+    String* str2 = create_string(test_pool, "item2");
     ConstItem items[2];
-    items[0].type_id = LMD_TYPE_STRING;
-    items[0].pointer = (void*)"item1";
-    items[1].type_id = LMD_TYPE_STRING;
-    items[1].pointer = (void*)"item2";
+    Item item1, item2;
+    item1.item = s2it(str1);
+    item2.item = s2it(str2);
+    items[0] = item1.to_const();
+    items[1] = item2.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -592,13 +604,17 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintMultipleItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
+    String* str1 = create_string(test_pool, "item1");
+    String* str2 = create_string(test_pool, "item2");
+    String* str3 = create_string(test_pool, "item3");
     ConstItem items[3];
-    items[0].type_id = LMD_TYPE_STRING;
-    items[0].pointer = (void*)"item1";
-    items[1].type_id = LMD_TYPE_STRING;
-    items[1].pointer = (void*)"item2";
-    items[2].type_id = LMD_TYPE_STRING;
-    items[2].pointer = (void*)"item3";
+    Item item1, item2, item3;
+    item1.item = s2it(str1);
+    item2.item = s2it(str2);
+    item3.item = s2it(str3);
+    items[0] = item1.to_const();
+    items[1] = item2.to_const();
+    items[2] = item3.to_const();
 
     AstValidator ctx = *validator;
     ctx.pool = test_pool;
@@ -616,10 +632,12 @@ TEST_F(AstValidatorTest, ZeroOrMoreConstraintAnyItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
+    String* str = create_string(test_pool, "item");
     ConstItem items[5];
     for (int i = 0; i < 5; i++) {
-        items[i].type_id = LMD_TYPE_STRING;
-        items[i].pointer = (void*)"item";
+        Item item_mut;
+        item_mut.item = s2it(str);
+        items[i] = item_mut.to_const();
     }
 
     AstValidator ctx = *validator;
@@ -649,9 +667,10 @@ TEST_F(AstValidatorTest, NullPointerHandling) {
 }
 
 TEST_F(AstValidatorTest, EmptyStringHandling) {
-    ConstItem empty_string_item;
-    empty_string_item.type_id = LMD_TYPE_STRING;
-    empty_string_item.pointer = (void*)"";
+    String* empty_str = create_string(test_pool, "");
+    Item item_mut;
+    item_mut.item = s2it(empty_str);
+    ConstItem empty_string_item = item_mut.to_const();
 
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
@@ -663,9 +682,10 @@ TEST_F(AstValidatorTest, EmptyStringHandling) {
 
 TEST_F(AstValidatorTest, UnicodeStringHandling) {
     const char* unicode_string = "Hello 世界 🌍 Ñoël";
-    ConstItem unicode_item;
-    unicode_item.type_id = LMD_TYPE_STRING;
-    unicode_item.pointer = (void*)unicode_string;
+    String* unicode_str = create_string(test_pool, unicode_string);
+    Item item_mut;
+    item_mut.item = s2it(unicode_str);
+    ConstItem unicode_item = item_mut.to_const();
 
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
@@ -801,9 +821,10 @@ TEST_F(AstValidatorTest, RepeatedValidationStability) {
 
 TEST_F(AstValidatorTest, LargeErrorMessageHandling) {
     // Create a scenario that might generate a large error message
-    ConstItem item;
-    item.type_id = LMD_TYPE_STRING;
-    item.pointer = nullptr; // This might generate an error about null pointer
+    Item item_mut;
+    item_mut.item = 0; // null pointer
+    item_mut._type_id = LMD_TYPE_STRING;
+    ConstItem item = item_mut.to_const();
 
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
