@@ -39,6 +39,7 @@ typedef enum PathSegmentType {
     PATH_INDEX,      // [index]
     PATH_ELEMENT,    // <element_tag>
     PATH_ATTRIBUTE,  // @attr_name
+    PATH_UNION,      // union alternative
 } PathSegmentType;
 
 // Path segment structure
@@ -173,6 +174,12 @@ Type* extract_type_from_ast_node(AstNode* node);
  * Find type definition by name in validator registry
  */
 Type* ast_validator_find_type(AstValidator* validator, const char* type_name);
+
+/**
+ * Resolve a type reference with circular reference detection
+ * Returns the resolved Type* or nullptr if not found or circular
+ */
+Type* ast_validator_resolve_type_reference(AstValidator* validator, const char* type_name);
 
 // ==================== Validation Functions ====================
 
