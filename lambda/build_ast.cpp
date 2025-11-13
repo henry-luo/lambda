@@ -358,6 +358,14 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                     (int)entry->name->len, entry->name->chars);
                 ast_node->type = &TYPE_ANY;
             }
+            // Special handling: if identifier refers to a type definition, wrap type in TypeType
+            else if (entry->node->node_type == AST_NODE_TYPE_STAM) {
+                TypeType* type_type = (TypeType*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
+                type_type->type = entry->node->type;
+                ast_node->type = (Type*)type_type;
+                log_debug("Wrapped type definition %.*s in TypeType", 
+                    (int)entry->name->len, entry->name->chars);
+            }
         }
         if (ast_node->type) {
             log_debug("ident %p type: %d", ast_node->type, ast_node->type->type_id);
@@ -1954,6 +1962,57 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     return (AstNode*)ast_node;
 }
 
+// Build type statement: type Name = TypeExpr, Name2 = TypeExpr2, ...
+AstNode* build_type_stam(Transpiler* tp, TSNode type_node) {
+    log_debug("build type_stam");
+    
+    // Get the first type_assign (declare field)
+    TSNode assign_node = ts_node_child_by_field_name(type_node, "declare", 7);
+    if (ts_node_is_null(assign_node)) {
+        log_warn("type_stam has no declare field");
+        return nullptr;
+    }
+    
+    // For now, handle single type definition
+    // Get name and type from the type_assign node
+    TSNode name_node = ts_node_child_by_field_name(assign_node, "name", 4);
+    TSNode type_expr_node = ts_node_child_by_field_name(assign_node, "as", 2);
+    
+    if (ts_node_is_null(name_node) || ts_node_is_null(type_expr_node)) {
+        log_warn("type_assign missing name or type");
+        return nullptr;
+    }
+    
+    // Create AST node for type statement
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_TYPE_STAM, type_node, sizeof(AstNamedNode));
+    
+    // Get the type name as a String - use same method as build_assign_expr
+    int start_byte = ts_node_start_byte(name_node);
+    StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
+    
+    // Build the type expression and extract the Type* from it
+    AstNode* type_expr = build_expr(tp, type_expr_node);
+    if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
+        ast_node->type = ((TypeType*)type_expr->type)->type;
+    } else {
+        log_warn("type_assign: failed to build type expression");
+        ast_node->type = &TYPE_ANY;
+    }
+    ast_node->as = nullptr;  // No value for type statements
+    
+    // Register the type name in the current scope so it can be referenced
+    // The node type should be the resolved type for lookups
+    push_name(tp, ast_node, NULL);
+    
+    log_debug("Built type_stam: name='%.*s' type=%p", 
+        ast_node->name ? (int)ast_node->name->len : 0,
+        ast_node->name ? ast_node->name->chars : "",
+        (void*)ast_node->type);
+    
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     log_debug("build content");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
@@ -2010,6 +2069,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_let_expr(tp, expr_node);
     case SYM_LET_STAM:  case SYM_PUB_STAM:
         return build_let_stam(tp, expr_node, symbol);
+    case SYM_TYPE_DEFINE:
+        return build_type_stam(tp, expr_node);
     case SYM_FOR_EXPR:
         return build_for_expr(tp, expr_node);
     case SYM_FOR_STAM:
@@ -2088,9 +2149,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_binary_type(tp, expr_node);
     case SYM_TYPE_OCCURRENCE:
         return build_occurrence_type(tp, expr_node);
-    case SYM_TYPE_DEFINE:
-        // todo: full type def support
-        return build_let_stam(tp, expr_node, symbol);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;

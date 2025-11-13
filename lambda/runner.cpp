@@ -68,6 +68,16 @@ void find_errors(TSNode node) {
 
     // Check for direct syntax error nodes
     if (ts_node_is_error(node)) {
+        printf("PARSE ERROR: Syntax error at Ln %u, Col %u - %u, Col %u: node_type='%s'\n",
+               start_point.row + 1, start_point.column + 1,
+               end_point.row + 1, end_point.column + 1, node_type);
+        // Print child count to see what's inside the error
+        uint32_t child_count = ts_node_child_count(node);
+        printf("  Error node has %u children\n", child_count);
+        for (uint32_t i = 0; i < child_count && i < 5; i++) {
+            TSNode child = ts_node_child(node, i);
+            printf("    Child %u: %s\n", i, ts_node_type(child));
+        }
         log_error("Syntax error at Ln %u, Col %u - %u, Col %u: %s",
                start_point.row + 1, start_point.column + 1,
                end_point.row + 1, end_point.column + 1, node_type);
@@ -75,12 +85,17 @@ void find_errors(TSNode node) {
 
     // Check for missing nodes (inserted by parser for error recovery)
     if (ts_node_is_missing(node)) {
+        printf("PARSE ERROR: Missing node at Ln %u, Col %u: expected '%s'\n",
+               start_point.row + 1, start_point.column + 1, node_type);
         log_error("Missing node at Ln %u, Col %u: expected %s",
                start_point.row + 1, start_point.column + 1, node_type);
     }
 
     // Check for ERROR node type specifically (some parsers use this)
     if (strcmp(node_type, "ERROR") == 0) {
+        printf("PARSE ERROR: ERROR node at Ln %u, Col %u - %u, Col %u\n",
+               start_point.row + 1, start_point.column + 1,
+               end_point.row + 1, end_point.column + 1);
         log_error("ERROR node at Ln %u, Col %u - %u, Col %u",
                start_point.row + 1, start_point.column + 1,
                end_point.row + 1, end_point.column + 1);

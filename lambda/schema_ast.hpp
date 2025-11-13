@@ -18,6 +18,9 @@ extern "C" {
 
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
+
+// Forward declarations
+typedef struct Pool Pool;
 #include "../lib/strview.h"
 #include "../lib/mempool.h"
 
@@ -164,7 +167,7 @@ typedef struct TypeRegistryEntry {
 typedef struct TypeRegistry {
     HashMap* type_map;           // Name -> TypeDefinition mapping
     ArrayList* type_list;        // Ordered list of type definitions
-    VariableMemPool* pool;       // Memory pool for allocations
+    Pool* pool;       // Memory pool for allocations
 } TypeRegistry;
 
 // ==================== Enhanced Transpiler ====================
@@ -179,21 +182,21 @@ typedef struct SchemaTranspiler : Transpiler {
 // ==================== Unified Type Creation Functions ====================
 
 // Create schema types
-TypeSchema* unified_create_primitive_schema(TypeId primitive_type, VariableMemPool* pool);
-TypeSchema* unified_create_union_schema(TypeSchema** types, int type_count, VariableMemPool* pool);
-TypeSchema* unified_create_array_schema(TypeSchema* element_type, long min_count, long max_count, VariableMemPool* pool);
-TypeSchema* unified_create_map_schema(TypeSchema* key_type, TypeSchema* value_type, VariableMemPool* pool);
-TypeSchema* unified_create_element_schema(StrView tag, SchemaMapField* attributes, TypeSchema** content_types, int content_count, VariableMemPool* pool);
-TypeSchema* unified_create_occurrence_schema(TypeSchema* base_type, char modifier, VariableMemPool* pool);
-TypeSchema* unified_create_reference_schema(StrView type_name, VariableMemPool* pool);
-TypeSchema* unified_create_literal_schema(Item literal_value, VariableMemPool* pool);
+TypeSchema* unified_create_primitive_schema(TypeId primitive_type, Pool* pool);
+TypeSchema* unified_create_union_schema(TypeSchema** types, int type_count, Pool* pool);
+TypeSchema* unified_create_array_schema(TypeSchema* element_type, long min_count, long max_count, Pool* pool);
+TypeSchema* unified_create_map_schema(TypeSchema* key_type, TypeSchema* value_type, Pool* pool);
+TypeSchema* unified_create_element_schema(StrView tag, SchemaMapField* attributes, TypeSchema** content_types, int content_count, Pool* pool);
+TypeSchema* unified_create_occurrence_schema(TypeSchema* base_type, char modifier, Pool* pool);
+TypeSchema* unified_create_reference_schema(StrView type_name, Pool* pool);
+TypeSchema* unified_create_literal_schema(Item literal_value, Pool* pool);
 
 // Bridge functions: schema to runtime types
-Type* schema_to_runtime_type(TypeSchema* schema, VariableMemPool* pool);
-TypeSchema* runtime_to_schema_type(Type* runtime_type, VariableMemPool* pool);
+Type* schema_to_runtime_type(TypeSchema* schema, Pool* pool);
+TypeSchema* runtime_to_schema_type(Type* runtime_type, Pool* pool);
 
 // Type registry functions
-TypeRegistry* type_registry_create(VariableMemPool* pool);
+TypeRegistry* type_registry_create(Pool* pool);
 void type_registry_destroy(TypeRegistry* registry);
 bool type_registry_add(TypeRegistry* registry, StrView name, TypeSchema* schema_type, Type* runtime_type);
 TypeDefinition* type_registry_lookup(TypeRegistry* registry, StrView name);
