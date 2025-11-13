@@ -131,7 +131,7 @@ void init_type_info() {
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
     type_info[LMD_TYPE_TYPE] = {sizeof(void*), "type", &TYPE_TYPE, (Type*)&LIT_TYPE_TYPE};
     type_info[LMD_TYPE_FUNC] = {sizeof(void*), "function", &TYPE_FUNC, (Type*)&LIT_TYPE_FUNC};
-    type_info[LMD_TYPE_ANY] = {sizeof(ConstItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
+    type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
     type_info[LMD_TYPE_ERROR] = {sizeof(void*), "error", &TYPE_ERROR, (Type*)&LIT_TYPE_ERROR};
     type_info[LMD_CONTAINER_HEAP_START] = {0, "container_start", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
 }
@@ -416,7 +416,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 log_error("expected a map, got type %d", itm._type_id );
             }
         } else {
-            log_debug("map set field: %.*s, type: %d", (int)field->name->length, field->name->str, field->type->type_id);
+            log_debug("map set field: %.*s, type: %d, at offset: %d", (int)field->name->length, 
+                field->name->str, field->type->type_id, (int)field->byte_offset);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
                 *(bool*)field_ptr = (bool)va_arg(args, int);
@@ -428,7 +429,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_INT: {
                 *(int*)field_ptr = va_arg(args, int);
-                log_debug("set field of int type to: %d", *(int*)field_ptr);
+                log_debug("set field of int type to val: %d", *(int*)field_ptr);
                 break;
             }
             case LMD_TYPE_INT64: {
@@ -468,7 +469,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_ANY: { // a special case
                 Item item = va_arg(args, Item);
                 TypeId type_id = get_type_id(item);
-                log_debug("set field of ANY type to: %d", type_id);
+                log_debug("set field of ANY type to type: %d", type_id);
                 TypedItem titem = {.type_id = type_id, .item = item.item};
                 switch (type_id) {
                 case LMD_TYPE_NULL: ;

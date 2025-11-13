@@ -251,7 +251,7 @@ Item list_end(List *list) {
         return {.list = list};
     }
     else {
-        log_debug("list_ended");
+        log_debug("list_ended: type %d, length %d", list->type_id, list->length);
         if (list->length == 0) {
             return ItemNull;
         }
@@ -377,9 +377,9 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return {.container = container};
             }
             case LMD_TYPE_TYPE:
-                return {.type = (Type*)field_ptr};
+                return {.type = *(Type**)field_ptr};
             case LMD_TYPE_FUNC:
-                return {.function = (Function*)field_ptr};
+                return {.function = *(Function**)field_ptr};
             case LMD_TYPE_ANY: {
                 log_debug("map_get ANY type, pointer: %p", field_ptr);
                 return typeditem_to_item((TypedItem*)field_ptr);
