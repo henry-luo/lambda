@@ -1,6 +1,7 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
-static Item parse_value(Input *input, const char **toml, int *line_num);
+static Item parse_value(Input *input, MarkBuilder* builder, const char **toml, int *line_num);
 
 // Common function to handle escape sequences in strings
 // is_multiline: true for multiline basic strings, false for regular strings
@@ -117,8 +118,9 @@ static void skip_whitespace_and_comments(const char **toml, int *line_num) {
     }
 }
 
-static String* parse_bare_key(Input *input, const char **toml) {
-    StringBuf* sb = input->sb;
+static String* parse_bare_key(Input *input, MarkBuilder* builder, const char **toml) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
     const char *start = *toml;
 
     // Bare keys can contain A-Z, a-z, 0-9, -, _ (including pure numeric keys)
@@ -131,12 +133,13 @@ static String* parse_bare_key(Input *input, const char **toml) {
     for (int i = 0; i < len; i++) {
         stringbuf_append_char(sb, start[i]);
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_quoted_key(Input *input, const char **toml) {
+static String* parse_quoted_key(Input *input, MarkBuilder* builder, const char **toml) {
     if (**toml != '"') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
@@ -151,12 +154,13 @@ static String* parse_quoted_key(Input *input, const char **toml) {
     if (**toml == '"') {
         (*toml)++; // skip closing quote
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_literal_key(Input *input, const char **toml) {
+static String* parse_literal_key(Input *input, MarkBuilder* builder, const char **toml) {
     if (**toml != '\'') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '\'') {
@@ -167,12 +171,13 @@ static String* parse_literal_key(Input *input, const char **toml) {
     if (**toml == '\'') {
         (*toml)++; // skip closing quote
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_basic_string(Input *input, const char **toml) {
+static String* parse_basic_string(Input *input, MarkBuilder* builder, const char **toml) {
     if (**toml != '"') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
@@ -187,12 +192,13 @@ static String* parse_basic_string(Input *input, const char **toml) {
     if (**toml == '"') {
         (*toml)++; // skip closing quote
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_literal_string(Input *input, const char **toml) {
+static String* parse_literal_string(Input *input, MarkBuilder* builder, const char **toml) {
     if (**toml != '\'') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '\'') {
@@ -203,12 +209,13 @@ static String* parse_literal_string(Input *input, const char **toml) {
     if (**toml == '\'') {
         (*toml)++; // skip closing quote
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_multiline_basic_string(Input *input, const char **toml, int *line_num) {
+static String* parse_multiline_basic_string(Input *input, MarkBuilder* builder, const char **toml, int *line_num) {
     if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     *toml += 3; // Skip opening triple quotes
 
@@ -237,12 +244,13 @@ static String* parse_multiline_basic_string(Input *input, const char **toml, int
             (*toml)++;
         }
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_multiline_literal_string(Input *input, const char **toml, int *line_num) {
-    if (strncmp(*toml, "'''", 3) != 0) return NULL;
-    StringBuf* sb = input->sb;
+static String* parse_multiline_literal_string(Input *input, MarkBuilder* builder, const char **toml, int *line_num) {
+    if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     *toml += 3; // Skip opening triple quotes
 
@@ -267,16 +275,16 @@ static String* parse_multiline_literal_string(Input *input, const char **toml, i
         stringbuf_append_char(sb, **toml);
         (*toml)++;
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_key(Input *input, const char **toml) {
+static String* parse_key(Input *input, MarkBuilder* builder, const char **toml) {
     if (**toml == '"') {
-        return parse_quoted_key(input, toml);
+        return parse_quoted_key(input, builder, toml);
     } else if (**toml == '\'') {
-        return parse_literal_key(input, toml);
+        return parse_literal_key(input, builder, toml);
     } else {
-        return parse_bare_key(input, toml);
+        return parse_bare_key(input, builder, toml);
     }
 }
 
@@ -382,7 +390,7 @@ static Item parse_number(Input *input, const char **toml) {
     }
 }
 
-static Array* parse_array(Input *input, const char **toml, int *line_num) {
+static Array* parse_array(Input *input, MarkBuilder* builder, const char **toml, int *line_num) {
     if (**toml != '[') return NULL;
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
@@ -396,7 +404,7 @@ static Array* parse_array(Input *input, const char **toml, int *line_num) {
     }
 
     while (**toml) {
-        Item value = parse_value(input, toml, line_num);
+        Item value = parse_value(input, builder, toml, line_num);
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
@@ -424,7 +432,7 @@ static Array* parse_array(Input *input, const char **toml, int *line_num) {
     return arr;
 }
 
-static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
+static Map* parse_inline_table(Input *input, MarkBuilder* builder, const char **toml, int *line_num) {
     if (**toml != '{') return NULL;
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
@@ -438,7 +446,7 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
     }
 
     while (**toml) {
-        String* key = parse_key(input, toml);
+        String* key = parse_key(input, builder, toml);
         if (!key) {
             return NULL;
         }
@@ -450,7 +458,7 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
         (*toml)++;
         skip_whitespace(toml);
 
-        Item value = parse_value(input, toml, line_num);
+        Item value = parse_value(input, builder, toml, line_num);
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
@@ -471,33 +479,33 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
     return mp;
 }
 
-static Item parse_value(Input *input, const char **toml, int *line_num) {
+static Item parse_value(Input *input, MarkBuilder* builder, const char **toml, int *line_num) {
     skip_whitespace_and_comments(toml, line_num);
 
     switch (**toml) {
         case '{': {
-            Map* table = parse_inline_table(input, toml, line_num);
+            Map* table = parse_inline_table(input, builder, toml, line_num);
             return table ? (Item){.item = (uint64_t)table} : (Item){.item = ITEM_ERROR};
         }
         case '[': {
-            Array* array = parse_array(input, toml, line_num);
+            Array* array = parse_array(input, builder, toml, line_num);
             return array ? (Item){.item = (uint64_t)array} : (Item){.item = ITEM_ERROR};
         }
         case '"': {
             String* str = NULL;
             if (strncmp(*toml, "\"\"\"", 3) == 0) {
-                str = parse_multiline_basic_string(input, toml, line_num);
+                str = parse_multiline_basic_string(input, builder, toml, line_num);
             } else {
-                str = parse_basic_string(input, toml);
+                str = parse_basic_string(input, builder, toml);
             }
             return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = ITEM_ERROR};
         }
         case '\'': {
             String* str = NULL;
             if (strncmp(*toml, "'''", 3) == 0) {
-                str = parse_multiline_literal_string(input, toml, line_num);
+                str = parse_multiline_literal_string(input, builder, toml, line_num);
             } else {
-                str = parse_literal_string(input, toml);
+                str = parse_literal_string(input, builder, toml);
             }
             return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = ITEM_ERROR};
         }
@@ -542,8 +550,8 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
 }
 
 // Helper function to create string key from C string
-static String* create_string_key(Input *input, const char* key_str) {
-    StringBuf* sb = input->sb;
+static String* create_string_key(Input *input, MarkBuilder* builder, const char* key_str) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     int len = strlen(key_str);
@@ -551,13 +559,13 @@ static String* create_string_key(Input *input, const char* key_str) {
         stringbuf_append_char(sb, key_str[i]);
     }
 
-    String* key = stringbuf_to_string(sb);
+    String* key = builder->createString(sb->str->chars, sb->length);
     return key;
 }
 
 // Helper function to find or create a section in the root map
-static Map* find_or_create_section(Input *input, Map* root_map, const char* section_name) {
-    String* key = create_string_key(input, section_name);
+static Map* find_or_create_section(Input *input, MarkBuilder* builder, Map* root_map, const char* section_name) {
+    String* key = create_string_key(input, builder, section_name);
     if (!key) return NULL;
 
     // Look for existing section in root map
@@ -583,7 +591,7 @@ static Map* find_or_create_section(Input *input, Map* root_map, const char* sect
 }
 
 // Helper function to handle nested sections (like "database.credentials")
-static Map* handle_nested_section(Input *input, Map* root_map, const char* section_path) {
+static Map* handle_nested_section(Input *input, MarkBuilder* builder, Map* root_map, const char* section_path) {
     char path_copy[512];
     strncpy(path_copy, section_path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
@@ -595,7 +603,7 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
     if (!first_part) return NULL;
 
     // Get or create the first level section
-    Map* current_map = find_or_create_section(input, root_map, first_part);
+    Map* current_map = find_or_create_section(input, builder, root_map, first_part);
     if (!current_map) return NULL;
 
     // If there's no remaining path, return the current section
@@ -612,7 +620,7 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
 
     char* token = strtok(remaining_path, ".");
     while (token != NULL) {
-        String* key = create_string_key(input, token);
+        String* key = create_string_key(input, builder, token);
         if (!key) return NULL;
 
         // Look for existing nested table in current map
@@ -679,10 +687,7 @@ static bool parse_table_header(const char **toml, char *table_name, int *line_nu
 }
 
 void parse_toml(Input* input, const char* toml_string) {
-    input->sb = stringbuf_new(input->pool);
-    if (!input->sb) {
-        return;
-    }
+    MarkBuilder builder(input);
 
     Map* root_map = map_pooled(input->pool);
     if (!root_map) { return; }
@@ -711,7 +716,7 @@ void parse_toml(Input* input, const char* toml_string) {
             char table_name[256];
             if (parse_table_header(&toml, table_name, &line_num)) {
                 // Handle sections using the new refactored function
-                Map* section_map = handle_nested_section(input, root_map, table_name);
+                Map* section_map = handle_nested_section(input, &builder, root_map, table_name);
                 if (section_map) {
                     current_table = section_map;
                     current_table_type = (TypeMap*)section_map->type;
@@ -722,7 +727,7 @@ void parse_toml(Input* input, const char* toml_string) {
         }
 
         // Parse key-value pair
-        String* key = parse_key(input, &toml);
+        String* key = parse_key(input, &builder, &toml);
         if (!key) {
             skip_line(&toml, &line_num);
             continue;
@@ -735,7 +740,7 @@ void parse_toml(Input* input, const char* toml_string) {
         }
         toml++; // skip '='
 
-        Item value = parse_value(input, &toml, &line_num);
+        Item value = parse_value(input, &builder, &toml, &line_num);
         if (value.item == ITEM_ERROR) {
             skip_line(&toml, &line_num);
             continue;

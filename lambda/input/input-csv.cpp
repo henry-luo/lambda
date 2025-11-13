@@ -41,8 +41,9 @@ bool is_header_line(const char* csv_string, char separator) {
 }
 
 // Helper: parse a single CSV field (handles quoted fields)
-String* parse_csv_field(Input *input, const char **csv, char separator) {
-    StringBuf *sb = input->sb;
+String* parse_csv_field(Input *input, MarkBuilder* builder, const char **csv, char separator) {
+    StringBuf *sb = builder->stringBuf();
+    stringbuf_reset(sb);
     if (**csv == '"') {
         (*csv)++; // skip opening quote
         while (**csv && !(**csv == '"' && *((*csv)+1) != '"')) {
@@ -61,15 +62,14 @@ String* parse_csv_field(Input *input, const char **csv, char separator) {
             (*csv)++;
         }
     }
-    if (sb->str) {
-        return stringbuf_to_string(sb);
+    if (sb->length > 0) {
+        return builder->createString(sb->str->chars, sb->length);
     }
     return &EMPTY_STRING;
 }
 
 // CSV parser
 void parse_csv(Input* input, const char* csv_string) {
-    input->sb = stringbuf_new(input->pool);
     MarkBuilder builder(input);
 
     // Detect separator and header
@@ -86,7 +86,7 @@ void parse_csv(Input* input, const char* csv_string) {
         if (!headers) { return; }
 
         while (*csv && *csv != '\n' && *csv != '\r') {
-            String *field = parse_csv_field(input, &csv, separator);
+            String *field = parse_csv_field(input, &builder, &csv, separator);
             Item item = field ? (field == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(field)}) : (Item){.item = 0};
             array_append(headers, item, input->pool);
             if (*csv == separator) csv++;
@@ -106,7 +106,7 @@ void parse_csv(Input* input, const char* csv_string) {
 
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
-                String *field = parse_csv_field(input, &csv, separator);
+                String *field = parse_csv_field(input, &builder, &csv, separator);
 
                 // Get header name for this field
                 if (field_index < headers->length) {
@@ -135,7 +135,7 @@ void parse_csv(Input* input, const char* csv_string) {
             ArrayBuilder fields_builder = builder.array();
 
             while (*csv && *csv != '\n' && *csv != '\r') {
-                String *field = parse_csv_field(input, &csv, separator);
+                String *field = parse_csv_field(input, &builder, &csv, separator);
 
                 // Append field to array - handles NULL and empty strings
                 if (field == &EMPTY_STRING || !field) {
