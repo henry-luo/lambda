@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
 static void skip_whitespace(const char **prop) {
     while (**prop && (**prop == ' ' || **prop == '\t')) {
@@ -21,8 +22,8 @@ static bool is_comment(const char *prop) {
     return *prop == '#' || *prop == '!';
 }
 
-static String* parse_key(Input *input, const char **prop) {
-    StringBuf* sb = input->sb;
+static String* parse_key(Input *input, MarkBuilder* builder, const char **prop) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     // read until '=', ':', or whitespace
@@ -31,14 +32,14 @@ static String* parse_key(Input *input, const char **prop) {
         (*prop)++;
     }
 
-    if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+    if (sb->length > 0) {
+        return builder->createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
 
-static String* parse_raw_value(Input *input, const char **prop) {
-    StringBuf* sb = input->sb;
+static String* parse_raw_value(Input *input, MarkBuilder* builder, const char **prop) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     skip_whitespace(prop);
@@ -111,15 +112,13 @@ static String* parse_raw_value(Input *input, const char **prop) {
         (*prop)++;
     }
 
-    // trim trailing whitespace using proper StringBuf API
+    // trim trailing whitespace
     while (sb->length > 0 && isspace(sb->str->chars[sb->length - 1])) {
         sb->length--;
-        sb->str->len = sb->length;
-        sb->str->chars[sb->length] = '\0';
     }
 
-    if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+    if (sb->length > 0) {
+        return builder->createString(sb->str->chars, sb->length);
     }
     return &EMPTY_STRING;
 }
@@ -228,7 +227,8 @@ static Item parse_typed_value(Input *input, String* value_str) {
 }
 
 void parse_properties(Input* input, const char* prop_string) {
-    input->sb = stringbuf_new(input->pool);
+    // Create MarkBuilder for memory-safe string handling
+    MarkBuilder builder(input);
 
     // create root map to hold all properties
     Map* root_map = map_pooled(input->pool);
@@ -256,7 +256,7 @@ void parse_properties(Input* input, const char* prop_string) {
         }
 
         // parse key-value pair
-        String* key = parse_key(input, &current);
+        String* key = parse_key(input, &builder, &current);
         if (!key) {
             skip_to_newline(&current);
             continue;
@@ -271,7 +271,7 @@ void parse_properties(Input* input, const char* prop_string) {
         }
 
         // parse value
-        String* raw_value = parse_raw_value(input, &current);
+        String* raw_value = parse_raw_value(input, &builder, &current);
         if (raw_value) {
             Item typed_value = parse_typed_value(input, raw_value);
             map_put(root_map, key, typed_value, input);

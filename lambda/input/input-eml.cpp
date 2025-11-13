@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 #include <ctype.h>
 
 // Helper function to skip whitespace at the beginning of a line
@@ -26,9 +27,9 @@ static bool is_continuation_line(const char *eml) {
 }
 
 // Helper function to parse header name
-static String* parse_header_name(Input *input, const char **eml) {
-    StringBuf* sb = input->sb;
-    stringbuf_reset(sb);  // Reset buffer for reuse
+static String* parse_header_name(Input *input, MarkBuilder* builder, const char **eml) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     while (**eml && **eml != ':' && **eml != '\n' && **eml != '\r') {
         stringbuf_append_char(sb, **eml);
@@ -36,15 +37,15 @@ static String* parse_header_name(Input *input, const char **eml) {
     }
 
     if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+        return builder->createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
 
 // Helper function to parse header value (including continuation lines)
-static String* parse_header_value(Input *input, const char **eml) {
-    StringBuf* sb = input->sb;
-    stringbuf_reset(sb);  // Reset buffer for reuse
+static String* parse_header_value(Input *input, MarkBuilder* builder, const char **eml) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     // Skip the colon and initial whitespace
     if (**eml == ':') {
@@ -87,7 +88,7 @@ static String* parse_header_value(Input *input, const char **eml) {
     }
 
     if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+        return builder->createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
@@ -100,11 +101,11 @@ static void normalize_header_name(char* name) {
 }
 
 // Helper function to parse email addresses from a header value
-static String* extract_email_address(Input *input, const char* header_value) {
+static String* extract_email_address(Input *input, MarkBuilder* builder, const char* header_value) {
     if (!header_value) return NULL;
 
-    StringBuf* sb = input->sb;
-    stringbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
     const char* start = strchr(header_value, '<');
     const char* end = NULL;
 
@@ -142,7 +143,7 @@ static String* extract_email_address(Input *input, const char* header_value) {
     }
 
     if (sb->str && sb->str->len > 0) {
-        return stringbuf_to_string(sb);
+        return builder->createString(sb->str->chars, sb->length);
     }
 
     return NULL;
@@ -161,9 +162,7 @@ static String* parse_date_value(Input *input, const char* date_str) {
 void parse_eml(Input* input, const char* eml_string) {
     if (!eml_string || !input) return;
 
-    // Initialize string buffer for parsing
-    input->sb = stringbuf_new(input->pool);
-    if (!input->sb) return;
+    MarkBuilder builder(input);
 
     const char* eml = eml_string;
 
@@ -215,14 +214,14 @@ void parse_eml(Input* input, const char* eml_string) {
         }
 
         // Parse header name
-        String* header_name = parse_header_name(input, &eml);
+        String* header_name = parse_header_name(input, &builder, &eml);
         if (!header_name) {
             skip_to_newline(&eml);
             continue;
         }
 
         // Parse header value
-        String* header_value = parse_header_value(input, &eml);
+        String* header_value = parse_header_value(input, &builder, &eml);
         if (!header_value) {
             skip_to_newline(&eml);
             continue;
@@ -237,7 +236,7 @@ void parse_eml(Input* input, const char* eml_string) {
 
         // Also store common headers as top-level fields for easier access
         if (strcmp(header_name->chars, "from") == 0) {
-            String* from_email = extract_email_address(input, header_value->chars);
+            String* from_email = extract_email_address(input, &builder, header_value->chars);
             if (from_email) {
                 String* from_key = input_create_string(input, "from");
                 Item from_value = {.item = s2it(from_email)};
@@ -245,7 +244,7 @@ void parse_eml(Input* input, const char* eml_string) {
             }
         }
         else if (strcmp(header_name->chars, "to") == 0) {
-            String* to_email = extract_email_address(input, header_value->chars);
+            String* to_email = extract_email_address(input, &builder, header_value->chars);
             if (to_email) {
                 String* to_key = input_create_string(input, "to");
                 Item to_value = {.item = s2it(to_email)};
@@ -279,8 +278,8 @@ void parse_eml(Input* input, const char* eml_string) {
 
     // At this point, eml should be positioned at the start of the body
     // Parse body
-    StringBuf* body_sb = input->sb;
-    stringbuf_reset(body_sb);  // Reset buffer for reuse
+    StringBuf* body_sb = builder.stringBuf();
+    stringbuf_reset(body_sb);
 
     while (*eml) {
         stringbuf_append_char(body_sb, *eml);
@@ -288,7 +287,7 @@ void parse_eml(Input* input, const char* eml_string) {
     }
 
     if (body_sb->str && body_sb->str->len > 0) {
-        String* body_string = stringbuf_to_string(body_sb);
+        String* body_string = builder.createString(body_sb->str->chars, body_sb->length);
         if (body_string) {
             String* body_key = input_create_string(input, "body");
             Item body_value = {.item = s2it(body_string)};

@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
 // Forward declarations
 static Item parse_man_content(Input *input, char** lines, int line_count);
@@ -51,7 +52,7 @@ static bool is_man_list_item(const char* line) {
 static Item parse_man_section_header(Input *input, const char* line) {
     Element* header = NULL;
     const char* content = NULL;
-    
+
     if (strncmp(line, ".SH", 3) == 0) {
         // Major section header
         header = create_man_element(input, "h1");
@@ -68,12 +69,12 @@ static Item parse_man_section_header(Input *input, const char* line) {
         add_attribute_to_element(input, header, "level", "1");
         content = line;
     }
-    
+
     if (!header) return {.item = ITEM_NULL};
-    
+
     // Skip whitespace
     while (*content && *content == ' ') content++;
-    
+
     if (*content != '\0') {
         char* trimmed_content = trim_whitespace(content);
         if (trimmed_content && strlen(trimmed_content) > 0) {
@@ -83,30 +84,30 @@ static Item parse_man_section_header(Input *input, const char* line) {
         }
         if (trimmed_content) free(trimmed_content);
     }
-    
+
     return {.item = (uint64_t)header};
 }
 
 static Item parse_man_paragraph(Input *input, const char* text) {
     Element* paragraph = create_man_element(input, "p");
     if (!paragraph) return {.item = ITEM_NULL};
-    
+
     // Parse inline content
     Item inline_content = parse_man_inline(input, text);
     list_push((List*)paragraph, inline_content);
     ((TypeElmt*)paragraph->type)->content_length++;
-    
+
     return {.item = (uint64_t)paragraph};
 }
 
 static Item parse_man_formatted_text(Input *input, const char* line, const char* tag_name) {
     Element* element = create_man_element(input, tag_name);
     if (!element) return {.item = ITEM_NULL};
-    
+
     // Skip the directive and whitespace
     const char* content = line + 3; // Skip ".B " or ".I "
     while (*content && *content == ' ') content++;
-    
+
     if (*content != '\0') {
         char* trimmed_content = trim_whitespace(content);
         if (trimmed_content && strlen(trimmed_content) > 0) {
@@ -118,7 +119,7 @@ static Item parse_man_formatted_text(Input *input, const char* line, const char*
         }
         if (trimmed_content) free(trimmed_content);
     }
-    
+
     return {.item = (uint64_t)element};
 }
 
@@ -126,12 +127,12 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
     const char* line = lines[*current_line];
     Element* list_item = create_man_element(input, "li");
     if (!list_item) return {.item = ITEM_NULL};
-    
+
     if (strncmp(line, ".IP", 3) == 0) {
         // Indented paragraph with optional tag
         const char* tag = line + 3;
         while (*tag && *tag == ' ') tag++;
-        
+
         if (*tag != '\0') {
             // Has a tag/bullet
             char* trimmed_tag = trim_whitespace(tag);
@@ -163,34 +164,34 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
             }
         }
     }
-    
+
     // Look for content on following lines
     (*current_line)++;
     while (*current_line < total_lines) {
         const char* content_line = lines[*current_line];
-        
+
         // Stop at next directive or empty line
         if (is_man_directive(content_line) || is_empty_line(content_line)) {
             (*current_line)--; // Back up so caller can process this line
             break;
         }
-        
+
         // Add content as paragraph
         Item content_item = parse_man_paragraph(input, content_line);
         if (content_item .item != ITEM_NULL) {
             list_push((List*)list_item, content_item);
             ((TypeElmt*)list_item->type)->content_length++;
         }
-        
+
         (*current_line)++;
     }
-    
+
     return {.item = (uint64_t)list_item};
 }
 
 static Item parse_man_inline(Input *input, const char* text) {
     if (!text || strlen(text) == 0) return {.item = ITEM_NULL};
-    
+
     // Check if text contains any formatting characters (man pages use backslashes for formatting)
     bool has_formatting = false;
     const char* check_ptr = text;
@@ -201,18 +202,18 @@ static Item parse_man_inline(Input *input, const char* text) {
         }
         check_ptr++;
     }
-    
+
     // If no formatting, just return the text as a string properly boxed as Item
     if (!has_formatting) {
         return {.item = s2it(create_string(input, text))};
     }
-    
+
     Element* container = create_man_element(input, "span");
     if (!container) return {.item = s2it(create_string(input, text))};
-    
+
     const char* ptr = text;
     const char* start = text;
-    
+
     while (*ptr) {
         if (*ptr == '\\' && ptr[1] == 'f') {
             // Font change: \fB (bold), \fI (italic), \fR (roman/normal)
@@ -230,16 +231,16 @@ static Item parse_man_inline(Input *input, const char* text) {
                     }
                     free(before_text);
                 }
-                
+
                 // Find the end of this formatting (next \f or end of string)
                 const char* format_start = ptr + 3;
                 const char* format_end = strstr(format_start, "\\f");
                 if (!format_end) format_end = text + strlen(text);
-                
+
                 if (format_end > format_start) {
-                    const char* tag_name = (ptr[2] == 'B') ? "strong" : 
+                    const char* tag_name = (ptr[2] == 'B') ? "strong" :
                                           (ptr[2] == 'I') ? "em" : "span";
-                    
+
                     Element* format_element = create_man_element(input, tag_name);
                     if (format_element) {
                         int format_len = format_end - format_start;
@@ -256,7 +257,7 @@ static Item parse_man_inline(Input *input, const char* text) {
                         free(format_text);
                     }
                 }
-                
+
                 ptr = format_end;
                 if (*ptr == '\\' && ptr[1] == 'f') {
                     ptr += 3; // Skip the closing \fR or similar
@@ -265,10 +266,10 @@ static Item parse_man_inline(Input *input, const char* text) {
                 continue;
             }
         }
-        
+
         ptr++;
     }
-    
+
     // Add remaining text
     if (ptr > start) {
         int len = ptr - start;
@@ -282,74 +283,74 @@ static Item parse_man_inline(Input *input, const char* text) {
         }
         free(remaining_text);
     }
-    
+
     // If container has only one child, return the child directly
     if (((TypeElmt*)container->type)->content_length == 1) {
         List* container_list = (List*)container;
         return container_list->items[0];
     }
-    
+
     // If container is empty, return a simple string
     if (((TypeElmt*)container->type)->content_length == 0) {
         return {.item = s2it(create_string(input, text))};
     }
-    
+
     return {.item = (uint64_t)container};
 }
 
 static Item parse_man_block(Input *input, char** lines, int* current_line, int total_lines) {
     if (*current_line >= total_lines) return {.item = ITEM_NULL};
-    
+
     const char* line = lines[*current_line];
-    
+
     // Skip empty lines
     if (is_empty_line(line)) {
         (*current_line)++;
         return {.item = ITEM_NULL};
     }
-    
+
     // Check for different block types
     if (is_man_section_header(line)) {
         Item result = parse_man_section_header(input, line);
         (*current_line)++;
         return result;
     }
-    
+
     if (is_man_paragraph_break(line)) {
         // Just skip paragraph breaks - they're formatting hints
         (*current_line)++;
         return {.item = ITEM_NULL};
     }
-    
+
     if (is_man_bold_directive(line)) {
         Item result = parse_man_formatted_text(input, line, "strong");
         (*current_line)++;
         return result;
     }
-    
+
     if (is_man_italic_directive(line)) {
         Item result = parse_man_formatted_text(input, line, "em");
         (*current_line)++;
         return result;
     }
-    
+
     if (is_man_list_item(line)) {
         return parse_man_list_item(input, lines, current_line, total_lines);
     }
-    
+
     if (is_man_indent_directive(line)) {
         // Skip indent directives for now
         (*current_line)++;
         return {.item = ITEM_NULL};
     }
-    
+
     // Default: treat as paragraph if it's not a directive
     if (!is_man_directive(line)) {
         Item result = parse_man_paragraph(input, line);
         (*current_line)++;
         return result;
     }
-    
+
     // Skip unknown directives
     (*current_line)++;
     return {.item = ITEM_NULL};
@@ -359,26 +360,26 @@ static Item parse_man_content(Input *input, char** lines, int line_count) {
     // Create the root document element according to schema
     Element* doc = create_man_element(input, "doc");
     if (!doc) return {.item = ITEM_NULL};
-    
+
     // Add version attribute to doc (required by schema)
     add_attribute_to_element(input, doc, "version", "1.0");
-    
+
     // Create meta element for metadata (required by schema)
     Element* meta = create_man_element(input, "meta");
     if (!meta) return {.item = (uint64_t)doc};
-    
+
     // Add default metadata
     add_attribute_to_element(input, meta, "title", "Man Page Document");
     add_attribute_to_element(input, meta, "language", "en");
-    
+
     // Add meta to doc
     list_push((List*)doc, {.item = (uint64_t)meta});
     ((TypeElmt*)doc->type)->content_length++;
-    
+
     // Create body element for content (required by schema)
     Element* body = create_man_element(input, "body");
     if (!body) return {.item = (uint64_t)doc};
-    
+
     int current_line = 0;
     while (current_line < line_count) {
         Item block = parse_man_block(input, lines, &current_line, line_count);
@@ -386,15 +387,15 @@ static Item parse_man_content(Input *input, char** lines, int line_count) {
             list_push((List*)body, block);
             ((TypeElmt*)body->type)->content_length++;
         }
-        
+
         // Safety check to prevent infinite loops
         if (current_line >= line_count) break;
     }
-    
+
     // Add body to doc
     list_push((List*)doc, {.item = (uint64_t)body});
     ((TypeElmt*)doc->type)->content_length++;
-    
+
     return {.item = (uint64_t)doc};
 }
 
@@ -403,22 +404,22 @@ void parse_man(Input* input, const char* man_string) {
         input->root = {.item = ITEM_NULL};
         return;
     }
-    
-    // Initialize string buffer (critical for proper Lambda Item creation)
-    input->sb = stringbuf_new(input->pool);
-    
+
+    // Initialize MarkBuilder for proper Lambda Item creation
+    MarkBuilder builder(input);
+
     // Split input into lines for processing
     int line_count;
     char** lines = split_lines(man_string, &line_count);
-    
+
     if (!lines || line_count == 0) {
         input->root = {.item = ITEM_NULL};
         return;
     }
-    
+
     // Parse content using the full man page parser
     input->root = parse_man_content(input, lines, line_count);
-    
+
     // Clean up lines
     free_lines(lines, line_count);
 }

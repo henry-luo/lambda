@@ -1,8 +1,9 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
-static Element* parse_element(Input *input, const char **mark);
-static Item parse_value(Input *input, const char **mark);
-static Item parse_content(Input *input, const char **mark);
+static Element* parse_element(Input *input, MarkBuilder* builder, const char **mark);
+static Item parse_value(Input *input, MarkBuilder* builder, const char **mark);
+static Item parse_content(Input *input, MarkBuilder* builder, const char **mark);
 
 static void skip_whitespace(const char **mark) {
     while (**mark && (**mark == ' ' || **mark == '\n' || **mark == '\r' || **mark == '\t')) {
@@ -19,7 +20,7 @@ static void skip_comments(const char **mark) {
         }
         skip_whitespace(mark);
     }
-    
+
     // Handle multi-line comments /* ... */
     while (**mark == '/' && *(*mark + 1) == '*') {
         *mark += 2; // Skip /*
@@ -33,11 +34,11 @@ static void skip_comments(const char **mark) {
     }
 }
 
-static String* parse_string(Input *input, const char **mark) {
+static String* parse_string(Input *input, MarkBuilder* builder, const char **mark) {
     if (**mark != '"') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
-    
+
     (*mark)++; // Skip opening quote
     while (**mark && **mark != '"') {
         if (**mark == '\\') {
@@ -79,14 +80,14 @@ static String* parse_string(Input *input, const char **mark) {
     if (**mark == '"') {
         (*mark)++; // skip closing quote
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_symbol(Input *input, const char **mark) {
+static String* parse_symbol(Input *input, MarkBuilder* builder, const char **mark) {
     if (**mark != '\'') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
-    
+
     (*mark)++; // Skip opening quote
     while (**mark && **mark != '\'' && **mark != '\n') {
         if (**mark == '\\') {
@@ -108,41 +109,41 @@ static String* parse_symbol(Input *input, const char **mark) {
     if (**mark == '\'') {
         (*mark)++; // skip closing quote
     }
-    
-    return stringbuf_to_string(sb);
+
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_unquoted_identifier(Input *input, const char **mark) {
-    StringBuf* sb = input->sb;
+static String* parse_unquoted_identifier(Input *input, MarkBuilder* builder, const char **mark) {
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
-    
+
     // First character must be alpha or underscore
-    if (!(**mark >= 'a' && **mark <= 'z') && 
-        !(**mark >= 'A' && **mark <= 'Z') && 
+    if (!(**mark >= 'a' && **mark <= 'z') &&
+        !(**mark >= 'A' && **mark <= 'Z') &&
         **mark != '_') {
         return NULL;
     }
-    
-    while (**mark && ((**mark >= 'a' && **mark <= 'z') || 
-                      (**mark >= 'A' && **mark <= 'Z') || 
-                      (**mark >= '0' && **mark <= '9') || 
+
+    while (**mark && ((**mark >= 'a' && **mark <= 'z') ||
+                      (**mark >= 'A' && **mark <= 'Z') ||
+                      (**mark >= '0' && **mark <= '9') ||
                       **mark == '_' || **mark == '-')) {
         stringbuf_append_char(sb, **mark);
         (*mark)++;
     }
-    
-    return stringbuf_to_string(sb);
+
+    return builder->createString(sb->str->chars, sb->length);
 }
 
 static Item parse_binary(Input *input, const char **mark) {
     if (**mark != 'b' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
-    
+
     *mark += 2; // Skip b'
     skip_whitespace(mark);
-    
+
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset buffer before use
-    
+
     // Check for hex format
     if (**mark == '\\' && *(*mark + 1) == 'x') {
         *mark += 2; // Skip \x
@@ -185,33 +186,33 @@ static Item parse_binary(Input *input, const char **mark) {
             (*mark)++;
         }
     }
-    
+
     if (**mark == '\'') {
         (*mark)++; // skip closing quote
     }
-    
+
     String* binary_str = stringbuf_to_string(sb);
     return binary_str ? (Item){.item = s2it(binary_str)} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_datetime(Input *input, const char **mark) {
     if (**mark != 't' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
-    
+
     *mark += 2; // Skip t'
     skip_whitespace(mark);
-    
+
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset buffer before use
-    
+
     while (**mark && **mark != '\'') {
         stringbuf_append_char(sb, **mark);
         (*mark)++;
     }
-    
+
     if (**mark == '\'') {
         (*mark)++; // skip closing quote
     }
-    
+
     String* datetime_str = stringbuf_to_string(sb);
     return datetime_str ? (Item){.item = s2it(datetime_str)} : (Item){.item = ITEM_ERROR};
 }
@@ -220,41 +221,41 @@ static Item parse_number(Input *input, const char **mark) {
     double *dval;
     dval = (double*)pool_calloc(input->pool, sizeof(double));
     if (dval == NULL) return {.item = ITEM_ERROR};
-    
+
     char* end;
     *dval = strtod(*mark, &end);
     *mark = end;
-    
+
     // Check for decimal suffix (n or N)
     if (**mark == 'n' || **mark == 'N') {
         (*mark)++;
         // For now, treat as regular double - could enhance for true decimal support
     }
-    
+
     return {.item = d2it(dval)};
 }
 
-static Array* parse_array(Input *input, const char **mark) {
+static Array* parse_array(Input *input, MarkBuilder* builder, const char **mark) {
     if (**mark != '[') return NULL;
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
 
     (*mark)++; // skip [
     skip_comments(mark);
-    
-    if (**mark == ']') { 
-        (*mark)++;  
-        return arr; 
+
+    if (**mark == ']') {
+        (*mark)++;
+        return arr;
     }
 
     while (**mark) {
-        Item item = parse_value(input, mark);
+        Item item = parse_value(input, builder, mark);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
-        if (**mark == ']') { 
-            (*mark)++;  
-            break; 
+        if (**mark == ']') {
+            (*mark)++;
+            break;
         }
         if (**mark != ',') {
             return NULL; // invalid format
@@ -265,27 +266,27 @@ static Array* parse_array(Input *input, const char **mark) {
     return arr;
 }
 
-static Array* parse_list(Input *input, const char **mark) {
+static Array* parse_list(Input *input, MarkBuilder* builder, const char **mark) {
     if (**mark != '(') return NULL;
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
 
     (*mark)++; // skip (
     skip_comments(mark);
-    
-    if (**mark == ')') { 
-        (*mark)++;  
-        return arr; 
+
+    if (**mark == ')') {
+        (*mark)++;
+        return arr;
     }
 
     while (**mark) {
-        Item item = parse_value(input, mark);
+        Item item = parse_value(input, builder, mark);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
-        if (**mark == ')') { 
-            (*mark)++;  
-            break; 
+        if (**mark == ')') {
+            (*mark)++;
+            break;
         }
         if (**mark != ',') {
             return NULL; // invalid format
@@ -296,31 +297,31 @@ static Array* parse_list(Input *input, const char **mark) {
     return arr;
 }
 
-static Map* parse_map(Input *input, const char **mark) {
+static Map* parse_map(Input *input, MarkBuilder* builder, const char **mark) {
     if (**mark != '{') return NULL;
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
-    
+
     (*mark)++; // skip '{'
     skip_comments(mark);
-    
+
     if (**mark == '}') { // empty map
-        (*mark)++;  
+        (*mark)++;
         return mp;
     }
 
     while (**mark) {
         String* key = NULL;
-        
+
         // Parse key - can be string, symbol, or identifier
         if (**mark == '"') {
-            key = parse_string(input, mark);
+            key = parse_string(input, builder, mark);
         } else if (**mark == '\'') {
-            key = parse_symbol(input, mark);
+            key = parse_symbol(input, builder, mark);
         } else {
-            key = parse_unquoted_identifier(input, mark);
+            key = parse_unquoted_identifier(input, builder, mark);
         }
-        
+
         if (!key) return mp;
 
         skip_comments(mark);
@@ -328,13 +329,13 @@ static Map* parse_map(Input *input, const char **mark) {
         (*mark)++;
         skip_comments(mark);
 
-        Item value = parse_value(input, mark);
+        Item value = parse_value(input, builder, mark);
         map_put(mp, key, value, input);
 
         skip_comments(mark);
-        if (**mark == '}') { 
-            (*mark)++;  
-            break; 
+        if (**mark == '}') {
+            (*mark)++;
+            break;
         }
         if (**mark != ',') return mp;
         (*mark)++;
@@ -343,31 +344,31 @@ static Map* parse_map(Input *input, const char **mark) {
     return mp;
 }
 
-static Element* parse_element(Input *input, const char **mark) {
+static Element* parse_element(Input *input, MarkBuilder* builder, const char **mark) {
     if (**mark != '<') return NULL;
-    
+
     (*mark)++; // skip '<'
     skip_comments(mark);
-    
+
     // Parse element name - can be symbol or identifier
     String* element_name = NULL;
     if (**mark == '\'') {
-        element_name = parse_symbol(input, mark);
+        element_name = parse_symbol(input, builder, mark);
     } else {
-        element_name = parse_unquoted_identifier(input, mark);
+        element_name = parse_unquoted_identifier(input, builder, mark);
     }
-    
+
     if (!element_name) return NULL;
-    
+
     Element* element = input_create_element(input, element_name->chars);
     if (!element) return NULL;
-    
+
     skip_comments(mark);
-    
+
     // Parse attributes
     while (**mark && **mark != '>') {
         String* attr_name = NULL;
-        
+
         // Check if this might be content instead of an attribute
         // If we see a quote, angle bracket, or brace that doesn't look like an attribute
         if (**mark == '"' || **mark == '<' || **mark == '{' || **mark == '[') {
@@ -382,7 +383,7 @@ static Element* parse_element(Input *input, const char **mark) {
                 }
                 if (*lookahead == '"') lookahead++;
                 skip_whitespace(&lookahead);
-                
+
                 // If we don't see a colon after the string, treat as content
                 if (*lookahead != ':') {
                     break; // Start parsing content
@@ -392,88 +393,88 @@ static Element* parse_element(Input *input, const char **mark) {
                 break;
             }
         }
-        
+
         // Parse attribute name
         if (**mark == '"') {
-            attr_name = parse_string(input, mark);
+            attr_name = parse_string(input, builder, mark);
         } else if (**mark == '\'') {
-            attr_name = parse_symbol(input, mark);
+            attr_name = parse_symbol(input, builder, mark);
         } else {
-            attr_name = parse_unquoted_identifier(input, mark);
+            attr_name = parse_unquoted_identifier(input, builder, mark);
         }
-        
+
         if (!attr_name) break;
-        
+
         skip_comments(mark);
         if (**mark != ':') break;
         (*mark)++;
         skip_comments(mark);
-        
+
         // Parse attribute value
-        Item attr_value = parse_value(input, mark);
+        Item attr_value = parse_value(input, builder, mark);
         input_add_attribute_item_to_element(input, element, attr_name->chars, attr_value);
-        
+
         skip_comments(mark);
         if (**mark == ',') {
             (*mark)++;
             skip_comments(mark);
         }
     }
-    
+
     // Check for content separator (semicolon, newline, or just whitespace)
     skip_comments(mark);
-    
+
     // Parse content - content can be separated by semicolons, newlines, or just whitespace
     while (**mark && **mark != '>') {
-        Item content_item = parse_content(input, mark);
+        Item content_item = parse_content(input, builder, mark);
         if (content_item .item != ITEM_ERROR && content_item .item != ITEM_NULL) {
             // Add content to element
             list_push((List*)element, content_item);
             ((TypeElmt*)element->type)->content_length++;
         }
         skip_comments(mark);
-        
+
         // Skip optional separators
         if (**mark == ';' || **mark == '\n') {
             (*mark)++;
             skip_comments(mark);
         }
     }
-    
+
     if (**mark == '>') {
         (*mark)++; // skip closing '>'
     }
-    
+
     return element;
 }
 
-static Item parse_content(Input *input, const char **mark) {
+static Item parse_content(Input *input, MarkBuilder* builder, const char **mark) {
     skip_comments(mark);
-    
+
     if (**mark == '<') {
-        return {.item = (uint64_t)parse_element(input, mark)};
+        return {.item = (uint64_t)parse_element(input, builder, mark)};
     } else {
-        return parse_value(input, mark);
+        return parse_value(input, builder, mark);
     }
 }
 
-static Item parse_value(Input *input, const char **mark) {
+static Item parse_value(Input *input, MarkBuilder* builder, const char **mark) {
     skip_comments(mark);
-    
+
     switch (**mark) {
         case '{':
-            return {.item = (uint64_t)parse_map(input, mark)};
+            return {.item = (uint64_t)parse_map(input, builder, mark)};
         case '[':
-            return {.item = (uint64_t)parse_array(input, mark)};
+            return {.item = (uint64_t)parse_array(input, builder, mark)};
         case '(':
-            return {.item = (uint64_t)parse_list(input, mark)};
+            return {.item = (uint64_t)parse_list(input, builder, mark)};
         case '<':
-            return {.item = (uint64_t)parse_element(input, mark)};
+            return {.item = (uint64_t)parse_element(input, builder, mark)};
         case '"':
-            return {.item = s2it(parse_string(input, mark))};
+            return {.item = s2it(parse_string(input, builder, mark))};
         case '\'':
             {
-                String* sym = parse_symbol(input, mark);
+                String* sym = parse_symbol(input, builder, mark);
                 return {.item = y2it(sym)};
             }
         case 'b':
@@ -538,12 +539,12 @@ static Item parse_value(Input *input, const char **mark) {
         default:
             if ((**mark >= '0' && **mark <= '9') || **mark == '-' || **mark == '+') {
                 return parse_number(input, mark);
-            } 
-            else if ((**mark >= 'a' && **mark <= 'z') || 
+            }
+            else if ((**mark >= 'a' && **mark <= 'z') ||
                 (**mark >= 'A' && **mark <= 'Z') || **mark == '_') {
                 UNQUOTED_IDENTIFIER:
                 // Parse as identifier/symbol
-                String* id = parse_unquoted_identifier(input, mark);
+                String* id = parse_unquoted_identifier(input, builder, mark);
                 return id ? (Item){.item = y2it(id)} : (Item){.item = ITEM_ERROR};
             }
             return {.item = ITEM_ERROR};
@@ -551,11 +552,11 @@ static Item parse_value(Input *input, const char **mark) {
 }
 
 void parse_mark(Input* input, const char* mark_string) {
-    input->sb = stringbuf_new(input->pool);
-    
+    MarkBuilder builder(input);
+
     const char* mark = mark_string;
     skip_comments(&mark);
-    
+
     // Parse the root content - could be a single value or element
-    input->root = parse_content(input, &mark);
+    input->root = parse_content(input, &builder, &mark);
 }

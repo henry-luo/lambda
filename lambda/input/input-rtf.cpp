@@ -1,6 +1,7 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
-static Item parse_rtf_content(Input *input, const char **rtf);
+static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **rtf);
 
 // RTF color table entry
 typedef struct {
@@ -44,8 +45,9 @@ static void skip_to_brace(const char **rtf, char target_brace) {
     }
 }
 
-static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) {
-    StringBuf* sb = input->sb;
+static String* parse_rtf_string(Input *input, MarkBuilder* builder, const char **rtf, char delimiter) {
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     while (**rtf && **rtf != delimiter && **rtf != '{' && **rtf != '}') {
         if (**rtf == '\\') {
@@ -127,10 +129,10 @@ static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) 
         (*rtf)++;
     }
 
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static RTFControlWord parse_control_word(Input *input, const char **rtf) {
+static RTFControlWord parse_control_word(Input *input, MarkBuilder* builder, const char **rtf) {
     RTFControlWord control_word = {0};
 
     if (**rtf != '\\') {
@@ -139,7 +141,8 @@ static RTFControlWord parse_control_word(Input *input, const char **rtf) {
 
     (*rtf)++; // Skip backslash
 
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
+    stringbuf_reset(sb);
 
     // Parse keyword (letters only)
     while (**rtf && isalpha(**rtf)) {
@@ -147,7 +150,7 @@ static RTFControlWord parse_control_word(Input *input, const char **rtf) {
         (*rtf)++;
     }
 
-    control_word.keyword = stringbuf_to_string(sb);
+    control_word.keyword = builder->createString(sb->str->chars, sb->length);
 
     // Parse optional parameter (digits with optional minus sign)
     if (**rtf == '-' || (**rtf >= '0' && **rtf <= '9')) {
@@ -176,14 +179,14 @@ static RTFControlWord parse_control_word(Input *input, const char **rtf) {
     return control_word;
 }
 
-static Array* parse_color_table(Input *input, const char **rtf) {
+static Array* parse_color_table(Input *input, MarkBuilder* builder, const char **rtf) {
     Array* colors = array_pooled(input->pool);
     if (!colors) return NULL;
 
     // Skip the \colortbl keyword
     while (**rtf && **rtf != ';' && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, rtf);
+            RTFControlWord cw = parse_control_word(input, builder, rtf);
             if (cw.keyword) {
                 RTFColor* color;
                 color = (RTFColor*)pool_calloc(input->pool, sizeof(RTFColor));
@@ -214,13 +217,13 @@ static Array* parse_color_table(Input *input, const char **rtf) {
     return colors;
 }
 
-static Array* parse_font_table(Input *input, const char **rtf) {
+static Array* parse_font_table(Input *input, MarkBuilder* builder, const char **rtf) {
     Array* fonts = array_pooled(input->pool);
     if (!fonts) return NULL;
 
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, rtf);
+            RTFControlWord cw = parse_control_word(input, builder, rtf);
             if (cw.keyword && strcmp(cw.keyword->chars, "f") == 0 && cw.has_parameter) {
                 // Start of font definition
                 RTFFont* font;
@@ -232,13 +235,13 @@ static Array* parse_font_table(Input *input, const char **rtf) {
                 // Parse font family
                 skip_whitespace(rtf);
                 if (**rtf == '\\') {
-                    RTFControlWord family_cw = parse_control_word(input, rtf);
+                    RTFControlWord family_cw = parse_control_word(input, builder, rtf);
                     font->font_family = family_cw.keyword;
                 }
 
                 // Parse font name (until semicolon)
                 skip_whitespace(rtf);
-                font->font_name = parse_rtf_string(input, rtf, ';');
+                font->font_name = parse_rtf_string(input, builder, rtf, ';');
 
                 if (**rtf == ';') {
                     (*rtf)++; // Skip semicolon
@@ -255,13 +258,13 @@ static Array* parse_font_table(Input *input, const char **rtf) {
     return fonts;
 }
 
-static Map* parse_document_properties(Input *input, const char **rtf) {
+static Map* parse_document_properties(Input *input, MarkBuilder* builder, const char **rtf) {
     Map* props = map_pooled(input->pool);
     if (!props) return NULL;
 
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, rtf);
+            RTFControlWord cw = parse_control_word(input, builder, rtf);
             if (cw.keyword) {
                 Item value;
 
@@ -286,7 +289,7 @@ static Map* parse_document_properties(Input *input, const char **rtf) {
     return props;
 }
 
-static Item parse_rtf_group(Input *input, const char **rtf) {
+static Item parse_rtf_group(Input *input, MarkBuilder* builder, const char **rtf) {
     if (**rtf != '{') {
         return {.item = ITEM_ERROR};
     }
@@ -306,11 +309,11 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
 
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, rtf);
+            RTFControlWord cw = parse_control_word(input, builder, rtf);
             if (cw.keyword) {
                 // Handle various RTF control words
                 if (strcmp(cw.keyword->chars, "colortbl") == 0) {
-                    Array* colors = parse_color_table(input, rtf);
+                    Array* colors = parse_color_table(input, builder, rtf);
                     if (colors) {
                         Item color_table = {.item = (uint64_t)colors};
 
@@ -324,7 +327,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                         }
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
-                    Array* fonts = parse_font_table(input, rtf);
+                    Array* fonts = parse_font_table(input, builder, rtf);
                     if (fonts) {
                         Item font_table = {.item = (uint64_t)fonts};
 
@@ -357,13 +360,13 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
             }
         } else if (**rtf == '{') {
             // Nested group
-            Item nested = parse_rtf_group(input, rtf);
+            Item nested = parse_rtf_group(input, builder, rtf);
             if (nested .item != ITEM_ERROR && nested .item != ITEM_NULL) {
                 array_append(content, nested, input->pool);
             }
         } else {
             // Text content
-            String* text = parse_rtf_string(input, rtf, '{');
+            String* text = parse_rtf_string(input, builder, rtf, '{');
             if (text && text->len > 0) {
                 Item text_item = {.item = s2it(text)};
                 array_append(content, text_item, input->pool);
@@ -406,11 +409,11 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     return {.item = (uint64_t)group};
 }
 
-static Item parse_rtf_content(Input *input, const char **rtf) {
+static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **rtf) {
     skip_whitespace(rtf);
 
     if (**rtf == '{') {
-        return parse_rtf_group(input, rtf);
+        return parse_rtf_group(input, builder, rtf);
     }
 
     return {.item = ITEM_ERROR};
@@ -418,7 +421,7 @@ static Item parse_rtf_content(Input *input, const char **rtf) {
 
 void parse_rtf(Input* input, const char* rtf_string) {
     printf("rtf_parse\n");
-    input->sb = stringbuf_new(input->pool);
+    MarkBuilder builder(input);
 
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);
@@ -443,7 +446,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
         if (*rtf == '\0') break;
 
         if (*rtf == '{') {
-            Item group = parse_rtf_group(input, &rtf);
+            Item group = parse_rtf_group(input, &builder, &rtf);
             if (group .item != ITEM_ERROR && group .item != ITEM_NULL) {
                 array_append(document, group, input->pool);
             }
