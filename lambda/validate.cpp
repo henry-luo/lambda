@@ -1,4 +1,5 @@
 #include "validator.hpp"
+#include "mark_reader.hpp"  // MarkReader API for type-safe traversal
 
 ValidationResult* validate_against_primitive_type(AstValidator* validator, ConstItem item, Type* type) {
     log_debug("[AST_VALIDATOR] Validating primitive: expected=%d, actual=%d", type->type_id, item.type_id());
@@ -27,7 +28,45 @@ ValidationResult* validate_against_primitive_type(AstValidator* validator, Const
 ValidationResult* validate_against_base_type(AstValidator* validator, ConstItem item, TypeType* type) {
     ValidationResult* result = create_validation_result(validator->pool);
     Type *base_type = type->type;
+    
+    // Safety check for null base_type
+    if (!base_type) {
+        log_error("[AST_VALIDATOR] Base type is null in TypeType wrapper");
+        result->valid = false;
+        return result;
+    }
+    
     log_debug("[AST_VALIDATOR] Validating base type: expected=%d, actual=%d", base_type->type_id, item.type_id());
+    
+    // Check if base_type is TypeUnary (occurrence operator: ?, +, *)
+    // TypeUnary inherits from Type and has type_id = LMD_TYPE_TYPE
+    // We need to carefully check if this is actually a TypeUnary, not just any LMD_TYPE_TYPE
+    if (base_type->type_id == LMD_TYPE_TYPE) {
+        // Try casting to TypeUnary to check the operator
+        TypeUnary* possible_unary = (TypeUnary*)base_type;
+        
+        // Check if this is an occurrence operator
+        // These are the only valid unary operators on types
+        if (possible_unary->op == OPERATOR_OPTIONAL || 
+            possible_unary->op == OPERATOR_ONE_MORE || 
+            possible_unary->op == OPERATOR_ZERO_MORE) {
+            
+            log_debug("[AST_VALIDATOR] Detected occurrence operator: %d", possible_unary->op);
+            
+            // Validate against the operand type
+            // Operand is always a Type*, which needs to be validated
+            // Since operand might be primitive, wrap it in TypeType for validation
+            TypeType temp_wrapper;
+            temp_wrapper.type_id = LMD_TYPE_TYPE;
+            temp_wrapper.type = possible_unary->operand;
+            
+            return validate_against_base_type(validator, item, &temp_wrapper);
+        }
+        
+        // Not a TypeUnary with occurrence operator, might be TypeType wrapping something else
+        // Fall through to normal validation
+    }
+    
     if (LMD_TYPE_INT <= base_type->type_id && base_type->type_id <= LMD_TYPE_NUMBER) {
         // number promotion - allow int/float/decimal interchangeably
         if (LMD_TYPE_INT <= item.type_id() && item.type_id() <= base_type->type_id) {
@@ -59,91 +98,63 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
     log_debug("Validating array type");
     ValidationResult* result = create_validation_result(validator->pool);
 
+    // Use MarkReader for type-safe access
+    ItemReader item_reader(item);
+    
     // Check if item is actually an array/list
-    TypeId item_type = item.type_id();
-    if (item_type != LMD_TYPE_ARRAY && item_type != LMD_TYPE_LIST && item_type != LMD_TYPE_RANGE &&
-        item_type != LMD_TYPE_ARRAY_INT && item_type != LMD_TYPE_ARRAY_INT64 && item_type != LMD_TYPE_ARRAY_FLOAT) {
+    if (!item_reader.isArray() && !item_reader.isList()) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
-            "Type mismatch: expected array, got type %d", item_type);
+            "Type mismatch: expected array/list, got type %d", item_reader.getType());
         add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool));
         return result;
     }
 
-    // Get the actual array data
-    const List* array_data = item.list;
-    if (!array_data) {
-        add_validation_error(result, create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, "Array data is null", validator->current_path, validator->pool));
-        return result;
-    }
+    // Get ArrayReader for type-safe iteration
+    ArrayReader array = item_reader.asArray();
+    int64_t length = array.length();
+    
+    log_debug("Validating array with length: %ld", length);
 
     // Validate array length if specified
-    // if (array_type->length >= 0 && array_data->length != array_type->length) {
+    // if (array_type->length >= 0 && length != array_type->length) {
     //     char error_msg[256];
     //     snprintf(error_msg, sizeof(error_msg),
     //             "Array length mismatch: expected %ld, got %ld",
-    //             array_type->length, array_data->length);
+    //             array_type->length, length);
     //     add_validation_error(result, create_validation_error(
     //         AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->current_path, validator->pool));
     // }
 
-    PathSegment* pa_path = validator->current_path;
-    // Validate each array element against nested type
-    log_debug("validating array length: %ld", array_data->length);
-    if (array_type->nested && array_data->length > 0) {
-        for (long i = 0; i < array_data->length; i++) {
+    // Validate each array element against nested type using iterator
+    if (array_type->nested && length > 0) {
+        auto iter = array.items();
+        ItemReader child;
+        int64_t index = 0;
+        
+        while (iter.next(&child)) {
             // Create path segment for array index
             PathSegment* path = nullptr;
             if (validator->pool) {
                 path = (PathSegment*)pool_calloc(validator->pool, sizeof(PathSegment));
                 if (path) {
                     path->type = PATH_INDEX;
-                    path->data.index = i;
+                    path->data.index = index;
                     path->next = validator->current_path;
                 }
             }
+            PathSegment* prev_path = validator->current_path;
             validator->current_path = path;
 
-            // Get array element (convert Item to ConstItem)
-            ConstItem array_item;
-            switch (item_type) {
-                case LMD_TYPE_ARRAY:
-                    array_item = array_data->get(i);
-                    break;
-                case LMD_TYPE_ARRAY_INT: {
-                    ArrayInt* array_int = (ArrayInt*)item.array;
-                    Item item = {.item = i2it(array_int->items[i])};
-                    array_item = *(ConstItem*)&item;
-                    break;
-                }
-                case LMD_TYPE_ARRAY_INT64: {
-                    ArrayInt64* array_int64 = (ArrayInt64*)item.array;
-                    Item item = {.item = d2it(array_int64->items + i)};
-                    array_item = *(ConstItem*)&item;
-                    break;
-                }
-                // todo: handle LMD_TYPE_ARRAY_FLOAT
-                // case LMD_TYPE_ARRAY_FLOAT: {
-                //     ArrayFloat* array_float = (ArrayFloat*)item.array;
-                //     array_item = (ConstItem){.type_id = LMD_TYPE_FLOAT, .double_val = array_float->items[i]};
-                //     break;
-                // }
-                case LMD_TYPE_RANGE: {
-                    Item item = {.item = i2it((int)(item.range->start + i))};
-                    array_item = *(ConstItem*)&item;
-                    break;
-                }
-                case LMD_TYPE_LIST:
-                    array_item = array_data->get(i);
-                    break;
-            }
-
             // Recursively validate element
-            log_debug("validating array item at index %ld, type %d", i, array_item.type_id());
+            log_debug("Validating array item at index %ld, type %d", index, child.getType());
+            ConstItem child_item = child.item().to_const();
             ValidationResult* item_result = validate_against_type(
-                validator, array_item, array_type->nested);
+                validator, child_item, array_type->nested);
+
+            // Restore previous path
+            validator->current_path = prev_path;
 
             // Merge validation results
             if (item_result && !item_result->valid) {
@@ -160,17 +171,20 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
                     element_error = element_error->next;
                 }
             }
+            
+            index++;
         }
     }
-    validator->current_path = pa_path;
+    
     return result;
 }
 
 ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem item, TypeMap* map_type) {
     ValidationResult* result = create_validation_result(validator->pool);
 
-    // Check if item is actually a map
-    if (item.type_id() != LMD_TYPE_MAP) {
+    // Check if item is actually a map using ItemReader
+    ItemReader item_reader(item);
+    if (!item_reader.isMap()) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
                 "Type mismatch: expected map, got type %d", item.type_id());
@@ -179,18 +193,14 @@ ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem i
         return result;
     }
 
-    // Get the actual map data (assuming it's stored as a struct with typed fields)
-    void* map_data = (void*)item.container;
-    if (!map_data) {
-        add_validation_error(result, create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, "Map data is null", validator->current_path, validator->pool));
-        return result;
-    }
-
-    PathSegment* pa_path = validator->current_path;
+    // Use MapReader for type-safe access
+    MapReader map = item_reader.asMap();
+    
     // Validate each field in the map shape
     ShapeEntry* shape_entry = map_type->shape;
     while (shape_entry) {
+        const char* field_name = shape_entry->name->str;
+        
         // Create path segment for map field
         PathSegment* field_path = nullptr;
         if (validator->pool) {
@@ -201,53 +211,52 @@ ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem i
                 field_path->next = validator->current_path;
             }
         }
+        PathSegment* saved_path = validator->current_path;
         validator->current_path = field_path;
 
-        // Extract field value from map data using byte offset
-        void* field_data = (char*)map_data + shape_entry->byte_offset;
+        // Check if field exists and validate it
+        if (map.has(field_name)) {
+            ItemReader field_value = map.get(field_name);
+            ConstItem field_item = field_value.item().to_const();
+            
+            // Recursively validate field
+            log_debug("Validating map field '%s', type %d", field_name, field_value.getType());
+            ValidationResult* field_result = validate_against_type(validator, field_item, shape_entry->type);
 
-        // Create ConstItem for the field (this is simplified - would need proper type detection)
-        Item field_item;
-        if (shape_entry->type->type_id <= LMD_TYPE_RANGE) {
-            field_item.item = *(uint64_t*)field_data;
-            field_item._type_id = shape_entry->type->type_id;
-        } else {
-            // todo: handle TYPE_ANY
-            field_item.container = *(Container**)field_data;
-        }
+            // Merge field validation results
+            if (field_result && !field_result->valid) {
+                result->valid = false;
 
-        // Recursively validate field
-        ValidationResult* field_result = validate_against_type(validator, *(ConstItem*)&field_item, shape_entry->type);
+                // Add all field errors to main result
+                ValidationError* field_error = field_result->errors;
+                while (field_error) {
+                    result->error_count++;
 
-        // Merge field validation results
-        if (field_result && !field_result->valid) {
-            result->valid = false;
+                    // Copy error to main result
+                    ValidationError* copied_error = create_validation_error(
+                        field_error->code, field_error->message->chars,
+                        field_error->path, validator->pool);
+                    add_validation_error(result, copied_error);
 
-            // Add all field errors to main result
-            ValidationError* field_error = field_result->errors;
-            while (field_error) {
-                result->error_count++;
-
-                // Copy error to main result
-                ValidationError* copied_error = create_validation_error(
-                    field_error->code, field_error->message->chars,
-                    field_error->path, validator->pool);
-                add_validation_error(result, copied_error);
-
-                field_error = field_error->next;
+                    field_error = field_error->next;
+                }
             }
         }
+        // Note: Missing field validation would go here if required fields are tracked
+        
+        validator->current_path = saved_path;
         shape_entry = shape_entry->next;
     }
-    validator->current_path = pa_path;
+    
     return result;
 }
 
 ValidationResult* validate_against_element_type(AstValidator* validator, ConstItem item, TypeElmt* element_type) {
     ValidationResult* result = create_validation_result(validator->pool);
 
-    // Check if item is actually an element
-    if (item.type_id() != LMD_TYPE_ELEMENT) {
+    // Check if item is actually an element using ItemReader
+    ItemReader item_reader(item);
+    if (!item_reader.isElement()) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
                 "Type mismatch: expected element, got type %d", item.type_id());
@@ -256,41 +265,42 @@ ValidationResult* validate_against_element_type(AstValidator* validator, ConstIt
         return result;
     }
 
-    // Get the actual element data
-    const Element* element_data = item.element;
-    if (!element_data) {
-        add_validation_error(result, create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, "Element data is null", validator->current_path, validator->pool));
-        return result;
-    }
+    // Use ElementReader for type-safe access
+    ElementReader element = item_reader.asElement();
 
     // Validate element name if specified
-    PathSegment* pa_path = validator->current_path;
+    PathSegment* saved_path = validator->current_path;
     if (element_type->name.length > 0) {
-        // Create path segment for element name
-        PathSegment* element_name_path = nullptr;
-        if (validator->pool) {
-            element_name_path = (PathSegment*)pool_calloc(validator->pool, sizeof(PathSegment));
-            if (element_name_path) {
-                element_name_path->type = PATH_ELEMENT;
-                element_name_path->data.element_tag = element_type->name;
-                element_name_path->next = validator->current_path;
+        const char* expected_tag = element_type->name.str;
+        
+        // Check if element has the expected tag
+        if (!element.hasTag(expected_tag)) {
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg),
+                    "Element tag mismatch: expected '%.*s', got '%s'",
+                    (int)element_type->name.length, expected_tag, element.tagName());
+            
+            PathSegment* element_name_path = nullptr;
+            if (validator->pool) {
+                element_name_path = (PathSegment*)pool_calloc(validator->pool, sizeof(PathSegment));
+                if (element_name_path) {
+                    element_name_path->type = PATH_ELEMENT;
+                    element_name_path->data.element_tag = element_type->name;
+                    element_name_path->next = validator->current_path;
+                }
             }
+            
+            add_validation_error(result, create_validation_error(
+                AST_VALID_ERROR_TYPE_MISMATCH, error_msg, element_name_path, validator->pool));
         }
-        // Create context for attribute validation
-        validator->current_path = element_name_path;
-        // Validate element name
-        printf("[AST_VALIDATOR] Element name validation for: %.*s\n",
-                (int)element_type->name.length, element_type->name.str);
+        
+        log_debug("Validating element with tag '%.*s'",
+                (int)element_type->name.length, expected_tag);
     }
 
     // TypeElmt inherits from TypeMap, so we can validate attributes as map fields
     TypeMap* map_part = (TypeMap*)element_type;
     if (map_part->shape) {
-        // Create a ConstItem for the element's attribute data
-        Map map;
-        map.type_id = LMD_TYPE_MAP;  map.data = element_data->data;  map.type = element_data->type;
-
         // Create path segment for attributes
         PathSegment* attr_path = nullptr;
         if (validator->pool) {
@@ -303,48 +313,67 @@ ValidationResult* validate_against_element_type(AstValidator* validator, ConstIt
         }
         validator->current_path = attr_path;
 
-        // Validate attributes using map validation
-        ValidationResult* attr_result = validate_against_map_type(validator, *(ConstItem*)&map, map_part);
+        // Validate each attribute using ElementReader
+        ShapeEntry* shape_entry = map_part->shape;
+        while (shape_entry) {
+            const char* attr_name = shape_entry->name->str;
+            
+            if (element.has_attr(attr_name)) {
+                ItemReader attr_value = element.get_attr(attr_name);
+                ConstItem attr_item = attr_value.item().to_const();
+                
+                log_debug("Validating element attribute '%s', type %d", attr_name, attr_value.getType());
+                ValidationResult* attr_result = validate_against_type(validator, attr_item, shape_entry->type);
 
-        // Merge attribute validation results
-        if (attr_result && !attr_result->valid) {
-            result->valid = false;
-            result->error_count += attr_result->error_count;
+                // Merge attribute validation results
+                if (attr_result && !attr_result->valid) {
+                    result->valid = false;
 
-            ValidationError* attr_error = attr_result->errors;
-            while (attr_error) {
-                ValidationError* copied_error = create_validation_error(
-                    attr_error->code, attr_error->message->chars,
-                    attr_error->path, validator->pool);
-                add_validation_error(result, copied_error);
-                attr_error = attr_error->next;
+                    ValidationError* attr_error = attr_result->errors;
+                    while (attr_error) {
+                        result->error_count++;
+                        
+                        ValidationError* copied_error = create_validation_error(
+                            attr_error->code, attr_error->message->chars,
+                            attr_error->path, validator->pool);
+                        add_validation_error(result, copied_error);
+                        attr_error = attr_error->next;
+                    }
+                }
             }
+            // Note: Missing attribute validation would go here if required attributes are tracked
+            
+            shape_entry = shape_entry->next;
         }
+        
+        validator->current_path = saved_path;
     }
 
     // Validate element content length
     if (element_type->content_length > 0) {
-        // Create path segment for content
-        PathSegment* content_path = nullptr;
-        if (validator->pool) {
-            content_path = (PathSegment*)pool_calloc(validator->pool, sizeof(PathSegment));
-            if (content_path) {
-                content_path->type = PATH_ELEMENT;
-                content_path->data.element_tag = (StrView){"content", 7};
-                content_path->next = validator->current_path;
+        int64_t actual_length = element.childCount();
+        
+        if (actual_length != element_type->content_length) {
+            PathSegment* content_path = nullptr;
+            if (validator->pool) {
+                content_path = (PathSegment*)pool_calloc(validator->pool, sizeof(PathSegment));
+                if (content_path) {
+                    content_path->type = PATH_ELEMENT;
+                    content_path->data.element_tag = (StrView){"content", 7};
+                    content_path->next = validator->current_path;
+                }
             }
-        }
 
-        if (element_data->length > element_type->content_length) {
             char content_error[256];
             snprintf(content_error, sizeof(content_error),
-                    "Element content length mismatch: expected %ld, got %ld",
-                    element_type->content_length, element_data->length);
+                    "Element content length mismatch: expected %lld, got %lld",
+                    element_type->content_length, actual_length);
             add_validation_error(result, create_validation_error(
                 AST_VALID_ERROR_CONSTRAINT_VIOLATION, content_error, content_path, validator->pool));
         }
     }
-    validator->current_path = pa_path;
+    
+    validator->current_path = saved_path;
     return result;
 }
 
@@ -362,50 +391,83 @@ ValidationResult* validate_against_union_type(AstValidator* validator, ConstItem
     bool any_valid = false;
     ValidationResult* best_result = nullptr;
     int min_errors = 2147483647; // INT_MAX value
+    int best_union_index = -1;
+
+    log_debug("[AST_VALIDATOR] Validating against union type with %d members", type_count);
 
     for (int i = 0; i < type_count; i++) {
         if (!union_types[i]) continue;
+
+        log_debug("[AST_VALIDATOR] Trying union member %d (type_id=%d)", i, union_types[i]->type_id);
 
         // Create path segment for union member
         PathSegment* union_path = nullptr;
         if (validator->pool) {
             union_path = (PathSegment*)pool_calloc(validator->pool, sizeof(PathSegment));
             if (union_path) {
-                union_path->type = PATH_INDEX;
+                union_path->type = PATH_UNION;
                 union_path->data.index = i;
                 union_path->next = validator->current_path;
             }
         }
-        PathSegment* pa_path = validator->current_path;
+        PathSegment* prev_path = validator->current_path;
         validator->current_path = union_path;
 
         // Try validating against this union member
         ValidationResult* member_result = validate_against_type(validator, item, union_types[i]);
+        
         if (member_result && member_result->valid) {
+            log_debug("[AST_VALIDATOR] Union member %d matched successfully", i);
             any_valid = true;
             result->valid = true;
+            validator->current_path = prev_path;
             return result;
-        } else if (member_result && member_result->error_count < min_errors) {
-            min_errors = member_result->error_count;
-            best_result = member_result;
+        } else if (member_result) {
+            log_debug("[AST_VALIDATOR] Union member %d failed with %d errors", i, member_result->error_count);
+            
+            // Track the result with the fewest errors (most specific/helpful)
+            if (member_result->error_count < min_errors) {
+                min_errors = member_result->error_count;
+                best_result = member_result;
+                best_union_index = i;
+            }
         }
 
-        validator->current_path = pa_path;
+        validator->current_path = prev_path;
     }
 
     // If no type in the union was valid, report the best error
     if (!any_valid) {
         result->valid = false;
-        if (best_result) {
+        
+        log_debug("[AST_VALIDATOR] No union member matched. Best result from member %d with %d errors", 
+                  best_union_index, min_errors);
+        
+        if (best_result && best_result->error_count > 0) {
+            // Copy errors from the best result
             result->error_count = best_result->error_count;
             ValidationError* error = best_result->errors;
             while (error) {
                 ValidationError* copied_error = create_validation_error(
                     error->code, error->message->chars, error->path, validator->pool);
+                if (copied_error) {
+                    copied_error->expected = error->expected;
+                    copied_error->actual = error->actual;
+                }
                 add_validation_error(result, copied_error);
                 error = error->next;
             }
+            
+            // Add a summary error at the top level indicating union failure
+            char summary_msg[512];
+            snprintf(summary_msg, sizeof(summary_msg),
+                    "Item does not match any type in union (%d types tried, closest match was type #%d with %d error%s)",
+                    type_count, best_union_index, min_errors, min_errors == 1 ? "" : "s");
+            ValidationError* summary_error = create_validation_error(
+                AST_VALID_ERROR_TYPE_MISMATCH, summary_msg, validator->current_path, validator->pool);
+            add_validation_error(result, summary_error);
         } else {
+            // No useful error information from union members
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg),
                     "Item does not match any type in union (%d types)", type_count);

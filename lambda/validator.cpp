@@ -127,6 +127,23 @@ static int type_entry_compare(const void *a, const void *b, void *udata) {
     return memcmp(entry_a->name.str, entry_b->name.str, entry_a->name.length);
 }
 
+// Hash functions for circular reference detection
+static uint64_t visited_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const VisitedEntry* entry = (const VisitedEntry*)item;
+    return hashmap_sip(entry->key.str, entry->key.length, seed0, seed1);
+}
+
+static int visited_entry_compare(const void *a, const void *b, void *udata) {
+    (void)udata;
+    const VisitedEntry* entry_a = (const VisitedEntry*)a;
+    const VisitedEntry* entry_b = (const VisitedEntry*)b;
+
+    if (entry_a->key.length != entry_b->key.length) {
+        return (int)entry_a->key.length - (int)entry_b->key.length;
+    }
+    return memcmp(entry_a->key.str, entry_b->key.str, entry_a->key.length);
+}
+
 // ==================== Core Validator Functions ====================
 
 AstValidator* ast_validator_create(Pool* pool) {
@@ -149,6 +166,13 @@ AstValidator* ast_validator_create(Pool* pool) {
         return nullptr;
     }
 
+    // Initialize visited nodes for circular reference detection
+    validator->visited_nodes = hashmap_new(sizeof(VisitedEntry), 0, 0, 0,
+                                   visited_entry_hash, visited_entry_compare, NULL, pool);
+    if (!validator->visited_nodes) {
+        return nullptr;
+    }
+
     // Initialize default validation options
     validator->options.strict_mode = false;
     validator->options.allow_unknown_fields = true;
@@ -163,6 +187,10 @@ void ast_validator_destroy(AstValidator* validator) {
 
     if (validator->type_definitions) {
         hashmap_free(validator->type_definitions);
+    }
+
+    if (validator->visited_nodes) {
+        hashmap_free(validator->visited_nodes);
     }
 
     if (validator->transpiler) {
@@ -187,8 +215,33 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
     printf("[AST_VALIDATOR] AST built successfully, extracting type definitions\n");
 
     // Extract type definitions from AST
-    // For Phase 1, we'll implement a simple type extraction
-    // TODO: Implement full AST traversal for type definitions
+    if (ast->node_type == AST_SCRIPT) {
+        AstScript* script = (AstScript*)ast;
+        AstNode* child = script->child;
+        
+        int type_count = 0;
+        while (child) {
+            if (child->node_type == AST_NODE_TYPE_STAM) {
+                // Type statement: type Name = TypeExpr
+                AstNamedNode* type_node = (AstNamedNode*)child;
+                
+                // Register type in validator's type_definitions map
+                TypeRegistryEntry entry;
+                entry.name = (StrView){type_node->name->chars, type_node->name->len};
+                entry.type = type_node->type;
+                
+                hashmap_set(validator->type_definitions, &entry);
+                
+                log_debug("Registered type: %.*s (type_id=%d)",
+                    (int)entry.name.length, entry.name.str,
+                    type_node->type ? type_node->type->type_id : -1);
+                type_count++;
+            }
+            child = child->next;
+        }
+        
+        printf("[AST_VALIDATOR] Registered %d type definitions\n", type_count);
+    }
 
     return 0;
 }
@@ -219,6 +272,37 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name) {
 
     const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(validator->type_definitions, &key);
     return entry ? entry->type : nullptr;
+}
+
+// Resolve a type reference with circular reference detection
+// Returns the resolved Type* or nullptr if not found or circular
+Type* ast_validator_resolve_type_reference(AstValidator* validator, const char* type_name) {
+    if (!validator || !type_name) return nullptr;
+
+    StrView name_view = {.str = type_name, .length = strlen(type_name)};
+
+    // Check if we're already visiting this type (circular reference)
+    VisitedEntry visited_key = {.key = name_view, .visited = false};
+    const VisitedEntry* existing = (const VisitedEntry*)hashmap_get(validator->visited_nodes, &visited_key);
+    
+    if (existing && existing->visited) {
+        log_error("[AST_VALIDATOR] Circular type reference detected: %.*s", 
+                  (int)name_view.length, name_view.str);
+        return nullptr;
+    }
+
+    // Mark this type as being visited
+    VisitedEntry visit_entry = {.key = name_view, .visited = true};
+    hashmap_set(validator->visited_nodes, &visit_entry);
+
+    // Look up the type
+    Type* resolved_type = ast_validator_find_type(validator, type_name);
+
+    // Unmark after resolution (allow revisiting in different validation paths)
+    VisitedEntry unvisit_entry = {.key = name_view, .visited = false};
+    hashmap_set(validator->visited_nodes, &unvisit_entry);
+
+    return resolved_type;
 }
 
 // ==================== Error Handling ====================

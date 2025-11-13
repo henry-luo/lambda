@@ -1199,6 +1199,32 @@
                         "binary": "test_graph_parser_gtest.exe"
                     },
                     {
+                        "source": "test_validator_input_gtest.cpp",
+                        "name": "\u2705 Validator Tests (GTest) - Through lambda-input DLL",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_validator_input_gtest.exe"
+                    },
+                    {
+                        "source": "test_validator_features_gtest.cpp",
+                        "name": "\ud83d\udee0\ufe0f Validator Features Tests (GTest) - Phase 1-3 Coverage",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_validator_features_gtest.exe"
+                    },
+                    {
                         "source": "test_graph_formatter_gtest.cpp",
                         "name": "\ud83c\udfa8 Graph Formatter Tests (GTest) - DOT, Mermaid, D2",
                         "dependencies": [
@@ -1645,7 +1671,7 @@
                             "gtest_main"
                         ],
                         "binary": "test/test_validator_gtest.exe",
-                        "disabled": true
+                        "disabled": false
                     },
                     {
                         "source": "test/test_ast_validator_gtest.cpp",
@@ -1659,7 +1685,7 @@
                             "rpmalloc"
                         ],
                         "binary": "test/test_ast_validator_gtest.exe",
-                        "disabled": true
+                        "disabled": false
                     }
                 ],
                 "type": "validator",

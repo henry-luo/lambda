@@ -1,0 +1,80 @@
+{
+  "comment": "Test data for validator - primitives",
+  "tests": [
+    {
+      "name": "valid_string",
+      "type": "string",
+      "value": "hello world",
+      "expected": "valid"
+    },
+    {
+      "name": "valid_int",
+      "type": "int",
+      "value": 42,
+      "expected": "valid"
+    },
+    {
+      "name": "valid_float",
+      "type": "float",
+      "value": 3.14,
+      "expected": "valid"
+    },
+    {
+      "name": "valid_bool_true",
+      "type": "bool",
+      "value": true,
+      "expected": "valid"
+    },
+    {
+      "name": "valid_bool_false",
+      "type": "bool",
+      "value": false,
+      "expected": "valid"
+    },
+    {
+      "name": "valid_null",
+      "type": "null",
+      "value": null,
+      "expected": "valid"
+    },
+    {
+      "name": "empty_string",
+      "type": "string",
+      "value": "",
+      "expected": "valid"
+    },
+    {
+      "name": "zero_int",
+      "type": "int",
+      "value": 0,
+      "expected": "valid"
+    },
+    {
+      "name": "negative_int",
+      "type": "int",
+      "value": -100,
+      "expected": "valid"
+    },
+    {
+      "name": "invalid_string_as_int",
+      "type": "int",
+      "value": "not a number",
+      "expected": "invalid",
+      "error": "TYPE_MISMATCH"
+    },
+    {
+      "name": "invalid_int_as_string",
+      "type": "string",
+      "value": 42,
+      "expected": "invalid",
+      "error": "TYPE_MISMATCH"
+    },
+    {
+      "name": "invalid_bool_as_int",
+      "type": "int",
+      "value": true,
+      "expected": "invalid",
+      "error": "TYPE_MISMATCH"
+    }
+  ]
+}
