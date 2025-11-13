@@ -345,8 +345,7 @@ Bool fn_is(Item a, Item b) {
                 a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
         } else {  // full type validation
             log_debug("full type validation for type: %d", type_b->type->type_id);
-            ConstItem titem = *(ConstItem*)&a;
-            ValidationResult* result = ast_validator_validate_type(context->validator, titem, type_b->type);
+            ValidationResult* result = ast_validator_validate_type(context->validator, a.to_const(), type_b->type);
             if (result->error_count > 0) {
                 print_validation_result(result);
                 log_debug("type validation failed with %d errors", result->error_count);
