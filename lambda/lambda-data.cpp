@@ -276,8 +276,11 @@ void array_push(Array* arr, Item item) {
 void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
     log_debug("list_push: pushing item: type_id: %d, item.item: %lx", type_id, item.item);
-    if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
-    if (type_id == LMD_TYPE_LIST) { // nest list is flattened
+    // 1. skip NULL value
+    if (type_id == LMD_TYPE_NULL) { return; } 
+
+    // 2. nest list is flattened
+    if (type_id == LMD_TYPE_LIST) { 
         log_debug("list_push: pushing nested list: %p, type_id: %d, length: %ld", item.list, type_id, item.list->length);
         // copy over the items
         List *nest_list = item.list;
@@ -299,8 +302,9 @@ void list_push(List *list, Item item) {
         }
         return;
     }
-    else if (type_id == LMD_TYPE_STRING) {
-        // need to merge with previous string if any (unless disabled)
+
+    // 3. need to merge with previous string if any (unless disabled)
+    if (type_id == LMD_TYPE_STRING) {
         if (list->length > 0 && list->items != NULL && !input_context->disable_string_merging) {
             log_debug("list_push: checking for string merging, list length: %ld", list->length);
             Item prev_item = list->items[list->length - 1];
@@ -319,9 +323,10 @@ void list_push(List *list, Item item) {
                 memcpy(merged_str->chars, prev_str->chars, prev_str->len);
                 memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
                 merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
-                // replace previous string with new merged string
                 merged_str->ref_cnt = prev_str->ref_cnt;
                 prev_str->ref_cnt = 0;  // to be freed later
+                // replace previous string with new merged string, in the list directly, 
+                // assuming the list is still being constructed/mutable
                 list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
                 return;
             }
