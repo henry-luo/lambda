@@ -282,7 +282,6 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
 }
 
 void parse_yaml(Input *input, const char* yaml_str) {
-    input->sb = stringbuf_new(input->pool);
     MarkBuilder builder(input);
 
     // Split into lines

@@ -11,7 +11,7 @@ static void skip_whitespace(const char **json) {
 
 static String* parse_string(Input *input, MarkBuilder* builder, const char **json) {
     if (**json != '"') return NULL;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     (*json)++; // Skip opening quote
@@ -56,7 +56,7 @@ static String* parse_string(Input *input, MarkBuilder* builder, const char **jso
     if (**json == '"') {
         (*json)++; // skip closing quote
     }
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
 static Item parse_number(Input *input, MarkBuilder* builder, const char **json) {
@@ -182,8 +182,6 @@ static Item parse_value(Input *input, MarkBuilder* builder, const char **json) {
 
 void parse_json(Input* input, const char* json_string) {
     printf("json_parse\n");
-    input->sb = stringbuf_new(input->pool);
-
     MarkBuilder builder(input);
     input->root = parse_value(input, &builder, &json_string);
 }
