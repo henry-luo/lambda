@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../mark_builder.hpp"
 
 // Forward declarations
 static Item parse_asciidoc_content(Input *input, char** lines, int line_count);
@@ -19,7 +20,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text);
 // AsciiDoc specific parsing functions
 static bool is_asciidoc_heading(const char* line) {
     int eq_count = count_leading_chars(line, '=');
-    return eq_count >= 1 && eq_count <= 6 && 
+    return eq_count >= 1 && eq_count <= 6 &&
            (line[eq_count] == '\0' || line[eq_count] == ' ');
 }
 
@@ -48,26 +49,26 @@ static bool is_list_item(const char* line) {
 
 static Item parse_asciidoc_heading(Input *input, const char* line) {
     if (!is_asciidoc_heading(line)) return {.item = ITEM_NULL};
-    
+
     int eq_count = count_leading_chars(line, '=');
-    
+
     // Skip equals and whitespace
     const char* content_start = line + eq_count;
     while (*content_start && *content_start == ' ') {
         content_start++;
     }
-    
+
     // Create header element
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", eq_count);
     Element* header = create_asciidoc_element(input, tag_name);
     if (!header) return {.item = ITEM_NULL};
-    
+
     // Add level attribute (required by schema)
     char level_str[10];
     snprintf(level_str, sizeof(level_str), "%d", eq_count);
     add_attribute_to_element(input, header, "level", level_str);
-    
+
     // Add content if present
     if (*content_start != '\0') {
         char* content = trim_whitespace(content_start);
@@ -79,26 +80,26 @@ static Item parse_asciidoc_heading(Input *input, const char* line) {
         }
         if (content) free(content);
     }
-    
+
     return {.item = (uint64_t)header};
 }
 
 static Item parse_asciidoc_paragraph(Input *input, const char* text) {
     Element* paragraph = create_asciidoc_element(input, "p");
     if (!paragraph) return {.item = ITEM_NULL};
-    
+
     // Parse inline content
     Item inline_content = parse_asciidoc_inline(input, text);
     list_push((List*)paragraph, inline_content);
     ((TypeElmt*)paragraph->type)->content_length++;
-    
+
     return {.item = (uint64_t)paragraph};
 }
 
 static Item parse_asciidoc_listing_block(Input *input, char** lines, int* current_line, int total_lines) {
     int start_line = *current_line;
     (*current_line)++; // Skip opening ----
-    
+
     // Find closing ----
     int end_line = -1;
     for (int i = *current_line; i < total_lines; i++) {
@@ -107,20 +108,20 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
             break;
         }
     }
-    
+
     if (end_line == -1) {
         // No closing delimiter, treat as regular paragraph
         *current_line = start_line;
         return parse_asciidoc_paragraph(input, lines[start_line]);
     }
-    
+
     // Create pre block
     Element* pre_block = create_asciidoc_element(input, "pre");
     if (!pre_block) return {.item = ITEM_NULL};
-    
+
     Element* code_block = create_asciidoc_element(input, "code");
     if (!code_block) return {.item = ITEM_NULL};
-    
+
     // Concatenate all lines between delimiters
     int content_lines = end_line - *current_line;
     if (content_lines > 0) {
@@ -128,28 +129,28 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
         for (int i = *current_line; i < end_line; i++) {
             total_len += strlen(lines[i]) + 1; // +1 for newline
         }
-        
+
         char* content = (char*)malloc(total_len + 1);
         content[0] = '\0';
-        
+
         for (int i = *current_line; i < end_line; i++) {
             strcat(content, lines[i]);
             if (i < end_line - 1) strcat(content, "\n");
         }
-        
+
         String* content_str = create_string(input, content);
         if (content_str) {
             list_push((List*)code_block, {.item = s2it(content_str)});
             ((TypeElmt*)code_block->type)->content_length++;
         }
-        
+
         free(content);
     }
-    
+
     // Add code block to pre block
     list_push((List*)pre_block, {.item = (uint64_t)code_block});
     ((TypeElmt*)pre_block->type)->content_length++;
-    
+
     *current_line = end_line + 1; // Skip closing ----
     return {.item = (uint64_t)pre_block};
 }
@@ -157,11 +158,11 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
 static Item parse_asciidoc_list(Input *input, char** lines, int* current_line, int total_lines) {
     Element* list_elem = create_asciidoc_element(input, "ul");
     if (!list_elem) return {.item = ITEM_NULL};
-    
+
     while (*current_line < total_lines && is_list_item(lines[*current_line])) {
         const char* line = lines[*current_line];
         char* trimmed = trim_whitespace(line);
-        
+
         if (trimmed && strncmp(trimmed, "* ", 2) == 0) {
             Element* list_item = create_asciidoc_element(input, "li");
             if (list_item) {
@@ -176,21 +177,21 @@ static Item parse_asciidoc_list(Input *input, char** lines, int* current_line, i
                 ((TypeElmt*)list_elem->type)->content_length++;
             }
         }
-        
+
         if (trimmed) free(trimmed);
         (*current_line)++;
     }
-    
+
     return {.item = (uint64_t)list_elem};
 }
 
 static Item parse_asciidoc_admonition(Input *input, const char* line) {
     Element* admonition = create_asciidoc_element(input, "div");
     if (!admonition) return {.item = ITEM_NULL};
-    
+
     const char* content = NULL;
     const char* type = NULL;
-    
+
     if (strncmp(line, "NOTE:", 5) == 0) {
         type = "note";
         content = line + 5;
@@ -207,13 +208,13 @@ static Item parse_asciidoc_admonition(Input *input, const char* line) {
         type = "caution";
         content = line + 8;
     }
-    
+
     if (type) {
         add_attribute_to_element(input, admonition, "class", type);
-        
+
         // Skip whitespace after colon
         while (*content && *content == ' ') content++;
-        
+
         if (*content) {
             Item inline_content = parse_asciidoc_inline(input, content);
             if (inline_content .item != ITEM_NULL) {
@@ -222,37 +223,37 @@ static Item parse_asciidoc_admonition(Input *input, const char* line) {
             }
         }
     }
-    
+
     return {.item = (uint64_t)admonition};
 }
 
 static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, int total_lines) {
     (*current_line)++; // Skip opening |===
-    
+
     Element* table = create_asciidoc_element(input, "table");
     if (!table) return {.item = ITEM_NULL};
-    
+
     Element* tbody = create_asciidoc_element(input, "tbody");
     if (!tbody) return {.item = ITEM_NULL};
-    
+
     bool header_parsed = false;
     Element* thead = NULL;
-    
+
     while (*current_line < total_lines) {
         const char* line = lines[*current_line];
-        
+
         // Check for table end
         if (strncmp(line, "|===", 4) == 0) {
             (*current_line)++; // Skip closing |===
             break;
         }
-        
+
         // Skip empty lines
         if (is_empty_line(line)) {
             (*current_line)++;
             continue;
         }
-        
+
         // Parse table row
         if (line[0] == '|') {
             Element* row = create_asciidoc_element(input, "tr");
@@ -260,11 +261,11 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                 (*current_line)++;
                 continue;
             }
-            
+
             // Split line by |
             const char* ptr = line + 1; // Skip first |
             const char* cell_start = ptr;
-            
+
             while (*ptr) {
                 if (*ptr == '|' || *(ptr + 1) == '\0') {
                     // End of cell
@@ -272,14 +273,14 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                     if (*(ptr + 1) == '\0' && *ptr != '|') {
                         cell_len++; // Include last character if not |
                     }
-                    
+
                     char* cell_text = (char*)malloc(cell_len + 1);
                     strncpy(cell_text, cell_start, cell_len);
                     cell_text[cell_len] = '\0';
-                    
+
                     char* trimmed_cell = trim_whitespace(cell_text);
                     free(cell_text);
-                    
+
                     // Create cell element
                     const char* cell_tag = (!header_parsed) ? "th" : "td";
                     Element* cell = create_asciidoc_element(input, cell_tag);
@@ -292,9 +293,9 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                         list_push((List*)row, {.item = (uint64_t)cell});
                         ((TypeElmt*)row->type)->content_length++;
                     }
-                    
+
                     if (trimmed_cell) free(trimmed_cell);
-                    
+
                     if (*ptr == '|') {
                         ptr++;
                         cell_start = ptr;
@@ -305,7 +306,7 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                     ptr++;
                 }
             }
-            
+
             // Add row to appropriate section
             if (!header_parsed) {
                 if (!thead) {
@@ -321,50 +322,50 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                 ((TypeElmt*)tbody->type)->content_length++;
             }
         }
-        
+
         (*current_line)++;
     }
-    
+
     // Add sections to table
     if (thead && ((TypeElmt*)thead->type)->content_length > 0) {
         list_push((List*)table, {.item = (uint64_t)thead});
         ((TypeElmt*)table->type)->content_length++;
     }
-    
+
     if (((TypeElmt*)tbody->type)->content_length > 0) {
         list_push((List*)table, {.item = (uint64_t)tbody});
         ((TypeElmt*)table->type)->content_length++;
     }
-    
+
     return {.item = (uint64_t)table};
 }
 
 static Item parse_asciidoc_inline(Input *input, const char* text) {
     if (!text || strlen(text) == 0) return {.item = ITEM_NULL};
-    
+
     // Check if text contains any formatting characters
     bool has_formatting = false;
     const char* check_ptr = text;
     while (*check_ptr) {
-        if (*check_ptr == '*' || *check_ptr == '_' || *check_ptr == '`' || 
+        if (*check_ptr == '*' || *check_ptr == '_' || *check_ptr == '`' ||
             strncmp(check_ptr, "http://", 7) == 0 || strncmp(check_ptr, "https://", 8) == 0) {
             has_formatting = true;
             break;
         }
         check_ptr++;
     }
-    
+
     // If no formatting, just return the text as a string properly boxed as Item
     if (!has_formatting) {
         return {.item = s2it(create_string(input, text))};
     }
-    
+
     Element* container = create_asciidoc_element(input, "span");
     if (!container) return {.item = s2it(create_string(input, text))};
-    
+
     const char* ptr = text;
     const char* start = text;
-    
+
     while (*ptr) {
         if (*ptr == '*' && ptr[1] != '\0' && ptr != text) {  // Don't match at start
             // Bold text - find closing *
@@ -384,7 +385,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     }
                     free(before_text);
                 }
-                
+
                 // Create bold element
                 Element* bold = create_asciidoc_element(input, "strong");
                 if (bold) {
@@ -401,7 +402,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     ((TypeElmt*)container->type)->content_length++;
                     free(bold_text);
                 }
-                
+
                 ptr = bold_end + 1;
                 start = ptr;
                 continue;
@@ -424,7 +425,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     }
                     free(before_text);
                 }
-                
+
                 // Create italic element
                 Element* italic = create_asciidoc_element(input, "em");
                 if (italic) {
@@ -441,7 +442,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     ((TypeElmt*)container->type)->content_length++;
                     free(italic_text);
                 }
-                
+
                 ptr = italic_end + 1;
                 start = ptr;
                 continue;
@@ -464,7 +465,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     }
                     free(before_text);
                 }
-                
+
                 // Create code element
                 Element* code = create_asciidoc_element(input, "code");
                 if (code) {
@@ -481,16 +482,16 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                     ((TypeElmt*)container->type)->content_length++;
                     free(code_text);
                 }
-                
+
                 ptr = code_end + 1;
                 start = ptr;
                 continue;
             }
         }
-        
+
         ptr++;
     }
-    
+
     // Add remaining text
     if (ptr > start) {
         int len = ptr - start;
@@ -504,57 +505,57 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
         }
         free(remaining_text);
     }
-    
+
     // If container has only one child, return the child directly
     if (((TypeElmt*)container->type)->content_length == 1) {
         List* container_list = (List*)container;
         return container_list->items[0];
     }
-    
+
     // If container is empty, return a simple string
     if (((TypeElmt*)container->type)->content_length == 0) {
         return {.item = s2it(create_string(input, text))};
     }
-    
+
     return {.item = (uint64_t)container};
 }
 
 static Item parse_asciidoc_block(Input *input, char** lines, int* current_line, int total_lines) {
     if (*current_line >= total_lines) return {.item = ITEM_NULL};
-    
+
     const char* line = lines[*current_line];
-    
+
     // Skip empty lines
     if (is_empty_line(line)) {
         (*current_line)++;
         return {.item = ITEM_NULL};
     }
-    
+
     // Check for different block types
     if (is_asciidoc_heading(line)) {
         Item result = parse_asciidoc_heading(input, line);
         (*current_line)++;
         return result;
     }
-    
+
     if (is_listing_block_start(line)) {
         return parse_asciidoc_listing_block(input, lines, current_line, total_lines);
     }
-    
+
     if (is_list_item(line)) {
         return parse_asciidoc_list(input, lines, current_line, total_lines);
     }
-    
+
     if (is_admonition_block(line)) {
         Item result = parse_asciidoc_admonition(input, line);
         (*current_line)++;
         return result;
     }
-    
+
     if (is_table_start(line)) {
         return parse_asciidoc_table(input, lines, current_line, total_lines);
     }
-    
+
     // Default: treat as paragraph
     Item result = parse_asciidoc_paragraph(input, line);
     (*current_line)++;
@@ -565,26 +566,26 @@ static Item parse_asciidoc_content(Input *input, char** lines, int line_count) {
     // Create the root document element according to schema
     Element* doc = create_asciidoc_element(input, "doc");
     if (!doc) return {.item = ITEM_NULL};
-    
+
     // Add version attribute to doc (required by schema)
     add_attribute_to_element(input, doc, "version", "1.0");
-    
+
     // Create meta element for metadata (required by schema)
     Element* meta = create_asciidoc_element(input, "meta");
     if (!meta) return {.item = (uint64_t)doc};
-    
+
     // Add default metadata
     add_attribute_to_element(input, meta, "title", "AsciiDoc Document");
     add_attribute_to_element(input, meta, "language", "en");
-    
+
     // Add meta to doc
     list_push((List*)doc, {.item = (uint64_t)meta});
     ((TypeElmt*)doc->type)->content_length++;
-    
+
     // Create body element for content (required by schema)
     Element* body = create_asciidoc_element(input, "body");
     if (!body) return {.item = (uint64_t)doc};
-    
+
     int current_line = 0;
     while (current_line < line_count) {
         Item block = parse_asciidoc_block(input, lines, &current_line, line_count);
@@ -592,15 +593,15 @@ static Item parse_asciidoc_content(Input *input, char** lines, int line_count) {
             list_push((List*)body, block);
             ((TypeElmt*)body->type)->content_length++;
         }
-        
+
         // Safety check to prevent infinite loops
         if (current_line >= line_count) break;
     }
-    
+
     // Add body to doc
     list_push((List*)doc, {.item = (uint64_t)body});
     ((TypeElmt*)doc->type)->content_length++;
-    
+
     return {.item = (uint64_t)doc};
 }
 
@@ -609,22 +610,22 @@ void parse_asciidoc(Input* input, const char* asciidoc_string) {
         input->root = {.item = ITEM_NULL};
         return;
     }
-    
-    // Initialize string buffer (critical for proper Lambda Item creation)
-    input->sb = stringbuf_new(input->pool);
-    
+
+    // Initialize MarkBuilder for proper Lambda Item creation
+    MarkBuilder builder(input);
+
     // Split input into lines for processing
     int line_count;
     char** lines = split_lines(asciidoc_string, &line_count);
-    
+
     if (!lines || line_count == 0) {
         input->root = {.item = ITEM_NULL};
         return;
     }
-    
+
     // Parse content using the full AsciiDoc parser
     input->root = parse_asciidoc_content(input, lines, line_count);
-    
+
     // Clean up lines
     free_lines(lines, line_count);
 }

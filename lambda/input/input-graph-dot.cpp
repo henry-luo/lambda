@@ -1,16 +1,17 @@
 #include "input-graph.h"
+#include "../mark_builder.hpp"
 #include <ctype.h>
 #include <string.h>
 
 // Forward declarations for internal functions
 static void skip_whitespace_and_comments(const char **dot);
 static String* parse_identifier(Input* input, const char **dot);
-static String* parse_quoted_string(Input* input, const char **dot);
-static String* parse_attribute_value(Input* input, const char **dot);
-static void parse_attribute_list(Input* input, Element* element, const char **dot);
-static Element* parse_node_statement(Input* input, const char **dot);
-static Element* parse_edge_statement(Input* input, const char **dot);
-static void parse_subgraph(Input* input, Element* graph, const char **dot);
+static String* parse_quoted_string(Input* input, MarkBuilder* builder, const char **dot);
+static String* parse_attribute_value(Input* input, MarkBuilder* builder, const char **dot);
+static void parse_attribute_list(Input* input, MarkBuilder* builder, Element* element, const char **dot);
+static Element* parse_node_statement(Input* input, MarkBuilder* builder, const char **dot);
+static Element* parse_edge_statement(Input* input, MarkBuilder* builder, const char **dot);
+static void parse_subgraph(Input* input, MarkBuilder* builder, Element* graph, const char **dot);
 
 // Skip whitespace and comments
 static void skip_whitespace_and_comments(const char **dot) {
@@ -71,14 +72,14 @@ static String* parse_identifier(Input* input, const char **dot) {
 }
 
 // Parse quoted string
-static String* parse_quoted_string(Input* input, const char **dot) {
+static String* parse_quoted_string(Input* input, MarkBuilder* builder, const char **dot) {
     skip_whitespace_and_comments(dot);
 
     if (**dot != '"') {
         return NULL;
     }
 
-    StringBuf* sb = input->sb;
+    StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     (*dot)++; // Skip opening quote
@@ -106,22 +107,22 @@ static String* parse_quoted_string(Input* input, const char **dot) {
         (*dot)++; // Skip closing quote
     }
 
-    return stringbuf_to_string(sb);
+    return builder->createString(sb->str->chars, sb->length);
 }
 
 // Parse attribute value (identifier or quoted string)
-static String* parse_attribute_value(Input* input, const char **dot) {
+static String* parse_attribute_value(Input* input, MarkBuilder* builder, const char **dot) {
     skip_whitespace_and_comments(dot);
 
     if (**dot == '"') {
-        return parse_quoted_string(input, dot);
+        return parse_quoted_string(input, builder, dot);
     } else {
         return parse_identifier(input, dot);
     }
 }
 
 // Parse attribute list [attr1=value1, attr2=value2, ...]
-static void parse_attribute_list(Input* input, Element* element, const char **dot) {
+static void parse_attribute_list(Input* input, MarkBuilder* builder, Element* element, const char **dot) {
     skip_whitespace_and_comments(dot);
 
     if (**dot != '[') {
@@ -150,7 +151,7 @@ static void parse_attribute_list(Input* input, Element* element, const char **do
         skip_whitespace_and_comments(dot);
 
         // Parse attribute value
-        String* attr_value = parse_attribute_value(input, dot);
+        String* attr_value = parse_attribute_value(input, builder, dot);
         if (!attr_value) {
             break;
         }
@@ -172,13 +173,13 @@ static void parse_attribute_list(Input* input, Element* element, const char **do
 }
 
 // Parse node statement: node_id [attributes]
-static Element* parse_node_statement(Input* input, const char **dot) {
+static Element* parse_node_statement(Input* input, MarkBuilder* builder, const char **dot) {
     skip_whitespace_and_comments(dot);
 
     // Parse node ID
     String* node_id = parse_identifier(input, dot);
     if (!node_id) {
-        node_id = parse_quoted_string(input, dot);
+        node_id = parse_quoted_string(input, builder, dot);
     }
     if (!node_id) {
         return NULL;
@@ -188,19 +189,19 @@ static Element* parse_node_statement(Input* input, const char **dot) {
     Element* node = create_node_element(input, node_id->chars, node_id->chars);
 
     // Parse optional attributes
-    parse_attribute_list(input, node, dot);
+    parse_attribute_list(input, builder, node, dot);
 
     return node;
 }
 
 // Parse edge statement: node1 -> node2 [attributes] or node1 -- node2 [attributes]
-static Element* parse_edge_statement(Input* input, const char **dot) {
+static Element* parse_edge_statement(Input* input, MarkBuilder* builder, const char **dot) {
     skip_whitespace_and_comments(dot);
 
     // Parse from node
     String* from_id = parse_identifier(input, dot);
     if (!from_id) {
-        from_id = parse_quoted_string(input, dot);
+        from_id = parse_quoted_string(input, builder, dot);
     }
     if (!from_id) {
         return NULL;
@@ -230,7 +231,7 @@ static Element* parse_edge_statement(Input* input, const char **dot) {
     // Parse to node
     String* to_id = parse_identifier(input, dot);
     if (!to_id) {
-        to_id = parse_quoted_string(input, dot);
+        to_id = parse_quoted_string(input, builder, dot);
     }
     if (!to_id) {
         return NULL;
@@ -243,13 +244,13 @@ static Element* parse_edge_statement(Input* input, const char **dot) {
     add_graph_attribute(input, edge, "direction", is_directed ? "forward" : "none");
 
     // Parse optional attributes
-    parse_attribute_list(input, edge, dot);
+    parse_attribute_list(input, builder, edge, dot);
 
     return edge;
 }
 
 // Parse subgraph or cluster
-static void parse_subgraph(Input* input, Element* graph, const char **dot) {
+static void parse_subgraph(Input* input, MarkBuilder* builder, Element* graph, const char **dot) {
     skip_whitespace_and_comments(dot);
 
     // Look for "subgraph" or "cluster"
@@ -266,7 +267,7 @@ static void parse_subgraph(Input* input, Element* graph, const char **dot) {
     // Parse optional subgraph name
     String* subgraph_id = parse_identifier(input, dot);
     if (!subgraph_id) {
-        subgraph_id = parse_quoted_string(input, dot);
+        subgraph_id = parse_quoted_string(input, builder, dot);
     }
 
     // Default ID if none provided
@@ -299,7 +300,7 @@ static void parse_subgraph(Input* input, Element* graph, const char **dot) {
         // Look ahead to determine if this is an edge statement
         String* first_id = parse_identifier(input, dot);
         if (!first_id) {
-            first_id = parse_quoted_string(input, dot);
+            first_id = parse_quoted_string(input, builder, dot);
         }
 
         if (first_id) {
@@ -309,14 +310,14 @@ static void parse_subgraph(Input* input, Element* graph, const char **dot) {
             if ((**dot == '-' && (*(*dot + 1) == '>' || *(*dot + 1) == '-'))) {
                 // This is an edge statement - reset and parse as edge
                 *dot = checkpoint;
-                Element* edge = parse_edge_statement(input, dot);
+                Element* edge = parse_edge_statement(input, builder, dot);
                 if (edge) {
                     add_edge_to_graph(input, cluster, edge);
                 }
             } else {
                 // This is a node statement - reset and parse as node
                 *dot = checkpoint;
-                Element* node = parse_node_statement(input, dot);
+                Element* node = parse_node_statement(input, builder, dot);
                 if (node) {
                     add_node_to_graph(input, cluster, node);
                 }
@@ -346,6 +347,8 @@ static void parse_subgraph(Input* input, Element* graph, const char **dot) {
 
 // Main DOT parser function
 void parse_graph_dot(Input* input, const char* dot_string) {
+    MarkBuilder builder(input);
+
     const char* dot = dot_string;
     skip_whitespace_and_comments(&dot);
 
@@ -378,7 +381,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
     // Parse optional graph name
     graph_name = parse_identifier(input, &dot);
     if (!graph_name) {
-        graph_name = parse_quoted_string(input, &dot);
+        graph_name = parse_quoted_string(input, &builder, &dot);
     }
 
     skip_whitespace_and_comments(&dot);
@@ -415,7 +418,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
 
         // Check for subgraph
         if (strncmp(dot, "subgraph", 8) == 0 || strncmp(dot, "cluster", 7) == 0) {
-            parse_subgraph(input, graph, &dot);
+            parse_subgraph(input, &builder, graph, &dot);
             continue;
         }
 
@@ -425,7 +428,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         // Look ahead to determine statement type
         String* first_id = parse_identifier(input, &dot);
         if (!first_id) {
-            first_id = parse_quoted_string(input, &dot);
+            first_id = parse_quoted_string(input, &builder, &dot);
         }
 
         if (first_id) {
@@ -435,14 +438,14 @@ void parse_graph_dot(Input* input, const char* dot_string) {
             if ((*dot == '-' && (*(dot + 1) == '>' || *(dot + 1) == '-'))) {
                 // This is an edge statement - reset and parse as edge
                 dot = checkpoint;
-                Element* edge = parse_edge_statement(input, &dot);
+                Element* edge = parse_edge_statement(input, &builder, &dot);
                 if (edge) {
                     add_edge_to_graph(input, graph, edge);
                 }
             } else {
                 // This is a node statement - reset and parse as node
                 dot = checkpoint;
-                Element* node = parse_node_statement(input, &dot);
+                Element* node = parse_node_statement(input, &builder, &dot);
                 if (node) {
                     add_node_to_graph(input, graph, node);
                 }
