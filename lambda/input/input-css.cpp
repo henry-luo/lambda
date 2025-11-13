@@ -1378,7 +1378,6 @@ void parse_css(Input* input, const char* css_string) {
 
     // Create MarkBuilder for string management
     MarkBuilder builder(input);
-    input->sb = stringbuf_new(input->pool);
 
     const char* css = css_string;
     skip_css_comments(&css);
