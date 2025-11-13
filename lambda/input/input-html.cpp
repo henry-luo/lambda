@@ -811,7 +811,6 @@ static void process_implicit_tbody(Input* input, Item item) {
 // Internal function - use input_from_source() instead for external API
 __attribute__((visibility("hidden")))
 void parse_html_impl(Input* input, const char* html_string) {
-    input->sb = stringbuf_new(input->pool);
     const char *html = html_string;
 
     // Create MarkBuilder for string management
