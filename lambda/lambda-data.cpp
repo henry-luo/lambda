@@ -535,11 +535,11 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_INT:
         return {.item = i2it(titem->int_val)};
     case LMD_TYPE_INT64:
-        return {.item = l2it(titem->long_val)};
+        return {.item = l2it(&titem->long_val)};
     case LMD_TYPE_FLOAT:
-        return {.item = d2it(titem->double_val)};
+        return {.item = d2it(&titem->double_val)};
     case LMD_TYPE_DTIME:
-        return {.item = k2it(titem->item)};
+        return {.item = k2it(&titem->item)};
     case LMD_TYPE_DECIMAL:
         return {.item = c2it(titem->decimal)};
     case LMD_TYPE_STRING:
