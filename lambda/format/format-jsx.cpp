@@ -1,5 +1,6 @@
 #include "format.h"
 #include "../../lib/stringbuf.h"
+#include "../mark_reader.hpp"
 #include <ctype.h>
 
 // Forward declarations
@@ -11,6 +12,10 @@ static void format_jsx_text_content(StringBuf* sb, String* text);
 static void format_jsx_children(StringBuf* sb, Element* elem);
 static void format_js_expression_element(StringBuf* sb, Element* js_elem);
 static bool is_js_expression_element(Element* elem);
+
+// MarkReader-based forward declarations
+static void format_jsx_element_reader(StringBuf* sb, const ElementReader& elem);
+static void format_jsx_item_reader(StringBuf* sb, const ItemReader& item);
 
 // Utility function to get attribute value from element
 static String* get_jsx_attribute(Element* elem, const char* attr_name) {
@@ -288,11 +293,94 @@ static void format_jsx_item(StringBuf* sb, Item item) {
     }
 }
 
+// MarkReader-based version: format JSX element
+static void format_jsx_element_reader(StringBuf* sb, const ElementReader& elem) {
+    const char* tag_name = elem.tagName();
+    if (!tag_name) return;
+    
+    // handle JSX fragment
+    if (strcmp(tag_name, "jsx_fragment") == 0) {
+        stringbuf_append_str(sb, "<>");
+        
+        auto children = elem.children();
+        ItemReader child;
+        while (children.next(&child)) {
+            format_jsx_item_reader(sb, child);
+        }
+        
+        stringbuf_append_str(sb, "</>");
+        return;
+    }
+    
+    // handle JS expression element
+    if (strcmp(tag_name, "js") == 0) {
+        stringbuf_append_char(sb, '{');
+        
+        auto children = elem.children();
+        ItemReader child;
+        if (children.next(&child) && child.isString()) {
+            String* js_content = child.asString();
+            if (js_content && js_content->len > 0 && js_content->len < 10000) {
+                stringbuf_append_str(sb, js_content->chars);
+            }
+        }
+        
+        stringbuf_append_char(sb, '}');
+        return;
+    }
+    
+    // regular JSX element
+    stringbuf_append_char(sb, '<');
+    stringbuf_append_str(sb, tag_name);
+    
+    // format attributes - use underlying element for now
+    format_jsx_attributes(sb, (Element*)elem.element());
+    
+    // check if self-closing
+    ItemReader self_closing_attr = elem.get_attr("self_closing");
+    if (self_closing_attr.isString()) {
+        String* self_closing = self_closing_attr.asString();
+        if (self_closing && strcmp(self_closing->chars, "true") == 0) {
+            stringbuf_append_str(sb, " />");
+            return;
+        }
+    }
+    
+    stringbuf_append_char(sb, '>');
+    
+    // format children
+    auto children = elem.children();
+    ItemReader child;
+    while (children.next(&child)) {
+        format_jsx_item_reader(sb, child);
+    }
+    
+    // closing tag
+    stringbuf_append_str(sb, "</");
+    stringbuf_append_str(sb, tag_name);
+    stringbuf_append_char(sb, '>');
+}
+
+// MarkReader-based version: format item (handles both elements and strings)
+static void format_jsx_item_reader(StringBuf* sb, const ItemReader& item) {
+    if (item.isNull()) return;
+    
+    if (item.isString()) {
+        String* text = item.asString();
+        format_jsx_text_content(sb, text);
+    } else if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        format_jsx_element_reader(sb, elem);
+    }
+}
+
 // Main JSX formatter entry point
 String* format_jsx(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     
-    format_jsx_item(sb, root_item);
+    // use MarkReader API for type-safe traversal
+    ItemReader root(root_item.to_const());
+    format_jsx_item_reader(sb, root);
     
     return stringbuf_to_string(sb);
 }

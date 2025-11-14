@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 #define DEBUG_MATH_FORMAT 1
@@ -74,6 +75,10 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
 static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor flavor, int depth);
 static void format_math_children_with_template(StringBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth);
 static void format_math_string(StringBuf* sb, String* str);
+
+// MarkReader-based forward declarations
+static String* format_math_reader(Pool* pool, const ItemReader& item);
+static String* format_math_latex_reader(Pool* pool, const ItemReader& item);
 
 // Math formatting tables for different output flavors
 typedef struct {
@@ -1815,11 +1820,27 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
 // Main format functions for different flavors
 
 // Format math expression to LaTeX
+// MarkReader-based implementations
+static String* format_math_latex_reader(Pool* pool, const ItemReader& item) {
+    // Delegate to existing Item-based implementation
+    Item raw_item = item.item();
+    return format_math_latex(pool, raw_item);
+}
+
+static String* format_math_reader(Pool* pool, const ItemReader& item) {
+    // Delegate to existing Item-based implementation
+    return format_math_latex_reader(pool, item);
+}
+
+// Main LaTeX math formatter
 String* format_math_latex(Pool* pool, Item root_item) {
     #ifdef DEBUG_MATH_FORMAT
     log_debug("format_math_latex: Starting with pool=%p, root_item=%p", 
             (void*)pool, (void*)root_item.pointer);
     #endif
+    
+    // Use MarkReader API
+    ItemReader reader(root_item.to_const());
     
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
@@ -1835,7 +1856,9 @@ String* format_math_latex(Pool* pool, Item root_item) {
             sb->length, (void*)sb->str);
     #endif
     
-    format_math_item(sb, root_item, MATH_OUTPUT_LATEX, 0);
+    // Convert back to Item for formatting (delegate to existing implementation)
+    Item item = reader.item();
+    format_math_item(sb, item, MATH_OUTPUT_LATEX, 0);
 
     #ifdef DEBUG_MATH_FORMAT
     log_debug("format_math_latex: After formatting - sb length=%zu, str='%s'", 
@@ -2089,8 +2112,11 @@ String* format_math_unicode(Pool* pool, Item root_item) {
 }
 
 // Generic math formatter (defaults to LaTeX)
+// Main math formatter (defaults to LaTeX output)
 String* format_math(Pool* pool, Item root_item) {
-    return format_math_latex(pool, root_item);
+    // Use MarkReader API
+    ItemReader reader(root_item.to_const());
+    return format_math_latex_reader(pool, reader);
 }
 
 // Helper function to append a space only if the last character is not already a space

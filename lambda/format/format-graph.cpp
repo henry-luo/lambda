@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 
 // Forward declarations
@@ -8,6 +9,13 @@ static void format_graph_edge(StringBuf* sb, Element* edge, const char* flavor);
 static void format_graph_cluster(StringBuf* sb, Element* cluster, const char* flavor);
 static void format_graph_attributes(StringBuf* sb, Element* element, const char* flavor);
 static void format_graph_attribute_value(StringBuf* sb, const char* key, const char* value, const char* flavor);
+
+// reader-based forward declarations
+static void format_graph_element_reader(StringBuf* sb, const ElementReader& element, const char* flavor);
+static void format_graph_node_reader(StringBuf* sb, const ElementReader& node, const char* flavor);
+static void format_graph_edge_reader(StringBuf* sb, const ElementReader& edge, const char* flavor);
+static void format_graph_cluster_reader(StringBuf* sb, const ElementReader& cluster, const char* flavor);
+static void format_graph_children_reader(StringBuf* sb, const ElementReader& element, const char* flavor);
 
 // Helper function to escape strings for different graph formats
 static void format_graph_string(StringBuf* sb, const char* str, const char* flavor) {
@@ -464,8 +472,15 @@ String* format_graph(Pool* pool, Item root_item) {
         return NULL;
     }
 
-    // Default to DOT format for backwards compatibility
-    format_graph_element(sb, element, "dot");
+    // default to DOT format for backwards compatibility
+    // use MarkReader API
+    ItemReader root(root_item.to_const());
+    if (root.isElement()) {
+        ElementReader elem = root.asElement();
+        format_graph_element_reader(sb, elem, "dot");
+    } else {
+        format_graph_element(sb, element, "dot");
+    }
 
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
@@ -492,10 +507,332 @@ String* format_graph_with_flavor(Pool* pool, Item root_item, const char* flavor)
         return NULL;
     }
 
-    format_graph_element(sb, element, flavor ? flavor : "dot");
+    // use MarkReader API
+    ItemReader root(root_item.to_const());
+    if (root.isElement()) {
+        ElementReader elem = root.asElement();
+        format_graph_element_reader(sb, elem, flavor ? flavor : "dot");
+    } else {
+        format_graph_element(sb, element, flavor ? flavor : "dot");
+    }
 
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
 
     return result;
+}
+
+// ===== MarkReader-based implementations =====
+
+// helper to get string attribute using reader API
+static const char* get_element_attribute_reader(const ElementReader& elem, const char* attr_name) {
+    ItemReader attr = elem.get_attr(attr_name);
+    if (attr.isString()) {
+        String* str = attr.asString();
+        return str ? str->chars : nullptr;
+    }
+    return nullptr;
+}
+
+// format graph children using reader API
+static void format_graph_children_reader(StringBuf* sb, const ElementReader& element, const char* flavor) {
+    auto it = element.children();
+    ItemReader child_item;
+    while (it.next(&child_item)) {
+        if (child_item.isElement()) {
+            ElementReader child = child_item.asElement();
+            const char* child_type_name = child.tagName();
+            
+            if (child_type_name) {
+                if (strcmp(child_type_name, "node") == 0) {
+                    format_graph_node_reader(sb, child, flavor);
+                } else if (strcmp(child_type_name, "edge") == 0) {
+                    format_graph_edge_reader(sb, child, flavor);
+                } else if (strcmp(child_type_name, "cluster") == 0) {
+                    format_graph_cluster_reader(sb, child, flavor);
+                }
+            }
+        }
+    }
+}
+
+// format graph node using reader API
+static void format_graph_node_reader(StringBuf* sb, const ElementReader& node, const char* flavor) {
+    const char* id = get_element_attribute_reader(node, "id");
+    const char* label = get_element_attribute_reader(node, "label");
+
+    if (!id) return; // node must have an ID
+
+    if (strcmp(flavor, "dot") == 0) {
+        stringbuf_append_str(sb, "    ");
+        format_graph_string(sb, id, flavor);
+
+        // add attributes if present
+        bool has_attrs = false;
+        if (label) {
+            stringbuf_append_str(sb, " [label=");
+            format_graph_string(sb, label, flavor);
+            has_attrs = true;
+        }
+
+        if (has_attrs) {
+            stringbuf_append_str(sb, "]");
+        }
+
+        stringbuf_append_str(sb, ";\n");
+
+    } else if (strcmp(flavor, "mermaid") == 0) {
+        stringbuf_append_str(sb, "    ");
+        format_graph_string(sb, id, flavor);
+
+        if (label) {
+            stringbuf_append_str(sb, "[");
+            format_graph_string(sb, label, flavor);
+            stringbuf_append_str(sb, "]");
+        }
+
+        stringbuf_append_char(sb, '\n');
+
+    } else if (strcmp(flavor, "d2") == 0) {
+        // D2 nodes with properties
+        format_graph_string(sb, id, flavor);
+
+        if (label) {
+            stringbuf_append_str(sb, ": ");
+            format_graph_string(sb, label, flavor);
+        }
+
+        // check for style attributes
+        const char* shape = get_element_attribute_reader(node, "shape");
+        const char* fill = get_element_attribute_reader(node, "fill");
+        const char* stroke = get_element_attribute_reader(node, "stroke");
+
+        if (shape || fill || stroke) {
+            stringbuf_append_str(sb, ": {\n");
+
+            if (shape) {
+                stringbuf_append_str(sb, "  shape: ");
+                stringbuf_append_str(sb, shape);
+                stringbuf_append_char(sb, '\n');
+            }
+
+            if (fill || stroke) {
+                stringbuf_append_str(sb, "  style: {\n");
+                if (fill) {
+                    stringbuf_append_str(sb, "    fill: ");
+                    stringbuf_append_str(sb, fill);
+                    stringbuf_append_char(sb, '\n');
+                }
+                if (stroke) {
+                    stringbuf_append_str(sb, "    stroke: ");
+                    stringbuf_append_str(sb, stroke);
+                    stringbuf_append_char(sb, '\n');
+                }
+                stringbuf_append_str(sb, "  }\n");
+            }
+
+            stringbuf_append_str(sb, "}\n");
+        } else {
+            stringbuf_append_char(sb, '\n');
+        }
+    }
+}
+
+// format graph edge using reader API
+static void format_graph_edge_reader(StringBuf* sb, const ElementReader& edge, const char* flavor) {
+    const char* from = get_element_attribute_reader(edge, "from");
+    const char* to = get_element_attribute_reader(edge, "to");
+    const char* label = get_element_attribute_reader(edge, "label");
+
+    if (!from || !to) return; // edge must have from and to
+
+    if (strcmp(flavor, "dot") == 0) {
+        stringbuf_append_str(sb, "    ");
+        format_graph_string(sb, from, flavor);
+        stringbuf_append_str(sb, " -> ");
+        format_graph_string(sb, to, flavor);
+
+        if (label) {
+            stringbuf_append_str(sb, " [label=");
+            format_graph_string(sb, label, flavor);
+            stringbuf_append_str(sb, "]");
+        }
+
+        stringbuf_append_str(sb, ";\n");
+
+    } else if (strcmp(flavor, "mermaid") == 0) {
+        stringbuf_append_str(sb, "    ");
+        format_graph_string(sb, from, flavor);
+        stringbuf_append_str(sb, " --> ");
+        format_graph_string(sb, to, flavor);
+
+        if (label) {
+            stringbuf_append_str(sb, " : ");
+            format_graph_string(sb, label, flavor);
+        }
+
+        stringbuf_append_char(sb, '\n');
+
+    } else if (strcmp(flavor, "d2") == 0) {
+        format_graph_string(sb, from, flavor);
+        stringbuf_append_str(sb, " -> ");
+        format_graph_string(sb, to, flavor);
+
+        if (label) {
+            stringbuf_append_str(sb, ": ");
+            format_graph_string(sb, label, flavor);
+        }
+
+        stringbuf_append_char(sb, '\n');
+    }
+}
+
+// format graph cluster using reader API
+static void format_graph_cluster_reader(StringBuf* sb, const ElementReader& cluster, const char* flavor) {
+    const char* id = get_element_attribute_reader(cluster, "id");
+    const char* label = get_element_attribute_reader(cluster, "label");
+
+    if (strcmp(flavor, "dot") == 0) {
+        stringbuf_append_str(sb, "    subgraph ");
+        if (id) {
+            format_graph_string(sb, id, flavor);
+        } else {
+            stringbuf_append_str(sb, "cluster_unnamed");
+        }
+        stringbuf_append_str(sb, " {\n");
+
+        if (label) {
+            stringbuf_append_str(sb, "        label=");
+            format_graph_string(sb, label, flavor);
+            stringbuf_append_str(sb, ";\n");
+        }
+
+        // format cluster children with increased indentation
+        format_graph_children_reader(sb, cluster, flavor);
+
+        stringbuf_append_str(sb, "    }\n");
+
+    } else if (strcmp(flavor, "mermaid") == 0) {
+        stringbuf_append_str(sb, "    subgraph ");
+        if (id) {
+            format_graph_string(sb, id, flavor);
+        } else {
+            stringbuf_append_str(sb, "cluster");
+        }
+
+        if (label) {
+            stringbuf_append_str(sb, " [");
+            format_graph_string(sb, label, flavor);
+            stringbuf_append_str(sb, "]");
+        }
+
+        stringbuf_append_char(sb, '\n');
+        format_graph_children_reader(sb, cluster, flavor);
+        stringbuf_append_str(sb, "    end\n");
+
+    } else if (strcmp(flavor, "d2") == 0) {
+        // D2 doesn't have explicit subgraphs like DOT, but we can group with containers
+        if (id) {
+            format_graph_string(sb, id, flavor);
+        } else {
+            stringbuf_append_str(sb, "container");
+        }
+
+        stringbuf_append_str(sb, ": {\n");
+
+        if (label) {
+            stringbuf_append_str(sb, "  label: ");
+            format_graph_string(sb, label, flavor);
+            stringbuf_append_char(sb, '\n');
+        }
+
+        format_graph_children_reader(sb, cluster, flavor);
+        stringbuf_append_str(sb, "}\n");
+    }
+}
+
+// format graph element using reader API
+static void format_graph_element_reader(StringBuf* sb, const ElementReader& element, const char* flavor) {
+    const char* element_type_name = element.tagName();
+    if (!element_type_name) return;
+
+    // check if this is a graph element
+    if (strcmp(element_type_name, "graph") != 0) {
+        printf("Warning: Expected graph element, got %s\n", element_type_name);
+        return;
+    }
+
+    // get graph attributes
+    const char* graph_type = get_element_attribute_reader(element, "type");
+    const char* graph_layout = get_element_attribute_reader(element, "layout");
+    const char* graph_flavor = get_element_attribute_reader(element, "flavor");
+    const char* graph_name = get_element_attribute_reader(element, "name");
+
+    // use provided flavor or fall back to graph's flavor attribute
+    if (!flavor && graph_flavor) {
+        flavor = graph_flavor;
+    }
+    if (!flavor) {
+        flavor = "dot"; // default flavor
+    }
+
+    printf("Formatting graph as %s (type: %s, layout: %s)\n",
+           flavor, graph_type ? graph_type : "unknown", graph_layout ? graph_layout : "unknown");
+
+    if (strcmp(flavor, "dot") == 0) {
+        // DOT format header
+        bool is_directed = graph_type && strcmp(graph_type, "directed") == 0;
+        stringbuf_append_str(sb, is_directed ? "digraph " : "graph ");
+
+        if (graph_name) {
+            format_graph_string(sb, graph_name, flavor);
+        } else {
+            stringbuf_append_str(sb, "G");
+        }
+
+        stringbuf_append_str(sb, " {\n");
+
+        // graph attributes
+        if (graph_layout) {
+            stringbuf_append_str(sb, "    layout=");
+            format_graph_string(sb, graph_layout, flavor);
+            stringbuf_append_str(sb, ";\n");
+        }
+
+        // format children
+        format_graph_children_reader(sb, element, flavor);
+
+        stringbuf_append_str(sb, "}\n");
+
+    } else if (strcmp(flavor, "mermaid") == 0) {
+        // Mermaid format header
+        bool is_directed = graph_type && strcmp(graph_type, "directed") == 0;
+        stringbuf_append_str(sb, is_directed ? "flowchart TD\n" : "graph LR\n");
+
+        // format children
+        format_graph_children_reader(sb, element, flavor);
+
+    } else if (strcmp(flavor, "d2") == 0) {
+        // D2 format - no explicit header, just content
+
+        // add a comment if we have graph metadata
+        if (graph_name || graph_type) {
+            stringbuf_append_str(sb, "# Graph: ");
+            if (graph_name) {
+                stringbuf_append_str(sb, graph_name);
+            }
+            if (graph_type) {
+                stringbuf_append_str(sb, " (");
+                stringbuf_append_str(sb, graph_type);
+                stringbuf_append_str(sb, ")");
+            }
+            stringbuf_append_char(sb, '\n');
+        }
+
+        // format children
+        format_graph_children_reader(sb, element, flavor);
+
+    } else {
+        printf("Unsupported graph flavor: %s\n", flavor);
+    }
 }

@@ -1,5 +1,6 @@
 // CSS Formatter - Implementation for CSS output
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include <string.h>
 
@@ -13,6 +14,9 @@ static void format_css_selectors(StringBuf* sb, Item selectors_item);
 static void format_css_value(StringBuf* sb, Item value, const char* property_name);
 static void format_css_declarations(StringBuf* sb, Element* rule, int indent);
 static void format_css_function(StringBuf* sb, Element* function);
+
+// MarkReader-based forward declarations
+static String* format_css_reader(Pool* pool, const ItemReader& item);
 
 // Helper function to check if a CSS property uses comma-separated multiple values
 static bool property_uses_comma_separator(const char* prop_name, size_t prop_len) {
@@ -930,45 +934,59 @@ static void format_css_stylesheet(StringBuf* sb, Element* stylesheet) {
 }
 
 // Main CSS formatting function
+// MarkReader-based implementation
+static String* format_css_reader(Pool* pool, const ItemReader& item) {
+    // Delegate to existing Item-based implementation
+    Item raw_item = item.item();
+    return format_css(pool, raw_item);
+}
+
+// Main formatting function (exported)
 String* format_css(Pool *pool, Item item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
 
-    TypeId type = get_type_id(item);
-
-    if (type == LMD_TYPE_ELEMENT) {
-        Element* element = item.element;
-        if (element && element->type) {
-            TypeElmt* elmt_type = (TypeElmt*)element->type;
+    // Use MarkReader API
+    ItemReader reader(item.to_const());
+    
+    if (reader.isElement()) {
+        ElementReader elem = reader.asElement();
+        Element* raw_elem = const_cast<Element*>(elem.element());
+        
+        if (raw_elem && raw_elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)raw_elem->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
-                format_css_stylesheet(sb, element);
+                format_css_stylesheet(sb, raw_elem);
             } else if (elmt_type->name.length == 7 && strncmp(elmt_type->name.str, "at-rule", 7) == 0) {
-                format_css_at_rule(sb, element, 0);
+                format_css_at_rule(sb, raw_elem, 0);
             } else {
                 // Handle single rule or other elements
-                format_css_rule(sb, element, 0);
+                format_css_rule(sb, raw_elem, 0);
             }
         } else {
             // Handle single rule or other elements
-            format_css_rule(sb, item.element, 0);
+            format_css_rule(sb, raw_elem, 0);
         }
-    } else if (type == LMD_TYPE_MAP) {
-        Element* element = item.element;
-        if (element && element->type) {
-            TypeElmt* elmt_type = (TypeElmt*)element->type;
+    } else if (reader.isMap()) {
+        ElementReader elem = reader.asElement();
+        Element* raw_elem = const_cast<Element*>(elem.element());
+        
+        if (raw_elem && raw_elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)raw_elem->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
-                format_css_stylesheet(sb, element);
+                format_css_stylesheet(sb, raw_elem);
             } else {
                 // Handle single rule or other elements
-                format_css_rule(sb, element, 0);
+                format_css_rule(sb, raw_elem, 0);
             }
         } else {
             // Handle single rule or other elements
-            format_css_rule(sb, item.element, 0);
+            format_css_rule(sb, raw_elem, 0);
         }
     } else {
         // Fallback - try to format as value
-        format_css_value(sb, item, NULL);
+        Item raw_item = reader.item();
+        format_css_value(sb, raw_item, NULL);
     }
 
     String* result = stringbuf_to_string(sb);

@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 
 // Forward declarations
@@ -17,6 +18,10 @@ String* format_jsx(Pool* pool, Item root_item);
 
 static bool contains_jsx_element(Element* elem);
 static void format_element_with_mdx_awareness(StringBuf* sb, Element* elem);
+
+// MarkReader-based forward declarations
+static void format_mdx_item_reader(StringBuf* sb, const ItemReader& item);
+static void format_mdx_element_reader(StringBuf* sb, const ElementReader& elem);
 
 // Format individual MDX element
 
@@ -266,51 +271,74 @@ static void format_mdx_item(StringBuf* sb, Item item) {
     }
 }
 
+// MarkReader-based version: format MDX element
+static void format_mdx_element_reader(StringBuf* sb, const ElementReader& elem) {
+    const char* type_name = elem.tagName();
+    
+    if (type_name && strcmp(type_name, "jsx_element") == 0) {
+        // handle JSX element - get content attribute
+        ItemReader content = elem.get_attr("content");
+        if (content.isString()) {
+            String* jsx_content = content.asString();
+            if (jsx_content && jsx_content->chars) {
+                stringbuf_append_str(sb, jsx_content->chars);
+            }
+        }
+    } else if (type_name && strcmp(type_name, "mdx_document") == 0) {
+        // format MDX document children
+        auto children = elem.children();
+        ItemReader child;
+        while (children.next(&child)) {
+            format_mdx_item_reader(sb, child);
+        }
+    } else {
+        // delegate to markdown formatter
+        format_markdown(sb, (Item){.element = (Element*)elem.element()});
+    }
+}
+
+// MarkReader-based version: format MDX item
+static void format_mdx_item_reader(StringBuf* sb, const ItemReader& item) {
+    if (item.isNull()) return;
+    
+    if (item.isString()) {
+        String* text = item.asString();
+        if (text && text->len > 0) {
+            stringbuf_append_str(sb, text->chars);
+        }
+    } else if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        format_mdx_element_reader(sb, elem);
+    }
+}
+
 // Main MDX formatting function
 String* format_mdx(Pool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) {
-        printf("DEBUG format_mdx: root_item is NULL\n");
         return &EMPTY_STRING;
     }
     
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
-        printf("DEBUG format_mdx: failed to create StringBuf\n");
         return &EMPTY_STRING;
     }
     
-    printf("DEBUG format_mdx: root_item type: %d *** NEW BUILD ***\n", get_type_id(root_item));
+    // use MarkReader API
+    ItemReader root(root_item.to_const());
     
-    // Check if this is an MDX document element
-    if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
-        Element* elem = root_item.element;
-        const char* type_name = get_element_type_name(elem);
-        printf("DEBUG format_mdx: element type: %s\n", type_name ? type_name : "NULL");
-        
-        List* list = (List*)elem;
-        printf("DEBUG format_mdx: element has %ld children\n", list->length);
-        
-        printf("DEBUG format_mdx: comparing '%s' with 'mdx_document'\n", type_name);
-        printf("DEBUG format_mdx: strcmp result: %d\n", strcmp(type_name, "mdx_document"));
+    if (root.isElement()) {
+        ElementReader elem = root.asElement();
+        const char* type_name = elem.tagName();
         
         if (type_name && strcmp(type_name, "mdx_document") == 0) {
-            // This is an MDX document, extract and format the content
-            printf("DEBUG format_mdx: about to call format_mdx_element\n");
-            format_mdx_element(sb, elem);
-            printf("DEBUG format_mdx: returned from format_mdx_element\n");
+            format_mdx_element_reader(sb, elem);
         } else {
-            // Not an MDX document, format as regular markdown
-            printf("DEBUG format_mdx: formatting as regular markdown (not mdx_document)\n");
             format_markdown(sb, root_item);
         }
     } else {
-        printf("DEBUG format_mdx: formatting as non-element item\n");
-        format_mdx_item(sb, root_item);
+        format_mdx_item_reader(sb, root);
     }
     
-    // Convert to string
     String* result = stringbuf_to_string(sb);
-    printf("DEBUG format_mdx: result: %s\n", result && result->chars ? result->chars : "NULL or empty");
-    
     return result ? result : &EMPTY_STRING;
 }
