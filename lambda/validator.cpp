@@ -12,6 +12,7 @@
 #include "lambda-data.hpp"
 #include "name_pool.h"
 #include "schema_ast.hpp"
+#include "mark_reader.hpp"
 
 // External function declarations
 extern "C" {
@@ -33,19 +34,19 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
 // Helper to print tree structure for debugging
 void print_tree(TSNode node, int depth) {
     if (ts_node_is_null(node)) return;
-    
+
     const char *node_type = ts_node_type(node);
     TSPoint start = ts_node_start_point(node);
     TSPoint end = ts_node_end_point(node);
-    
+
     for (int i = 0; i < depth; ++i) printf("  ");
-    printf("%s [%u:%u-%u:%u] %s%s\n", 
+    printf("%s [%u:%u-%u:%u] %s%s\n",
            node_type,
            start.row + 1, start.column + 1,
            end.row + 1, end.column + 1,
            ts_node_is_error(node) ? " ERROR" : "",
            ts_node_is_missing(node) ? " MISSING" : "");
-    
+
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; ++i) {
         print_tree(ts_node_child(node, i), depth + 1);
@@ -238,45 +239,45 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
     if (ast->node_type == AST_SCRIPT) {
         AstScript* script = (AstScript*)ast;
         AstNode* child = script->child;
-        
+
         // If the script child is a content node, traverse into it
         if (child && child->node_type == AST_NODE_CONTENT) {
             AstListNode* content = (AstListNode*)child;
             child = content->item;
         }
-        
+
         int type_count = 0;
         while (child) {
             if (child->node_type == AST_NODE_TYPE_STAM) {
                 // Type statement: type Name = TypeExpr
                 AstNamedNode* type_node = (AstNamedNode*)child;
-                
+
                 if (!type_node->name || !type_node->type) {
                     log_warn("Skipping type node without name or type");
                     child = child->next;
                     continue;
                 }
-                
+
                 // Create TypeDefinition
                 TypeDefinition* def = (TypeDefinition*)pool_calloc(validator->pool, sizeof(TypeDefinition));
                 if (!def) {
                     log_error("Failed to allocate TypeDefinition");
                     return -1;
                 }
-                
+
                 def->name.str = type_node->name->chars;
                 def->name.length = type_node->name->len;
                 def->runtime_type = type_node->type;
                 def->schema_type = nullptr;  // Can be filled in later if needed
                 def->is_exported = true;  // Assume exported by default
-                
+
                 // Create TypeRegistryEntry for hashmap
                 TypeRegistryEntry entry;
                 entry.definition = def;
                 entry.name_key = def->name;
-                
+
                 hashmap_set(validator->type_definitions, &entry);
-                
+
                 log_debug("Registered type: %.*s (type_id=%d)",
                     (int)def->name.length, def->name.str,
                     type_node->type ? type_node->type->type_id : -1);
@@ -284,7 +285,7 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
             }
             child = child->next;
         }
-        
+
         log_info("Registered %d type definitions", type_count);
         return 0;
     }
@@ -330,9 +331,9 @@ Type* ast_validator_resolve_type_reference(AstValidator* validator, const char* 
     // Check if we're already visiting this type (circular reference)
     VisitedEntry visited_key = {.key = name_view, .visited = false};
     const VisitedEntry* existing = (const VisitedEntry*)hashmap_get(validator->visited_nodes, &visited_key);
-    
+
     if (existing && existing->visited) {
-        log_error("[AST_VALIDATOR] Circular type reference detected: %.*s", 
+        log_error("[AST_VALIDATOR] Circular type reference detected: %.*s",
                   (int)name_view.length, name_view.str);
         return nullptr;
     }
@@ -408,6 +409,27 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
     error->expected = nullptr;
     error->actual = (Item){0};
     error->next = nullptr;
+
+    return error;
+}
+
+ValidationError* create_validation_error_ex(
+    ValidationErrorCode code,
+    const char* message,
+    PathSegment* path,
+    Type* expected_type,
+    ConstItem actual_item,
+    Pool* pool) {
+
+    // Create basic error first
+    ValidationError* error = create_validation_error(code, message, path, pool);
+    if (!error) return nullptr;
+
+    // Add expected type information
+    error->expected = expected_type;
+
+    // Copy actual item
+    error->actual = *(Item*)&actual_item;
 
     return error;
 }
@@ -503,6 +525,12 @@ ValidationResult* ast_validator_validate_type(AstValidator* validator, ConstItem
     // init validation context
     validator->current_path = nullptr;
     validator->current_depth = 0;
+
+    // initialize validation session for timeout tracking
+    if (validator->options.timeout_ms > 0) {
+        validator->validation_start_time = clock();
+    }
+
     return validate_against_type(validator, item, type);
 }
 
@@ -523,7 +551,7 @@ ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item
     if (!type) {
         ValidationResult* result = create_validation_result(validator->pool);
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), 
+        snprintf(error_msg, sizeof(error_msg),
                 "Type not found or circular reference detected: %s", type_name);
         ValidationError* error = create_validation_error(
             AST_VALID_ERROR_REFERENCE_ERROR, error_msg, nullptr, validator->pool);
@@ -532,4 +560,247 @@ ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item
     }
 
     return ast_validator_validate_type(validator, item, type);
+}
+
+// ==================== Validation Options Functions ====================
+
+/**
+ * Create default validation options
+ */
+ValidationOptions ast_validator_default_options() {
+    ValidationOptions opts = {};
+    opts.strict_mode = false;
+    opts.allow_unknown_fields = false;
+    opts.allow_empty_elements = false;
+    opts.max_depth = 100;
+    opts.timeout_ms = 0;  // no timeout
+    opts.max_errors = 0;  // unlimited
+    opts.show_suggestions = true;
+    opts.show_context = true;
+    opts.enabled_rules = nullptr;
+    opts.disabled_rules = nullptr;
+    return opts;
+}
+
+/**
+ * Set validation options
+ */
+void ast_validator_set_options(AstValidator* validator, ValidationOptions* options) {
+    if (!validator || !options) return;
+    validator->options = *options;
+}
+
+/**
+ * Get current validation options
+ */
+ValidationOptions* ast_validator_get_options(AstValidator* validator) {
+    if (!validator) return nullptr;
+    return &validator->options;
+}
+
+/**
+ * Convenience: Set strict mode
+ */
+void ast_validator_set_strict_mode(AstValidator* validator, bool strict) {
+    if (!validator) return;
+    validator->options.strict_mode = strict;
+}
+
+/**
+ * Convenience: Set maximum error count
+ */
+void ast_validator_set_max_errors(AstValidator* validator, int max) {
+    if (!validator) return;
+    validator->options.max_errors = max;
+}
+
+/**
+ * Convenience: Set validation timeout
+ */
+void ast_validator_set_timeout(AstValidator* validator, int timeout_ms) {
+    if (!validator) return;
+    validator->options.timeout_ms = timeout_ms;
+}
+
+/**
+ * Convenience: Enable error suggestions
+ */
+void ast_validator_set_show_suggestions(AstValidator* validator, bool show) {
+    if (!validator) return;
+    validator->options.show_suggestions = show;
+}
+
+/**
+ * Convenience: Enable error context display
+ */
+void ast_validator_set_show_context(AstValidator* validator, bool show) {
+    if (!validator) return;
+    validator->options.show_context = show;
+}
+
+// ==================== Format-Specific Validation ====================
+
+/**
+ * Detect input format from item structure
+ */
+const char* detect_input_format(ConstItem item) {
+    ItemReader reader(item);
+
+    // check if it's an element (likely XML/HTML)
+    if (reader.isElement()) {
+        ElementReader element = reader.asElement();
+        const char* tag = element.tagName();
+
+        // check for common HTML root elements
+        if (tag && (strcmp(tag, "html") == 0 ||
+                   strcmp(tag, "body") == 0 ||
+                   strcmp(tag, "head") == 0)) {
+            return "html";
+        }
+
+        // check for XML document wrapper
+        if (tag && strcmp(tag, "document") == 0) {
+            return "xml";
+        }
+
+        return "xml"; // default for elements
+    }
+
+    // check if it's a map (likely JSON)
+    if (reader.isMap()) {
+        return "json";
+    }
+
+    // check if it's an array or list (could be JSON array)
+    if (reader.isArray() || reader.isList()) {
+        return "json";
+    }
+
+    return nullptr; // unknown format
+}
+
+/**
+ * Unwrap XML document wrapper element
+ * XML parsers often wrap content in a <document> root element that's not part of the schema
+ */
+ConstItem unwrap_xml_document(ConstItem item, Pool* pool) {
+    ItemReader reader(item);
+
+    // only unwrap if it's an element
+    if (!reader.isElement()) {
+        return item;
+    }
+
+    ElementReader element = reader.asElement();
+    const char* tag = element.tagName();
+
+    // check if this is a document wrapper
+    if (!tag || strcmp(tag, "document") != 0) {
+        return item; // not a document wrapper
+    }
+
+    log_debug("Detected XML <document> wrapper, unwrapping...");
+
+    // find the first non-processing-instruction, non-comment child element
+    int64_t child_count = element.childCount();
+    for (int64_t i = 0; i < child_count; i++) {
+        ItemReader child_reader = element.childAt(i);
+
+        // skip non-element children (text nodes, comments, etc.)
+        if (!child_reader.isElement()) {
+            continue;
+        }
+
+        ElementReader child_element = child_reader.asElement();
+        const char* child_tag = child_element.tagName();
+
+        // skip processing instructions and comments
+        if (child_tag && (strncmp(child_tag, "?", 1) == 0 ||
+                         strcmp(child_tag, "!--") == 0)) {
+            continue;
+        }
+
+        // found the actual content element
+        log_debug("Found actual content element: <%s>", child_tag ? child_tag : "unknown");
+        return child_reader.item().to_const();
+    }
+
+    // no suitable child found, return original item
+    log_debug("No content element found in <document> wrapper");
+    return item;
+}
+
+/**
+ * Unwrap HTML document wrapper element
+ * Handle HTML-specific quirks and wrapper elements
+ */
+ConstItem unwrap_html_document(ConstItem item, Pool* pool) {
+    ItemReader reader(item);
+
+    // only unwrap if it's an element
+    if (!reader.isElement()) {
+        return item;
+    }
+
+    ElementReader element = reader.asElement();
+    const char* tag = element.tagName();
+
+    // check if this is an html root wrapper
+    if (tag && strcmp(tag, "html") == 0) {
+        log_debug("Detected HTML <html> wrapper, looking for body...");
+
+        // try to find <body> element
+        int64_t child_count = element.childCount();
+        for (int64_t i = 0; i < child_count; i++) {
+            ItemReader child_reader = element.childAt(i);
+
+            if (child_reader.isElement()) {
+                ElementReader child_element = child_reader.asElement();
+                const char* child_tag = child_element.tagName();
+
+                if (child_tag && strcmp(child_tag, "body") == 0) {
+                    log_debug("Found <body> element, unwrapping...");
+                    return child_reader.item().to_const();
+                }
+            }
+        }
+    }
+
+    // not an HTML wrapper or couldn't find body
+    return item;
+}
+
+/**
+ * Validate with format-specific handling
+ */
+ValidationResult* ast_validator_validate_with_format(
+    AstValidator* validator,
+    ConstItem item,
+    const char* type_name,
+    const char* input_format
+) {
+    if (!validator || !type_name) {
+        return nullptr;
+    }
+
+    // auto-detect format if not specified
+    if (!input_format) {
+        input_format = detect_input_format(item);
+    }
+
+    log_debug("Validating with format: %s", input_format ? input_format : "auto");
+
+    // apply format-specific unwrapping
+    ConstItem unwrapped_item = item;
+    if (input_format) {
+        if (strcmp(input_format, "xml") == 0) {
+            unwrapped_item = unwrap_xml_document(item, validator->pool);
+        } else if (strcmp(input_format, "html") == 0) {
+            unwrapped_item = unwrap_html_document(item, validator->pool);
+        }
+        // json and other formats don't need unwrapping
+    }
+
+    // perform standard validation on unwrapped item
+    return ast_validator_validate(validator, unwrapped_item, type_name);
 }

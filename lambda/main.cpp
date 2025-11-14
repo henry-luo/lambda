@@ -36,7 +36,7 @@ extern "C" {
 }
 
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
-extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
+AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
 
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
@@ -600,11 +600,15 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Validator v1.0\n\n");
-            printf("Usage: %s validate [-s <schema>] [-f <format>] <file> [files...]\n", argv[0]);
+            printf("Usage: %s validate [-s <schema>] [-f <format>] [options] <file> [files...]\n", argv[0]);
             printf("\nOptions:\n");
-            printf("  -s <schema>    Schema file (required for some formats)\n");
-            printf("  -f <format>    Input format (auto-detect, json, xml, html, md, yaml, csv, ini, toml, etc.)\n");
-            printf("  -h, --help     Show this help message\n");
+            printf("  -s <schema>       Schema file (required for some formats)\n");
+            printf("  -f <format>       Input format (auto-detect, json, xml, html, md, yaml, csv, ini, toml, etc.)\n");
+            printf("  --strict          Enable strict mode (all optional fields must be present or null)\n");
+            printf("  --max-errors N    Stop validation after N errors (default: 100)\n");
+            printf("  --max-depth N     Maximum validation depth for nested structures (default: 100)\n");
+            printf("  --allow-unknown   Allow fields not defined in schema\n");
+            printf("  -h, --help        Show this help message\n");
             printf("\nDefault Schemas:\n");
             printf("  html           - html5_schema.ls\n");
             printf("  eml            - eml_schema.ls\n");
@@ -624,6 +628,8 @@ int main(int argc, char *argv[]) {
             printf("  %s validate -s custom_schema.ls document.ls\n", argv[0]);
             printf("  %s validate -f html input.html  # Uses html5_schema.ls automatically\n", argv[0]);
             printf("  %s validate -f html -s schema.ls input.html\n", argv[0]);
+            printf("  %s validate --strict --max-errors 5 document.json\n", argv[0]);
+            printf("  %s validate --max-depth 50 --allow-unknown data.xml\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
         }

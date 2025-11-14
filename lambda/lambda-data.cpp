@@ -277,10 +277,10 @@ void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
     log_debug("list_push: pushing item: type_id: %d, item.item: %lx", type_id, item.item);
     // 1. skip NULL value
-    if (type_id == LMD_TYPE_NULL) { return; } 
+    if (type_id == LMD_TYPE_NULL) { return; }
 
     // 2. nest list is flattened
-    if (type_id == LMD_TYPE_LIST) { 
+    if (type_id == LMD_TYPE_LIST) {
         log_debug("list_push: pushing nested list: %p, type_id: %d, length: %ld", item.list, type_id, item.list->length);
         // copy over the items
         List *nest_list = item.list;
@@ -325,7 +325,7 @@ void list_push(List *list, Item item) {
                 merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
                 merged_str->ref_cnt = prev_str->ref_cnt;
                 prev_str->ref_cnt = 0;  // to be freed later
-                // replace previous string with new merged string, in the list directly, 
+                // replace previous string with new merged string, in the list directly,
                 // assuming the list is still being constructed/mutable
                 list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
                 return;
@@ -421,7 +421,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 log_error("expected a map, got type %d", itm._type_id );
             }
         } else {
-            log_debug("map set field: %.*s, type: %d, at offset: %d", (int)field->name->length, 
+            log_debug("map set field: %.*s, type: %d, at offset: %d", (int)field->name->length,
                 field->name->str, field->type->type_id, (int)field->byte_offset);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
@@ -660,6 +660,23 @@ ConstItem Map::get(const char* key_str) const {
     if (!this || !key_str) { return null_result; }
     bool is_found;
     return _map_get_const((TypeMap*)this->type, this->data, (char*)key_str, &is_found);
+}
+
+bool Map::has_field(const char* field_name) const {
+    if (!this || !this->type) return false;
+
+    TypeMap* type = (TypeMap*)this->type;
+    if (!type->shape) return false;
+
+    ShapeEntry* shape = type->shape;
+    // Iterate through the shape to find the field
+    while (shape) {
+        if (shape->name && strview_equal(shape->name, field_name)) {
+            return true;
+        }
+        shape = shape->next;
+    }
+    return false;
 }
 
 Element* elmt_pooled(Pool *pool) {

@@ -19,7 +19,7 @@
 #include <unistd.h>
 
 // Forward declaration for suggest_corrections function
-extern "C" List* suggest_corrections(ValidationError* error, Pool* pool);
+List* suggest_corrections(ValidationError* error, Pool* pool);
 
 // ==================== Validation Error System ====================
 // Note: ValidationResult and related structures now defined in validator.hpp
@@ -361,7 +361,8 @@ ValidationResult* validate_lambda_file(const char* file_path, Pool* pool) {
 }
 
 // Enhanced AST-based validation function with full validation flow
-extern "C" ValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format) {
+ValidationResult* run_ast_validation(const char* data_file, const char* schema_file,
+                                    const char* input_format, ValidationOptions* options) {
     printf("Lambda AST Validator v2.0\n");
 
     // Check if this is a Lambda file or should use schema validation
@@ -390,6 +391,15 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
         } else {
             printf("Auto-detect format, Schema: %s\n", schema_file);
         }
+    }
+
+    // Print validation options if provided
+    if (options) {
+        printf("Validation options:\n");
+        printf("  - Strict mode: %s\n", options->strict_mode ? "enabled" : "disabled");
+        printf("  - Max errors: %d\n", options->max_errors);
+        printf("  - Max depth: %d\n", options->max_depth);
+        printf("  - Allow unknown fields: %s\n", options->allow_unknown_fields ? "yes" : "no");
     }
 
     // Create memory pool for validation
@@ -548,13 +558,13 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
 
 
 // Validation execution function that can be called directly by tests
-extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
+ValidationResult* exec_validation(int argc, char* argv[]) {
     // Extract validation argument parsing logic from main() function
     // This allows tests to call validation directly without spawning new processes
     printf("Starting validation with arguments\n");
     if (argc < 2) {
         printf("Error: No file specified for validation\n");
-        printf("Usage: validate [-s <schema>] [-f <format>] <file> [files...]\n");
+        printf("Usage: validate [-s <schema>] [-f <format>] [--strict] [--max-errors N] [--max-depth N] [--allow-unknown] <file> [files...]\n");
         return NULL;
     }
 
@@ -562,6 +572,12 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
     const char* schema_file = nullptr;  // Will be determined based on format
     const char* input_format = nullptr;  // Auto-detect by default
     bool schema_explicitly_set = false;
+
+    // Validation options
+    bool strict_mode = false;
+    int max_errors = 100;
+    int max_depth = 100;
+    bool allow_unknown = false;
 
     // Parse validation arguments (skip argv[0] which would be "validate")
     for (int i = 1; i < argc; i++) {
@@ -572,6 +588,18 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
             input_format = argv[i + 1];
             i++; // Skip the format name
+        } else if (strcmp(argv[i], "--strict") == 0) {
+            strict_mode = true;
+        } else if (strcmp(argv[i], "--max-errors") == 0 && i + 1 < argc) {
+            max_errors = atoi(argv[i + 1]);
+            if (max_errors <= 0) max_errors = 100;
+            i++;
+        } else if (strcmp(argv[i], "--max-depth") == 0 && i + 1 < argc) {
+            max_depth = atoi(argv[i + 1]);
+            if (max_depth <= 0) max_depth = 100;
+            i++;
+        } else if (strcmp(argv[i], "--allow-unknown") == 0) {
+            allow_unknown = true;
         } else if (argv[i][0] != '-') {
             // This is the input file
             if (!data_file) {
@@ -582,7 +610,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
             }
         } else {
             printf("Error: Unknown validation option '%s'\n", argv[i]);
-            printf("Usage: validate [-s <schema>] [-f <format>] <file>\n");
+            printf("Usage: validate [-s <schema>] [-f <format>] [--strict] [--max-errors N] [--max-depth N] [--allow-unknown] <file>\n");
             printf("Formats: auto, json, csv, ini, toml, yaml, xml, markdown, rst, html, latex, rtf, pdf, wiki, asciidoc, man, eml, vcf, ics, text\n");
             return NULL;
         }
@@ -688,7 +716,19 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
     } else {
         printf("Starting AST validation of '%s'...\n", data_file);
     }
-    ValidationResult* result = run_ast_validation(data_file, schema_file, input_format);
+
+    // Create validation options from parsed arguments
+    ValidationOptions opts;
+    opts.strict_mode = strict_mode;
+    opts.allow_unknown_fields = allow_unknown;
+    opts.allow_empty_elements = true;
+    opts.max_depth = max_depth;
+    opts.max_errors = max_errors;
+    opts.timeout_ms = 0;
+    opts.enabled_rules = nullptr;
+    opts.disabled_rules = nullptr;
+
+    ValidationResult* result = run_ast_validation(data_file, schema_file, input_format, &opts);
 
     // Return the ValidationResult directly to the caller
     return result;
@@ -696,7 +736,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
 
 
 // Simple wrapper function for tests that need direct validation
-extern "C" ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
+ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     if (!data_file) {
         printf("Error: No data file specified\n");
         return nullptr;
@@ -705,7 +745,18 @@ extern "C" ValidationResult* run_validation(const char *data_file, const char *s
     printf("Running validation for %s (schema: %s, format: %s)\n",
            data_file, schema_file ? schema_file : "auto", input_format ? input_format : "auto");
 
-    return run_ast_validation(data_file, schema_file, input_format);
+    // Use default validation options
+    ValidationOptions opts;
+    opts.strict_mode = false;
+    opts.allow_unknown_fields = true;
+    opts.allow_empty_elements = true;
+    opts.max_depth = 100;
+    opts.max_errors = 100;
+    opts.timeout_ms = 0;
+    opts.enabled_rules = nullptr;
+    opts.disabled_rules = nullptr;
+
+    return run_ast_validation(data_file, schema_file, input_format, &opts);
 }
 
 // Cleanup function for validation results

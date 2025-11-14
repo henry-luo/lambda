@@ -13,10 +13,19 @@
 #include <assert.h>
 
 // Forward declarations for functions used in this file
-extern "C" List* suggest_corrections(ValidationError* error, Pool* pool);
+List* suggest_corrections(ValidationError* error, Pool* pool);
 String* format_validation_path(PathSegment* path, Pool* pool);
 String* format_type_name(void* type, Pool* pool);
 StrView strview_from_cstr(const char* str);
+
+// helper to get type name from type_info
+static const char* get_type_name_str(TypeId type_id) {
+    // type_info array is sized 32 in lambda-data.cpp
+    if (type_id >= 0 && type_id < 32) {
+        return type_info[type_id].name;
+    }
+    return "unknown";
+}
 
 static void stringbuf_append_string(StringBuf* sb, String* str) {
     if (str && str->chars) {
@@ -52,6 +61,8 @@ const char* get_error_code_name(ValidationErrorCode code) {
             return "MISSING_FIELD";
         case VALID_ERROR_UNEXPECTED_FIELD:
             return "UNEXPECTED_FIELD";
+        case VALID_ERROR_NULL_VALUE:
+            return "NULL_VALUE";
         case VALID_ERROR_INVALID_ELEMENT:
             return "INVALID_ELEMENT";
         case VALID_ERROR_CONSTRAINT_VIOLATION:
@@ -72,16 +83,56 @@ const char* get_error_code_name(ValidationErrorCode code) {
 String* format_error_with_context(ValidationError* error, Pool* pool) {
     if (!error || !pool) return nullptr;
 
+    StringBuf* sb = stringbuf_new(pool);
+
+    // Error code and message
+    const char* error_code = get_error_code_name(error->code);
+    stringbuf_append_format(sb, "[%s] ", error_code);
+
     const char* error_msg = error->message ? error->message->chars : "Unknown error";
-    size_t len = strlen(error_msg);
-    String* formatted = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-    if (formatted) {
-        formatted->len = len;
-        formatted->ref_cnt = 0;
-        strcpy(formatted->chars, error_msg);
+    stringbuf_append_str(sb, error_msg);
+
+    // Path information
+    if (error->path) {
+        stringbuf_append_str(sb, " at ");
+        String* path_str = format_validation_path(error->path, pool);
+        if (path_str && path_str->chars) {
+            stringbuf_append_str(sb, path_str->chars);
+        }
     }
 
-    return formatted;
+    // Expected vs Actual type information
+    if (error->expected || error->actual.item) {
+        stringbuf_append_str(sb, "\n    ");
+
+        if (error->expected) {
+            Type* expected = (Type*)error->expected;
+            stringbuf_append_format(sb, "Expected: %s", get_type_name_str(expected->type_id));
+        }
+
+        if (error->actual.item) {
+            if (error->expected) {
+                stringbuf_append_str(sb, ", ");
+            }
+            stringbuf_append_format(sb, "Actual: %s", get_type_name_str(error->actual.type_id()));
+        }
+    }
+
+    // Suggestions
+    if (error->suggestions && error->suggestions->length > 0) {
+        stringbuf_append_str(sb, "\n    Suggestions:");
+        for (int i = 0; i < error->suggestions->length; i++) {
+            ConstItem suggestion_item = error->suggestions->get(i);
+            if (suggestion_item.type_id() == LMD_TYPE_STRING) {
+                String* suggestion = suggestion_item.string();
+                if (suggestion && suggestion->chars) {
+                    stringbuf_append_format(sb, "\n      - %s", suggestion->chars);
+                }
+            }
+        }
+    }
+
+    return stringbuf_to_string(sb);
 }
 
 // ==================== Validation Report Generation ====================
@@ -257,11 +308,46 @@ String* generate_json_report(ValidationResult* result, Pool* pool) {
 // Format validation path
 String* format_validation_path(PathSegment* path, Pool* pool) {
     if (!path) {
-        return string_from_strview(strview_from_cstr(""), pool);
+        return string_from_strview(strview_from_cstr("(root)"), pool);
     }
 
-    // Simple path formatting - just return empty string for now
-    return string_from_strview(strview_from_cstr(""), pool);
+    StringBuf* sb = stringbuf_new(pool);
+
+    // Collect path segments in reverse order (path is stored backwards)
+    PathSegment* segments[100];
+    int count = 0;
+    PathSegment* current = path;
+    while (current && count < 100) {
+        segments[count++] = current;
+        current = current->next;
+    }
+
+    // Build path string from root to leaf
+    for (int i = count - 1; i >= 0; i--) {
+        PathSegment* seg = segments[i];
+        switch (seg->type) {
+            case PATH_FIELD:
+                stringbuf_append_format(sb, ".%.*s",
+                    (int)seg->data.field_name.length, seg->data.field_name.str);
+                break;
+            case PATH_INDEX:
+                stringbuf_append_format(sb, "[%ld]", seg->data.index);
+                break;
+            case PATH_ELEMENT:
+                stringbuf_append_format(sb, "<%.*s>",
+                    (int)seg->data.element_tag.length, seg->data.element_tag.str);
+                break;
+            case PATH_ATTRIBUTE:
+                stringbuf_append_format(sb, "@%.*s",
+                    (int)seg->data.attr_name.length, seg->data.attr_name.str);
+                break;
+            case PATH_UNION:
+                stringbuf_append_format(sb, "|%ld", seg->data.index);
+                break;
+        }
+    }
+
+    return stringbuf_to_string(sb);
 }
 
 // Format type name
