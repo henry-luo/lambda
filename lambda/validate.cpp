@@ -42,7 +42,7 @@ ValidationResult* validate_against_primitive_type(AstValidator* validator, Const
     } else {
         result->valid = false;
         char error_msg[256];
-        const char* actual_type_name = item.type_id() >= 0 && item.type_id() < 32 
+        const char* actual_type_name = item.type_id() >= 0 && item.type_id() < 32
             ? type_info[item.type_id()].name : "unknown";
         snprintf(error_msg, sizeof(error_msg),
                 "Expected type '%s', but got '%s'",
@@ -125,7 +125,7 @@ ValidationResult* validate_against_base_type(AstValidator* validator, ConstItem 
     } else {
         result->valid = false;
         char error_msg[256];
-        const char* actual_type_name = item.type_id() >= 0 && item.type_id() < 32 
+        const char* actual_type_name = item.type_id() >= 0 && item.type_id() < 32
             ? type_info[item.type_id()].name : "unknown";
         snprintf(error_msg, sizeof(error_msg),
                 "Expected type '%s', but got '%s'",
