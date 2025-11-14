@@ -70,14 +70,23 @@ ValidationResult* validate_against_base_type(AstValidator* validator, ConstItem 
         return result;
     }
 
-    log_debug("[AST_VALIDATOR] Validating base type: expected=%d, actual=%d", base_type->type_id, item.type_id());
+    log_debug("[AST_VALIDATOR] validate_against_base_type: TypeType wrapper at %p, base_type at %p with type_id=%d, item type_id=%d",
+              (void*)type, (void*)base_type, base_type->type_id, item.type_id());
+
+    // TEMPORARY: Force print for debugging
+    fprintf(stderr, "[DEBUG_TRACE] validate_against_base_type: base_type->type_id=%d, item.type_id()=%d\n",
+            base_type->type_id, item.type_id());
 
     // Check if base_type is TypeUnary (occurrence operator: ?, +, *)
     // TypeUnary inherits from Type and has type_id = LMD_TYPE_TYPE
     // We need to carefully check if this is actually a TypeUnary, not just any LMD_TYPE_TYPE
-    if (base_type->type_id == LMD_TYPE_TYPE) {
+    // Use a while loop to unwrap nested TypeType wrappers
+    while (base_type->type_id == LMD_TYPE_TYPE) {
         // Try casting to TypeUnary to check the operator
         TypeUnary* possible_unary = (TypeUnary*)base_type;
+
+        log_debug("[AST_VALIDATOR] base_type type_id is LMD_TYPE_TYPE, checking if TypeUnary. op=%d", possible_unary->op);
+        fprintf(stderr, "[DEBUG_TRACE] base_type is LMD_TYPE_TYPE, checking op field: op=%d\n", possible_unary->op);
 
         // Check if this is an occurrence operator
         // These are the only valid unary operators on types
@@ -85,20 +94,65 @@ ValidationResult* validate_against_base_type(AstValidator* validator, ConstItem 
             possible_unary->op == OPERATOR_ONE_MORE ||
             possible_unary->op == OPERATOR_ZERO_MORE) {
 
-            log_debug("[AST_VALIDATOR] Detected occurrence operator: %d", possible_unary->op);
+            fprintf(stderr, "[DEBUG_TRACE] IS TypeUnary with occurrence operator!\n");
+
+            log_debug("[AST_VALIDATOR] Detected TypeUnary with occurrence operator: %d, operand at %p",
+                      possible_unary->op, (void*)possible_unary->operand);
+
+            // TEMPORARY: Force print for debugging
+            fprintf(stderr, "[DEBUG_TRACE] TypeUnary detected: op=%d, operand=%p\n",
+                    possible_unary->op, (void*)possible_unary->operand);
 
             // Validate against the operand type
-            // Operand is always a Type*, which needs to be validated
-            // Since operand might be primitive, wrap it in TypeType for validation
+            // Unwrap TypeType from operand if needed
+            Type* operand_type = possible_unary->operand;
+            log_debug("[AST_VALIDATOR] Before unwrap: operand_type at %p, type_id=%d",
+                      (void*)operand_type, operand_type ? operand_type->type_id : -1);
+
+            fprintf(stderr, "[DEBUG_TRACE] Before unwrap: operand_type=%p, type_id=%d\n",
+                    (void*)operand_type, operand_type ? operand_type->type_id : -1);
+
+            if (operand_type && operand_type->type_id == LMD_TYPE_TYPE) {
+                TypeType* operand_wrapper = (TypeType*)operand_type;
+                operand_type = operand_wrapper->type;
+                log_debug("[AST_VALIDATOR] After unwrap: operand_type at %p, type_id=%d",
+                          (void*)operand_type, operand_type ? operand_type->type_id : -1);
+                fprintf(stderr, "[DEBUG_TRACE] After unwrap: operand_type=%p, type_id=%d\n",
+                        (void*)operand_type, operand_type ? operand_type->type_id : -1);
+            }
+
+            if (!operand_type) {
+                log_error("[AST_VALIDATOR] TypeUnary operand is null after unwrapping");
+                result->valid = false;
+                return result;
+            }
+
+            // Now wrap the operand in TypeType for validation (unless it's already wrapped)
+            // If operand was already TypeType*, we unwrapped it, so rewrap
+            // If operand was a primitive, wrap it
             TypeType temp_wrapper;
             temp_wrapper.type_id = LMD_TYPE_TYPE;
-            temp_wrapper.type = possible_unary->operand;
+            temp_wrapper.type = operand_type;
 
+            log_debug("[AST_VALIDATOR] Recursing into validate_against_base_type with wrapped operand");
             return validate_against_base_type(validator, item, &temp_wrapper);
         }
 
-        // Not a TypeUnary with occurrence operator, might be TypeType wrapping something else
-        // Fall through to normal validation
+        // Not a TypeUnary with occurrence operator, must be TypeType wrapping something else
+        // This happens with literal types like &LIT_TYPE_INT
+        fprintf(stderr, "[DEBUG_TRACE] NOT a TypeUnary (op=%d), treating as TypeType wrapper\n", possible_unary->op);
+        TypeType* nested_wrapper = (TypeType*)base_type;
+        if (!nested_wrapper->type) {
+            log_error("[AST_VALIDATOR] TypeType wrapper has null nested type");
+            result->valid = false;
+            return result;
+        }
+
+        fprintf(stderr, "[DEBUG_TRACE] Unwrapping TypeType: nested type_id=%d\n", nested_wrapper->type->type_id);
+        // Update base_type to the wrapped type and loop to unwrap further if needed
+        base_type = nested_wrapper->type;
+        fprintf(stderr, "[DEBUG_TRACE] After unwrap iteration, base_type->type_id=%d\n", base_type->type_id);
+        // Continue loop to check if this is also a TypeType that needs unwrapping
     }
 
     if (LMD_TYPE_INT <= base_type->type_id && base_type->type_id <= LMD_TYPE_NUMBER) {
@@ -165,6 +219,41 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
 
     log_debug("Validating array with length: %ld", length);
 
+    // Check for occurrence operators on nested type
+    // Nested type is TypeType* wrapping the actual type (which could be TypeUnary for occurrence operators)
+    // We need to unwrap TypeType to check if it's a TypeUnary with occurrence operator
+    log_debug("[AST_VALIDATOR] Checking array nested type at %p, type_id=%d",
+              (void*)array_type->nested, array_type->nested ? array_type->nested->type_id : -1);
+
+    if (array_type->nested && array_type->nested->type_id == LMD_TYPE_TYPE) {
+        TypeType* type_wrapper = (TypeType*)array_type->nested;
+        Type* unwrapped = type_wrapper->type;
+        log_debug("[AST_VALIDATOR] Array nested is TypeType wrapper, unwrapped type at %p, type_id=%d",
+                  (void*)unwrapped, unwrapped ? unwrapped->type_id : -1);
+
+        // Check if unwrapped type is TypeUnary (occurrence operator)
+        if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE) {
+            TypeUnary* possible_unary = (TypeUnary*)unwrapped;
+            if (possible_unary->op == OPERATOR_ONE_MORE && length < 1) {
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg),
+                        "Array with '+' occurrence operator requires at least one element, got %ld", length);
+                add_validation_error(result, create_validation_error(
+                    AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->current_path, validator->pool));
+                return result;
+            }
+            else if (possible_unary->op == OPERATOR_OPTIONAL && length > 1) {
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg),
+                        "Array with '?' occurrence operator requires at most one element, got %ld", length);
+                add_validation_error(result, create_validation_error(
+                    AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->current_path, validator->pool));
+                return result;
+            }
+            // OPERATOR_ZERO_MORE (*) has no length constraint
+        }
+    }
+
     // Validate array length if specified
     // if (array_type->length >= 0 && length != array_type->length) {
     //     char error_msg[256];
@@ -176,7 +265,9 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
     // }
 
     // Validate each array element against nested type using iterator
+    // Pass nested type directly - validate_against_type will handle TypeType unwrapping
     if (array_type->nested && length > 0) {
+
         auto iter = array.items();
         ItemReader child;
         int64_t index = 0;
@@ -196,7 +287,9 @@ ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem
             validator->current_path = path;
 
             // Recursively validate element
-            log_debug("Validating array item at index %ld, type %d", index, child.getType());
+            log_debug("[AST_VALIDATOR] Validating array item at index %ld, item type_id=%d, against nested type at %p type_id=%d",
+                      index, child.getType(), (void*)array_type->nested,
+                      array_type->nested ? array_type->nested->type_id : -1);
             ConstItem child_item = child.item().to_const();
             ValidationResult* item_result = validate_against_type(
                 validator, child_item, array_type->nested);
@@ -269,11 +362,17 @@ ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem i
         if (!field_exists) {
             // Field is truly missing - check if it's optional
             // A field is optional if its type is wrapped in OPERATOR_OPTIONAL (Type?)
+            // Need to unwrap TypeType to check if it's TypeUnary with OPERATOR_OPTIONAL
             bool is_optional = false;
-            if (shape_entry->type && shape_entry->type->type_id == LMD_TYPE_TYPE) {
-                TypeUnary* possible_unary = (TypeUnary*)shape_entry->type;
-                if (possible_unary->op == OPERATOR_OPTIONAL) {
-                    is_optional = true;
+            Type* field_type = shape_entry->type;
+            if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                TypeType* type_wrapper = (TypeType*)field_type;
+                Type* unwrapped = type_wrapper->type;
+                if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE) {
+                    TypeUnary* possible_unary = (TypeUnary*)unwrapped;
+                    if (possible_unary->op == OPERATOR_OPTIONAL) {
+                        is_optional = true;
+                    }
                 }
             }
 
@@ -295,11 +394,17 @@ ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem i
 
             if (field_item.type_id() == LMD_TYPE_NULL) {
                 // Field exists but is null - check if null is allowed
+                // Need to unwrap TypeType to check if it's TypeUnary with OPERATOR_OPTIONAL
                 bool allows_null = false;
-                if (shape_entry->type && shape_entry->type->type_id == LMD_TYPE_TYPE) {
-                    TypeUnary* possible_unary = (TypeUnary*)shape_entry->type;
-                    if (possible_unary->op == OPERATOR_OPTIONAL) {
-                        allows_null = true;
+                Type* field_type = shape_entry->type;
+                if (field_type && field_type->type_id == LMD_TYPE_TYPE) {
+                    TypeType* type_wrapper = (TypeType*)field_type;
+                    Type* unwrapped = type_wrapper->type;
+                    if (unwrapped && unwrapped->type_id == LMD_TYPE_TYPE) {
+                        TypeUnary* possible_unary = (TypeUnary*)unwrapped;
+                        if (possible_unary->op == OPERATOR_OPTIONAL) {
+                            allows_null = true;
+                        }
                     }
                 }
 
@@ -747,7 +852,9 @@ ValidationResult* validate_against_type(AstValidator* validator, ConstItem item,
 
     ValidationResult* result = nullptr;
     validator->current_depth++;
-    log_debug("[AST_VALIDATOR] Validating against type_id: %d", type->type_id);
+    log_debug("[AST_VALIDATOR] Validating against type_id: %d, item type_id: %d", type->type_id, item.type_id());
+    fprintf(stderr, "[VALIDATE_TYPE] type->type_id=%d, item.type_id()=%d\n", type->type_id, item.type_id());
+
     switch (type->type_id) {
         case LMD_TYPE_STRING:
         case LMD_TYPE_INT:
