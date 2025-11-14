@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-utils.h"
 #include "../../lib/stringbuf.h"
 #include "../mark_reader.hpp"
 #include <ctype.h>
@@ -60,62 +61,23 @@ static String* get_attribute(Element* elem, const char* attr_name) {
 }
 
 // MarkReader-based version: get attribute value from element using ElementReader
-static String* get_attribute_reader(const ElementReader& elem, const char* attr_name) {
-    ItemReader attr = elem.get_attr(attr_name);
-    if (attr.isNull()) return NULL;
-    if (attr.isString()) return attr.asString();
-    return NULL;
-}
-
-// Format raw text (no escaping - for code blocks, etc.)
+// Format raw text without escaping (use shared utility)
 static void format_raw_text(StringBuf* sb, String* str) {
-    if (!sb || !str || str->len == 0) return;
-
-    // Check if this is the EMPTY_STRING and handle it specially
-    if (str == &EMPTY_STRING) {
-        return; // Don't output anything for empty string
-    } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-        return; // Don't output anything for lambda.nil content
-    } else {
-        stringbuf_append_str_n(sb, str->chars, str->len);
-    }
+    format_raw_text_common(sb, str);
 }
 
-// Format plain text (escape markdown special characters)
+// Format plain text (escape markdown special characters using shared utility)
 static void format_text(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
 
     const char* s = str->chars;
-    size_t len = str->len;
 
-    // Only debug when processing LaTeX-like content
+    // only debug when processing LaTeX-like content
     if (strstr(s, "frac") || strstr(s, "[x") || strchr(s, '$')) {
-        printf("DEBUG format_text: Processing text='%s' (len=%zu)\n", s, len);
+        printf("DEBUG format_text: Processing text='%s' (len=%zu)\n", s, str->len);
     }
 
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-        switch (c) {
-        case '*':
-        case '_':
-        case '`':
-        case '#':
-            stringbuf_append_char(sb, '\\');
-            stringbuf_append_char(sb, c);
-            break;
-        case '[':
-        case ']':
-        case '(':
-        case ')':
-        case '\\':
-            stringbuf_append_char(sb, '\\');
-            stringbuf_append_char(sb, c);
-            break;
-        default:
-            stringbuf_append_char(sb, c);
-            break;
-        }
-    }
+    format_text_with_escape(sb, str, &MARKDOWN_ESCAPE_CONFIG);
 }
 
 // Format heading elements (h1-h6)
@@ -127,7 +89,7 @@ static void format_heading_reader(StringBuf* sb, const ElementReader& elem) {
     int level = 1;
 
     // First try to get level from attribute (Pandoc schema)
-    String* level_attr = get_attribute_reader(elem, "level");
+    String* level_attr = elem.get_string_attr("level");
     if (level_attr && level_attr->len > 0) {
         level = atoi(level_attr->chars);
         if (level < 1) level = 1;
@@ -169,7 +131,7 @@ static void format_emphasis_reader(StringBuf* sb, const ElementReader& elem) {
 // Format code elements
 // MarkReader version: Format code elements
 static void format_code_reader(StringBuf* sb, const ElementReader& elem) {
-    String* lang_attr = get_attribute_reader(elem, "language");
+    String* lang_attr = elem.get_string_attr("language");
     if (lang_attr && lang_attr->len > 0) {
         // Check if this is a math code block
         if (strcmp(lang_attr->chars, "math") == 0) {
@@ -196,8 +158,8 @@ static void format_code_reader(StringBuf* sb, const ElementReader& elem) {
 // Format link elements
 // MarkReader version: Format link elements
 static void format_link_reader(StringBuf* sb, const ElementReader& elem) {
-    String* href = get_attribute_reader(elem, "href");
-    String* title = get_attribute_reader(elem, "title");
+    String* href = elem.get_string_attr("href");
+    String* title = elem.get_string_attr("title");
 
     stringbuf_append_char(sb, '[');
     format_element_children_reader(sb, elem);
@@ -226,9 +188,9 @@ static void format_list_reader(StringBuf* sb, const ElementReader& elem) {
     bool is_ordered = (strcmp(tag_name, "ol") == 0);
 
     // Get list attributes from Pandoc schema
-    String* start_attr = get_attribute_reader(elem, "start");
-    String* style_attr = get_attribute_reader(elem, "style");
-    String* type_attr = get_attribute_reader(elem, "type");
+    String* start_attr = elem.get_string_attr("start");
+    String* style_attr = elem.get_string_attr("style");
+    String* type_attr = elem.get_string_attr("type");
 
     int start_num = 1;
     if (start_attr && start_attr->len > 0) {
@@ -294,60 +256,53 @@ static void format_list_reader(StringBuf* sb, const ElementReader& elem) {
     }
 }
 
+// Context for table row formatting
+typedef struct {
+    int first_header_row;
+} MarkdownTableContext;
+
+// Table row handler for markdown formatting
+static void format_markdown_table_row(
+    StringBuf* sb,
+    const ElementReader& row,
+    int row_idx,
+    bool is_header,
+    void* ctx
+) {
+    MarkdownTableContext* context = (MarkdownTableContext*)ctx;
+    
+    // Format table row
+    stringbuf_append_char(sb, '|');
+    auto row_children = row.children();
+    ItemReader cell_item;
+    
+    while (row_children.next(&cell_item)) {
+        stringbuf_append_char(sb, ' ');
+        if (cell_item.isElement()) {
+            ElementReader cell = cell_item.asElement();
+            format_element_children_reader(sb, cell);
+        }
+        stringbuf_append_str(sb, " |");
+    }
+    stringbuf_append_char(sb, '\n');
+    
+    // Add separator row after first header row
+    if (is_header && row_idx == 0) {
+        stringbuf_append_char(sb, '|');
+        // Count cells for separator
+        auto row_children2 = row.children();
+        ItemReader cell_count_item;
+        while (row_children2.next(&cell_count_item)) {
+            stringbuf_append_str(sb, "---|");
+        }
+        stringbuf_append_char(sb, '\n');
+    }
+}
+
 // MarkReader version: Format table elements
 static void format_table_reader(StringBuf* sb, const ElementReader& elem) {
-    // Process table sections (thead, tbody)
-    auto children_iter = elem.children();
-    ItemReader section_item;
-    
-    while (children_iter.next(&section_item)) {
-        if (section_item.isElement()) {
-            ElementReader section = section_item.asElement();
-            const char* section_tag = section.tagName();
-            
-            if (!section_tag) continue;
-            
-            bool is_header = (strcmp(section_tag, "thead") == 0);
-            
-            auto section_children = section.children();
-            ItemReader row_item;
-            long j = 0;
-            
-            while (section_children.next(&row_item)) {
-                if (row_item.isElement()) {
-                    ElementReader row = row_item.asElement();
-                    
-                    // Format table row
-                    stringbuf_append_char(sb, '|');
-                    auto row_children = row.children();
-                    ItemReader cell_item;
-                    
-                    while (row_children.next(&cell_item)) {
-                        stringbuf_append_char(sb, ' ');
-                        if (cell_item.isElement()) {
-                            ElementReader cell = cell_item.asElement();
-                            format_element_children_reader(sb, cell);
-                        }
-                        stringbuf_append_str(sb, " |");
-                    }
-                    stringbuf_append_char(sb, '\n');
-                    
-                    // Add separator row after header
-                    if (is_header && j == 0) {
-                        stringbuf_append_char(sb, '|');
-                        // Count cells for separator
-                        auto row_children2 = row.children();
-                        ItemReader cell_count_item;
-                        while (row_children2.next(&cell_count_item)) {
-                            stringbuf_append_str(sb, "---|");
-                        }
-                        stringbuf_append_char(sb, '\n');
-                    }
-                    j++;
-                }
-            }
-        }
-    }
+    MarkdownTableContext context = {0};
+    iterate_table_rows(elem, sb, format_markdown_table_row, &context);
 }
 
 // Format table row
@@ -662,7 +617,7 @@ static bool is_block_element_reader(const ItemReader& item) {
 
     // check for math elements with display types
     if (strcmp(tag_name, "math") == 0) {
-        String* type_attr = get_attribute_reader(elem, "type");
+        String* type_attr = elem.get_string_attr("type");
         return (type_attr && (strcmp(type_attr->chars, "block") == 0 || strcmp(type_attr->chars, "code") == 0));
     }
 
@@ -707,7 +662,7 @@ static int get_heading_level_reader(const ItemReader& item) {
     // check if it's a heading
     if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
         // first try to get level from attribute (Pandoc schema)
-        String* level_attr = get_attribute_reader(elem, "level");
+        String* level_attr = elem.get_string_attr("level");
         if (level_attr && level_attr->len > 0) {
             int level = atoi(level_attr->chars);
             return (level >= 1 && level <= 6) ? level : 0;
@@ -1001,87 +956,119 @@ static void format_element(StringBuf* sb, Element* elem) {
     }
 }
 
+// ==============================================================================
+// Dispatcher-based Markdown Formatting
+// ==============================================================================
+
+// global dispatcher (initialized once)
+static FormatterDispatcher* md_dispatcher = NULL;
+static Pool* dispatcher_pool = NULL;
+
+// default handler for unknown elements
+static void format_element_default_reader(StringBuf* sb, const ElementReader& elem) {
+    const char* tag_name = elem.tagName();
+    
+    // container elements: just format children
+    if (tag_name && (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 ||
+                      strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0)) {
+        format_element_children_reader(sb, elem);
+        return;
+    }
+    
+    // meta elements: skip
+    if (tag_name && strcmp(tag_name, "meta") == 0) {
+        return;
+    }
+    
+    // jsx_element: try to output content directly
+    if (tag_name && strcmp(tag_name, "jsx_element") == 0) {
+        ItemReader content_attr = elem.get_attr("content");
+        if (content_attr.isString()) {
+            String* jsx_content = content_attr.asString();
+            if (jsx_content && jsx_content->chars) {
+                stringbuf_append_str(sb, jsx_content->chars);
+                stringbuf_append_char(sb, ' ');
+            }
+            return;
+        }
+    }
+    
+    // unknown elements: format children
+    format_element_children_reader(sb, elem);
+}
+
+// special handler for list elements (adds newline after)
+static void format_list_with_newline_reader(StringBuf* sb, const ElementReader& elem) {
+    format_list_reader(sb, elem);
+    stringbuf_append_char(sb, '\n');
+}
+
+// special handler for table elements (adds newline after)
+static void format_table_with_newline_reader(StringBuf* sb, const ElementReader& elem) {
+    format_table_reader(sb, elem);
+    stringbuf_append_char(sb, '\n');
+}
+
+// special handler for thematic break (hr element - no elem parameter needed)
+static void format_thematic_break_reader(StringBuf* sb, const ElementReader& elem) {
+    (void)elem; // unused parameter
+    format_thematic_break(sb);
+}
+
+// special handler for math elements (still uses Element* temporarily)
+static void format_math_element_reader(StringBuf* sb, const ElementReader& elem_reader) {
+    Element* elem = (Element*)elem_reader.element();
+    String* type_attr = elem_reader.get_string_attr("type");
+    
+    if (type_attr && strcmp(type_attr->chars, "block") == 0) {
+        format_math_display(sb, elem);
+    } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
+        format_math_code_block(sb, elem);
+    } else {
+        format_math_inline(sb, elem);
+    }
+}
+
+// initialize markdown dispatcher
+static void init_markdown_dispatcher(Pool* pool) {
+    if (md_dispatcher) return;
+    if (!pool) return;
+    
+    dispatcher_pool = pool;
+    md_dispatcher = dispatcher_create(pool);
+    if (!md_dispatcher) return;
+    
+    // register all element type handlers
+    dispatcher_register(md_dispatcher, "h1", format_heading_reader);
+    dispatcher_register(md_dispatcher, "h2", format_heading_reader);
+    dispatcher_register(md_dispatcher, "h3", format_heading_reader);
+    dispatcher_register(md_dispatcher, "h4", format_heading_reader);
+    dispatcher_register(md_dispatcher, "h5", format_heading_reader);
+    dispatcher_register(md_dispatcher, "h6", format_heading_reader);
+    dispatcher_register(md_dispatcher, "p", format_paragraph_reader);
+    dispatcher_register(md_dispatcher, "blockquote", format_blockquote_reader);
+    dispatcher_register(md_dispatcher, "strong", format_emphasis_reader);
+    dispatcher_register(md_dispatcher, "em", format_emphasis_reader);
+    dispatcher_register(md_dispatcher, "code", format_code_reader);
+    dispatcher_register(md_dispatcher, "a", format_link_reader);
+    dispatcher_register(md_dispatcher, "ul", format_list_with_newline_reader);
+    dispatcher_register(md_dispatcher, "ol", format_list_with_newline_reader);
+    dispatcher_register(md_dispatcher, "hr", format_thematic_break_reader);
+    dispatcher_register(md_dispatcher, "table", format_table_with_newline_reader);
+    dispatcher_register(md_dispatcher, "math", format_math_element_reader);
+    
+    // set default handler for unknown elements
+    dispatcher_set_default(md_dispatcher, format_element_default_reader);
+}
+
 // MarkReader-based version: format Lambda element to markdown
 static void format_element_reader(StringBuf* sb, const ElementReader& elem_reader) {
-    const char* tag_name = elem_reader.tagName();
-    if (!tag_name) return;
-
-    // for math elements, we still need Element* temporarily for math formatters
-    Element* elem = (Element*)elem_reader.element();
-
-    printf("DEBUG format_element_reader: processing element '%s' (len=%zu)\n", tag_name, strlen(tag_name));
-
-    // handle different element types
-    if (strcmp(tag_name, "math") == 0) {
-        // math element - check type attribute to determine formatting
-        printf("DEBUG: *** MATH ELEMENT HANDLER TRIGGERED ***\n");
-        printf("DEBUG: Found math element, checking type attribute\n");
-        String* type_attr = get_attribute_reader(elem_reader, "type");
-        printf("DEBUG: type_attr = %p\n", type_attr);
-        if (type_attr) {
-            printf("DEBUG: type_attr->chars = '%s'\n", type_attr->chars);
-        }
-
-        if (type_attr && strcmp(type_attr->chars, "block") == 0) {
-            // display math ($$math$$)
-            printf("DEBUG: Calling format_math_display\n");
-            format_math_display(sb, elem);
-        } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
-            // math code block (```math)
-            printf("DEBUG: Calling format_math_code_block\n");
-            format_math_code_block(sb, elem);
-        } else {
-            // inline math ($math$) - default when no type or unknown type
-            printf("DEBUG: Calling format_math_inline\n");
-            format_math_inline(sb, elem);
-        }
-    } else if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
-        format_heading_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "p") == 0) {
-        format_paragraph_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "blockquote") == 0) {
-        format_blockquote_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "strong") == 0 || strcmp(tag_name, "em") == 0) {
-        format_emphasis_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "code") == 0) {
-        format_code_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "a") == 0) {
-        format_link_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0) {
-        format_list_reader(sb, elem_reader);
-        stringbuf_append_char(sb, '\n');
-    } else if (strcmp(tag_name, "hr") == 0) {
-        format_thematic_break(sb);
-    } else if (strcmp(tag_name, "table") == 0) {
-        format_table_reader(sb, elem_reader);
-        stringbuf_append_char(sb, '\n');
-    } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 ||
-               strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
-        // just format children for document root, body, and span containers
-        printf("DEBUG: Container element case triggered for '%s'\n", tag_name);
-        format_element_children_reader(sb, elem_reader);
-    } else if (strcmp(tag_name, "meta") == 0) {
-        // skip meta elements in markdown output
-        return;
+    // use dispatcher for element type routing
+    if (md_dispatcher) {
+        dispatcher_format(md_dispatcher, sb, elem_reader);
     } else {
-        // for unknown elements, just format children
-        printf("DEBUG format_element_reader: unknown element '%s', formatting children\n", tag_name);
-
-        // special case for jsx_element: try to output the content directly
-        if (strcmp(tag_name, "jsx_element") == 0) {
-            ItemReader content_attr = elem_reader.get_attr("content");
-            if (content_attr.isString()) {
-                String* jsx_content = content_attr.asString();
-                if (jsx_content && jsx_content->chars) {
-                    stringbuf_append_str(sb, jsx_content->chars);
-                    // add a space after JSX element to preserve spacing
-                    stringbuf_append_char(sb, ' ');
-                }
-                return;
-            }
-        }
-
-        format_element_children_reader(sb, elem_reader);
+        // fallback to default handler if dispatcher not initialized
+        format_element_default_reader(sb, elem_reader);
     }
 }
 
@@ -1177,7 +1164,15 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item) {
 void format_markdown(StringBuf* sb, Item root_item) {
     if (!sb) return;
 
-    // Handle null/empty root item
+    // initialize dispatcher on first use
+    if (!md_dispatcher) {
+        Pool* pool = pool_create();
+        if (pool) {
+            init_markdown_dispatcher(pool);
+        }
+    }
+
+    // handle null/empty root item
     if (root_item.item == ITEM_NULL || (root_item.item == ITEM_NULL)) return;
 
     printf("format_markdown: root_item %p, type %d\n", (void*)root_item.pointer, get_type_id(root_item));

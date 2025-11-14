@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-utils.h"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include <string.h>
@@ -81,11 +82,8 @@ static void format_element_children_reader(StringBuf* sb, const ElementReader& e
     
     recursion_depth++;
     
-    auto it = elem.children();
-    ItemReader child;
-    while (it.next(&child)) {
-        format_item_reader(sb, child);
-    }
+    // use shared utility for simple child iteration
+    format_element_children_with_processors(sb, elem, nullptr, format_item_reader);
     
     recursion_depth--;
 }
@@ -240,8 +238,22 @@ static void format_list_reader(StringBuf* sb, const ElementReader& elem) {
     }
 }
 
-// format table row using reader API
-static void format_table_row_reader(StringBuf* sb, const ElementReader& row, bool is_header) {
+// context for RST table formatting
+typedef struct {
+    int first_header_row;
+} RSTTableContext;
+
+// callback for RST table row formatting
+static void format_rst_table_row(
+    StringBuf* sb,
+    const ElementReader& row,
+    int row_idx,
+    bool is_header,
+    void* ctx
+) {
+    RSTTableContext* context = (RSTTableContext*)ctx;
+    
+    // format table row with RST syntax
     stringbuf_append_str(sb, "   ");  // indent for table directive
     
     auto it = row.children();
@@ -257,55 +269,31 @@ static void format_table_row_reader(StringBuf* sb, const ElementReader& row, boo
         }
     }
     stringbuf_append_char(sb, '\n');
-}
-
-// format table separator using reader API
-static void format_table_separator_reader(StringBuf* sb, const ElementReader& header_row) {
-    stringbuf_append_str(sb, "   ");  // indent for table directive
     
-    auto it = header_row.children();
-    ItemReader cell;
-    bool first = true;
-    while (it.next(&cell)) {
-        if (!first) stringbuf_append_str(sb, " + ");
-        first = false;
-        stringbuf_append_str(sb, "===");
+    // add separator row after first header row
+    if (is_header && row_idx == 0 && context->first_header_row == 0) {
+        context->first_header_row = 1;
+        
+        stringbuf_append_str(sb, "   ");  // indent for table directive
+        auto sep_it = row.children();
+        ItemReader sep_cell;
+        bool sep_first = true;
+        while (sep_it.next(&sep_cell)) {
+            if (!sep_first) stringbuf_append_str(sb, " + ");
+            sep_first = false;
+            stringbuf_append_str(sb, "===");
+        }
+        stringbuf_append_char(sb, '\n');
     }
-    
-    stringbuf_append_char(sb, '\n');
 }
 
 // format table using reader API
 static void format_table_reader(StringBuf* sb, const ElementReader& elem) {
     stringbuf_append_str(sb, ".. table::\n\n");
     
-    // process table sections (thead, tbody)
-    auto it = elem.children();
-    ItemReader section_item;
-    while (it.next(&section_item)) {
-        if (section_item.isElement()) {
-            ElementReader section = section_item.asElement();
-            const char* section_type = section.tagName();
-            
-            bool is_header = (section_type && strcmp(section_type, "thead") == 0);
-            
-            auto row_it = section.children();
-            ItemReader row_item;
-            bool first_row = true;
-            while (row_it.next(&row_item)) {
-                if (row_item.isElement()) {
-                    ElementReader row = row_item.asElement();
-                    format_table_row_reader(sb, row, is_header);
-                    
-                    // add separator row after header
-                    if (is_header && first_row) {
-                        format_table_separator_reader(sb, row);
-                    }
-                    first_row = false;
-                }
-            }
-        }
-    }
+    RSTTableContext context = {0};
+    iterate_table_rows(elem, sb, format_rst_table_row, &context);
+    
     stringbuf_append_char(sb, '\n');
 }
 
