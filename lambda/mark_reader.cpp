@@ -651,6 +651,22 @@ ItemReader ElementReader::get_attr(const char* key) const {
     return ItemReader();
 }
 
+// Typed attribute accessors
+String* ElementReader::get_string_attr(const char* attr_name) const {
+    ItemReader attr = get_attr(attr_name);
+    return attr.isString() ? attr.asString() : nullptr;
+}
+
+int64_t ElementReader::get_int_attr(const char* attr_name, int64_t default_val) const {
+    ItemReader attr = get_attr(attr_name);
+    return attr.isInt() ? attr.asInt() : default_val;
+}
+
+bool ElementReader::get_bool_attr(const char* attr_name, bool default_val) const {
+    ItemReader attr = get_attr(attr_name);
+    return attr.isBool() ? attr.asBool() : default_val;
+}
+
 // Helper function for recursive text extraction
 static void _extract_text_recursive_inline(const Element* element, StringBuf* sb) {
     if (!element || !sb) return;
