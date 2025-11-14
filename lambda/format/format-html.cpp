@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-utils.h"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 
@@ -48,105 +49,6 @@ static bool is_simple_type(TypeId type) {
     return type == LMD_TYPE_STRING || type == LMD_TYPE_INT ||
            type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
            type == LMD_TYPE_BOOL;
-}
-
-static void format_html_string(StringBuf* sb, String* str, bool is_attribute) {
-    if (!str || !str->chars) return;
-
-    const char* s = str->chars;
-    size_t len = str->len;
-
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-
-        // Check if this is an already-encoded entity (starts with & and ends with ;)
-        // This prevents double-encoding of entities like &lt; -> &amp;lt;
-        if (c == '&') {
-            // Look ahead to see if this is an entity reference
-            size_t j = i + 1;
-            bool is_entity = false;
-
-            // Check for numeric entity: &#123; or &#xAB;
-            if (j < len && s[j] == '#') {
-                j++;
-                if (j < len && (s[j] == 'x' || s[j] == 'X')) {
-                    j++; // hex entity
-                    while (j < len && ((s[j] >= '0' && s[j] <= '9') ||
-                                       (s[j] >= 'a' && s[j] <= 'f') ||
-                                       (s[j] >= 'A' && s[j] <= 'F'))) {
-                        j++;
-                    }
-                } else {
-                    // decimal entity
-                    while (j < len && s[j] >= '0' && s[j] <= '9') {
-                        j++;
-                    }
-                }
-                if (j < len && s[j] == ';') {
-                    is_entity = true;
-                }
-            } else {
-                // Check for named entity: &nbsp; &lt; &gt; &frac12; etc.
-                // Entity names can contain letters and digits
-                while (j < len && ((s[j] >= 'a' && s[j] <= 'z') ||
-                                   (s[j] >= 'A' && s[j] <= 'Z') ||
-                                   (s[j] >= '0' && s[j] <= '9'))) {
-                    j++;
-                }
-                if (j < len && s[j] == ';' && j > i + 1) {
-                    is_entity = true;
-                }
-            }
-
-            if (is_entity) {
-                // Copy the entire entity as-is (already encoded)
-                while (i <= j && i < len) {
-                    stringbuf_append_char(sb, s[i]);
-                    i++;
-                }
-                i--; // Adjust because loop will increment
-                continue;
-            } else {
-                // Not an entity, encode the ampersand
-                stringbuf_append_str(sb, "&amp;");
-            }
-        } else {
-            switch (c) {
-            case '<':
-                stringbuf_append_str(sb, "&lt;");
-                break;
-            case '>':
-                stringbuf_append_str(sb, "&gt;");
-                break;
-            case '"':
-                // Only encode quotes when inside attribute values
-                if (is_attribute) {
-                    stringbuf_append_str(sb, "&quot;");
-                } else {
-                    stringbuf_append_char(sb, '"');
-                }
-                break;
-            case '\'':
-                // Apostrophes don't need to be encoded in text content (only in attributes)
-                // For HTML5, apostrophes in text are safe and don't need encoding
-                stringbuf_append_char(sb, '\'');
-                break;
-            default:
-                // Use unsigned char for comparison to handle UTF-8 multibyte sequences correctly
-                // UTF-8 continuation bytes (0x80-0xBF) and start bytes (0xC0-0xF7) should pass through
-                if ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
-                    // Control characters - encode as numeric character reference
-                    char hex_buf[10];
-                    snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
-                    stringbuf_append_str(sb, hex_buf);
-                } else {
-                    // Pass through as-is (including UTF-8 multibyte sequences)
-                    stringbuf_append_char(sb, c);
-                }
-                break;
-            }
-        }
-    }
 }
 
 static void format_indent(StringBuf* sb, int depth) {
@@ -348,7 +250,7 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
                     stringbuf_append_char(sb, ' ');
                     stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
                     if (str && str->chars) {
-                        format_html_string(sb, str, true);  // true = is_attribute
+                        format_html_string_safe(sb, str, true);  // true = is_attribute
                     }
                     stringbuf_append_char(sb, '"');
                 }
@@ -416,7 +318,7 @@ static void format_item_reader(StringBuf* sb, const ItemReader& item, int depth,
                 stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
             } else {
                 // in normal mode, escape HTML entities
-                format_html_string(sb, str, false);  // false = text content, not attribute
+                format_html_string_safe(sb, str, false);  // false = text content, not attribute
             }
         }
     }

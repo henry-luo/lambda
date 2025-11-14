@@ -363,6 +363,11 @@ public:
     const char* get_attr_string(const char* key) const;
     ItemReader get_attr(const char* key) const;
 
+    // Typed attribute accessors
+    String* get_string_attr(const char* attr_name) const;
+    int64_t get_int_attr(const char* attr_name, int64_t default_val = 0) const;
+    bool get_bool_attr(const char* attr_name, bool default_val = false) const;
+
     // Accessors
     bool isValid() const { return element_ != nullptr; }
     const Element* element() const { return element_; }

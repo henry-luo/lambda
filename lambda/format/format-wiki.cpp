@@ -1,4 +1,5 @@
 #include "format.h"
+#include "format-utils.h"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include <string.h>
@@ -14,43 +15,15 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem);
 static void format_element_children_reader(StringBuf* sb, const ElementReader& elem);
 
 // Format raw text (no escaping - for code blocks, etc.)
+// Format raw text without escaping (use shared utility)
 static void format_raw_text(StringBuf* sb, String* str) {
-    if (!sb || !str || str->len == 0) return;
-    
-    // Check if this is the EMPTY_STRING and handle it specially
-    if (str == &EMPTY_STRING) {
-        return; // Don't output anything for empty string
-    } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
-        return; // Don't output anything for lambda.nil content
-    } else {
-        stringbuf_append_str_n(sb, str->chars, str->len);
-    }
+    format_raw_text_common(sb, str);
 }
 
-// Format plain text (minimal escaping for Wiki markup)
+// Format plain text (escape wiki markup using shared utility)
 static void format_text(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
-
-    const char* s = str->chars;
-    size_t len = str->len;
-    
-    for (size_t i = 0; i < len; i++) {
-        char c = s[i];
-        switch (c) {
-        case '[':
-        case ']':
-        case '{':
-        case '}':
-        case '|':
-            // These characters have special meaning in Wiki markup
-            stringbuf_append_char(sb, '\\');
-            stringbuf_append_char(sb, c);
-            break;
-        default:
-            stringbuf_append_char(sb, c);
-            break;
-        }
-    }
+    format_text_with_escape(sb, str, &WIKI_ESCAPE_CONFIG);
 }
 
 // Main Wiki formatting function (StrBuf version)
@@ -80,11 +53,8 @@ String* format_wiki_string(Pool* pool, Item root_item) {
 
 // format element children using MarkReader API
 static void format_element_children_reader(StringBuf* sb, const ElementReader& elem) {
-    auto it = elem.children();
-    ItemReader child;
-    while (it.next(&child)) {
-        format_item_reader(sb, child);
-    }
+    // use shared utility for simple child iteration
+    format_element_children_with_processors(sb, elem, nullptr, format_item_reader);
 }
 
 // format element children raw (no escaping)
@@ -216,14 +186,35 @@ static void format_ordered_list_reader(StringBuf* sb, const ElementReader& elem,
     if (depth == 0) stringbuf_append_char(sb, '\n');
 }
 
-// format table row using reader API
-static void format_table_row_reader(StringBuf* sb, const ElementReader& row, bool is_header) {
-    stringbuf_append_str(sb, "{| class=\"wikitable\"");
-    if (is_header) {
-        stringbuf_append_str(sb, " style=\"font-weight:bold\"");
-    }
-    stringbuf_append_str(sb, "\n|-\n");
+// context for Wiki table formatting
+typedef struct {
+    bool table_started;
+} WikiTableContext;
+
+// callback for Wiki table row formatting
+static void format_wiki_table_row(
+    StringBuf* sb,
+    const ElementReader& row,
+    int row_idx,
+    bool is_header,
+    void* ctx
+) {
+    WikiTableContext* context = (WikiTableContext*)ctx;
     
+    // start table on first row
+    if (!context->table_started) {
+        stringbuf_append_str(sb, "{| class=\"wikitable\"");
+        if (is_header) {
+            stringbuf_append_str(sb, " style=\"font-weight:bold\"");
+        }
+        stringbuf_append_str(sb, "\n");
+        context->table_started = true;
+    }
+    
+    // start row
+    stringbuf_append_str(sb, "|-\n");
+    
+    // format cells
     auto it = row.children();
     ItemReader cell_item;
     while (it.next(&cell_item)) {
@@ -240,28 +231,16 @@ static void format_table_row_reader(StringBuf* sb, const ElementReader& row, boo
             stringbuf_append_char(sb, '\n');
         }
     }
-    
-    stringbuf_append_str(sb, "|}\n\n");
 }
 
 // format table using reader API
 static void format_table_reader(StringBuf* sb, const ElementReader& elem) {
-    bool first_row = true;
-    auto it = elem.children();
-    ItemReader row_item;
-    while (it.next(&row_item)) {
-        if (row_item.isElement()) {
-            ElementReader row = row_item.asElement();
-            const char* row_type = row.tagName();
-            
-            bool is_header = (row_type && 
-                            (strcmp(row_type, "thead") == 0 ||
-                             strcmp(row_type, "th") == 0 ||
-                             first_row));
-            
-            format_table_row_reader(sb, row, is_header);
-            first_row = false;
-        }
+    WikiTableContext context = {false};
+    iterate_table_rows(elem, sb, format_wiki_table_row, &context);
+    
+    // close table if it was started
+    if (context.table_started) {
+        stringbuf_append_str(sb, "|}\n\n");
     }
 }
 
