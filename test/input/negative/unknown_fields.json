@@ -1,0 +1,8 @@
+{
+    "name": "Bob",
+    "age": 25,
+    "email": null,
+    "address": "123 Main St",
+    "phone": "555-0100",
+    "extra_field": "unexpected"
+}

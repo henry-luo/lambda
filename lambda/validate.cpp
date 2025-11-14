@@ -42,9 +42,11 @@ ValidationResult* validate_against_primitive_type(AstValidator* validator, Const
     } else {
         result->valid = false;
         char error_msg[256];
+        const char* actual_type_name = item.type_id() >= 0 && item.type_id() < 32
+            ? type_info[item.type_id()].name : "unknown";
         snprintf(error_msg, sizeof(error_msg),
-                "Type mismatch: expected %s, got type %d",
-                type_to_string(type), item.type_id());
+                "Expected type '%s', but got '%s'",
+                type_to_string(type), actual_type_name);
 
         ValidationError* error = create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool);
@@ -106,14 +108,28 @@ ValidationResult* validate_against_base_type(AstValidator* validator, ConstItem 
         }
         else { result->valid = false; }
     }
+    else if (base_type->type_id == LMD_TYPE_MAP) {
+        // Base type is a map - validate structure recursively
+        return validate_against_map_type(validator, item, (TypeMap*)base_type);
+    }
+    else if (base_type->type_id == LMD_TYPE_ELEMENT) {
+        // Base type is an element - validate structure recursively
+        return validate_against_element_type(validator, item, (TypeElmt*)base_type);
+    }
+    else if (base_type->type_id == LMD_TYPE_ARRAY || base_type->type_id == LMD_TYPE_LIST) {
+        // Base type is an array/list - validate structure recursively
+        return validate_against_array_type(validator, item, (TypeArray*)base_type);
+    }
     else if (base_type->type_id == item.type_id()) {
         result->valid = true;
     } else {
         result->valid = false;
         char error_msg[256];
+        const char* actual_type_name = item.type_id() >= 0 && item.type_id() < 32
+            ? type_info[item.type_id()].name : "unknown";
         snprintf(error_msg, sizeof(error_msg),
-                "Type mismatch: expected %s, got type %d",
-                type_to_string(base_type), item.type_id());
+                "Expected type '%s', but got '%s'",
+                type_to_string(base_type), actual_type_name);
 
         ValidationError* error = create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, validator->current_path, validator->pool);
@@ -265,7 +281,7 @@ ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem i
                 // Required field is missing
                 char error_msg[256];
                 snprintf(error_msg, sizeof(error_msg),
-                        "Missing required field: %s", field_name);
+                        "Required field '%s' is missing from object", field_name);
                 add_validation_error(result, create_validation_error(
                     AST_VALID_ERROR_MISSING_FIELD, error_msg,
                     validator->current_path, validator->pool));

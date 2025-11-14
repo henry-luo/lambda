@@ -21,6 +21,11 @@
 // Forward declaration for suggest_corrections function
 List* suggest_corrections(ValidationError* error, Pool* pool);
 
+// Forward declarations for real transpiler functions from validator.cpp
+extern Transpiler* transpiler_create(Pool* pool);
+extern void transpiler_destroy(Transpiler* transpiler);
+extern AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
+
 // ==================== Validation Error System ====================
 // Note: ValidationResult and related structures now defined in validator.hpp
 
@@ -63,32 +68,62 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
         return -1;
     }
 
-    // For now, stub implementation that succeeds
-    // Full implementation will require AST parsing
-    log_info("Loaded schema: %s", schema_name ? schema_name : "<unnamed>");
+    // Create AstValidator if not already created
+    if (!validator->ast_validator) {
+        validator->ast_validator = ast_validator_create(validator->pool);
+        if (!validator->ast_validator) {
+            log_error("Failed to create AST validator");
+            return -1;
+        }
+    }
+
+    // Use the existing AST validator to load the schema
+    int result = ast_validator_load_schema(validator->ast_validator, schema_source, schema_name);
+    if (result != 0) {
+        log_error("Failed to load schema into AST validator");
+        return -1;
+    }
+
+    log_info("Loaded schema: %s (AST validator initialized)", schema_name ? schema_name : "<unnamed>");
     return 0;
 }
 
 ValidationResult* validate_document(SchemaValidator* validator, Item document,
                                    const char* schema_name) {
-    // Stub implementation - always passes
-    ValidationResult* result = create_validation_result(validator->pool);
+    if (!validator || document.item == ITEM_NULL || !schema_name) {
+        ValidationResult* result = create_validation_result(validator->pool);
+        ValidationError* error = create_validation_error(
+            VALID_ERROR_PARSE_ERROR,
+            "Invalid validation parameters",
+            nullptr,
+            validator->pool
+        );
+        add_validation_error(result, error);
+        return result;
+    }
+
+    // Check if AST validator was initialized (schema was loaded)
+    if (!validator->ast_validator) {
+        ValidationResult* result = create_validation_result(validator->pool);
+        ValidationError* error = create_validation_error(
+            VALID_ERROR_PARSE_ERROR,
+            "Schema not loaded - call schema_validator_load_schema first",
+            nullptr,
+            validator->pool
+        );
+        add_validation_error(result, error);
+        return result;
+    }
+
+    // Use the existing AST validator to validate the document
+    // ConstItem constructor takes a raw item value
+    Item mutable_item = document;
+    ConstItem const_doc = *(ConstItem*)&mutable_item;
+    ValidationResult* result = ast_validator_validate(validator->ast_validator, const_doc, schema_name);
+
     return result;
-}
 
-// Transpiler stub implementations (static to avoid conflicts)
-static void* transpiler_create(Pool* pool) {
-    // Stub implementation - return null to indicate transpiler not available
-    return nullptr;
-}
-
-static void* transpiler_build_ast(void* transpiler, const char* source) {
-    // Stub implementation - return null to indicate AST building not available
-    return nullptr;
-}
-
-static void transpiler_destroy(void* transpiler) {
-    // Stub implementation - nothing to destroy
+    return result;
 }
 
 // Enhanced validation context for AST validation
@@ -292,13 +327,13 @@ ValidationResult* validate_lambda_source(const char* source_content, Pool* pool)
         return result;
     }
 
-    // Try to build AST using transpiler (if available)
-    void* transpiler = transpiler_create(pool);
+    // Build AST using real transpiler
+    Transpiler* transpiler = transpiler_create(pool);
     if (transpiler) {
-        void* ast = transpiler_build_ast(transpiler, source_content);
+        AstNode* ast = transpiler_build_ast(transpiler, source_content);
         if (ast) {
             // Validate the AST
-            ValidationResult* ast_result = validate_lambda_ast((AstNode*)ast, pool);
+            ValidationResult* ast_result = validate_lambda_ast(ast, pool);
             if (ast_result) {
                 merge_validation_results(result, ast_result);
             }
@@ -437,7 +472,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         }
 
         // Determine root type based on schema file
-        const char* root_type = "Document";  // Default
+        const char* root_type = nullptr;
         if (strstr(schema_file, "html5_schema.ls")) {
             root_type = "HTMLDocument";
         } else if (strstr(schema_file, "eml_schema.ls")) {
@@ -448,7 +483,70 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             root_type = "VCFDocument";
         }
 
-        // Load schema
+        // For custom schemas, try to extract the root type name from the source
+        // Strategy: Look for a type named "Document" first, otherwise use the last defined type
+        if (!root_type) {
+            // First, try to find a type named "Document"
+            const char* doc_search = schema_contents;
+            while ((doc_search = strstr(doc_search, "type ")) != nullptr) {
+                doc_search += 5; // Skip "type "
+                // Skip whitespace
+                while (*doc_search == ' ' || *doc_search == '\t') {
+                    doc_search++;
+                }
+                // Check if this is "Document"
+                if (strncmp(doc_search, "Document", 8) == 0 &&
+                    (doc_search[8] == ' ' || doc_search[8] == '=' || doc_search[8] == '\t')) {
+                    root_type = "Document";
+                    log_info("Found Document type in schema, using as root");
+                    break;
+                }
+                doc_search++;
+            }
+
+            // If no "Document" type found, extract the LAST type definition
+            // (typically the root/aggregating type is defined last)
+            if (!root_type) {
+                const char* last_type_start = nullptr;
+                const char* search_pos = schema_contents;
+
+                while ((search_pos = strstr(search_pos, "type ")) != nullptr) {
+                    last_type_start = search_pos + 5; // Skip "type "
+                    search_pos += 5;
+                }
+
+                if (last_type_start) {
+                    // Skip whitespace
+                    while (*last_type_start == ' ' || *last_type_start == '\t' || *last_type_start == '\n') {
+                        last_type_start++;
+                    }
+                    // Extract type name (until whitespace or '=')
+                    const char* name_end = last_type_start;
+                    while (*name_end && *name_end != ' ' && *name_end != '\t' &&
+                           *name_end != '\n' && *name_end != '=') {
+                        name_end++;
+                    }
+                    if (name_end > last_type_start) {
+                        // Copy the type name
+                        size_t name_len = name_end - last_type_start;
+                        char* extracted_name = (char*)pool_calloc(pool, name_len + 1);
+                        if (extracted_name) {
+                            memcpy(extracted_name, last_type_start, name_len);
+                            extracted_name[name_len] = '\0';
+                            root_type = extracted_name;
+                            log_info("Using last type definition as root: %s", root_type);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If still no root type, use default
+        if (!root_type) {
+            root_type = "Document";
+        }
+
+        // Load schema (this will extract all type definitions)
         int schema_result = schema_validator_load_schema(validator, schema_contents, root_type);
         if (schema_result != 0) {
             printf("Error: Failed to load schema\n");
@@ -736,7 +834,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
 
 
 // Simple wrapper function for tests that need direct validation
-ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
+extern "C" ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     if (!data_file) {
         printf("Error: No data file specified\n");
         return nullptr;

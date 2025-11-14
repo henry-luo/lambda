@@ -1,0 +1,9 @@
+<document>
+  <article>
+    <title>123</title>
+    <author></author>
+    <content>
+      <paragraph>Invalid nesting</wrong-tag>
+    </content>
+  </article>
+</document>
