@@ -594,7 +594,7 @@ module.exports = grammar({
     ),
 
     map_type: $ => seq('{',
-      optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)), optional(','))), '}'
+      optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)))), '}'
     ),
 
     attr_type: $ => seq(
