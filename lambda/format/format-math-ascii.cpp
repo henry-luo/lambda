@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
 #include <stdio.h>
@@ -27,6 +28,11 @@ static void format_ascii_math_children(StringBuf* sb, List* children, int depth)
 static void format_ascii_math_children_with_template(StringBuf* sb, List* children, const char* format_str, int depth);
 static void format_ascii_math_string(StringBuf* sb, String* str);
 static const ASCIIMathFormatDef* find_ascii_format_def(const char* element_name);
+
+// reader-based forward declarations
+static void format_ascii_math_item_reader(StringBuf* sb, const ItemReader& item, int depth);
+static void format_ascii_math_element_reader(StringBuf* sb, const ElementReader& elem, int depth);
+static void format_ascii_math_children_reader(StringBuf* sb, const ElementReader& elem, int depth);
 
 // ASCII Math format definitions table
 static const ASCIIMathFormatDef ascii_format_defs[] = {
@@ -466,10 +472,229 @@ String* format_math_ascii_standalone(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
-    format_ascii_math_item(sb, root_item, 0);
+    // use MarkReader API
+    ItemReader root(root_item.to_const());
+    format_ascii_math_item_reader(sb, root, 0);
     
     String* result = stringbuf_to_string(sb);
     printf("DEBUG: format_math_ascii_standalone result='%s'\n", result ? result->chars : "NULL");
     fflush(stdout);
     return result;
+}
+
+// ===== MarkReader-based implementations =====
+
+// format children using reader API
+static void format_ascii_math_children_reader(StringBuf* sb, const ElementReader& elem, int depth) {
+    auto it = elem.children();
+    ItemReader child;
+    bool first = true;
+    while (it.next(&child)) {
+        if (!first) {
+            stringbuf_append_str(sb, " ");
+        }
+        first = false;
+        format_ascii_math_item_reader(sb, child, depth + 1);
+    }
+}
+
+// format children with template substitution using reader API
+static void format_ascii_math_children_with_template_reader(StringBuf* sb, const ElementReader& elem, const char* format_str, int depth) {
+    if (!format_str) return;
+    
+    const char* p = format_str;
+    while (*p) {
+        if (*p == '{' && *(p+1) >= '1' && *(p+1) <= '9' && *(p+2) == '}') {
+            // template substitution {1}, {2}, etc.
+            int arg_index = *(p+1) - '1';  // convert '1' to 0, '2' to 1, etc.
+            
+            ItemReader child = elem.childAt(arg_index);
+            if (!child.isNull()) {
+                format_ascii_math_item_reader(sb, child, depth + 1);
+            }
+            p += 3;  // skip {n}
+        } else {
+            stringbuf_append_char(sb, *p);
+            p++;
+        }
+    }
+}
+
+// get operator name from element reader
+static const char* get_operator_name_reader(const ItemReader& item) {
+    if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        return elem.tagName();
+    }
+    return nullptr;
+}
+
+// check if child needs parentheses using reader API
+static bool needs_parentheses_reader(const char* parent_op, const ItemReader& child_item, bool is_right_operand) {
+    if (!parent_op) return false;
+    
+    const char* child_op = get_operator_name_reader(child_item);
+    if (!child_op) return false;
+    
+    int parent_prec = get_operator_precedence(parent_op);
+    int child_prec = get_operator_precedence(child_op);
+    
+    if (child_prec == 0) return false; // unknown child operator
+    
+    // child needs parentheses if it has lower precedence than parent
+    if (child_prec < parent_prec) return true;
+    
+    // special case: for right-associative operators like power,
+    // left operand with same precedence needs parentheses
+    if (strcmp(parent_op, "pow") == 0 && !is_right_operand && child_prec == parent_prec) {
+        return true;
+    }
+    
+    return false;
+}
+
+// format ASCII math element using reader API
+static void format_ascii_math_element_reader(StringBuf* sb, const ElementReader& elem, int depth) {
+    const char* element_name = elem.tagName();
+    if (!element_name) return;
+    
+    const ASCIIMathFormatDef* def = find_ascii_format_def(element_name);
+    
+    // get element length
+    long elem_length = 0;
+    auto it = elem.children();
+    ItemReader child;
+    while (it.next(&child)) {
+        elem_length++;
+    }
+    
+    // special handling for sum/prod/int/lim with bounds notation
+    printf("DEBUG: Checking element '%s' with length %ld\n", element_name, elem_length);
+    if ((strcmp(element_name, "sum") == 0 || strcmp(element_name, "prod") == 0 || 
+         strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0 ||
+         strcmp(element_name, "lim") == 0) && 
+        elem_length >= 2) {
+        printf("DEBUG: Using special sum/prod/int/lim formatting for '%s'\n", element_name);
+        
+        // special handling for limit notation
+        if (strcmp(element_name, "lim") == 0) {
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "_(");
+            ItemReader child0 = elem.childAt(0);
+            format_ascii_math_item_reader(sb, child0, depth + 1);  // limit expression
+            stringbuf_append_str(sb, ")");
+            if (elem_length >= 2) {
+                stringbuf_append_str(sb, " ");
+                ItemReader child1 = elem.childAt(1);
+                format_ascii_math_item_reader(sb, child1, depth + 1);  // function expression
+            }
+        } else {
+            // format as: sum_(lower_bound)^upper_bound summand
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "_(");
+            ItemReader child0 = elem.childAt(0);
+            format_ascii_math_item_reader(sb, child0, depth + 1);  // lower bound
+            stringbuf_append_str(sb, ")");
+            if (elem_length >= 2) {
+                stringbuf_append_str(sb, "^");
+                ItemReader child1 = elem.childAt(1);
+                format_ascii_math_item_reader(sb, child1, depth + 1);  // upper bound
+            }
+            if (elem_length >= 3) {
+                stringbuf_append_str(sb, " ");
+                ItemReader child2 = elem.childAt(2);
+                format_ascii_math_item_reader(sb, child2, depth + 1);  // summand
+            }
+            
+            // for integrals, add differential if present
+            if ((strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0) && 
+                elem_length >= 4) {
+                stringbuf_append_str(sb, " ");
+                ItemReader child3 = elem.childAt(3);
+                format_ascii_math_item_reader(sb, child3, depth + 1);  // differential
+            }
+        }
+        printf("DEBUG: Finished special formatting\n");
+        return;
+    } else if (def && def->ascii_format) {
+        if (def->has_children && elem_length > 0) {
+            if (def->is_binary_op && elem_length == 2) {
+                // binary operator: format as {left} op {right} with precedence-aware parentheses
+                ItemReader left_item = elem.childAt(0);
+                ItemReader right_item = elem.childAt(1);
+                
+                // check if operands need parentheses
+                bool left_needs_parens = needs_parentheses_reader(element_name, left_item, false);
+                bool right_needs_parens = needs_parentheses_reader(element_name, right_item, true);
+                
+                // format left operand with parentheses if needed
+                if (left_needs_parens) stringbuf_append_str(sb, "(");
+                format_ascii_math_item_reader(sb, left_item, depth + 1);
+                if (left_needs_parens) stringbuf_append_str(sb, ")");
+                
+                // add operator with spaces for better readability
+                stringbuf_append_str(sb, " ");
+                stringbuf_append_str(sb, def->ascii_format);
+                stringbuf_append_str(sb, " ");
+                
+                // format right operand with parentheses if needed
+                if (right_needs_parens) stringbuf_append_str(sb, "(");
+                format_ascii_math_item_reader(sb, right_item, depth + 1);
+                if (right_needs_parens) stringbuf_append_str(sb, ")");
+            } else {
+                // use template formatting
+                format_ascii_math_children_with_template_reader(sb, elem, def->ascii_format, depth);
+            }
+        } else {
+            // no children, just output the format string
+            stringbuf_append_str(sb, def->ascii_format);
+        }
+    } else {
+        // unknown element - output element name and children
+        stringbuf_append_str(sb, element_name);
+        if (elem_length > 0) {
+            stringbuf_append_str(sb, "(");
+            format_ascii_math_children_reader(sb, elem, depth);
+            stringbuf_append_str(sb, ")");
+        }
+    }
+}
+
+// format ASCII math item using reader API
+static void format_ascii_math_item_reader(StringBuf* sb, const ItemReader& item, int depth) {
+    if (depth > 50) {  // prevent infinite recursion
+        stringbuf_append_str(sb, "...");
+        return;
+    }
+    
+    if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        format_ascii_math_element_reader(sb, elem, depth);
+    }
+    else if (item.isString()) {
+        printf("DEBUG: Processing string via reader\n");
+        String* str = item.asString();
+        if (str) {
+            printf("DEBUG: String content: '%s'\n", str->chars);
+        }
+        format_ascii_math_string(sb, str);
+    }
+    else if (item.isInt()) {
+        int value = item.asInt();
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d", value);
+        stringbuf_append_str(sb, buffer);
+    }
+    else if (item.isFloat()) {
+        double value = item.asFloat();
+        char buffer[64];
+        snprintf(buffer, sizeof(buffer), "%.10g", value);
+        stringbuf_append_str(sb, buffer);
+    }
+    else {
+        // unknown type
+        printf("DEBUG: Unknown type via reader\n");
+        fflush(stdout);
+        stringbuf_append_str(sb, "[UNKNOWN]");
+    }
 }

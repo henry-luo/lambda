@@ -2,6 +2,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "../../lib/stringbuf.h"
+#include "../mark_reader.hpp"
 
 // Global recursion depth counter to prevent infinite recursion
 static thread_local int recursion_depth = 0;
@@ -11,6 +12,12 @@ static void format_item_text(StringBuf* sb, Item item);
 static void format_element_text(StringBuf* sb, Element* elem);
 static void format_array_text(StringBuf* sb, Array* arr);
 static void format_map_text(StringBuf* sb, Map* mp);
+
+// MarkReader-based forward declarations
+static void format_item_text_reader(StringBuf* sb, const ItemReader& item);
+static void format_element_text_reader(StringBuf* sb, const ElementReader& elem);
+static void format_array_text_reader(StringBuf* sb, const ArrayReader& arr);
+static void format_map_text_reader(StringBuf* sb, const MapReader& mp);
 
 // Helper function to format scalar values as raw text (no quotes)
 static void format_scalar_value(StringBuf* sb, Item item) {
@@ -107,6 +114,28 @@ static void format_array_text(StringBuf* sb, Array* arr) {
     recursion_depth--;
 }
 
+// MarkReader-based version: format an array by extracting scalar values
+static void format_array_text_reader(StringBuf* sb, const ArrayReader& arr) {
+    if (recursion_depth >= MAX_RECURSION_DEPTH) return;
+    
+    recursion_depth++;
+    
+    auto items_iter = arr.items();
+    ItemReader item;
+    bool first = true;
+    
+    while (items_iter.next(&item)) {
+        if (!first) {
+            stringbuf_append_char(sb, ' ');
+        }
+        first = false;
+        
+        format_item_text_reader(sb, item);
+    }
+    
+    recursion_depth--;
+}
+
 // Format a map by extracting all scalar values from its fields
 static void format_map_text(StringBuf* sb, Map* mp) {
     if (!mp || !mp->type || !mp->data || recursion_depth >= MAX_RECURSION_DEPTH) return;
@@ -140,6 +169,29 @@ static void format_map_text(StringBuf* sb, Map* mp) {
         format_item_text(sb, field_item);
         
         field = field->next;
+    }
+    
+    recursion_depth--;
+}
+
+// MarkReader-based version: format a map by extracting scalar values
+static void format_map_text_reader(StringBuf* sb, const MapReader& mp) {
+    if (recursion_depth >= MAX_RECURSION_DEPTH) return;
+    
+    recursion_depth++;
+    
+    auto entries = mp.entries();
+    const char* key;
+    ItemReader value;
+    bool first = true;
+    
+    while (entries.next(&key, &value)) {
+        if (!first) {
+            stringbuf_append_char(sb, ' ');
+        }
+        first = false;
+        
+        format_item_text_reader(sb, value);
     }
     
     recursion_depth--;
@@ -197,6 +249,32 @@ static void format_element_text(StringBuf* sb, Element* elem) {
                 stringbuf_append_char(sb, ' ');
             }
         }
+    }
+    
+    recursion_depth--;
+}
+
+// MarkReader-based version: format element by extracting scalar values
+static void format_element_text_reader(StringBuf* sb, const ElementReader& elem) {
+    if (recursion_depth >= MAX_RECURSION_DEPTH) return;
+    
+    recursion_depth++;
+    
+    // for text extraction, we focus on element children/content
+    // attributes are typically metadata, not content text
+    
+    // process element children
+    auto children_iter = elem.children();
+    ItemReader child;
+    bool first = true;
+    
+    while (children_iter.next(&child)) {
+        if (!first) {
+            stringbuf_append_char(sb, ' ');
+        }
+        first = false;
+        
+        format_item_text_reader(sb, child);
     }
     
     recursion_depth--;
@@ -260,6 +338,45 @@ static void format_item_text(StringBuf* sb, Item item) {
     }
 }
 
+// MarkReader-based version: main recursive function to extract scalar values
+static void format_item_text_reader(StringBuf* sb, const ItemReader& item) {
+    if (recursion_depth >= MAX_RECURSION_DEPTH) {
+        return; // prevent stack overflow
+    }
+    
+    if (item.isNull()) {
+        // skip null values
+        return;
+    }
+    else if (item.isBool()) {
+        bool val = item.asBool();
+        stringbuf_append_str(sb, val ? "true" : "false");
+    }
+    else if (item.isInt() || item.isFloat()) {
+        // use the raw Item for format_number
+        format_scalar_value(sb, item.item());
+    }
+    else if (item.isString()) {
+        String* str = item.asString();
+        if (str && str->chars && str->len > 0) {
+            stringbuf_append_str_n(sb, str->chars, str->len);
+        }
+    }
+    else if (item.isArray()) {
+        ArrayReader arr = item.asArray();
+        format_array_text_reader(sb, arr);
+    }
+    else if (item.isMap()) {
+        MapReader mp = item.asMap();
+        format_map_text_reader(sb, mp);
+    }
+    else if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        format_element_text_reader(sb, elem);
+    }
+    // for unknown types, skip
+}
+
 // Public interface function that formats a Lambda Item as plain text
 void format_text(StringBuf* sb, Item root_item) {
     if (!sb) return;
@@ -267,8 +384,9 @@ void format_text(StringBuf* sb, Item root_item) {
     // Reset recursion depth
     recursion_depth = 0;
     
-    // Extract all scalar values from the item tree
-    format_item_text(sb, root_item);
+    // use MarkReader API for type-safe traversal
+    ItemReader root(root_item.to_const());
+    format_item_text_reader(sb, root);
 }
 
 // String variant that returns a String* allocated from the pool
