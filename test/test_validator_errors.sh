@@ -74,6 +74,27 @@ echo "------------------------------------------------------------------------"
 ./lambda.exe validate -s test/input/negative/person_schema.ls -f json --strict test/input/negative/unknown_fields.json
 echo ""
 
+echo "------------------------------------------------------------------------"
+echo "TEST 12: Nested Object Path Reporting (3-4 levels deep)"
+echo "------------------------------------------------------------------------"
+echo "Testing: .employee.contact.address.city path reporting"
+./lambda.exe validate -s test/input/negative/company_named_types.ls -f json test/input/negative/company_nested_errors.json
+echo ""
+
+echo "------------------------------------------------------------------------"
+echo "TEST 13: Array Index Path Reporting"
+echo "------------------------------------------------------------------------"
+echo "Testing: .employees[N].contacts[M].address.city path reporting"
+./lambda.exe validate -s test/input/negative/company_with_arrays.ls -f json test/input/negative/company_array_errors.json
+echo ""
+
+echo "------------------------------------------------------------------------"
+echo "TEST 14: Enhanced Error Messages (Human-Readable Types)"
+echo "------------------------------------------------------------------------"
+echo "Verifying error messages use 'string', 'int', 'bool' instead of type IDs"
+./lambda.exe validate -s test/input/negative/person_schema.ls -f json test/input/negative/type_mismatch.json | grep -E "(Expected type|TYPE_MISMATCH)"
+echo ""
+
 echo "========================================================================"
 echo "Error Reporting Demonstration Complete"
 echo "========================================================================"
