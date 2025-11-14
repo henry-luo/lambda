@@ -1,0 +1,10 @@
+{
+    "person": {
+        "name": "Charlie",
+        "age": "invalid",
+        "address": {
+            "street": 999,
+            "city": null
+        }
+    }
+}
