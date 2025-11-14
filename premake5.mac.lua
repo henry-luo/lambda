@@ -514,6 +514,7 @@ project "lambda"
         "lambda/format/format-ini.cpp",
         "lambda/format/format-xml.cpp",
         "lambda/format/format-latex.cpp",
+        "lambda/format/format-utils.cpp",
         "lambda/format/format-json.cpp",
         "lambda/format/format-wiki.cpp",
     }
