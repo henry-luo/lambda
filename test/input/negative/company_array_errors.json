@@ -1,0 +1,59 @@
+{
+    "name": "TechCorp",
+    "employees": [
+        {
+            "firstName": "Alice",
+            "lastName": "Smith",
+            "contacts": [
+                {
+                    "email": "alice@work.com",
+                    "phone": "555-0001",
+                    "address": {
+                        "street": "100 Main St",
+                        "city": "Boston",
+                        "zipcode": 2101
+                    }
+                }
+            ]
+        },
+        {
+            "firstName": "Bob",
+            "lastName": "Jones",
+            "contacts": [
+                {
+                    "email": "bob@work.com",
+                    "phone": 5550002,
+                    "address": {
+                        "street": "200 Oak Ave",
+                        "city": 30301,
+                        "zipcode": "30301"
+                    }
+                },
+                {
+                    "email": "bob.personal@email.com",
+                    "phone": "555-0003",
+                    "address": {
+                        "street": 300,
+                        "city": "Seattle",
+                        "zipcode": "98101"
+                    }
+                }
+            ]
+        },
+        {
+            "firstName": "Charlie",
+            "lastName": 789,
+            "contacts": [
+                {
+                    "email": 12345,
+                    "phone": "555-0004",
+                    "address": {
+                        "street": "400 Pine St",
+                        "city": "Portland",
+                        "zipcode": 97201
+                    }
+                }
+            ]
+        }
+    ]
+}

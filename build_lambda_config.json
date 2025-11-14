@@ -1302,7 +1302,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_type_references_gtest.exe"
+                        "binary": "test_type_references_simple.exe"
                     },
                     {
                         "source": "test_graph_formatter_gtest.cpp",
@@ -1765,6 +1765,20 @@
                             "rpmalloc"
                         ],
                         "binary": "test/test_ast_validator_gtest.exe",
+                        "disabled": false
+                    },
+                    {
+                        "source": "test/test_validator_path_reporting.cpp",
+                        "name": "\ud83d\udccd Validator Path Reporting Tests (GTest) - Phase 2.2 Enhanced Errors",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test/test_validator_path_reporting.exe",
                         "disabled": false
                     }
                 ],

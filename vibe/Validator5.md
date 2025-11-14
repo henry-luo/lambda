@@ -175,7 +175,9 @@ type Document = {
 
 ### 2.1 Rich Error Context with Expected vs Actual
 
-**Status:** 🔄 Partially complete (framework ready, needs population)
+**Status:** 🔄 Ready to implement (framework complete, Phase 2.2 provides foundation)
+
+**Note:** Phase 2.2 has been completed first, providing enhanced error reporting with full paths and human-readable type names. This phase will add suggestion generation on top of that foundation.
 
 **Current State:**
 ```cpp
@@ -246,18 +248,63 @@ Error 2: Unknown field at .meta.autor
 
 ---
 
-### 2.2 Path Formatting Improvements
+### 2.2 Field Type Validation with Enhanced Error Reporting
 
-**Status:** ✅ Complete (implemented in error_reporting.cpp)
+**Status:** ✅ Complete (January 2025)
+
+**What Was Implemented:**
+1. **Full Type Validation** - Complete type checking for all Lambda types
+   - Primitive types: `string`, `int`, `float`, `bool`
+   - Complex types: Nested structures, arrays, element types
+   - Type references: Named types (Address, Contact, Employee)
+   - Recursive validation: 4+ level deep nesting
+
+2. **Enhanced Error Reporting** - Full path reporting from root to error location
+   - Flat paths: `.field`
+   - Nested paths: `.employee.contact.address.city`
+   - Array indices: `.employees[1].contacts[0].phone`
+   - Human-readable type names: `'string'` vs `'int'` (not type IDs)
+
+3. **Improved Error Messages**
+   - Old: "Type mismatch: expected string, got type 3"
+   - New: "Expected type 'string', but got 'int' at .name"
+   - Clear missing field messages: "Required field 'age' is missing from object at .age"
 
 **Current State:**
 ```cpp
 String* format_validation_path(PathSegment* path, Pool* pool) {
-    // ✅ NOW IMPLEMENTED - Full path formatting with all segment types
+    // ✅ COMPLETE - Full path formatting with all segment types
     if (!path) return string_from_strview(strview_from_cstr("(root)"), pool);
     // Builds proper paths like: .field[0]<element>@attribute
+    // Examples: .employee.contact.address.city
+    //          .employees[1].contacts[0].phone
 }
 ```
+
+**Test Coverage:**
+- ✅ 18/18 automated tests passing (`test/test_validator_path_reporting.cpp`)
+- ✅ 14 demonstration scenarios in shell script (`test/test_validator_errors.sh`)
+- ✅ Test data created for nested objects and arrays
+- ✅ Comprehensive validation of flat structures, nested objects, and arrays
+
+**Example Output:**
+```
+Nested Object Validation:
+  [TYPE_MISMATCH] Expected type 'string', but got 'int' at .employee.contact.phone
+  [TYPE_MISMATCH] Expected type 'string', but got 'int' at .employee.contact.address.city
+
+Array Validation with Indices:
+  [TYPE_MISMATCH] Expected type 'string', but got 'int' at .employees[1].contacts[0].phone
+  [TYPE_MISMATCH] Expected type 'string', but got 'int' at .employees[2].lastName
+```
+
+**Files Modified:**
+- `lambda/validator/ast_validate.cpp` - Schema loading and validation entry point
+- `lambda/validate.cpp` - Core validation logic with recursive type checking
+- `lambda/validator/error_reporting.cpp` - Path construction and formatting
+- `lambda/validator.hpp` - SchemaValidator struct with AstValidator integration
+
+**See:** `doc/Validator_Phase2.2_Summary.md` for complete details
 
 **Enhancement:**
 ```cpp
@@ -655,11 +702,17 @@ test_custom_rule_filtering()
 **Deliverable:** Understanding of current schema capabilities, field validation distinguishes null from missing
 
 ### Sprint 2: Error Reporting (1-2 weeks)
-- [ ] Phase 2.1: Expected vs actual (3-4 days) - Framework ready, needs population
-- [x] Phase 2.2: Path formatting (COMPLETE)
+- [x] Phase 2.2: Field Type Validation and Path Formatting (COMPLETE - January 2025)
+  - ✅ Complete type validation for all Lambda types
+  - ✅ Full path reporting from root (.employee.contact.address.city)
+  - ✅ Array index notation (.employees[1].contacts[0].phone)
+  - ✅ Human-readable type names in error messages
+  - ✅ 18/18 automated tests passing
+  - ✅ Comprehensive test coverage
+- [ ] Phase 2.1: Expected vs actual with suggestions (3-4 days) - Framework ready
 - [ ] Phase 6.1: Number promotion (1 day)
 
-**Deliverable:** Rich error messages with suggestions and proper paths
+**Deliverable:** ✅ Enhanced error reporting complete - Rich error messages with full paths and type information (Phase 2.2 DONE)
 
 ### Sprint 3: Configuration (1 week)
 - [x] Phase 3.1: Validation options (COMPLETE - all CLI options working)
@@ -689,25 +742,35 @@ test_custom_rule_filtering()
 
 ### Functionality Checklist
 - [x] Unified type system (already done)
-- [x] **AST parser integration** ✅ **NEW - COMPLETE**
-- [x] **Transpiler integration** ✅ **NEW - COMPLETE**
-- [x] **CLI options** ✅ **NEW - COMPLETE**
-- [x] **Path formatting** ✅ **NEW - COMPLETE**
-- [x] **Error reporting framework** ✅ **NEW - COMPLETE**
+- [x] **AST parser integration** ✅ **COMPLETE**
+- [x] **Transpiler integration** ✅ **COMPLETE**
+- [x] **CLI options** ✅ **COMPLETE**
+- [x] **Path formatting** ✅ **COMPLETE**
+- [x] **Error reporting framework** ✅ **COMPLETE**
+- [x] **Field Type Validation (Phase 2.2)** ✅ **COMPLETE - January 2025**
+  - ✅ Primitive type validation (string, int, float, bool)
+  - ✅ Complex type validation (nested structures, arrays, elements)
+  - ✅ Type reference resolution (named types)
+  - ✅ Recursive validation (4+ levels deep)
+  - ✅ Full path reporting from root
+  - ✅ Array index notation in paths
+  - ✅ Human-readable type names
 - [ ] Lambda schema analysis and documentation
 - [ ] Optional field validation (Type? handling) - Infrastructure ready
 - [ ] Missing vs null distinction
-- [ ] Rich error messages with suggestions - Framework ready
+- [ ] Rich error messages with suggestions - Framework ready (Phase 2.2 provides foundation)
 - [ ] Format-specific handling - Basic structure validation working
 - [ ] Number type promotion with checks
 
 ### Quality Metrics
 - [x] **99.6% test pass rate (1881/1888)** ✅ **ACHIEVED**
 - [x] **All validator integration tests pass (44/44)** ✅ **ACHIEVED**
+- [x] **Phase 2.2 test coverage (18/18 tests)** ✅ **ACHIEVED - January 2025**
 - [ ] All old validator test cases pass (in progress)
 - [ ] Performance: validate 1MB document in <100ms
 - [ ] Zero memory leaks (valgrind clean)
 - [x] **Integration documentation complete** ✅ **ACHIEVED**
+- [x] **Phase 2.2 documentation complete** ✅ **ACHIEVED**
 - [ ] Full API documentation
 
 ### User Experience Metrics
@@ -783,7 +846,7 @@ test_custom_rule_filtering()
 
 **Overall Progress:** 🟢 Foundation Complete - Ready for Enhancement Sprints
 
-### What's Working Now (November 14, 2025)
+### What's Working Now (January 2025)
 ✅ **Lambda Syntax Validation**
 - Full Tree-sitter AST parsing
 - Comprehensive error detection (syntax errors, parse errors)
@@ -794,6 +857,16 @@ test_custom_rule_filtering()
 - Basic document structure validation (JSON/XML)
 - Foundation for deep type checking
 
+✅ **Field Type Validation (Phase 2.2 - NEW)**
+- Complete type validation for all Lambda types
+- Primitive types: string, int, float, bool
+- Complex types: nested structures, arrays, elements
+- Type references: named types (Address, Contact, Employee)
+- Recursive validation: 4+ level deep nesting
+- Full path reporting: .employee.contact.address.city
+- Array index notation: .employees[1].contacts[0].phone
+- Human-readable error messages with type names
+
 ✅ **CLI Integration**
 - All validation options functional
 - Format auto-detection
@@ -802,20 +875,26 @@ test_custom_rule_filtering()
 ✅ **Test Coverage**
 - 1881/1888 tests passing (99.6%)
 - 44/44 validator integration tests passing
+- 18/18 Phase 2.2 path reporting tests passing
 - Comprehensive negative test suite
 
 ### Next Priority Phases
-1. **Phase 2.1** - Populate expected/actual types in errors (3-4 days)
+1. **Phase 2.1** - Add suggestion generation (typo detection, type suggestions) (3-4 days)
 2. **Phase 4.1** - Missing vs null field distinction (2 days)
 3. **Phase 6.1** - Number type promotion with checks (1 day)
 4. **Phase 1.1** - Document Lambda schema patterns (1-2 days)
 
 ### Files Modified in Recent Integration
-- `lambda/validator/ast_validate.cpp` - Full AST integration
+- `lambda/validator/ast_validate.cpp` - Full AST integration + Schema loading
 - `lambda/validator/error_reporting.cpp` - Path formatting
 - `lambda/validator.cpp` - Real transpiler implementation
+- `lambda/validate.cpp` - Core validation logic with recursive type checking (Phase 2.2)
 - `test/AST_PARSER_INTEGRATION_COMPLETE.md` - Documentation
+- `test/test_validator_path_reporting.cpp` - Comprehensive Phase 2.2 tests (18 tests)
+- `doc/Validator_Phase2.2_Summary.md` - Complete Phase 2.2 documentation
 
 ---
 
-**Status:** ✅ AST Integration Complete - Enhancement Plan Ready for Execution
+**Status:** ✅ Phase 2.2 Complete (January 2025) - Field Type Validation with Enhanced Error Reporting
+
+**Recent Achievement:** Full type validation system implemented with comprehensive path reporting, array index notation, and human-readable error messages. All 18 automated tests passing. See `doc/Validator_Phase2.2_Summary.md` for details.

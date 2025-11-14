@@ -238,6 +238,16 @@ TEST_F(ValidatorIntegrationTest, ValidateArrayOccurrences) {
 
     ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&lists, "Lists");
     ASSERT_NE(result, nullptr);
+    ASSERT_NE(result, nullptr);
+
+    // Debug: Print errors if validation failed
+    if (!result->valid) {
+        printf("Validation failed with %d errors:\n", result->error_count);
+        for (int i = 0; i < result->error_count; i++) {
+            printf("  Error %d: %s\n", i+1, result->errors[i].message->chars);
+        }
+    }
+
     EXPECT_TRUE(result->valid);
 }
 
