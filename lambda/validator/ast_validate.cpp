@@ -509,12 +509,12 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             if (!root_type) {
                 const char* last_type_start = nullptr;
                 const char* search_pos = schema_contents;
-                
+
                 while ((search_pos = strstr(search_pos, "type ")) != nullptr) {
                     last_type_start = search_pos + 5; // Skip "type "
                     search_pos += 5;
                 }
-                
+
                 if (last_type_start) {
                     // Skip whitespace
                     while (*last_type_start == ' ' || *last_type_start == '\t' || *last_type_start == '\n') {
