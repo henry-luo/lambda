@@ -3,6 +3,34 @@
 #include <stdio.h>
 
 // ==============================================================================
+// Formatter Context Implementation
+// ==============================================================================
+
+FormatterContext* formatter_context_create(Pool* pool, StringBuf* output) {
+    if (!pool || !output) return NULL;
+    
+    FormatterContext* ctx = (FormatterContext*)pool_alloc(pool, sizeof(FormatterContext));
+    if (!ctx) return NULL;
+    
+    ctx->output = output;
+    ctx->pool = pool;
+    ctx->recursion_depth = 0;
+    ctx->indent_level = 0;
+    ctx->compact_mode = false;
+    ctx->format_specific_state = NULL;
+    
+    return ctx;
+}
+
+void formatter_context_destroy(FormatterContext* ctx) {
+    // context is pool-allocated, so no explicit free needed
+    // just clear the pointer for safety
+    if (ctx) {
+        ctx->format_specific_state = NULL;
+    }
+}
+
+// ==============================================================================
 // Formatter Dispatcher Implementation
 // ==============================================================================
 
