@@ -2,12 +2,16 @@
 // Properties files are flat key-value pairs without sections
 #include "format.h"
 #include "../../lib/stringbuf.h"
+#include "../mark_reader.hpp"
 #include <string.h>
 
 // forward declarations
 static void format_item(StringBuf* sb, Item item, const char* key_name);
 static void format_properties_string(StringBuf* sb, String* str);
 static bool is_simple_value(TypeId type_id);
+
+// MarkReader-based forward declarations
+static void format_item_reader(StringBuf* sb, const ItemReader& item, const char* key_name);
 
 // format a string value for Properties - handle escaping for properties format
 static void format_properties_string(StringBuf* sb, String* str) {
@@ -142,6 +146,69 @@ static void format_item(StringBuf* sb, Item item, const char* key_name) {
     }
 }
 
+// MarkReader-based version: format any Lambda Item for Properties format
+static void format_item_reader(StringBuf* sb, const ItemReader& item, const char* key_name) {
+    if (item.isNull()) {
+        // empty value in properties
+        return;
+    }
+    
+    if (item.isBool()) {
+        bool val = item.asBool();
+        stringbuf_append_str(sb, val ? "true" : "false");
+    }
+    else if (item.isInt() || item.isFloat()) {
+        format_number(sb, item.item());
+    }
+    else if (item.isString()) {
+        String* str = item.asString();
+        if (str) {
+            format_properties_string(sb, str);
+        }
+    }
+    else if (item.isArray()) {
+        // arrays in properties are typically comma-separated values
+        ArrayReader arr = item.asArray();
+        auto items_iter = arr.items();
+        ItemReader arr_item;
+        bool first = true;
+        
+        while (items_iter.next(&arr_item)) {
+            if (!first) {
+                stringbuf_append_str(sb, ",");
+            }
+            first = false;
+            
+            // only format simple values in arrays for properties
+            if (arr_item.isNull() || arr_item.isBool() || arr_item.isInt() || 
+                arr_item.isFloat() || arr_item.isString()) {
+                format_item_reader(sb, arr_item, NULL);
+            } else {
+                stringbuf_append_str(sb, "[complex]");
+            }
+        }
+    }
+    else if (item.isMap()) {
+        // nested maps cannot be represented as simple values in properties
+        stringbuf_append_str(sb, "[map]");
+    }
+    else if (item.isElement()) {
+        ElementReader element = item.asElement();
+        const char* tag_name = element.tagName();
+        
+        // represent element as its tag name
+        if (tag_name) {
+            stringbuf_append_str(sb, tag_name);
+        } else {
+            stringbuf_append_str(sb, "[element]");
+        }
+    }
+    else {
+        // fallback for unknown types
+        stringbuf_append_str(sb, "[unknown]");
+    }
+}
+
 // format nested maps by flattening keys with dot notation
 static void format_map_flattened(StringBuf* sb, Map* map, const char* prefix) {
     if (!map || !map->type || !map->data) {
@@ -188,8 +255,6 @@ static void format_map_flattened(StringBuf* sb, Map* map, const char* prefix) {
 
 // main Properties formatter function
 String* format_properties(Pool* pool, Item root_item) {
-    TypeId type_id = get_type_id(root_item);
-    
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
         return NULL;
@@ -197,37 +262,28 @@ String* format_properties(Pool* pool, Item root_item) {
     
     stringbuf_append_str(sb, "# Properties formatted output\n");
     
-    if (type_id == LMD_TYPE_MAP) {
-        Map* map = (Map*)root_item.pointer;
-        if (map && map->type && map->data) {
-            TypeMap* map_type = (TypeMap*)map->type;
-            
-            // iterate through map fields
-            ShapeEntry* field = map_type->shape;
-            int field_count = 0;
-            
-            while (field && field_count < map_type->length) {
-                if (field->name) {
-                    // named field - create proper Lambda Item
-                    void* field_data = ((char*)map->data) + field->byte_offset;
-                    TypeId field_type = field->type->type_id;
-                    
-                    Item field_item = create_item_from_field_data(field_data, field_type);
-                    
-                    // format key=value pair
-                    stringbuf_append_format(sb, "%.*s=", (int)field->name->length, field->name->str);
-                    format_item(sb, field_item, field->name->str);
-                    stringbuf_append_char(sb, '\n');
-                }
-                
-                field = field->next;
-                field_count++;
-            }
+    // use MarkReader API for type-safe traversal
+    ItemReader root(root_item.to_const());
+    
+    if (root.isMap()) {
+        MapReader map = root.asMap();
+        
+        // iterate through map fields
+        auto entries = map.entries();
+        const char* key;
+        ItemReader value;
+        
+        while (entries.next(&key, &value)) {
+            // format key=value pair
+            stringbuf_append_format(sb, "%s=", key);
+            format_item_reader(sb, value, key);
+            stringbuf_append_char(sb, '\n');
         }
-    } else if (is_simple_value(type_id)) {
-        // single value - create a generic key
+    } else if (root.isNull() || root.isBool() || root.isInt() || 
+               root.isFloat() || root.isString()) {
+        // single simple value - create a generic key
         stringbuf_append_str(sb, "value=");
-        format_item(sb, root_item, "value");
+        format_item_reader(sb, root, "value");
         stringbuf_append_char(sb, '\n');
     } else {
         stringbuf_append_str(sb, "# Unsupported type for Properties format\n");

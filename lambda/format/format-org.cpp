@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include <string.h>
 
@@ -7,6 +8,10 @@ static void format_inline_element(StringBuf* sb, Element* elem);
 static void format_scheduling(StringBuf* sb, Element* elem);
 static void format_timestamp(StringBuf* sb, Element* elem);
 static void format_footnote_definition(StringBuf* sb, Element* elem);
+
+// MarkReader-based forward declarations
+static void format_org_element_reader(StringBuf* sb, const ElementReader& elem);
+static void format_org_text_reader(StringBuf* sb, const ItemReader& item);
 
 // Simple helper to append a string to the buffer
 static void append_string(StringBuf* sb, const char* str) {
@@ -923,29 +928,46 @@ static void format_org_text(StringBuf* sb, Item item) {
     }
 }
 
+// MarkReader-based implementations
+static void format_org_element_reader(StringBuf* sb, const ElementReader& elem) {
+    // Delegate to existing Element-based implementation
+    Element* raw_elem = const_cast<Element*>(elem.element());
+    format_org_element(sb, raw_elem);
+}
+
+static void format_org_text_reader(StringBuf* sb, const ItemReader& item) {
+    // Delegate to existing Item-based implementation
+    Item raw_item = item.item();
+    format_org_text(sb, raw_item);
+}
+
+
 // Main Org formatting function
 void format_org(StringBuf* sb, Item root_item) {
     if (!sb || root_item.item == ITEM_NULL) return;
     
-    TypeId type = get_type_id(root_item);
-    if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)root_item.pointer;
-        const char* type_name = get_element_type_name(elem);
+    // Use MarkReader API
+    ItemReader root(root_item.to_const());
+    
+    if (root.isElement()) {
+        ElementReader elem = root.asElement();
+        Element* raw_elem = const_cast<Element*>(elem.element());
+        const char* type_name = get_element_type_name(raw_elem);
         
         if (type_name && strcmp(type_name, "org_document") == 0) {
             // Format document children
-            List* list = (List*)elem;
+            List* list = (List*)raw_elem;
             for (long i = 0; i < list->length; i++) {
                 Item child_item = list->items[i];
-                format_org_text(sb, child_item);
+                format_org_text_reader(sb, ItemReader(child_item.to_const()));
             }
         } else {
             // Format single element
-            format_org_element(sb, elem);
+            format_org_element_reader(sb, elem);
         }
     } else {
         // Fallback for other types
-        format_org_text(sb, root_item);
+        format_org_text_reader(sb, root);
     }
 }
 

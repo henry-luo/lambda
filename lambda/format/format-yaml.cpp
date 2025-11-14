@@ -1,13 +1,16 @@
 // YAML Formatter - Refactored for clarity and maintainability
 // Safe implementation with centralized type handling
+// Updated to use MarkReader API (Nov 2025)
 #include "format.h"
+#include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include <string.h>
 
 // forward declarations
-static void format_item(StringBuf* sb, Item item, int indent_level);
-static void format_array_items(StringBuf* sb, Array* arr, int indent_level);
-static void format_map_items(StringBuf* sb, TypeMap* map_type, void* map_data, int indent_level);
+static void format_item_reader(StringBuf* sb, const ItemReader& item, int indent_level);
+static void format_array_reader(StringBuf* sb, const ArrayReader& arr, int indent_level);
+static void format_map_reader(StringBuf* sb, const MapReader& map_reader, int indent_level);
+static void format_element_reader(StringBuf* sb, const ElementReader& elem, int indent_level);
 static void format_yaml_string(StringBuf* sb, String* str);
 static void add_yaml_indent(StringBuf* sb, int indent_level);
 
@@ -95,79 +98,49 @@ static void format_yaml_string(StringBuf* sb, String* str) {
     }
 }
 
-// format array items for YAML
-static void format_array_items(StringBuf* sb, Array* arr, int indent_level) {
-    if (!arr || arr->length == 0) {
+// format array items for YAML using ArrayReader
+static void format_array_reader(StringBuf* sb, const ArrayReader& arr, int indent_level) {
+    if (!arr.isValid() || arr.isEmpty()) {
         stringbuf_append_str(sb, "[]");
         return;
     }
     
-    for (long i = 0; i < arr->length; i++) {
-        if (i > 0 || indent_level > 0) {
+    auto iter = arr.items();
+    ItemReader item;
+    int index = 0;
+    
+    while (iter.next(&item)) {
+        if (index > 0 || indent_level > 0) {
             stringbuf_append_char(sb, '\n');
             add_yaml_indent(sb, indent_level);
         }
         stringbuf_append_str(sb, "- ");
         
-        // use the direct item access like TOML formatter
-        Item item = arr->items[i];
-        TypeId item_type = (TypeId)(get_type_id(item));
-        
         // for complex types, add proper indentation
-        if (item_type == LMD_TYPE_MAP || item_type == LMD_TYPE_ELEMENT || 
-            item_type == LMD_TYPE_ARRAY || item_type == LMD_TYPE_LIST) {
-            format_item(sb, item, indent_level + 1);
+        if (item.isMap() || item.isElement() || item.isArray() || item.isList()) {
+            format_item_reader(sb, item, indent_level + 1);
         } else {
-            format_item(sb, item, 0);
+            format_item_reader(sb, item, 0);
         }
+        index++;
     }
 }
 
-// format map items using centralized field data creation
-static void format_map_items(StringBuf* sb, TypeMap* map_type, void* map_data, int indent_level) {
-    if (!map_type || !map_data) {
+// format map items using MapReader
+static void format_map_reader(StringBuf* sb, const MapReader& map_reader, int indent_level) {
+    if (!map_reader.isValid()) {
+        stringbuf_append_str(sb, "{}");
         return;
     }
     
     bool first_item = true;
-    ShapeEntry *field = map_type->shape;
-    int field_count = 0;
+    auto iter = map_reader.entries();
+    const char* key;
+    ItemReader value;
     
-    // safely iterate through the map fields using linked list with bounds checking
-    while (field && field_count < map_type->length) {
-        if (!field->name) {
-            // nested map - handle specially
-            void* data = ((char*)map_data) + field->byte_offset;
-            Map *nest_map = *(Map**)data;
-            if (nest_map && nest_map->type) {
-                TypeMap *nest_map_type = (TypeMap*)nest_map->type;
-                format_map_items(sb, nest_map_type, nest_map->data, indent_level);
-            }
-        } else {
-            // named field - use centralized function to create proper Lambda Item
-            void* field_data = ((char*)map_data) + field->byte_offset;
-            TypeId field_type = field->type->type_id;
-            
-            // create proper Lambda Item using centralized function
-            Item field_item = create_item_from_field_data(field_data, field_type);
-            
-            // skip null/unset fields appropriately
-            if (field_type == LMD_TYPE_NULL) {
-                if (!first_item) {
-                    stringbuf_append_char(sb, '\n');
-                }
-                first_item = false;
-                
-                if (indent_level > 0) {
-                    add_yaml_indent(sb, indent_level);
-                }
-                
-                stringbuf_append_format(sb, "%.*s: null", (int)field->name->length, field->name->str);
-                field = field->next;
-                field_count++;
-                continue;
-            }
-            
+    while (iter.next(&key, &value)) {
+        // skip null/unset fields appropriately
+        if (value.isNull()) {
             if (!first_item) {
                 stringbuf_append_char(sb, '\n');
             }
@@ -177,159 +150,144 @@ static void format_map_items(StringBuf* sb, TypeMap* map_type, void* map_data, i
                 add_yaml_indent(sb, indent_level);
             }
             
-            // add field name
-            stringbuf_append_format(sb, "%.*s: ", (int)field->name->length, field->name->str);
-            
-            // format field value using centralized format_item function
-            if (field_type == LMD_TYPE_MAP || field_type == LMD_TYPE_ELEMENT || 
-                field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_LIST) {
-                // for complex types, add newline and proper indentation
-                if (field_type == LMD_TYPE_MAP || field_type == LMD_TYPE_ELEMENT) {
-                    stringbuf_append_char(sb, '\n');
-                }
-                format_item(sb, field_item, indent_level + 1);
-            } else {
-                format_item(sb, field_item, 0);
-            }
+            stringbuf_append_format(sb, "%s: null", key);
+            continue;
         }
         
-        field = field->next;
-        field_count++;
+        if (!first_item) {
+            stringbuf_append_char(sb, '\n');
+        }
+        first_item = false;
+        
+        if (indent_level > 0) {
+            add_yaml_indent(sb, indent_level);
+        }
+        
+        // add field name
+        stringbuf_append_format(sb, "%s: ", key);
+        
+        // format field value
+        if (value.isMap() || value.isElement() || value.isArray() || value.isList()) {
+            // for complex types, add newline and proper indentation
+            if (value.isMap() || value.isElement()) {
+                stringbuf_append_char(sb, '\n');
+            }
+            format_item_reader(sb, value, indent_level + 1);
+        } else {
+            format_item_reader(sb, value, 0);
+        }
     }
 }
 
-// centralized function to format any Lambda Item with proper type handling
-static void format_item(StringBuf* sb, Item item, int indent_level) {
+// format element using ElementReader
+static void format_element_reader(StringBuf* sb, const ElementReader& elem, int indent_level) {
+    // for yaml, represent element as an object with special "$" key for tag name
+    if (indent_level > 0) {
+        stringbuf_append_char(sb, '\n');
+        add_yaml_indent(sb, indent_level);
+    }
+    stringbuf_append_format(sb, "$: \"%s\"", elem.tagName());
+    
+    // add attributes if any
+    if (elem.attrCount() > 0) {
+        stringbuf_append_char(sb, '\n');
+        // create MapReader from element attributes
+        // note: for now we'll iterate manually, but ElementReader could provide attribute iteration
+        const TypeMap* map_type = (const TypeMap*)elem.element()->type;
+        const ShapeEntry* field = map_type->shape;
+        bool first_attr = true;
+        
+        while (field) {
+            const char* key = field->name->str;
+            ItemReader attr_value = elem.get_attr(key);
+            
+            if (!first_attr) {
+                stringbuf_append_char(sb, '\n');
+            }
+            first_attr = false;
+            
+            if (indent_level > 0) {
+                add_yaml_indent(sb, indent_level);
+            }
+            
+            stringbuf_append_format(sb, "%s: ", key);
+            format_item_reader(sb, attr_value, 0);
+            
+            field = field->next;
+        }
+    }
+    
+    // add children if any
+    if (elem.childCount() > 0) {
+        if (indent_level > 0) {
+            stringbuf_append_char(sb, '\n');
+            add_yaml_indent(sb, indent_level);
+        } else {
+            stringbuf_append_char(sb, '\n');
+        }
+        stringbuf_append_str(sb, "_:");
+        
+        auto child_iter = elem.children();
+        ItemReader child;
+        int child_index = 0;
+        
+        while (child_iter.next(&child)) {
+            if (child_index > 0 || indent_level >= 0) {
+                stringbuf_append_char(sb, '\n');
+                add_yaml_indent(sb, indent_level + 1);
+            }
+            stringbuf_append_str(sb, "- ");
+            
+            if (child.isMap() || child.isElement() || child.isArray() || child.isList()) {
+                format_item_reader(sb, child, indent_level + 2);
+            } else {
+                format_item_reader(sb, child, 0);
+            }
+            child_index++;
+        }
+    }
+}
+
+// centralized function to format any Lambda Item with proper type handling using MarkReader
+static void format_item_reader(StringBuf* sb, const ItemReader& item, int indent_level) {
     // prevent infinite recursion
     if (indent_level > 10) {
         stringbuf_append_str(sb, "\"[max_depth]\"");
         return;
     }
     
-    TypeId type_id = get_type_id(item);
-    
-    switch (type_id) {
-        case LMD_TYPE_NULL:
+    if (item.isNull()) {
+        stringbuf_append_str(sb, "null");
+    } else if (item.isBool()) {
+        stringbuf_append_str(sb, item.asBool() ? "true" : "false");
+    } else if (item.isInt() || item.isFloat()) {
+        // use centralized number formatting
+        format_number(sb, item.item());
+    } else if (item.isString()) {
+        String* str = item.asString();
+        if (str) {
+            format_yaml_string(sb, str);
+        } else {
             stringbuf_append_str(sb, "null");
-            break;
-        case LMD_TYPE_BOOL: {
-            bool val = item.bool_val;
-            stringbuf_append_str(sb, val ? "true" : "false");
-            break;
         }
-        case LMD_TYPE_INT:
-        case LMD_TYPE_INT64:
-        case LMD_TYPE_FLOAT:
-            // use centralized number formatting
-            format_number(sb, item);
-            break;
-        case LMD_TYPE_STRING: {
-            String* str = (String*)item.pointer;
-            if (str) {
-                format_yaml_string(sb, str);
-            } else {
-                stringbuf_append_str(sb, "null");
-            }
-            break;
-        }
-        case LMD_TYPE_SYMBOL: {
-            String* str = (String*)item.pointer;
-            if (str) {
-                // Symbols in YAML should be formatted as plain strings or quoted if needed
-                format_yaml_string(sb, str);
-            } else {
-                stringbuf_append_str(sb, "null");
-            }
-            break;
-        }
-        case LMD_TYPE_BINARY: {
-            String* bin_str = (String*)item.pointer;
-            if (bin_str) {
-                // Format binary data as base64 encoded YAML block scalar
-                stringbuf_append_str(sb, "!!binary |\n");
-                // For simplicity, we'll output the binary data as is
-                // In a real implementation, you'd want to base64 encode it
-                stringbuf_append_str(sb, "  ");
-                stringbuf_append_str(sb, bin_str->chars);
-            } else {
-                stringbuf_append_str(sb, "null");
-            }
-            break;
-        }
-        case LMD_TYPE_DTIME: {
-            String* dt_str = (String*)item.pointer;
-            if (dt_str) {
-                // Check if the datetime string needs quotes or is ISO format
-                if (strchr(dt_str->chars, ' ') || strchr(dt_str->chars, 'T')) {
-                    // Looks like a standard datetime format
-                    stringbuf_append_str(sb, dt_str->chars);
-                } else {
-                    // Quote it to be safe
-                    format_yaml_string(sb, dt_str);
-                }
-            } else {
-                stringbuf_append_str(sb, "null");
-            }
-            break;
-        }
-        case LMD_TYPE_ARRAY:
-        case LMD_TYPE_LIST: {
-            Array* arr = (Array*)item.pointer;
-            format_array_items(sb, arr, indent_level);
-            break;
-        }
-        case LMD_TYPE_MAP: {
-            Map* mp = (Map*)item.pointer;
-            if (mp && mp->type) {
-                TypeMap* map_type = (TypeMap*)mp->type;
-                format_map_items(sb, map_type, mp->data, indent_level);
-            } else {
-                stringbuf_append_str(sb, "{}");
-            }
-            break;
-        }
-        case LMD_TYPE_ELEMENT: {
-            Element* element = item.element;
-            TypeElmt* elmt_type = (TypeElmt*)element->type;
-            
-            // for yaml, represent element as an object with special "$" key for tag name
-            if (indent_level > 0) {
-                stringbuf_append_char(sb, '\n');
-                add_yaml_indent(sb, indent_level);
-            }
-            stringbuf_append_format(sb, "$: \"%.*s\"", (int)elmt_type->name.length, elmt_type->name.str);
-            
-            // add attributes if any
-            if (elmt_type && elmt_type->length > 0 && element->data) {
-                stringbuf_append_char(sb, '\n');
-                format_map_items(sb, (TypeMap*)elmt_type, element->data, indent_level);
-            }
-            
-            // add children if any
-            if (elmt_type && elmt_type->content_length > 0) {
-                if (indent_level > 0) {
-                    stringbuf_append_char(sb, '\n');
-                    add_yaml_indent(sb, indent_level);
-                } else {
-                    stringbuf_append_char(sb, '\n');
-                }
-                stringbuf_append_str(sb, "_:");
-                
-                List* list = (List*)element;
-                format_array_items(sb, (Array*)list, indent_level + 1);
-            }
-            break;
-        }
-        default:
-            // fallback for unknown types
-            stringbuf_append_format(sb, "\"[type_%d]\"", (int)type_id);
-            break;
+    } else if (item.isArray() || item.isList()) {
+        ArrayReader arr = item.asArray();
+        format_array_reader(sb, arr, indent_level);
+    } else if (item.isMap()) {
+        MapReader mp = item.asMap();
+        format_map_reader(sb, mp, indent_level);
+    } else if (item.isElement()) {
+        ElementReader elem = item.asElement();
+        format_element_reader(sb, elem, indent_level);
+    } else {
+        // fallback for unknown types
+        stringbuf_append_format(sb, "\"[type_%d]\"", (int)item.getType());
     }
 }
 
 // yaml formatter that produces proper YAML output
 String* format_yaml(Pool* pool, Item root_item) {
-    printf("format_yaml: ENTRY - direct traversal version\n");
+    printf("format_yaml: ENTRY - MarkReader version\n");
     fflush(stdout);
     
     StringBuf* sb = stringbuf_new(pool);
@@ -339,15 +297,19 @@ String* format_yaml(Pool* pool, Item root_item) {
         return NULL;
     }
     
-    TypeId root_type = get_type_id(root_item);
+    ItemReader reader(root_item.to_const());
     
     // Check if root is an array that might represent multiple YAML documents
-    if (root_type == LMD_TYPE_ARRAY || root_type == LMD_TYPE_LIST) {
-        Array* arr = (Array*)root_item.pointer;
-        if (arr && arr->length > 1) {
+    if (reader.isArray() || reader.isList()) {
+        ArrayReader arr = reader.asArray();
+        if (arr.length() > 1) {
             // Treat as multi-document YAML
-            for (long i = 0; i < arr->length; i++) {
-                if (i > 0) {
+            auto iter = arr.items();
+            ItemReader doc_item;
+            int doc_index = 0;
+            
+            while (iter.next(&doc_item)) {
+                if (doc_index > 0) {
                     stringbuf_append_str(sb, "\n---\n");
                 } else {
                     stringbuf_append_str(sb, "---\n");
@@ -357,21 +319,22 @@ String* format_yaml(Pool* pool, Item root_item) {
                 stringbuf_append_str(sb, "# yaml formatted output\n");
                 
                 // format each document
-                format_item(sb, arr->items[i], 0);
+                format_item_reader(sb, doc_item, 0);
                 stringbuf_append_char(sb, '\n');
+                doc_index++;
             }
         } else {
             // Single document array
             stringbuf_append_str(sb, "---\n");
             stringbuf_append_str(sb, "# yaml formatted output\n");
-            format_item(sb, root_item, 0);
+            format_item_reader(sb, reader, 0);
             stringbuf_append_char(sb, '\n');
         }
     } else {
         // Single document
         stringbuf_append_str(sb, "---\n");
         stringbuf_append_str(sb, "# yaml formatted output\n");
-        format_item(sb, root_item, 0);
+        format_item_reader(sb, reader, 0);
         stringbuf_append_char(sb, '\n');
     }
     
