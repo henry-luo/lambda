@@ -52,6 +52,7 @@
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
+        "lambda/validator/suggestions.cpp",
         "lambda/js/js_scope.cpp",
         "lambda/js/build_js_ast.cpp",
         "lambda/js/transpile_js.cpp",
@@ -329,6 +330,7 @@
                 "lambda/validator.cpp",
                 "lambda/validator/ast_validate.cpp",
                 "lambda/validator/error_reporting.cpp",
+                "lambda/validator/suggestions.cpp",
                 "lambda/format/format.cpp",
                 "lambda/mark_builder.cpp",
                 "lambda/mark_reader.cpp",
@@ -1223,6 +1225,71 @@
                             "rpmalloc"
                         ],
                         "binary": "test_validator_features_gtest.exe"
+                    },
+                    {
+                        "source": "test_null_vs_missing_gtest.cpp",
+                        "name": "✅ Null vs Missing Field Tests (GTest) - Phase 4.1 Implementation",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_null_vs_missing_gtest.exe"
+                    },
+                    {
+                        "source": "test_enhanced_errors.cpp",
+                        "name": "✨ Enhanced Error Reporting Tests (GTest) - Phase 2.1 Implementation",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_enhanced_errors.exe"
+                    },
+                    {
+                        "source": "test_validation_options.cpp",
+                        "name": "⚙️ Validation Options Tests (GTest) - Sprint 3 Implementation",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_validation_options.exe"
+                    },
+                    {
+                        "source": "test_format_validation.cpp",
+                        "name": "🌐 Format-Specific Validation Tests (GTest) - Sprint 4 Implementation",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_format_validation.exe"
+                    },
+                    {
+                        "source": "test_validator_integration.cpp",
+                        "name": "🧪 Validator Integration Tests (GTest) - Sprint 5 Comprehensive Testing",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_validator_integration.exe"
                     },
                     {
                         "source": "test_type_references_simple.cpp",

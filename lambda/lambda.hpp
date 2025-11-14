@@ -139,6 +139,7 @@ struct Map : Container {
 
     ConstItem get(const Item key) const;
     ConstItem get(const char* key_str) const;
+    bool has_field(const char* field_name) const;
 };
 
 struct Element : List {

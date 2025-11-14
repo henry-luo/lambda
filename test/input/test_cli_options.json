@@ -1,0 +1,5 @@
+{
+    "name": "Test Document",
+    "count": 42,
+    "extra_field": "should trigger error in strict mode"
+}
