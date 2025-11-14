@@ -1,4 +1,5 @@
 #include "format-latex-html.h"
+#include "../mark_reader.hpp"
 #include "format.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
@@ -26,6 +27,11 @@ static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool,
 static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void append_escaped_text(StringBuf* html_buf, const char* text);
 static void append_indent(StringBuf* html_buf, int depth);
+
+// reader-based forward declarations
+static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth);
+static void process_element_content_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth);
+static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth);
 
 // Document metadata storage
 typedef struct {
@@ -59,7 +65,10 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
         // Process the LaTeX AST without automatic paragraph wrapper
         // Individual text content will be wrapped in paragraphs as needed
         printf("DEBUG: About to process LaTeX AST\n");
-        process_latex_element(html_buf, latex_ast, pool, 1);
+        
+        // use MarkReader API
+        ItemReader ast_reader(latex_ast.to_const());
+        process_latex_element_reader(html_buf, ast_reader, pool, 1);
     }
 
     // Break down the CSS into smaller chunks to avoid C++ compiler issues with very long string literals
@@ -924,5 +933,56 @@ static void append_escaped_text(StringBuf* html_buf, const char* text) {
 static void append_indent(StringBuf* html_buf, int depth) {
     for (int i = 0; i < depth; i++) {
         stringbuf_append_str(html_buf, "  ");
+    }
+}
+
+// ===== MarkReader-based implementations =====
+
+// process element content using reader API (simple version)
+static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth) {
+    auto it = elem.children();
+    ItemReader child;
+    while (it.next(&child)) {
+        process_latex_element_reader(html_buf, child, pool, depth);
+    }
+}
+
+// process element content using reader API (with paragraph wrapping)
+static void process_element_content_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth) {
+    // for now, just use simple version - can add paragraph logic later if needed
+    process_element_content_simple_reader(html_buf, elem, pool, depth);
+}
+
+// main LaTeX element processor using reader API
+static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth) {
+    if (item.isNull()) {
+        return;
+    }
+
+    if (item.isString()) {
+        String* str = item.asString();
+        if (str && str->chars) {
+            append_escaped_text(html_buf, str->chars);
+        }
+        return;
+    }
+
+    if (!item.isElement()) {
+        return;
+    }
+
+    ElementReader elem = item.asElement();
+    const char* cmd_name = elem.tagName();
+    if (!cmd_name) return;
+
+    // handle different LaTeX commands - delegate to existing handlers for now
+    // convert reader back to Item/Element for compatibility with existing code
+    if (elem.element()) {
+        Element* raw_elem = (Element*)elem.element();
+        Item raw_item;
+        raw_item.element = raw_elem;
+        raw_item._type_id = LMD_TYPE_ELEMENT;
+        
+        process_latex_element(html_buf, raw_item, pool, depth);
     }
 }
