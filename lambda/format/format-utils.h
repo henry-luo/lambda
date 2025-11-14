@@ -22,6 +22,32 @@ typedef void (*ItemProcessor)(StringBuf* sb, const ItemReader& item);
 typedef void (*ElementFormatterFunc)(StringBuf* sb, const ElementReader& elem);
 
 // ==============================================================================
+// Formatter Context - Shared State Management
+// ==============================================================================
+
+#define MAX_RECURSION_DEPTH 50
+
+typedef struct {
+    StringBuf* output;
+    Pool* pool;
+    int recursion_depth;
+    int indent_level;
+    bool compact_mode;
+    void* format_specific_state;  // opaque pointer for formatter-specific data
+} FormatterContext;
+
+// recursion control macros
+#define CHECK_RECURSION(ctx) \
+    if ((ctx)->recursion_depth >= MAX_RECURSION_DEPTH) return; \
+    (ctx)->recursion_depth++
+
+#define END_RECURSION(ctx) (ctx)->recursion_depth--
+
+// context lifecycle
+FormatterContext* formatter_context_create(Pool* pool, StringBuf* output);
+void formatter_context_destroy(FormatterContext* ctx);
+
+// ==============================================================================
 // Formatter Dispatcher - Hash-based Element Type Routing
 // ==============================================================================
 
