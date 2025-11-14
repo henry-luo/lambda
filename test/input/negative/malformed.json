@@ -1,0 +1,3 @@
+This is not valid JSON {
+    "broken": true,
+    "missing_closing_brace": false

@@ -2,12 +2,13 @@
 // This schema tests all types, occurrences, and complex nested structures with Markdown elements
 
 // Basic element types matching Markdown parser output
-type HeadingElement = <h1 level: int?, content: string>
-type ParagraphElement = <p id: string?, class: string*, content: string>
-type LinkElement = <a href: string, title: string?, target: string?, text: string>
-type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?>
-type CodeElement = <code lang: string?, class: string*, content: string>
-type ListElement = <ul type: string?, class: string*, items: string+>
+// Element syntax: <name attr1: type, attr2: type; content_type>
+type HeadingElement = <h1 level: int?; string>
+type ParagraphElement = <p id: string?, class: string*; string>
+type LinkElement = <a href: string, title: string?, target: string?; string>
+type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?; string?>
+type CodeElement = <code lang: string?, class: string*; string>
+type ListElement = <ul listType: string?, class: string*; string+>
 
 // Union types for flexible content
 type ContentElement = HeadingElement | ParagraphElement | LinkElement | ImageElement | CodeElement | ListElement
@@ -34,11 +35,11 @@ type Tag = {
 
 // Array and occurrence testing
 type Metadata = {
-    authors: Author+,              // one or more
-    categories: Category*,         // zero or more
-    tags: Tag*,                   // zero or more  
-    keywords: string*,            // zero or more strings
-    custom_fields: {              // nested map with optional fields
+    authors: Author+,
+    categories: Category*,
+    tags: Tag*,
+    keywords: string*,
+    custom_fields: {
         priority: int?,
         status: string?,
         flags: string*
@@ -50,9 +51,9 @@ type Section = {
     id: string,
     level: int,
     title: string,
-    content: ContentElement*,      // zero or more content elements
-    subsections: Section*,         // recursive structure
-    metadata: {                    // inline nested structure
+    content: ContentElement*,
+    subsections: Section*,
+    metadata: {
         word_count: int?,
         reading_time: float?,
         last_updated: datetime?
@@ -60,8 +61,4 @@ type Section = {
 }
 
 // Main document type with all features - now as doc element to match Markdown parser output
-type Document = <doc
-    version: string?,
-    title: string?,
-    children: ContentElement*
->
+type Document = <doc version: string?, title: string?; ContentElement*>

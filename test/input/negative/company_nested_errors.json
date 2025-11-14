@@ -1,0 +1,16 @@
+{
+    "name": "TechCorp",
+    "employee": {
+        "firstName": "John",
+        "lastName": "Doe",
+        "contact": {
+            "email": "john@example.com",
+            "phone": 5551234,
+            "address": {
+                "street": "123 Main St",
+                "city": 90210,
+                "zipcode": "12345"
+            }
+        }
+    }
+}

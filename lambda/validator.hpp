@@ -146,6 +146,7 @@ typedef struct AstValidator {
 typedef struct SchemaValidator {
     HashMap* schemas;              // Loaded schemas by name
     Pool* pool;         // Memory pool
+    AstValidator* ast_validator;   // AST-based validator instance
     void* context;                 // Default validation context
     void* custom_validators;       // Registered custom validators
     ValidationOptions default_options;  // Default validation options
