@@ -363,7 +363,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 TypeType* type_type = (TypeType*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
                 type_type->type = entry->node->type;
                 ast_node->type = (Type*)type_type;
-                log_debug("Wrapped type definition %.*s in TypeType", 
+                log_debug("Wrapped type definition %.*s in TypeType",
                     (int)entry->name->len, entry->name->chars);
             }
         }
@@ -1110,7 +1110,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
+AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node, bool is_type_definition) {
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
@@ -1119,17 +1119,44 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
-
     TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
-    ast_node->as = build_expr(tp, val_node);
 
-    // determine the type of the variable
-    if (ts_node_is_null(type_node)) {
-        ast_node->type = ast_node->as->type;
-    }
-    else {
-        AstNode* type_expr = build_expr(tp, type_node);
-        ast_node->type = ((TypeType*)type_expr->type)->type;
+    // handle type definitions vs variable assignments differently
+    if (is_type_definition) {
+        // for type statements: type Name = TypeExpr
+        // build the type expression - the result's type field is a TypeType* wrapper
+        if (ts_node_is_null(val_node)) {
+            log_error("type definition: missing type expression");
+            ast_node->type = &TYPE_ANY;
+            ast_node->as = nullptr;
+        } else {
+            AstNode* type_expr = build_expr(tp, val_node);
+            ast_node->as = type_expr;
+            if (type_expr && type_expr->type) {
+                ast_node->type = type_expr->type;  // Keep as TypeType* wrapper
+            } else {
+                log_warn("type definition: failed to build type expression");
+                ast_node->type = &TYPE_ANY;
+            }
+        }
+    } else {
+        // for variable assignments: let name = value or let name: type = value
+        if (ts_node_is_null(val_node)) {
+            log_error("assignment: missing value expression");
+            ast_node->as = nullptr;
+            ast_node->type = &TYPE_ANY;
+        } else {
+            ast_node->as = build_expr(tp, val_node);
+
+            // determine the type of the variable
+            if (ts_node_is_null(type_node)) {
+                ast_node->type = ast_node->as->type;
+            }
+            else {
+                AstNode* type_expr = build_expr(tp, type_node);
+                ast_node->type = ((TypeType*)type_expr->type)->type;
+            }
+        }
     }
 
     // push the name to the name stack
@@ -1139,13 +1166,16 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
 
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     TSNode type_node = ts_node_child_by_field_id(let_node, FIELD_DECLARE);
-    return build_assign_expr(tp, type_node);
+    return build_assign_expr(tp, type_node, false);  // let expressions are not type definitions
 }
 
-AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
+AstNode* build_let_and_type_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp,
         symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM :
         symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
+
+    // determine if this is a type definition based on the parent symbol
+    bool is_type_definition = (symbol == SYM_TYPE_DEFINE);
 
     // 'let' can have multiple name-value declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
@@ -1156,17 +1186,19 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
-            // Defensive check: validate symbol type instead of using assert
-            if (ts_node_symbol(child) != SYM_ASSIGN_EXPR) {
-                log_error("Error: build_let_stam expected SYM_ASSIGN_EXPR but got symbol %d", ts_node_symbol(child));
-                // Skip invalid node and continue - defensive recovery
+            TSSymbol child_symbol = ts_node_symbol(child);
+            // defensive check: validate symbol type
+            // type_assign is aliased as assign_expr in the grammar, so we only see SYM_ASSIGN_EXPR
+            if (child_symbol != SYM_ASSIGN_EXPR) {
+                log_error("Error: build_let_and_type_stam expected SYM_ASSIGN_EXPR but got symbol %d", child_symbol);
+                // skip invalid node and continue - defensive recovery
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
-            AstNode* declare = build_assign_expr(tp, child);
-            // Additional defensive check
+            AstNode* declare = build_assign_expr(tp, child, is_type_definition);
+            // additional defensive check
             if (!declare) {
-                log_error("Error: build_let_stam failed to build assign expression");
+                log_error("Error: build_let_and_type_stam failed to build assign expression");
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
@@ -1211,10 +1243,25 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
+    if (ts_node_is_null(name)) {
+        log_error("build_key_expr: missing name field");
+        ast_node->name = name_pool_create_strview(tp->name_pool, (StrView){.str = "", .length = 0});
+        ast_node->type = &TYPE_ANY;
+        ast_node->as = nullptr;
+        return ast_node;
+    }
+
     StrView name_view = build_key_string(tp, name);
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+    if (ts_node_is_null(val_node)) {
+        log_error("build_key_expr: missing value field");
+        ast_node->type = &TYPE_ANY;
+        ast_node->as = nullptr;
+        return ast_node;
+    }
+
     log_debug("build key as");
     ast_node->as = build_expr(tp, val_node);
 
@@ -1374,8 +1421,14 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     // map type does not support dynamic expr in the body
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
+        // Skip comments in map type definition
+        if (symbol == SYM_COMMENT) {
+            child = ts_node_next_named_sibling(child);
+            continue;
+        }
+
         AstNode* item = (AstNode*)build_key_expr(tp, child);
-        if (item) {
+        if (item && ((AstNamedNode*)item)->name) {
             if (!prev_item) { ast_node->item = item; }
             else { prev_item->next = item; }
             prev_item = item;
@@ -1962,57 +2015,6 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     return (AstNode*)ast_node;
 }
 
-// Build type statement: type Name = TypeExpr, Name2 = TypeExpr2, ...
-AstNode* build_type_stam(Transpiler* tp, TSNode type_node) {
-    log_debug("build type_stam");
-    
-    // Get the first type_assign (declare field)
-    TSNode assign_node = ts_node_child_by_field_name(type_node, "declare", 7);
-    if (ts_node_is_null(assign_node)) {
-        log_warn("type_stam has no declare field");
-        return nullptr;
-    }
-    
-    // For now, handle single type definition
-    // Get name and type from the type_assign node
-    TSNode name_node = ts_node_child_by_field_name(assign_node, "name", 4);
-    TSNode type_expr_node = ts_node_child_by_field_name(assign_node, "as", 2);
-    
-    if (ts_node_is_null(name_node) || ts_node_is_null(type_expr_node)) {
-        log_warn("type_assign missing name or type");
-        return nullptr;
-    }
-    
-    // Create AST node for type statement
-    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_TYPE_STAM, type_node, sizeof(AstNamedNode));
-    
-    // Get the type name as a String - use same method as build_assign_expr
-    int start_byte = ts_node_start_byte(name_node);
-    StrView name_view = { .str = tp->source + start_byte, .length = ts_node_end_byte(name_node) - start_byte };
-    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
-    
-    // Build the type expression and extract the Type* from it
-    AstNode* type_expr = build_expr(tp, type_expr_node);
-    if (type_expr && type_expr->type && type_expr->type->type_id == LMD_TYPE_TYPE) {
-        ast_node->type = ((TypeType*)type_expr->type)->type;
-    } else {
-        log_warn("type_assign: failed to build type expression");
-        ast_node->type = &TYPE_ANY;
-    }
-    ast_node->as = nullptr;  // No value for type statements
-    
-    // Register the type name in the current scope so it can be referenced
-    // The node type should be the resolved type for lookups
-    push_name(tp, ast_node, NULL);
-    
-    log_debug("Built type_stam: name='%.*s' type=%p", 
-        ast_node->name ? (int)ast_node->name->len : 0,
-        ast_node->name ? ast_node->name->chars : "",
-        (void*)ast_node->type);
-    
-    return (AstNode*)ast_node;
-}
-
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     log_debug("build content");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
@@ -2067,10 +2069,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_binary_expr(tp, expr_node);
     case SYM_LET_EXPR:
         return build_let_expr(tp, expr_node);
-    case SYM_LET_STAM:  case SYM_PUB_STAM:
-        return build_let_stam(tp, expr_node, symbol);
-    case SYM_TYPE_DEFINE:
-        return build_type_stam(tp, expr_node);
+    case SYM_LET_STAM:  case SYM_PUB_STAM:  case SYM_TYPE_DEFINE:
+        return build_let_and_type_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
         return build_for_expr(tp, expr_node);
     case SYM_FOR_STAM:
@@ -2080,7 +2080,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_IF_STAM:
         return build_if_stam(tp, expr_node);
     case SYM_ASSIGN_EXPR:
-        return build_assign_expr(tp, expr_node);
+        return build_assign_expr(tp, expr_node, false);  // standalone assign_expr is not a type definition
     case SYM_ARRAY:
         return build_array(tp, expr_node);
     case SYM_MAP:
@@ -2239,12 +2239,14 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             char* ch = buf->str + buf->length - (ast_node->module.length - 1);
             while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
             strbuf_append_str(buf, ".ls");
-#ifdef SIMPLE_SCHEMA_PARSER
+
+            #ifdef SIMPLE_SCHEMA_PARSER
             // Skip module loading in simple schema parser mode
             ast_node->script = nullptr;
-#else
+            #else
             ast_node->script = load_script(tp->runtime, buf->str, NULL);
-#endif
+            #endif
+
             strbuf_free(buf);
             // import names/definitions from the modules
             if (ast_node->script) {

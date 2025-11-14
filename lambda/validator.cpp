@@ -250,38 +250,73 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
         while (child) {
             if (child->node_type == AST_NODE_TYPE_STAM) {
                 // Type statement: type Name = TypeExpr
-                AstNamedNode* type_node = (AstNamedNode*)child;
+                // After refactoring, AST_NODE_TYPE_STAM is an AstLetNode wrapper
+                // The actual type assignment(s) are in the declare field, potentially chained via next
+                AstLetNode* type_stam = (AstLetNode*)child;
 
-                if (!type_node->name || !type_node->type) {
-                    log_warn("Skipping type node without name or type");
-                    child = child->next;
-                    continue;
+                // Process all declarations in the type statement (could be chained)
+                AstNode* declare_node = type_stam->declare;
+                while (declare_node) {
+                    if (declare_node->node_type != AST_NODE_ASSIGN) {
+                        log_warn("Skipping non-ASSIGN declare node (type=%d)", declare_node->node_type);
+                        declare_node = declare_node->next;
+                        continue;
+                    }
+
+                    AstNamedNode* type_node = (AstNamedNode*)declare_node;
+
+                    if (!type_node->name || !type_node->type) {
+                        log_warn("Skipping type node without name or type");
+                        declare_node = declare_node->next;
+                        continue;
+                    }
+
+                    // Unwrap the TypeType* to get the actual Type*
+                    // type_node->type is a TypeType* wrapper (e.g., &LIT_TYPE_STRING)
+                    // We need to extract the underlying Type* from it
+                    Type* actual_type = nullptr;
+                    if (type_node->type->type_id == LMD_TYPE_TYPE) {
+                        // It's a TypeType wrapper, unwrap it
+                        TypeType* type_wrapper = (TypeType*)type_node->type;
+                        actual_type = type_wrapper->type;
+                    } else {
+                        // For other cases, use the type directly
+                        actual_type = type_node->type;
+                    }
+
+                    if (!actual_type) {
+                        log_warn("Skipping type node with null actual type");
+                        declare_node = declare_node->next;
+                        continue;
+                    }
+
+                    // Create TypeDefinition
+                    TypeDefinition* def = (TypeDefinition*)pool_calloc(validator->pool, sizeof(TypeDefinition));
+                    if (!def) {
+                        log_error("Failed to allocate TypeDefinition");
+                        return -1;
+                    }
+
+                    def->name.str = type_node->name->chars;
+                    def->name.length = type_node->name->len;
+                    def->runtime_type = actual_type;  // Use the unwrapped type
+                    def->schema_type = nullptr;  // Can be filled in later if needed
+                    def->is_exported = true;  // Assume exported by default
+
+                    // Create TypeRegistryEntry for hashmap
+                    TypeRegistryEntry entry;
+                    entry.definition = def;
+                    entry.name_key = def->name;
+
+                    hashmap_set(validator->type_definitions, &entry);
+
+                    log_debug("Registered type: %.*s (type_id=%d)",
+                        (int)def->name.length, def->name.str,
+                        actual_type->type_id);
+                    type_count++;
+
+                    declare_node = declare_node->next;
                 }
-
-                // Create TypeDefinition
-                TypeDefinition* def = (TypeDefinition*)pool_calloc(validator->pool, sizeof(TypeDefinition));
-                if (!def) {
-                    log_error("Failed to allocate TypeDefinition");
-                    return -1;
-                }
-
-                def->name.str = type_node->name->chars;
-                def->name.length = type_node->name->len;
-                def->runtime_type = type_node->type;
-                def->schema_type = nullptr;  // Can be filled in later if needed
-                def->is_exported = true;  // Assume exported by default
-
-                // Create TypeRegistryEntry for hashmap
-                TypeRegistryEntry entry;
-                entry.definition = def;
-                entry.name_key = def->name;
-
-                hashmap_set(validator->type_definitions, &entry);
-
-                log_debug("Registered type: %.*s (type_id=%d)",
-                    (int)def->name.length, def->name.str,
-                    type_node->type ? type_node->type->type_id : -1);
-                type_count++;
             }
             child = child->next;
         }
