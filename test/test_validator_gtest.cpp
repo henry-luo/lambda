@@ -20,7 +20,7 @@
 #include <atomic>
 
 // Include validator headers for ValidationResult and run_validation
-#include "../lambda/validator.hpp"
+#include "../lambda/validator/validator.hpp"
 #include "../lib/log.h"
 
 // External validation functions - implemented in validator/ast_validate.cpp

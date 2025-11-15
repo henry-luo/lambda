@@ -14,7 +14,7 @@
 #include <stddef.h>
 
 // Include validator headers for ValidationResult and run_validation
-#include "../lambda/validator.hpp"
+#include "../lambda/validator/validator.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/input/input.h"
 #include "../lib/mempool.h"
@@ -137,7 +137,7 @@ protected:
     ConstItem create_test_float(double value) {
         double* float_ptr = (double*)pool_calloc(test_pool, sizeof(double));
         *float_ptr = value;
-        
+
         Item item;
         item.pointer = (uint64_t)float_ptr;
         item._type_id = LMD_TYPE_FLOAT;
@@ -384,7 +384,7 @@ TEST_F(AstValidatorTest, ValidElementValidation) {
     Item element = builder.element("testElement")
         .text("Hello World")
         .final();
-    
+
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
 
     AstValidator ctx = *validator;
@@ -405,7 +405,7 @@ TEST_F(AstValidatorTest, ElementContentLengthViolation) {
     Item element = builder.element("testElement")
         .text("This content is too long for the constraint")
         .final();
-    
+
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
     // Set a content_length constraint that expects 5 children, but we only have 1
     element_type->content_length = 5;

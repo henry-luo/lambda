@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "../validator.hpp"
+#include "validator.hpp"
 #include "../transpiler.hpp"
 #include "../ast.hpp"
 #include "../lambda-data.hpp"

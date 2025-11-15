@@ -321,7 +321,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
 }
 
 #include "../lib/url.h"
-#include "validator.hpp"
+#include "validator/validator.hpp"
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");

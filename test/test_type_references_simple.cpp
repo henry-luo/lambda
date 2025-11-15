@@ -4,7 +4,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "lambda/validator.hpp"
+#include "lambda/validator/validator.hpp"
 #include "lambda/lambda.h"
 #include "lib/log.h"
 #include "lib/mempool.h"

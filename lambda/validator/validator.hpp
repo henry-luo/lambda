@@ -8,9 +8,9 @@
 #pragma once
 
 #include <ctime>
-#include "../lib/mempool.h"
-#include "../lib/hashmap.h"
-#include "transpiler.hpp"
+#include "../../lib/mempool.h"
+#include "../../lib/hashmap.h"
+#include "../transpiler.hpp"
 
 // Forward declarations
 typedef struct AstValidator AstValidator;
