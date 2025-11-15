@@ -448,11 +448,10 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
 
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
-        input = (Input*)calloc(1, sizeof(Input));
-        input->url = abs_url;
-        String *str = (String*)malloc(sizeof(String) + strlen(source) + 1);
-        str->len = strlen(source);  str->ref_cnt = 0;
-        strcpy(str->chars, source);
+        // Use input_new to properly set up the Input with a pool
+        input = input_new(abs_url);
+        // Allocate string from the pool instead of malloc
+        String *str = create_string(input->pool, source);
         input->root = {.item = s2it(str)};
     }
     else {
