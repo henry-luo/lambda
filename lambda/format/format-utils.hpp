@@ -278,4 +278,560 @@ private:
     bool in_code_block_;
 };
 
+// Org-mode formatter context
+class OrgContext : public FormatterContextCpp {
+public:
+    OrgContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+    {}
+
+    // Org-mode specific utilities
+    inline void write_heading_stars(int level) {
+        for (int i = 0; i < level; i++) {
+            write_char('*');
+        }
+        write_char(' ');
+    }
+
+    inline void write_list_marker(bool ordered, int counter = 1) {
+        if (ordered) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%d. ", counter);
+            write_text(buf);
+        } else {
+            write_text("- ");
+        }
+    }
+
+    inline void write_inline_markup(const char* marker, const char* content) {
+        write_text(marker);
+        write_text(content);
+        write_text(marker);
+    }
+
+    inline void write_timestamp(const char* timestamp) {
+        write_char('<');
+        write_text(timestamp);
+        write_char('>');
+    }
+
+    inline void write_property_drawer_start() {
+        write_text(":PROPERTIES:\n");
+    }
+
+    inline void write_property_drawer_end() {
+        write_text(":END:\n");
+    }
+
+    inline void write_property(const char* key, const char* value) {
+        write_char(':');
+        write_text(key);
+        write_text(": ");
+        write_text(value);
+        write_newline();
+    }
+};
+
+// JSON formatter context
+class JsonContext : public FormatterContextCpp {
+public:
+    JsonContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+        , indent_level_(0)
+    {}
+
+    // JSON-specific utilities
+    inline void write_indent(int indent) {
+        for (int i = 0; i < indent; i++) {
+            write_text("  ");
+        }
+    }
+
+    inline void write_string_escaped(const char* str) {
+        write_char('"');
+        if (str) {
+            for (const char* p = str; *p; p++) {
+                switch (*p) {
+                case '"':  write_text("\\\""); break;
+                case '\\': write_text("\\\\"); break;
+                case '\n': write_text("\\n"); break;
+                case '\r': write_text("\\r"); break;
+                case '\t': write_text("\\t"); break;
+                case '\b': write_text("\\b"); break;
+                case '\f': write_text("\\f"); break;
+                default:
+                    if ((unsigned char)*p < 32) {
+                        char buf[8];
+                        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)*p);
+                        write_text(buf);
+                    } else {
+                        write_char(*p);
+                    }
+                    break;
+                }
+            }
+        }
+        write_char('"');
+    }
+
+    inline void write_key_value_separator() {
+        write_char(':');
+    }
+
+    inline void write_comma() {
+        write_char(',');
+    }
+
+    inline void write_object_start() {
+        write_char('{');
+    }
+
+    inline void write_object_end() {
+        write_char('}');
+    }
+
+    inline void write_array_start() {
+        write_char('[');
+    }
+
+    inline void write_array_end() {
+        write_char(']');
+    }
+
+    inline void write_null() {
+        write_text("null");
+    }
+
+    inline void write_bool(bool value) {
+        write_text(value ? "true" : "false");
+    }
+
+    inline void write_number(const char* num) {
+        write_text(num);
+    }
+
+    // Indentation tracking
+    int indent_level() const { return indent_level_; }
+    void increase_indent() { indent_level_++; }
+    void decrease_indent() { if (indent_level_ > 0) indent_level_--; }
+
+private:
+    int indent_level_;
+};
+
+// YAML formatter context
+class YamlContext : public FormatterContextCpp {
+public:
+    YamlContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+    {}
+
+    // YAML-specific utilities
+    inline void write_yaml_indent(int indent_level) {
+        for (int i = 0; i < indent_level * 2; i++) {
+            write_char(' ');
+        }
+    }
+
+    inline void write_yaml_key(const char* key) {
+        write_text(key);
+        write_text(": ");
+    }
+
+    inline void write_yaml_list_marker() {
+        write_text("- ");
+    }
+
+    inline void write_yaml_null() {
+        write_text("null");
+    }
+
+    inline void write_yaml_bool(bool value) {
+        write_text(value ? "true" : "false");
+    }
+
+    inline void write_document_separator() {
+        write_text("---\n");
+    }
+
+    inline void write_document_end() {
+        write_text("...\n");
+    }
+
+    // Check if string needs quoting in YAML
+    static bool needs_yaml_quotes(const char* s, size_t len) {
+        if (!s || len == 0) return true;
+        
+        // Check for special characters
+        if (strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') || 
+            strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || 
+            strchr(s, '[') || strchr(s, ']') || strchr(s, '{') || 
+            strchr(s, '}') || strchr(s, '|') || strchr(s, '>') || 
+            strchr(s, '&') || strchr(s, '*') || strchr(s, '!')) {
+            return true;
+        }
+        
+        // Check for leading/trailing whitespace
+        if (isspace(s[0]) || isspace(s[len-1])) {
+            return true;
+        }
+        
+        // Check for YAML reserved words
+        if (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 || 
+            strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 || 
+            strcmp(s, "no") == 0 || strcmp(s, "on") == 0 || 
+            strcmp(s, "off") == 0 || strcmp(s, "~") == 0) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    inline void write_yaml_string(const char* s, size_t len, bool force_quotes = false) {
+        if (!s) {
+            write_yaml_null();
+            return;
+        }
+        
+        if (force_quotes || needs_yaml_quotes(s, len)) {
+            write_char('"');
+            for (size_t i = 0; i < len; i++) {
+                switch (s[i]) {
+                case '"':  write_text("\\\""); break;
+                case '\\': write_text("\\\\"); break;
+                case '\n': write_text("\\n"); break;
+                case '\r': write_text("\\r"); break;
+                case '\t': write_text("\\t"); break;
+                default:   write_char(s[i]); break;
+                }
+            }
+            write_char('"');
+        } else {
+            for (size_t i = 0; i < len; i++) {
+                write_char(s[i]);
+            }
+        }
+    }
+};
+
+// HTML formatter context
+class HtmlContext : public FormatterContextCpp {
+public:
+    HtmlContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+        , depth_(0)
+    {}
+
+    // HTML-specific utilities
+    inline void write_tag_open(const char* tag_name) {
+        write_char('<');
+        write_text(tag_name);
+    }
+
+    inline void write_tag_close() {
+        write_char('>');
+    }
+
+    inline void write_tag_self_close() {
+        write_text(" />");
+    }
+
+    inline void write_closing_tag(const char* tag_name) {
+        write_text("</");
+        write_text(tag_name);
+        write_char('>');
+    }
+
+    inline void write_attribute(const char* name, const char* value) {
+        write_char(' ');
+        write_text(name);
+        write_text("=\"");
+        if (value) {
+            write_html_escaped_attribute(value);
+        }
+        write_char('"');
+    }
+
+    inline void write_html_escaped_text(const char* text) {
+        if (!text) return;
+        for (const char* p = text; *p; p++) {
+            switch (*p) {
+            case '<':  write_text("&lt;"); break;
+            case '>':  write_text("&gt;"); break;
+            case '&':  write_text("&amp;"); break;
+            default:   write_char(*p); break;
+            }
+        }
+    }
+
+    inline void write_html_escaped_attribute(const char* text) {
+        if (!text) return;
+        for (const char* p = text; *p; p++) {
+            switch (*p) {
+            case '<':  write_text("&lt;"); break;
+            case '>':  write_text("&gt;"); break;
+            case '&':  write_text("&amp;"); break;
+            case '"':  write_text("&quot;"); break;
+            case '\'': write_text("&#39;"); break;
+            default:   write_char(*p); break;
+            }
+        }
+    }
+
+    inline void write_doctype() {
+        write_text("<!DOCTYPE html>\n");
+    }
+
+    inline void write_comment(const char* text) {
+        write_text("<!--");
+        if (text) write_text(text);
+        write_text("-->");
+    }
+
+    // Depth tracking for indentation
+    int depth() const { return depth_; }
+    void increase_depth() { depth_++; }
+    void decrease_depth() { if (depth_ > 0) depth_--; }
+
+    inline void write_indent() {
+        for (int i = 0; i < depth_; i++) {
+            write_text("  ");
+        }
+    }
+
+private:
+    int depth_;
+};
+
+// LaTeX formatter context
+class LaTeXContext : public FormatterContextCpp {
+public:
+    LaTeXContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+    {}
+
+    // LaTeX-specific utilities
+    inline void write_command(const char* cmd_name) {
+        write_char('\\');
+        write_text(cmd_name);
+    }
+
+    inline void write_command_with_arg(const char* cmd_name, const char* arg) {
+        write_char('\\');
+        write_text(cmd_name);
+        write_char('{');
+        if (arg) write_text(arg);
+        write_char('}');
+    }
+
+    inline void write_begin_environment(const char* env_name) {
+        write_text("\\begin{");
+        write_text(env_name);
+        write_char('}');
+    }
+
+    inline void write_end_environment(const char* env_name) {
+        write_text("\\end{");
+        write_text(env_name);
+        write_char('}');
+    }
+
+    inline void write_latex_escaped_text(const char* text) {
+        if (!text) return;
+        for (const char* p = text; *p; p++) {
+            switch (*p) {
+            case '\\': write_text("\\textbackslash{}"); break;
+            case '{':  write_text("\\{"); break;
+            case '}':  write_text("\\}"); break;
+            case '$':  write_text("\\$"); break;
+            case '&':  write_text("\\&"); break;
+            case '%':  write_text("\\%"); break;
+            case '#':  write_text("\\#"); break;
+            case '_':  write_text("\\_"); break;
+            case '^':  write_text("\\^{}"); break;
+            case '~':  write_text("\\~{}"); break;
+            default:   write_char(*p); break;
+            }
+        }
+    }
+
+    inline void write_optional_arg(const char* arg) {
+        write_char('[');
+        if (arg) write_text(arg);
+        write_char(']');
+    }
+
+    inline void write_latex_comment(const char* text) {
+        write_char('%');
+        if (text) write_text(text);
+        write_newline();
+    }
+
+    inline void write_math_inline(const char* math) {
+        write_char('$');
+        if (math) write_text(math);
+        write_char('$');
+    }
+
+    inline void write_math_display(const char* math) {
+        write_text("\\[");
+        if (math) write_text(math);
+        write_text("\\]");
+    }
+
+    inline void write_latex_indent(int level) {
+        for (int i = 0; i < level; i++) {
+            write_text("  ");
+        }
+    }
+};
+
+// XML formatter context
+class XmlContext : public FormatterContextCpp {
+public:
+    XmlContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+    {}
+
+    // XML-specific utilities
+    inline void write_xml_declaration() {
+        write_text("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    }
+
+    inline void write_tag_open(const char* tag_name) {
+        write_char('<');
+        write_text(tag_name);
+    }
+
+    inline void write_tag_close() {
+        write_char('>');
+    }
+
+    inline void write_tag_self_close() {
+        write_text(" />");
+    }
+
+    inline void write_closing_tag(const char* tag_name) {
+        write_text("</");
+        write_text(tag_name);
+        write_char('>');
+    }
+
+    inline void write_attribute(const char* name, const char* value) {
+        write_char(' ');
+        write_text(name);
+        write_text("=\"");
+        if (value) {
+            write_xml_escaped_attribute(value);
+        }
+        write_char('"');
+    }
+
+    inline void write_xml_escaped_text(const char* text) {
+        if (!text) return;
+        for (const char* p = text; *p; p++) {
+            switch (*p) {
+            case '<':  write_text("&lt;"); break;
+            case '>':  write_text("&gt;"); break;
+            case '&':  write_text("&amp;"); break;
+            default:   write_char(*p); break;
+            }
+        }
+    }
+
+    inline void write_xml_escaped_attribute(const char* text) {
+        if (!text) return;
+        for (const char* p = text; *p; p++) {
+            switch (*p) {
+            case '<':  write_text("&lt;"); break;
+            case '>':  write_text("&gt;"); break;
+            case '&':  write_text("&amp;"); break;
+            case '"':  write_text("&quot;"); break;
+            case '\'': write_text("&apos;"); break;
+            default:   write_char(*p); break;
+            }
+        }
+    }
+
+    inline void write_cdata_start() {
+        write_text("<![CDATA[");
+    }
+
+    inline void write_cdata_end() {
+        write_text("]]>");
+    }
+
+    inline void write_comment(const char* text) {
+        write_text("<!--");
+        if (text) write_text(text);
+        write_text("-->");
+    }
+
+    inline void write_xml_indent(int level) {
+        for (int i = 0; i < level; i++) {
+            write_text("  ");
+        }
+    }
+};
+
+// CSS formatter context
+class CssContext : public FormatterContextCpp {
+public:
+    CssContext(Pool* pool, StringBuf* output)
+        : FormatterContextCpp(pool, output, 50)
+    {}
+
+    // CSS-specific utilities
+    inline void write_css_indent(int level) {
+        for (int i = 0; i < level; i++) {
+            write_text("  ");
+        }
+    }
+
+    inline void write_selector(const char* selector) {
+        if (selector) write_text(selector);
+    }
+
+    inline void write_property(const char* property, const char* value) {
+        if (property) write_text(property);
+        write_text(": ");
+        if (value) write_text(value);
+        write_char(';');
+    }
+
+    inline void write_rule_start() {
+        write_text(" {");
+        write_newline();
+    }
+
+    inline void write_rule_end(int indent) {
+        write_css_indent(indent);
+        write_char('}');
+        write_newline();
+    }
+
+    inline void write_at_rule(const char* name) {
+        write_char('@');
+        if (name) write_text(name);
+    }
+
+    inline void write_media_query(const char* query) {
+        write_text("@media ");
+        if (query) write_text(query);
+        write_rule_start();
+    }
+
+    inline void write_keyframe_selector(const char* selector) {
+        if (selector) write_text(selector);
+        write_rule_start();
+    }
+
+    inline void write_comment(const char* text) {
+        write_text("/* ");
+        if (text) write_text(text);
+        write_text(" */");
+    }
+};
+
 #endif // FORMAT_UTILS_HPP
+

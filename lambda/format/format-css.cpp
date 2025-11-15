@@ -2,6 +2,7 @@
 #include "format.h"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
+#include "format-utils.hpp"
 #include <string.h>
 
 // Forward declarations
@@ -943,8 +944,9 @@ static String* format_css_reader(Pool* pool, const ItemReader& item) {
 
 // Main formatting function (exported)
 String* format_css(Pool *pool, Item item) {
+    Pool* ctx_pool = pool_create();
     StringBuf* sb = stringbuf_new(pool);
-    if (!sb) return NULL;
+    CssContext ctx(ctx_pool, sb);
 
     // Use MarkReader API
     ItemReader reader(item.to_const());
@@ -956,16 +958,16 @@ String* format_css(Pool *pool, Item item) {
         if (raw_elem && raw_elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)raw_elem->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
-                format_css_stylesheet(sb, raw_elem);
+                format_css_stylesheet(ctx.output(), raw_elem);
             } else if (elmt_type->name.length == 7 && strncmp(elmt_type->name.str, "at-rule", 7) == 0) {
-                format_css_at_rule(sb, raw_elem, 0);
+                format_css_at_rule(ctx.output(), raw_elem, 0);
             } else {
                 // Handle single rule or other elements
-                format_css_rule(sb, raw_elem, 0);
+                format_css_rule(ctx.output(), raw_elem, 0);
             }
         } else {
             // Handle single rule or other elements
-            format_css_rule(sb, raw_elem, 0);
+            format_css_rule(ctx.output(), raw_elem, 0);
         }
     } else if (reader.isMap()) {
         ElementReader elem = reader.asElement();
@@ -974,23 +976,24 @@ String* format_css(Pool *pool, Item item) {
         if (raw_elem && raw_elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)raw_elem->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
-                format_css_stylesheet(sb, raw_elem);
+                format_css_stylesheet(ctx.output(), raw_elem);
             } else {
                 // Handle single rule or other elements
-                format_css_rule(sb, raw_elem, 0);
+                format_css_rule(ctx.output(), raw_elem, 0);
             }
         } else {
             // Handle single rule or other elements
-            format_css_rule(sb, raw_elem, 0);
+            format_css_rule(ctx.output(), raw_elem, 0);
         }
     } else {
         // Fallback - try to format as value
         Item raw_item = reader.item();
-        format_css_value(sb, raw_item, NULL);
+        format_css_value(ctx.output(), raw_item, NULL);
     }
 
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
+    pool_destroy(ctx_pool);
 
     return result;
 }

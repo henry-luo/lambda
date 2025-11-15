@@ -1,10 +1,11 @@
 // LaTeX Formatter - Simple implementation for LaTeX output
 #include "format.h"
+#include "format-utils.hpp"
 #include "../../lib/stringbuf.h"
 #include "../mark_reader.hpp"
 #include <string.h>
 
-// Forward declarations
+// Forward declarations - old Element* API
 static void format_latex_document(StringBuf* sb, Element* document);
 static void format_latex_element(StringBuf* sb, Element* element, int depth);
 static void format_latex_command_with_args(StringBuf* sb, Element* element, const char* cmd_name);
@@ -12,9 +13,9 @@ static void format_latex_environment_with_content(StringBuf* sb, Element* elemen
 static void format_latex_element_content(StringBuf* sb, Element* element);
 static void format_latex_value(StringBuf* sb, Item value);
 
-// MarkReader-based forward declarations
-static void format_latex_value_reader(StringBuf* sb, const ItemReader& value);
-static void format_latex_element_reader(StringBuf* sb, const ElementReader& element, int depth);
+// MarkReader-based forward declarations using LaTeXContext
+static void format_latex_value_reader(LaTeXContext& ctx, const ItemReader& value);
+static void format_latex_element_reader(LaTeXContext& ctx, const ElementReader& element, int depth);
 
 // Helper function to add indentation
 static void add_latex_indent(StringBuf* sb, int indent) {
@@ -256,16 +257,16 @@ static void format_latex_document(StringBuf* sb, Element* document) {
 }
 
 // MarkReader-based version: format LaTeX value item
-static void format_latex_value_reader(StringBuf* sb, const ItemReader& value) {
+static void format_latex_value_reader(LaTeXContext& ctx, const ItemReader& value) {
     if (value.isNull()) {
         return;
     } else if (value.isElement()) {
         ElementReader elem = value.asElement();
-        format_latex_element_reader(sb, elem, 0);
+        format_latex_element_reader(ctx, elem, 0);
     } else if (value.isString()) {
         String* str = value.asString();
         if (str && str->chars && str->len > 0 && str->len < 65536) {
-            stringbuf_append_str_n(sb, str->chars, str->len);
+            stringbuf_append_str_n(ctx.output(), str->chars, str->len);
         }
     } else if (value.isArray()) {
         ArrayReader arr = value.asArray();
@@ -273,19 +274,19 @@ static void format_latex_value_reader(StringBuf* sb, const ItemReader& value) {
         ItemReader item;
         bool first = true;
         while (items.next(&item)) {
-            if (!first) stringbuf_append_char(sb, ' ');
+            if (!first) stringbuf_append_char(ctx.output(), ' ');
             first = false;
-            format_latex_value_reader(sb, item);
+            format_latex_value_reader(ctx, item);
         }
     } else if (value.isInt() || value.isFloat()) {
-        format_number(sb, value.item());
+        format_number(ctx.output(), value.item());
     } else {
-        stringbuf_append_str(sb, "[unknown]");
+        stringbuf_append_str(ctx.output(), "[unknown]");
     }
 }
 
 // MarkReader-based version: format LaTeX element
-static void format_latex_element_reader(StringBuf* sb, const ElementReader& element, int depth) {
+static void format_latex_element_reader(LaTeXContext& ctx, const ElementReader& element, int depth) {
     const char* cmd_name = element.tagName();
     if (!cmd_name) return;
     
@@ -298,31 +299,31 @@ static void format_latex_element_reader(StringBuf* sb, const ElementReader& elem
         strcmp(cmd_name, "section") == 0 || strcmp(cmd_name, "subsection") == 0 || strcmp(cmd_name, "subsubsection") == 0 ||
         strcmp(cmd_name, "textbf") == 0 || strcmp(cmd_name, "textit") == 0 || strcmp(cmd_name, "texttt") == 0 ||
         strcmp(cmd_name, "emph") == 0 || strcmp(cmd_name, "underline") == 0) {
-        format_latex_command_with_args(sb, elem, cmd_name);
+        format_latex_command_with_args(ctx.output(), elem, cmd_name);
     } else if (strcmp(cmd_name, "document") == 0 || strcmp(cmd_name, "abstract") == 0 ||
                strcmp(cmd_name, "itemize") == 0 || strcmp(cmd_name, "enumerate") == 0 ||
                strcmp(cmd_name, "description") == 0 || strcmp(cmd_name, "quote") == 0 ||
                strcmp(cmd_name, "center") == 0 || strcmp(cmd_name, "verbatim") == 0) {
-        format_latex_environment_with_content(sb, elem, cmd_name, depth);
+        format_latex_environment_with_content(ctx.output(), elem, cmd_name, depth);
     } else if (strcmp(cmd_name, "maketitle") == 0) {
-        stringbuf_append_str(sb, "\\maketitle");
+        stringbuf_append_str(ctx.output(), "\\maketitle");
     } else if (strcmp(cmd_name, "tableofcontents") == 0) {
-        stringbuf_append_str(sb, "\\tableofcontents");
+        stringbuf_append_str(ctx.output(), "\\tableofcontents");
     } else if (strcmp(cmd_name, "item") == 0) {
-        add_latex_indent(sb, depth + 1);
-        stringbuf_append_str(sb, "\\item ");
-        format_latex_element_content(sb, elem);
+        add_latex_indent(ctx.output(), depth + 1);
+        stringbuf_append_str(ctx.output(), "\\item ");
+        format_latex_element_content(ctx.output(), elem);
     } else if (strncmp(cmd_name, "math", 4) == 0) {
-        stringbuf_append_char(sb, '$');
-        format_latex_element_content(sb, elem);
-        stringbuf_append_char(sb, '$');
+        stringbuf_append_char(ctx.output(), '$');
+        format_latex_element_content(ctx.output(), elem);
+        stringbuf_append_char(ctx.output(), '$');
     } else if (strncmp(cmd_name, "comment", 7) == 0) {
-        stringbuf_append_str(sb, "% ");
-        format_latex_element_content(sb, elem);
+        stringbuf_append_str(ctx.output(), "% ");
+        format_latex_element_content(ctx.output(), elem);
     } else {
-        stringbuf_append_char(sb, '\\');
-        stringbuf_append_str(sb, cmd_name);
-        format_latex_element_content(sb, elem);
+        stringbuf_append_char(ctx.output(), '\\');
+        stringbuf_append_str(ctx.output(), cmd_name);
+        format_latex_element_content(ctx.output(), elem);
     }
 }
 
@@ -330,6 +331,10 @@ static void format_latex_element_reader(StringBuf* sb, const ElementReader& elem
 String* format_latex(Pool *pool, Item item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
+
+    // Create LaTeX context
+    Pool* ctx_pool = pool_create();
+    LaTeXContext ctx(ctx_pool, sb);
 
     // use MarkReader API
     ItemReader root(item.to_const());
@@ -340,9 +345,9 @@ String* format_latex(Pool *pool, Item item) {
         ItemReader elem;
         bool first = true;
         while (items.next(&elem)) {
-            if (!first) stringbuf_append_char(sb, '\n');
+            if (!first) stringbuf_append_char(ctx.output(), '\n');
             first = false;
-            format_latex_value_reader(sb, elem);
+            format_latex_value_reader(ctx, elem);
         }
     } else if (root.isElement()) {
         ElementReader element = root.asElement();
@@ -352,12 +357,13 @@ String* format_latex(Pool *pool, Item item) {
                     strcmp(tag, "book") == 0 || strcmp(tag, "latex_document") == 0)) {
             format_latex_document(sb, (Element*)element.element());
         } else {
-            format_latex_element_reader(sb, element, 0);
+            format_latex_element_reader(ctx, element, 0);
         }
     } else {
-        format_latex_value_reader(sb, root);
+        format_latex_value_reader(ctx, root);
     }
 
+    pool_destroy(ctx_pool);
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
 
