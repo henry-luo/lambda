@@ -11,7 +11,7 @@
 #include <cstring>
 #include <string>
 #include "../lib/log.h"  // Add logging support
-#include "validator.hpp"  // For ValidationResult
+#include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
 

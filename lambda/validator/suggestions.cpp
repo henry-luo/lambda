@@ -4,7 +4,7 @@
  * @author Lambda Validator Enhancement
  */
 
-#include "../validator.hpp"
+#include "validator.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/arraylist.h"
 #include <string.h>

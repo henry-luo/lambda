@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "../validator.hpp"
+#include "validator.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/arraylist.h"
@@ -300,10 +300,6 @@ String* generate_json_report(ValidationResult* result, Pool* pool) {
 
     return stringbuf_to_string(json);
 }
-
-// ==================== Debug Utilities ====================
-
-// ==================== Missing Function Implementations ====================
 
 // Format validation path
 String* format_validation_path(PathSegment* path, Pool* pool) {

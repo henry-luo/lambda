@@ -14,7 +14,7 @@
 #else
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #endif
-#include "validator.hpp"
+#include "validator/validator.hpp"
 
 extern __thread EvalContext* context;
 

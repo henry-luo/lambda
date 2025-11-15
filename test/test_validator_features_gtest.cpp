@@ -10,7 +10,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "../lambda/validator.hpp"
+#include "../lambda/validator/validator.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/input/input.h"

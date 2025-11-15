@@ -1,5 +1,5 @@
 #include "validator.hpp"
-#include "mark_reader.hpp"  // MarkReader API for type-safe traversal
+#include "../mark_reader.hpp"  // MarkReader API for type-safe traversal
 #include <ctime>
 
 // ==================== Validation State Helpers ====================
