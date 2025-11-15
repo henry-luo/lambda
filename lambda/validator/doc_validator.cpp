@@ -167,10 +167,10 @@ static int visited_entry_compare(const void *a, const void *b, void *udata) {
 
 // ==================== Core Validator Functions ====================
 
-AstValidator* ast_validator_create(Pool* pool) {
+SchemaValidator* SchemaValidator::create(Pool* pool) {
     if (!pool) return nullptr;
 
-    AstValidator* validator = (AstValidator*)pool_calloc(pool, sizeof(AstValidator));
+    SchemaValidator* validator = (SchemaValidator*)pool_calloc(pool, sizeof(SchemaValidator));
     if (!validator) return nullptr;
 
     validator->pool = pool;
@@ -203,31 +203,29 @@ AstValidator* ast_validator_create(Pool* pool) {
     return validator;
 }
 
-void ast_validator_destroy(AstValidator* validator) {
-    if (!validator) return;
-
-    if (validator->type_definitions) {
-        hashmap_free(validator->type_definitions);
+void SchemaValidator::destroy() {
+    if (this->type_definitions) {
+        hashmap_free(this->type_definitions);
     }
 
-    if (validator->visited_nodes) {
-        hashmap_free(validator->visited_nodes);
+    if (this->visited_nodes) {
+        hashmap_free(this->visited_nodes);
     }
 
-    if (validator->transpiler) {
-        transpiler_destroy(validator->transpiler);
+    if (this->transpiler) {
+        transpiler_destroy(this->transpiler);
     }
 
     // Note: Memory pool cleanup handled by caller
 }
 
-int ast_validator_load_schema(AstValidator* validator, const char* source, const char* root_type) {
-    if (!validator || !source || !root_type) return -1;
+int SchemaValidator::load_schema(const char* source, const char* root_type) {
+    if (!source || !root_type) return -1;
 
     log_info("Loading schema with root type: %s", root_type);
 
     // Build AST using transpiler
-    AstNode* ast = transpiler_build_ast(validator->transpiler, source);
+    AstNode* ast = transpiler_build_ast(this->transpiler, source);
     if (!ast) {
         log_error("Failed to build AST from source");
         return -1;
@@ -291,7 +289,7 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
                     }
 
                     // Create TypeDefinition
-                    TypeDefinition* def = (TypeDefinition*)pool_calloc(validator->pool, sizeof(TypeDefinition));
+                    TypeDefinition* def = (TypeDefinition*)pool_calloc(this->pool, sizeof(TypeDefinition));
                     if (!def) {
                         log_error("Failed to allocate TypeDefinition");
                         return -1;
@@ -308,7 +306,7 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
                     entry.definition = def;
                     entry.name_key = def->name;
 
-                    hashmap_set(validator->type_definitions, &entry);
+                    hashmap_set(this->type_definitions, &entry);
 
                     log_debug("Registered type: %.*s (type_id=%d)",
                         (int)def->name.length, def->name.str,
@@ -346,26 +344,26 @@ Type* extract_type_from_ast_node(AstNode* node) {
     }
 }
 
-Type* ast_validator_find_type(AstValidator* validator, const char* type_name) {
-    if (!validator || !type_name) return nullptr;
+Type* SchemaValidator::find_type(const char* type_name) {
+    if (!type_name) return nullptr;
 
     StrView name_view = {.str = type_name, .length = strlen(type_name)};
     TypeRegistryEntry key = {.definition = nullptr, .name_key = name_view};
 
-    const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(validator->type_definitions, &key);
+    const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(this->type_definitions, &key);
     return entry && entry->definition ? entry->definition->runtime_type : nullptr;
 }
 
 // Resolve a type reference with circular reference detection
 // Returns the resolved Type* or nullptr if not found or circular
-Type* ast_validator_resolve_type_reference(AstValidator* validator, const char* type_name) {
-    if (!validator || !type_name) return nullptr;
+Type* SchemaValidator::resolve_type_reference(const char* type_name) {
+    if (!type_name) return nullptr;
 
     StrView name_view = {.str = type_name, .length = strlen(type_name)};
 
     // Check if we're already visiting this type (circular reference)
     VisitedEntry visited_key = {.key = name_view, .visited = false};
-    const VisitedEntry* existing = (const VisitedEntry*)hashmap_get(validator->visited_nodes, &visited_key);
+    const VisitedEntry* existing = (const VisitedEntry*)hashmap_get(this->visited_nodes, &visited_key);
 
     if (existing && existing->visited) {
         log_error("[AST_VALIDATOR] Circular type reference detected: %.*s",
@@ -375,14 +373,14 @@ Type* ast_validator_resolve_type_reference(AstValidator* validator, const char* 
 
     // Mark this type as being visited
     VisitedEntry visit_entry = {.key = name_view, .visited = true};
-    hashmap_set(validator->visited_nodes, &visit_entry);
+    hashmap_set(this->visited_nodes, &visit_entry);
 
     // Look up the type
-    Type* resolved_type = ast_validator_find_type(validator, type_name);
+    Type* resolved_type = this->find_type(type_name);
 
     // Unmark after resolution (allow revisiting in different validation paths)
     VisitedEntry unvisit_entry = {.key = name_view, .visited = false};
-    hashmap_set(validator->visited_nodes, &unvisit_entry);
+    hashmap_set(this->visited_nodes, &unvisit_entry);
 
     return resolved_type;
 }
@@ -547,54 +545,80 @@ void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
 
 // ==================== Validation Functions ====================
 
-// validate 'item' against type 'type'
-ValidationResult* ast_validator_validate_type(AstValidator* validator, ConstItem item, Type* type) {
+// validate 'item' against Type* directly
+ValidationResult* ast_validator_validate_type(SchemaValidator* validator, ConstItem item, Type* type) {
     if (!validator || !type) {
-        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
-        ValidationError* error = create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type",
-            nullptr, validator ? validator->pool : nullptr);
-        add_validation_error(result, error);
+        ValidationResult* result = create_validation_result(validator ? validator->get_pool() : nullptr);
+        if (result) {
+            add_validation_error(result, create_validation_error(
+                AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type pointer",
+                nullptr, validator ? validator->get_pool() : nullptr));
+        }
         return result;
     }
-    // init validation context
-    validator->current_path = nullptr;
-    validator->current_depth = 0;
+
+    // reset validation state - use accessor methods for encapsulation
+    validator->set_current_path(nullptr);
+    validator->set_current_depth(0);
 
     // initialize validation session for timeout tracking
-    if (validator->options.timeout_ms > 0) {
-        validator->validation_start_time = clock();
+    if (validator->get_options()->timeout_ms > 0) {
+        validator->set_validation_start_time(clock());
     }
 
     return validate_against_type(validator, item, type);
 }
 
 // validate 'item' against type named 'type_name'
-ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item, const char* type_name) {
-    if (!validator || !type_name) {
-        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
+ValidationResult* SchemaValidator::validate(ConstItem item, const char* type_name) {
+    if (!type_name) {
+        ValidationResult* result = create_validation_result(this->pool);
         if (result) {
             add_validation_error(result, create_validation_error(
-                AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type name",
-                nullptr, validator ? validator->pool : nullptr));
+                AST_VALID_ERROR_PARSE_ERROR, "Invalid type name",
+                nullptr, this->pool));
         }
         return result;
     }
 
     // Use resolve_type_reference for circular reference detection
-    Type* type = ast_validator_resolve_type_reference(validator, type_name);
+    Type* type = this->resolve_type_reference(type_name);
     if (!type) {
-        ValidationResult* result = create_validation_result(validator->pool);
+        ValidationResult* result = create_validation_result(this->pool);
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg),
                 "Type not found or circular reference detected: %s", type_name);
         ValidationError* error = create_validation_error(
-            AST_VALID_ERROR_REFERENCE_ERROR, error_msg, nullptr, validator->pool);
+            AST_VALID_ERROR_REFERENCE_ERROR, error_msg, nullptr, this->pool);
         add_validation_error(result, error);
         return result;
     }
 
-    return ast_validator_validate_type(validator, item, type);
+    return this->validate_type(item, type);
+}
+
+// validate 'item' against Type* directly
+ValidationResult* SchemaValidator::validate_type(ConstItem item, Type* type) {
+    if (!type) {
+        ValidationResult* result = create_validation_result(this->pool);
+        if (result) {
+            add_validation_error(result, create_validation_error(
+                AST_VALID_ERROR_PARSE_ERROR, "Invalid type pointer",
+                nullptr, this->pool));
+        }
+        return result;
+    }
+
+    // reset validation state
+    this->current_path = nullptr;
+    this->current_depth = 0;
+
+    // initialize validation session for timeout tracking
+    if (this->options.timeout_ms > 0) {
+        this->validation_start_time = clock();
+    }
+
+    return validate_against_type(this, item, type);
 }
 
 // ==================== Validation Options Functions ====================
@@ -620,57 +644,51 @@ ValidationOptions ast_validator_default_options() {
 /**
  * Set validation options
  */
-void ast_validator_set_options(AstValidator* validator, ValidationOptions* options) {
-    if (!validator || !options) return;
-    validator->options = *options;
+void SchemaValidator::set_options(ValidationOptions* options) {
+    if (!options) return;
+    this->options = *options;
 }
 
 /**
  * Get current validation options
  */
-ValidationOptions* ast_validator_get_options(AstValidator* validator) {
-    if (!validator) return nullptr;
-    return &validator->options;
+ValidationOptions* SchemaValidator::get_options() {
+    return &this->options;
 }
 
 /**
  * Convenience: Set strict mode
  */
-void ast_validator_set_strict_mode(AstValidator* validator, bool strict) {
-    if (!validator) return;
-    validator->options.strict_mode = strict;
+void SchemaValidator::set_strict_mode(bool strict) {
+    this->options.strict_mode = strict;
 }
 
 /**
  * Convenience: Set maximum error count
  */
-void ast_validator_set_max_errors(AstValidator* validator, int max) {
-    if (!validator) return;
-    validator->options.max_errors = max;
+void SchemaValidator::set_max_errors(int max) {
+    this->options.max_errors = max;
 }
 
 /**
  * Convenience: Set validation timeout
  */
-void ast_validator_set_timeout(AstValidator* validator, int timeout_ms) {
-    if (!validator) return;
-    validator->options.timeout_ms = timeout_ms;
+void SchemaValidator::set_timeout(int timeout_ms) {
+    this->options.timeout_ms = timeout_ms;
 }
 
 /**
  * Convenience: Enable error suggestions
  */
-void ast_validator_set_show_suggestions(AstValidator* validator, bool show) {
-    if (!validator) return;
-    validator->options.show_suggestions = show;
+void SchemaValidator::set_show_suggestions(bool show) {
+    this->options.show_suggestions = show;
 }
 
 /**
  * Convenience: Enable error context display
  */
-void ast_validator_set_show_context(AstValidator* validator, bool show) {
-    if (!validator) return;
-    validator->options.show_context = show;
+void SchemaValidator::set_show_context(bool show) {
+    this->options.show_context = show;
 }
 
 // ==================== Format-Specific Validation ====================
@@ -805,16 +823,123 @@ ConstItem unwrap_html_document(ConstItem item, Pool* pool) {
     return item;
 }
 
-/**
- * Validate with format-specific handling
- */
-ValidationResult* ast_validator_validate_with_format(
-    AstValidator* validator,
+// ==================== C Wrapper Functions ====================
+
+extern "C" {
+
+SchemaValidator* schema_validator_create(Pool* pool) {
+    return SchemaValidator::create(pool);
+}
+
+void schema_validator_destroy(SchemaValidator* validator) {
+    if (validator) {
+        validator->destroy();
+    }
+}
+
+int schema_validator_load_schema(SchemaValidator* validator, const char* source, const char* root_type) {
+    if (!validator) return -1;
+    return validator->load_schema(source, root_type);
+}
+
+Type* schema_validator_find_type(SchemaValidator* validator, const char* type_name) {
+    if (!validator) return nullptr;
+    return validator->find_type(type_name);
+}
+
+Type* schema_validator_resolve_type_reference(SchemaValidator* validator, const char* type_name) {
+    if (!validator) return nullptr;
+    return validator->resolve_type_reference(type_name);
+}
+
+ValidationResult* schema_validator_validate(SchemaValidator* validator, ConstItem item, const char* type_name) {
+    if (!validator) return nullptr;
+    return validator->validate(item, type_name);
+}
+
+ValidationResult* schema_validator_validate_type(SchemaValidator* validator, ConstItem item, Type* type) {
+    if (!validator) {
+        // return an invalid result for null validator
+        ValidationResult* result = (ValidationResult*)calloc(1, sizeof(ValidationResult));
+        result->valid = false;
+        result->error_count = 0;
+        result->errors = nullptr;
+        return result;
+    }
+    return validator->validate_type(item, type);
+}
+
+ValidationResult* schema_validator_validate_with_format(
+    SchemaValidator* validator,
     ConstItem item,
     const char* type_name,
     const char* input_format
 ) {
-    if (!validator || !type_name) {
+    if (!validator) return nullptr;
+    return validator->validate_with_format(item, type_name, input_format);
+}
+
+ValidationOptions schema_validator_default_options() {
+    ValidationOptions opts = {};
+    opts.strict_mode = false;
+    opts.allow_unknown_fields = false;
+    opts.allow_empty_elements = false;
+    opts.max_depth = 100;
+    opts.timeout_ms = 0;
+    opts.max_errors = 0;
+    opts.show_suggestions = true;
+    opts.show_context = true;
+    opts.enabled_rules = nullptr;
+    opts.disabled_rules = nullptr;
+    return opts;
+}
+
+void schema_validator_set_options(SchemaValidator* validator, ValidationOptions* options) {
+    if (!validator) return;
+    validator->set_options(options);
+}
+
+ValidationOptions* schema_validator_get_options(SchemaValidator* validator) {
+    if (!validator) return nullptr;
+    return validator->get_options();
+}
+
+void schema_validator_set_strict_mode(SchemaValidator* validator, bool strict) {
+    if (!validator) return;
+    validator->set_strict_mode(strict);
+}
+
+void schema_validator_set_max_errors(SchemaValidator* validator, int max) {
+    if (!validator) return;
+    validator->set_max_errors(max);
+}
+
+void schema_validator_set_timeout(SchemaValidator* validator, int timeout_ms) {
+    if (!validator) return;
+    validator->set_timeout(timeout_ms);
+}
+
+void schema_validator_set_show_suggestions(SchemaValidator* validator, bool show) {
+    if (!validator) return;
+    validator->set_show_suggestions(show);
+}
+
+void schema_validator_set_show_context(SchemaValidator* validator, bool show) {
+    if (!validator) return;
+    validator->set_show_context(show);
+}
+
+} // extern "C"
+
+/**
+ * Validate with format-specific handling
+ */
+ValidationResult* SchemaValidator::validate_with_format(
+    ConstItem item,
+    const char* type_name,
+    const char* input_format
+) {
+    if (!type_name) {
         return nullptr;
     }
 
@@ -829,13 +954,13 @@ ValidationResult* ast_validator_validate_with_format(
     ConstItem unwrapped_item = item;
     if (input_format) {
         if (strcmp(input_format, "xml") == 0) {
-            unwrapped_item = unwrap_xml_document(item, validator->pool);
+            unwrapped_item = unwrap_xml_document(item, this->pool);
         } else if (strcmp(input_format, "html") == 0) {
-            unwrapped_item = unwrap_html_document(item, validator->pool);
+            unwrapped_item = unwrap_html_document(item, this->pool);
         }
         // json and other formats don't need unwrapping
     }
 
     // perform standard validation on unwrapped item
-    return ast_validator_validate(validator, unwrapped_item, type_name);
+    return this->validate(unwrapped_item, type_name);
 }

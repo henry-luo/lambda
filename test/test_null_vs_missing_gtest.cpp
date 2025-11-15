@@ -14,14 +14,14 @@
 class NullVsMissingTest : public ::testing::Test {
 protected:
     Pool* pool;
-    AstValidator* validator;
+    SchemaValidator* validator;
     Input* input;
 
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
 
-        validator = ast_validator_create(pool);
+        validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
 
         // Create Input context for MarkBuilder
@@ -44,7 +44,7 @@ protected:
             arraylist_free(input->type_list);
         }
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
         }
         if (pool) {
             pool_destroy(pool);
@@ -53,7 +53,7 @@ protected:
 
     // Helper: Load schema from file
     bool load_schema(const char* schema_file, const char* type_name) {
-        int result = ast_validator_load_schema(validator, schema_file, type_name);
+        int result = schema_validator_load_schema(validator, schema_file, type_name);
         return (result == 0);
     }
 

@@ -13,10 +13,10 @@
 #include "../transpiler.hpp"
 
 // Forward declarations
-typedef struct AstValidator AstValidator;
 typedef struct ValidationResult ValidationResult;
 typedef struct ValidationError ValidationError;
 typedef struct PathSegment PathSegment;
+class SchemaValidator;  // C++ class, defined below
 
 // ==================== Validation Error System ====================
 
@@ -129,136 +129,192 @@ struct VisitedEntry {
     bool visited;
 };
 
-// Validation context
-typedef struct AstValidator {
-    Transpiler* transpiler;          // direct use of transpiler for AST
+// ==================== Schema Validator Class ====================
+
+/**
+ * SchemaValidator - Unified validator for Lambda schemas
+ *
+ * Validates data items against Lambda type schemas. Supports various input formats
+ * (JSON, XML, HTML, etc.) and provides detailed error reporting with suggestions.
+ *
+ * Example usage:
+ *   SchemaValidator* validator = SchemaValidator::create(pool);
+ *   validator->load_schema(schema_source, "RootType");
+ *   ValidationResult* result = validator->validate(item, "RootType");
+ *   validator->destroy();
+ */
+class SchemaValidator {
+private:
+    // Core components
+    Transpiler* transpiler;          // AST building and type extraction
     Pool* pool;                      // memory pool
     HashMap* type_definitions;       // registry of Type* definitions
+
+    // Validation state
     PathSegment* current_path;       // current validation path
     int current_depth;               // current recursion depth
     int max_depth;                   // deprecated: use options.max_depth
     ValidationOptions options;       // validation configuration
     HashMap* visited_nodes;          // for circular reference detection
     clock_t validation_start_time;   // for timeout tracking
-} AstValidator;
 
-// Schema validator structure
-typedef struct SchemaValidator {
-    HashMap* schemas;              // Loaded schemas by name
-    Pool* pool;         // Memory pool
-    AstValidator* ast_validator;   // AST-based validator instance
-    void* context;                 // Default validation context
-    void* custom_validators;       // Registered custom validators
-    ValidationOptions default_options;  // Default validation options
-} SchemaValidator;
+    // Private constructor - use create() factory method
+    SchemaValidator(Pool* pool);
 
-// ==================== Core API ====================
+public:
+    // Factory method and destructor
+    static SchemaValidator* create(Pool* pool);
+    void destroy();
+
+    // Schema management
+    int load_schema(const char* source, const char* root_type);
+
+    // Validation methods
+    ValidationResult* validate(ConstItem item, const char* type_name);
+    ValidationResult* validate_with_format(ConstItem item, const char* type_name, const char* input_format);
+    ValidationResult* validate_type(ConstItem item, Type* type);
+
+    // Options management
+    void set_options(ValidationOptions* options);
+    ValidationOptions* get_options();
+    static ValidationOptions default_options();
+    void set_strict_mode(bool strict);
+    void set_max_errors(int max);
+    void set_timeout(int timeout_ms);
+    void set_show_suggestions(bool show);
+    void set_show_context(bool show);
+
+    // Type lookup
+    Type* find_type(const char* type_name);
+    Type* resolve_type_reference(const char* type_name);
+
+    // Accessors (for internal validation functions)
+    Pool* get_pool() const { return pool; }
+    Transpiler* get_transpiler() const { return transpiler; }
+    PathSegment* get_current_path() const { return current_path; }
+    void set_current_path(PathSegment* path) { current_path = path; }
+    int get_current_depth() const { return current_depth; }
+    void set_current_depth(int depth) { current_depth = depth; }
+    HashMap* get_visited_nodes() const { return visited_nodes; }
+    HashMap* get_type_definitions() const { return type_definitions; }
+    ValidationOptions& get_options_ref() { return options; }
+    clock_t get_validation_start_time() const { return validation_start_time; }
+    void set_validation_start_time(clock_t time) { validation_start_time = time; }
+};
+
+// ==================== Core API (C Wrapper Functions for C Compatibility) ====================
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
- * Create a new AST-based validator
+ * Create a new schema validator (C wrapper)
  */
-AstValidator* ast_validator_create(Pool* pool);
+SchemaValidator* schema_validator_create(Pool* pool);
 
 /**
- * Destroy validator and cleanup resources
+ * Destroy validator and cleanup resources (C wrapper)
  */
-void ast_validator_destroy(AstValidator* validator);
+void schema_validator_destroy(SchemaValidator* validator);
 
 /**
- * Load schema from Lambda source code
+ * Load schema from Lambda source code (C wrapper)
  */
-int ast_validator_load_schema(AstValidator* validator, const char* source, const char* root_type);
+int schema_validator_load_schema(SchemaValidator* validator, const char* source, const char* root_type);
 
 /**
- * Validate a typed item against a type name
+ * Validate a typed item against a type name (C wrapper)
  */
-ValidationResult* ast_validator_validate(AstValidator* validator, ConstItem item, const char* type_name);
+ValidationResult* schema_validator_validate(SchemaValidator* validator, ConstItem item, const char* type_name);
 
 /**
- * Validate a typed item against a type name with format-specific handling
- * @param validator The validator instance
- * @param item The item to validate
- * @param type_name The name of the type to validate against
- * @param input_format Format hint ("xml", "html", "json", etc.) or NULL for auto-detect
+ * Validate a typed item against a type name with format-specific handling (C wrapper)
  */
-ValidationResult* ast_validator_validate_with_format(
-    AstValidator* validator,
+ValidationResult* schema_validator_validate_with_format(
+    SchemaValidator* validator,
     ConstItem item,
     const char* type_name,
     const char* input_format
 );
 
 /**
- * Validate a typed item against a specific Type*
+ * Validate a typed item against a specific Type* (C wrapper)
  */
-ValidationResult* ast_validator_validate_type(AstValidator* validator, ConstItem item, Type* type);
+ValidationResult* schema_validator_validate_type(SchemaValidator* validator, ConstItem item, Type* type);
 
-// ==================== Validation Options ====================
+// ==================== Validation Options (C Wrappers) ====================
 
 /**
- * Set validation options
+ * Set validation options (C wrapper)
  */
-void ast_validator_set_options(AstValidator* validator, ValidationOptions* options);
+void schema_validator_set_options(SchemaValidator* validator, ValidationOptions* options);
 
 /**
- * Get current validation options
+ * Get current validation options (C wrapper)
  */
-ValidationOptions* ast_validator_get_options(AstValidator* validator);
+ValidationOptions* schema_validator_get_options(SchemaValidator* validator);
 
 /**
- * Create default validation options
+ * Create default validation options (C wrapper)
  */
-ValidationOptions ast_validator_default_options();
+ValidationOptions schema_validator_default_options();
 
 /**
- * Convenience: Set strict mode
+ * Convenience: Set strict mode (C wrapper)
  */
-void ast_validator_set_strict_mode(AstValidator* validator, bool strict);
+void schema_validator_set_strict_mode(SchemaValidator* validator, bool strict);
 
 /**
- * Convenience: Set maximum error count
+ * Convenience: Set maximum error count (C wrapper)
  */
-void ast_validator_set_max_errors(AstValidator* validator, int max);
+void schema_validator_set_max_errors(SchemaValidator* validator, int max);
 
 /**
- * Convenience: Set validation timeout
+ * Convenience: Set validation timeout (C wrapper)
  */
-void ast_validator_set_timeout(AstValidator* validator, int timeout_ms);
+void schema_validator_set_timeout(SchemaValidator* validator, int timeout_ms);
 
 /**
- * Convenience: Enable error suggestions
+ * Convenience: Enable error suggestions (C wrapper)
  */
-void ast_validator_set_show_suggestions(AstValidator* validator, bool show);
+void schema_validator_set_show_suggestions(SchemaValidator* validator, bool show);
 
 /**
- * Convenience: Enable error context display
+ * Convenience: Enable error context display (C wrapper)
  */
-void ast_validator_set_show_context(AstValidator* validator, bool show);
+void schema_validator_set_show_context(SchemaValidator* validator, bool show);
 
-// ==================== Type Extraction ====================
+// ==================== Type Extraction (C Wrappers) ====================
+
+/**
+ * Find type definition by name in validator registry (C wrapper)
+ */
+Type* schema_validator_find_type(SchemaValidator* validator, const char* type_name);
+
+/**
+ * Resolve a type reference with circular reference detection (C wrapper)
+ */
+Type* schema_validator_resolve_type_reference(SchemaValidator* validator, const char* type_name);
+
+#ifdef __cplusplus
+}
+#endif
+
+// ==================== Internal Validation Functions ====================
+// These internal functions handle validation logic for specific type categories
 
 /**
  * Extract Type* from AST node
  */
 Type* extract_type_from_ast_node(AstNode* node);
 
-/**
- * Find type definition by name in validator registry
- */
-Type* ast_validator_find_type(AstValidator* validator, const char* type_name);
-
-/**
- * Resolve a type reference with circular reference detection
- * Returns the resolved Type* or nullptr if not found or circular
- */
-Type* ast_validator_resolve_type_reference(AstValidator* validator, const char* type_name);
-
-// ==================== Validation Functions ====================
+// ==================== Internal Validation Functions ====================
 
 /**
  * Main validation dispatcher
  */
-ValidationResult* validate_against_type(AstValidator* validator, ConstItem item, Type* type);
+ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem item, Type* type);
 
 /**
  * Validate against primitive type
@@ -268,27 +324,27 @@ ValidationResult* validate_against_primitive_type(ConstItem item, Type* type);
 /**
  * Validate against array type
  */
-ValidationResult* validate_against_array_type(AstValidator* validator, ConstItem item, TypeArray* array_type);
+ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstItem item, TypeArray* array_type);
 
 /**
  * Validate against map type
  */
-ValidationResult* validate_against_map_type(AstValidator* validator, ConstItem item, TypeMap* map_type);
+ValidationResult* validate_against_map_type(SchemaValidator* validator, ConstItem item, TypeMap* map_type);
 
 /**
  * Validate against element type
  */
-ValidationResult* validate_against_element_type(AstValidator* validator, ConstItem item, TypeElmt* element_type);
+ValidationResult* validate_against_element_type(SchemaValidator* validator, ConstItem item, TypeElmt* element_type);
 
 /**
  * Validate against union type (multiple valid types)
  */
-ValidationResult* validate_against_union_type(AstValidator* validator, ConstItem item, Type** union_types, int type_count);
+ValidationResult* validate_against_union_type(SchemaValidator* validator, ConstItem item, Type** union_types, int type_count);
 
 /**
  * Validate occurrence constraints (?, *, +, min/max)
  */
-ValidationResult* validate_against_occurrence(AstValidator* validator, ConstItem* items, long item_count, Type* expected_type, Operator occurrence_op);
+ValidationResult* validate_against_occurrence(SchemaValidator* validator, ConstItem* items, long item_count, Type* expected_type, Operator occurrence_op);
 
 // ==================== Error Handling ====================
 

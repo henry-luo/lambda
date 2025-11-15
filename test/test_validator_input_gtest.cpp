@@ -48,19 +48,19 @@ String* create_lambda_string(const char* text) {
 class ValidatorInputTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
-    AstValidator* validator = nullptr;
+    SchemaValidator* validator = nullptr;
 
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr) << "Failed to create memory pool";
 
-        validator = ast_validator_create(pool);
+        validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr) << "Failed to create validator";
     }
 
     void TearDown() override {
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
             validator = nullptr;
         }
 
@@ -110,15 +110,15 @@ protected:
 
 TEST_F(ValidatorInputTest, ValidatorCreation) {
     EXPECT_NE(validator, nullptr);
-    EXPECT_NE(validator->pool, nullptr);
-    EXPECT_NE(validator->transpiler, nullptr);
+    EXPECT_NE(validator->get_pool(), nullptr);
+    EXPECT_NE(validator->get_transpiler(), nullptr);
 }
 
 TEST_F(ValidatorInputTest, ValidateString) {
     ConstItem string_item = create_string("hello world");
     Type* string_type = create_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, string_item, string_type);
 
     ASSERT_NE(result, nullptr);
@@ -130,7 +130,7 @@ TEST_F(ValidatorInputTest, ValidateInt) {
     ConstItem int_item = create_int(42);
     Type* int_type = create_type(LMD_TYPE_INT);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, int_item, int_type);
 
     ASSERT_NE(result, nullptr);
@@ -142,7 +142,7 @@ TEST_F(ValidatorInputTest, ValidateBool) {
     ConstItem bool_item = create_bool(true);
     Type* bool_type = create_type(LMD_TYPE_BOOL);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, bool_item, bool_type);
 
     ASSERT_NE(result, nullptr);
@@ -154,7 +154,7 @@ TEST_F(ValidatorInputTest, ValidateNull) {
     ConstItem null_item = create_null();
     Type* null_type = create_type(LMD_TYPE_NULL);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, null_item, null_type);
 
     ASSERT_NE(result, nullptr);
@@ -167,7 +167,7 @@ TEST_F(ValidatorInputTest, StringIntMismatch) {
     ConstItem string_item = create_string("not a number");
     Type* int_type = create_type(LMD_TYPE_INT);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, string_item, int_type);
 
     ASSERT_NE(result, nullptr);
@@ -185,7 +185,7 @@ TEST_F(ValidatorInputTest, IntStringMismatch) {
     ConstItem int_item = create_int(123);
     Type* string_type = create_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, int_item, string_type);
 
     ASSERT_NE(result, nullptr);
@@ -197,7 +197,7 @@ TEST_F(ValidatorInputTest, BoolIntMismatch) {
     ConstItem bool_item = create_bool(true);
     Type* int_type = create_type(LMD_TYPE_INT);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, bool_item, int_type);
 
     ASSERT_NE(result, nullptr);
@@ -210,7 +210,7 @@ TEST_F(ValidatorInputTest, ErrorHasMessage) {
     ConstItem string_item = create_string("wrong");
     Type* int_type = create_type(LMD_TYPE_INT);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, string_item, int_type);
 
     ASSERT_NE(result, nullptr);
@@ -230,7 +230,7 @@ TEST_F(ValidatorInputTest, ValidationResultDestroy) {
     ConstItem string_item = create_string("test");
     Type* string_type = create_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, string_item, string_type);
 
     ASSERT_NE(result, nullptr);
@@ -265,7 +265,7 @@ TEST_F(ValidatorInputTest, ValidateJSONInput) {
         // Convert Item to ConstItem for validation
         ConstItem root_item = input->root.to_const();
 
-        ValidationResult* result = ast_validator_validate_type(
+        ValidationResult* result = schema_validator_validate_type(
             validator, root_item, map_type);
 
         ASSERT_NE(result, nullptr);
@@ -283,7 +283,7 @@ TEST_F(ValidatorInputTest, NullValidator) {
     ConstItem string_item = create_string("test");
     Type* string_type = create_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         nullptr, string_item, string_type);
 
     // The validator handles null gracefully by returning an invalid result
@@ -294,7 +294,7 @@ TEST_F(ValidatorInputTest, NullValidator) {
 TEST_F(ValidatorInputTest, NullType) {
     ConstItem string_item = create_string("test");
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, string_item, nullptr);
 
     // Should handle null type gracefully
@@ -306,7 +306,7 @@ TEST_F(ValidatorInputTest, EmptyString) {
     ConstItem empty_string = create_string("");
     Type* string_type = create_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(
+    ValidationResult* result = schema_validator_validate_type(
         validator, empty_string, string_type);
 
     ASSERT_NE(result, nullptr);
@@ -321,18 +321,18 @@ TEST_F(ValidatorInputTest, MultipleValidations) {
 
     // First validation
     ConstItem string_item = create_string("hello");
-    ValidationResult* result1 = ast_validator_validate_type(
+    ValidationResult* result1 = schema_validator_validate_type(
         validator, string_item, string_type);
     EXPECT_TRUE(result1->valid);
 
     // Second validation
     ConstItem int_item = create_int(42);
-    ValidationResult* result2 = ast_validator_validate_type(
+    ValidationResult* result2 = schema_validator_validate_type(
         validator, int_item, int_type);
     EXPECT_TRUE(result2->valid);
 
     // Third validation (should fail)
-    ValidationResult* result3 = ast_validator_validate_type(
+    ValidationResult* result3 = schema_validator_validate_type(
         validator, string_item, int_type);
     EXPECT_FALSE(result3->valid);
 }

@@ -23,14 +23,14 @@
 class ValidatorFeaturesTest : public ::testing::Test {
 protected:
     Pool* pool;
-    AstValidator* validator;
+    SchemaValidator* validator;
     Input* input;
 
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
 
-        validator = ast_validator_create(pool);
+        validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
 
         // Create Input context for MarkBuilder
@@ -53,7 +53,7 @@ protected:
             arraylist_free(input->type_list);
         }
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
         }
         if (pool) {
             pool_destroy(pool);
@@ -369,7 +369,7 @@ struct TestTypeEntry {
 };
 
 // Helper function to register a type in the validator
-static void register_type(AstValidator* validator, Pool* pool, const char* name, size_t name_len, Type* runtime_type) {
+static void register_type(SchemaValidator* validator, Pool* pool, const char* name, size_t name_len, Type* runtime_type) {
     TestTypeDefinition* def = (TestTypeDefinition*)pool_calloc(pool, sizeof(TestTypeDefinition));
     def->name = (StrView){name, name_len};
     def->runtime_type = runtime_type;
@@ -378,12 +378,12 @@ static void register_type(AstValidator* validator, Pool* pool, const char* name,
     TestTypeEntry entry;
     entry.definition = def;
     entry.name_key = def->name;
-    hashmap_set(validator->type_definitions, &entry);
+    hashmap_set(validator->get_type_definitions(), &entry);
 }
 
 TEST_F(ValidatorFeaturesTest, LoadSimpleSchema) {
     // Directly test type registration without AST parsing
-    // (AST parser now supports type statements via ast_validator_load_schema)
+    // (AST parser now supports type statements via schema_validator_load_schema)
 
     // Create Person type: { name: string, age: int }
     TypeMap* person_map = create_map_type();
@@ -399,10 +399,10 @@ TEST_F(ValidatorFeaturesTest, LoadSimpleSchema) {
     TestTypeEntry person_entry;
     person_entry.definition = person_def;
     person_entry.name_key = person_def->name;
-    hashmap_set(validator->type_definitions, &person_entry);
+    hashmap_set(validator->get_type_definitions(), &person_entry);
 
     // Verify registration
-    Type* retrieved = ast_validator_find_type(validator, "Person");
+    Type* retrieved = schema_validator_find_type(validator, "Person");
     EXPECT_NE(retrieved, nullptr) << "Person type should be registered";
     EXPECT_EQ(retrieved->type_id, LMD_TYPE_MAP);
 }
@@ -420,7 +420,7 @@ TEST_F(ValidatorFeaturesTest, LoadSchemaWithMultipleTypes) {
     TestTypeEntry address_entry;
     address_entry.definition = address_def;
     address_entry.name_key = address_def->name;
-    hashmap_set(validator->type_definitions, &address_entry);
+    hashmap_set(validator->get_type_definitions(), &address_entry);
 
     // Create and register Person type
     TypeMap* person_map = create_map_type();
@@ -432,7 +432,7 @@ TEST_F(ValidatorFeaturesTest, LoadSchemaWithMultipleTypes) {
     TestTypeEntry person_entry;
     person_entry.definition = person_def;
     person_entry.name_key = person_def->name;
-    hashmap_set(validator->type_definitions, &person_entry);
+    hashmap_set(validator->get_type_definitions(), &person_entry);
 
     // Create and register Company type
     TypeMap* company_map = create_map_type();
@@ -444,12 +444,12 @@ TEST_F(ValidatorFeaturesTest, LoadSchemaWithMultipleTypes) {
     TestTypeEntry company_entry;
     company_entry.definition = company_def;
     company_entry.name_key = company_def->name;
-    hashmap_set(validator->type_definitions, &company_entry);
+    hashmap_set(validator->get_type_definitions(), &company_entry);
 
     // Verify all types are registered
-    EXPECT_NE(ast_validator_find_type(validator, "Address"), nullptr);
-    EXPECT_NE(ast_validator_find_type(validator, "Person"), nullptr);
-    EXPECT_NE(ast_validator_find_type(validator, "Company"), nullptr);
+    EXPECT_NE(schema_validator_find_type(validator, "Address"), nullptr);
+    EXPECT_NE(schema_validator_find_type(validator, "Person"), nullptr);
+    EXPECT_NE(schema_validator_find_type(validator, "Company"), nullptr);
 }
 
 TEST_F(ValidatorFeaturesTest, TypeNotFound) {
@@ -460,10 +460,10 @@ TEST_F(ValidatorFeaturesTest, TypeNotFound) {
     // registered via helper
 
     // Verify Person exists
-    EXPECT_NE(ast_validator_find_type(validator, "Person"), nullptr);
+    EXPECT_NE(schema_validator_find_type(validator, "Person"), nullptr);
 
     // Try to find non-existent type
-    Type* result = ast_validator_find_type(validator, "NonExistent");
+    Type* result = schema_validator_find_type(validator, "NonExistent");
     EXPECT_EQ(result, nullptr) << "Should return nullptr for non-existent type";
 }
 
@@ -477,7 +477,7 @@ TEST_F(ValidatorFeaturesTest, ResolveSimpleTypeReference) {
     // registered via helper
 
     // Resolve the reference
-    Type* resolved = ast_validator_resolve_type_reference(validator, "Person");
+    Type* resolved = schema_validator_resolve_type_reference(validator, "Person");
     EXPECT_NE(resolved, nullptr) << "Should resolve type reference";
     EXPECT_EQ(resolved, (Type*)person_map) << "Should return the registered type";
     EXPECT_EQ(resolved->type_id, LMD_TYPE_MAP);
@@ -497,8 +497,8 @@ TEST_F(ValidatorFeaturesTest, ResolveNestedTypeReference) {
     // registered via helper
 
     // Resolve both references
-    Type* address_resolved = ast_validator_resolve_type_reference(validator, "Address");
-    Type* person_resolved = ast_validator_resolve_type_reference(validator, "Person");
+    Type* address_resolved = schema_validator_resolve_type_reference(validator, "Address");
+    Type* person_resolved = schema_validator_resolve_type_reference(validator, "Person");
 
     EXPECT_NE(address_resolved, nullptr);
     EXPECT_NE(person_resolved, nullptr);
@@ -517,20 +517,20 @@ TEST_F(ValidatorFeaturesTest, DetectCircularTypeReference) {
     // registered via helper
 
     // First resolution should work
-    Type* first_resolve = ast_validator_resolve_type_reference(validator, "Node");
+    Type* first_resolve = schema_validator_resolve_type_reference(validator, "Node");
     EXPECT_NE(first_resolve, nullptr);
 
     // The visited_nodes mechanism prevents infinite loops during validation
     // The function marks as visited, resolves, then unmarks
     // So we can resolve the same type multiple times
-    Type* second_resolve = ast_validator_resolve_type_reference(validator, "Node");
+    Type* second_resolve = schema_validator_resolve_type_reference(validator, "Node");
     EXPECT_NE(second_resolve, nullptr);
     EXPECT_EQ(first_resolve, second_resolve);
 }
 
 TEST_F(ValidatorFeaturesTest, ResolveNonExistentTypeReference) {
     // Try to resolve a type that doesn't exist
-    Type* resolved = ast_validator_resolve_type_reference(validator, "NonExistent");
+    Type* resolved = schema_validator_resolve_type_reference(validator, "NonExistent");
     EXPECT_EQ(resolved, nullptr) << "Should return nullptr for non-existent type";
 }
 
@@ -554,9 +554,9 @@ TEST_F(ValidatorFeaturesTest, ResolveMultipleTypesInRegistry) {
     // registered via helper
 
     // Resolve all three types
-    Type* person_resolved = ast_validator_resolve_type_reference(validator, "Person");
-    Type* numbers_resolved = ast_validator_resolve_type_reference(validator, "Numbers");
-    Type* status_resolved = ast_validator_resolve_type_reference(validator, "Status");
+    Type* person_resolved = schema_validator_resolve_type_reference(validator, "Person");
+    Type* numbers_resolved = schema_validator_resolve_type_reference(validator, "Numbers");
+    Type* status_resolved = schema_validator_resolve_type_reference(validator, "Status");
 
     EXPECT_NE(person_resolved, nullptr);
     EXPECT_NE(numbers_resolved, nullptr);
@@ -574,9 +574,9 @@ TEST_F(ValidatorFeaturesTest, ResolveTypeAfterMultipleLookups) {
     // registered via helper
 
     // Resolve multiple times to ensure stability
-    Type* resolved1 = ast_validator_resolve_type_reference(validator, "Age");
-    Type* resolved2 = ast_validator_resolve_type_reference(validator, "Age");
-    Type* resolved3 = ast_validator_resolve_type_reference(validator, "Age");
+    Type* resolved1 = schema_validator_resolve_type_reference(validator, "Age");
+    Type* resolved2 = schema_validator_resolve_type_reference(validator, "Age");
+    Type* resolved3 = schema_validator_resolve_type_reference(validator, "Age");
 
     EXPECT_NE(resolved1, nullptr);
     EXPECT_EQ(resolved1, resolved2) << "Multiple resolutions should return same pointer";
@@ -595,15 +595,15 @@ TEST_F(ValidatorFeaturesTest, CircularReferenceDetectionInDepth) {
     VisitedEntry visit_entry;
     visit_entry.key = (StrView){"RecursiveNode", 13};
     visit_entry.visited = true;
-    hashmap_set(validator->visited_nodes, &visit_entry);
+    hashmap_set(validator->get_visited_nodes(), &visit_entry);
 
     // Try to resolve while marked as visited (circular reference)
-    Type* resolved = ast_validator_resolve_type_reference(validator, "RecursiveNode");
+    Type* resolved = schema_validator_resolve_type_reference(validator, "RecursiveNode");
     EXPECT_EQ(resolved, nullptr) << "Should return nullptr when circular reference detected";
 
     // Cleanup: unmark for other tests
     visit_entry.visited = false;
-    hashmap_set(validator->visited_nodes, &visit_entry);
+    hashmap_set(validator->get_visited_nodes(), &visit_entry);
 }
 
 TEST_F(ValidatorFeaturesTest, TypeRegistryOverwrite) {
@@ -620,7 +620,7 @@ TEST_F(ValidatorFeaturesTest, TypeRegistryOverwrite) {
     // registered via helper
 
     // Should resolve to the most recent type
-    Type* resolved = ast_validator_resolve_type_reference(validator, "Status");
+    Type* resolved = schema_validator_resolve_type_reference(validator, "Status");
     EXPECT_NE(resolved, nullptr);
     EXPECT_EQ(resolved->type_id, LMD_TYPE_INT) << "Should use overwritten type";
 }
@@ -639,8 +639,8 @@ TEST_F(ValidatorFeaturesTest, ResolveArrayOfReferencedType) {
     // registered via helper
 
     // Resolve both
-    Type* person_resolved = ast_validator_resolve_type_reference(validator, "Person");
-    Type* people_resolved = ast_validator_resolve_type_reference(validator, "People");
+    Type* person_resolved = schema_validator_resolve_type_reference(validator, "Person");
+    Type* people_resolved = schema_validator_resolve_type_reference(validator, "People");
 
     EXPECT_NE(person_resolved, nullptr);
     EXPECT_NE(people_resolved, nullptr);
@@ -875,8 +875,8 @@ TEST_F(ValidatorFeaturesTest, ReferencedTypesInRegistry) {
     // registered via helper
 
     // Resolve both
-    Type* name_resolved = ast_validator_resolve_type_reference(validator, "Name");
-    Type* count_resolved = ast_validator_resolve_type_reference(validator, "Count");
+    Type* name_resolved = schema_validator_resolve_type_reference(validator, "Name");
+    Type* count_resolved = schema_validator_resolve_type_reference(validator, "Count");
 
     EXPECT_NE(name_resolved, nullptr);
     EXPECT_NE(count_resolved, nullptr);
@@ -887,7 +887,7 @@ TEST_F(ValidatorFeaturesTest, ReferencedTypesInRegistry) {
 // ==================== Depth Limit Tests ====================
 
 TEST_F(ValidatorFeaturesTest, ValidatorDepthLimit) {
-    validator->options.max_depth = 5;
+    validator->get_options()->max_depth = 5;
 
     // Create nested array types to exceed depth
     Type* base = create_primitive_type(LMD_TYPE_INT);
@@ -902,7 +902,7 @@ TEST_F(ValidatorFeaturesTest, ValidatorDepthLimit) {
     item_mut.item = 0; // Any item
     ConstItem item = item_mut.to_const();
 
-    validator->current_depth = 0;
+    validator->set_current_depth(0);
     ValidationResult* result = validate_against_type(validator, item, (Type*)arr6);
 
     ASSERT_NE(result, nullptr);
@@ -934,18 +934,18 @@ TEST_F(ValidatorFeaturesTest, ErrorPathCreation) {
 // ==================== Validator Creation/Destruction ====================
 
 TEST_F(ValidatorFeaturesTest, ValidatorHasTypeRegistry) {
-    EXPECT_NE(validator->type_definitions, nullptr);
+    EXPECT_NE(validator->get_type_definitions(), nullptr);
 }
 
 TEST_F(ValidatorFeaturesTest, ValidatorHasVisitedNodes) {
-    EXPECT_NE(validator->visited_nodes, nullptr);
+    EXPECT_NE(validator->get_visited_nodes(), nullptr);
 }
 
 TEST_F(ValidatorFeaturesTest, ValidatorHasDefaultOptions) {
-    EXPECT_FALSE(validator->options.strict_mode);
-    EXPECT_TRUE(validator->options.allow_unknown_fields);
-    EXPECT_TRUE(validator->options.allow_empty_elements);
-    EXPECT_EQ(validator->options.max_depth, 1024);
+    EXPECT_FALSE(validator->get_options()->strict_mode);
+    EXPECT_TRUE(validator->get_options()->allow_unknown_fields);
+    EXPECT_TRUE(validator->get_options()->allow_empty_elements);
+    EXPECT_EQ(validator->get_options()->max_depth, 1024);
 }
 
 // ==================== Integration Tests (Phase 1-5 Combined) ====================
@@ -960,7 +960,7 @@ TEST_F(ValidatorFeaturesTest, Integration_TypedArrayWithReferences) {
     // registered via helper
 
     // Create Users type as array of Username
-    Type* username_resolved = ast_validator_resolve_type_reference(validator, "Username");
+    Type* username_resolved = schema_validator_resolve_type_reference(validator, "Username");
     ASSERT_NE(username_resolved, nullptr);
 
     TypeArray* users_array = create_array_type(username_resolved);
@@ -985,7 +985,7 @@ TEST_F(ValidatorFeaturesTest, Integration_TypedArrayWithReferences) {
     item_mut.array = test_array;
     ConstItem item = item_mut.to_const();
 
-    Type* users_resolved = ast_validator_resolve_type_reference(validator, "Users");
+    Type* users_resolved = schema_validator_resolve_type_reference(validator, "Users");
     ASSERT_NE(users_resolved, nullptr);
 
     ValidationResult* result = validate_against_type(validator, item, users_resolved);
@@ -1049,8 +1049,8 @@ TEST_F(ValidatorFeaturesTest, Integration_NestedReferences) {
     // registered via helper
 
     // Resolve both types
-    Type* address_resolved = ast_validator_resolve_type_reference(validator, "Address");
-    Type* person_resolved = ast_validator_resolve_type_reference(validator, "Person");
+    Type* address_resolved = schema_validator_resolve_type_reference(validator, "Address");
+    Type* person_resolved = schema_validator_resolve_type_reference(validator, "Person");
 
     ASSERT_NE(address_resolved, nullptr);
     ASSERT_NE(person_resolved, nullptr);
@@ -1101,7 +1101,7 @@ TEST_F(ValidatorFeaturesTest, Integration_ComplexTypeChain) {
     // registered via helper
 
     // Register type B = [A]
-    Type* a_resolved = ast_validator_resolve_type_reference(validator, "A");
+    Type* a_resolved = schema_validator_resolve_type_reference(validator, "A");
     ASSERT_NE(a_resolved, nullptr);
     TypeArray* b_array = create_array_type(a_resolved);
     TestTypeEntry b_entry;
@@ -1109,7 +1109,7 @@ TEST_F(ValidatorFeaturesTest, Integration_ComplexTypeChain) {
     // registered via helper
 
     // Create type C = B | int
-    Type* b_resolved = ast_validator_resolve_type_reference(validator, "B");
+    Type* b_resolved = schema_validator_resolve_type_reference(validator, "B");
     Type* int_type = create_primitive_type(LMD_TYPE_INT);
 
     Type** union_types = (Type**)pool_calloc(pool, sizeof(Type*) * 2);
@@ -1150,8 +1150,8 @@ TEST_F(ValidatorFeaturesTest, Integration_MultipleReferencesNoCircular) {
     // registered via helper
 
     // Resolve ID from different contexts
-    Type* id_for_user = ast_validator_resolve_type_reference(validator, "ID");
-    Type* id_for_post = ast_validator_resolve_type_reference(validator, "ID");
+    Type* id_for_user = schema_validator_resolve_type_reference(validator, "ID");
+    Type* id_for_post = schema_validator_resolve_type_reference(validator, "ID");
 
     ASSERT_NE(id_for_user, nullptr);
     ASSERT_NE(id_for_post, nullptr);
@@ -1175,8 +1175,8 @@ TEST_F(ValidatorFeaturesTest, Integration_UnionErrorWithTypeReferences) {
     // registered via helper
 
     // Create union Data = Name | Age
-    Type* name_resolved = ast_validator_resolve_type_reference(validator, "Name");
-    Type* age_resolved = ast_validator_resolve_type_reference(validator, "Age");
+    Type* name_resolved = schema_validator_resolve_type_reference(validator, "Name");
+    Type* age_resolved = schema_validator_resolve_type_reference(validator, "Age");
 
     Type** union_types = (Type**)pool_calloc(pool, sizeof(Type*) * 2);
     union_types[0] = name_resolved;
@@ -1204,19 +1204,19 @@ TEST_F(ValidatorFeaturesTest, Integration_DeepTypeNesting) {
     register_type(validator, pool, "A", 1, string_type);
     // registered via helper
 
-    Type* a_resolved = ast_validator_resolve_type_reference(validator, "A");
+    Type* a_resolved = schema_validator_resolve_type_reference(validator, "A");
     TypeArray* b_array = create_array_type(a_resolved);
     TestTypeEntry b_entry;
     register_type(validator, pool, "B", 1, (Type*)b_array);
     // registered via helper
 
-    Type* b_resolved = ast_validator_resolve_type_reference(validator, "B");
+    Type* b_resolved = schema_validator_resolve_type_reference(validator, "B");
     TypeArray* c_array = create_array_type(b_resolved);
     TestTypeEntry c_entry;
     register_type(validator, pool, "C", 1, (Type*)c_array);
     // registered via helper
 
-    Type* c_resolved = ast_validator_resolve_type_reference(validator, "C");
+    Type* c_resolved = schema_validator_resolve_type_reference(validator, "C");
     TypeArray* d_array = create_array_type(c_resolved);
 
     // Verify all types resolve correctly
@@ -1364,7 +1364,7 @@ TEST_F(ValidatorFeaturesTest, MapField_NestedMapType) {
     address_field_entry->name->length = strlen(address_field);
 
     // Use resolved Address type
-    Type* address_resolved = ast_validator_resolve_type_reference(validator, "Address");
+    Type* address_resolved = schema_validator_resolve_type_reference(validator, "Address");
     ASSERT_NE(address_resolved, nullptr);
     address_field_entry->type = address_resolved;
     address_field_entry->byte_offset = 0;
