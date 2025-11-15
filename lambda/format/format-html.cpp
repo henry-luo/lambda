@@ -1,13 +1,14 @@
 #include "format.h"
 #include "format-utils.h"
+#include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
-// MarkReader-based forward declarations
-static void format_item_reader(StringBuf* sb, const ItemReader& item, int depth, bool raw_text_mode);
-static void format_element_reader(StringBuf* sb, const ElementReader& elem, int depth, bool raw_text_mode);
+// MarkReader-based forward declarations using HtmlContext
+static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int depth, bool raw_text_mode);
+static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, int depth, bool raw_text_mode);
 
 // HTML5 void elements (self-closing tags that should not have closing tags)
 static const char* void_elements[] = {
@@ -51,15 +52,19 @@ static bool is_simple_type(TypeId type) {
            type == LMD_TYPE_BOOL;
 }
 
-static void format_indent(StringBuf* sb, int depth) {
+static void format_indent(HtmlContext& ctx, int depth) {
     for (int i = 0; i < depth; i++) {
-        stringbuf_append_str(sb, "  ");
+        stringbuf_append_str(ctx.output(), "  ");
     }
 }
 
 String* format_html(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
+
+    // Create HTML context
+    Pool* ctx_pool = pool_create();
+    HtmlContext ctx(ctx_pool, sb);
 
     // check if root is already an HTML element, if so, format as-is
     if (root_item.item) {
@@ -73,12 +78,13 @@ String* format_html(Pool* pool, Item root_item) {
                 for (long i = 0; i < list->length; i++) {
                     Item list_item = list->items[i];
                     ItemReader item_reader(list_item.to_const());
-                    format_item_reader(sb, item_reader, 0, false);
+                    format_item_reader(ctx, item_reader, 0, false);
                     // add newline after DOCTYPE or comments if not the last item
                     if (i < list->length - 1) {
-                        stringbuf_append_char(sb, '\n');
+                        stringbuf_append_char(ctx.output(), '\n');
                     }
                 }
+                pool_destroy(ctx_pool);
                 return stringbuf_to_string(sb);
             }
         }
@@ -100,7 +106,8 @@ String* format_html(Pool* pool, Item root_item) {
                             strncmp(elmt_type->name.str, "html", 4) == 0) {
                             // format the HTML element directly without wrapping
                             ItemReader first_reader(first_item.to_const());
-                            format_item_reader(sb, first_reader, 0, false);
+                            format_item_reader(ctx, first_reader, 0, false);
+                            pool_destroy(ctx_pool);
                             return stringbuf_to_string(sb);
                         }
                     }
@@ -115,7 +122,8 @@ String* format_html(Pool* pool, Item root_item) {
                     strncmp(elmt_type->name.str, "html", 4) == 0) {
                     // format the HTML element directly without wrapping
                     ItemReader root_reader(root_item.to_const());
-                    format_item_reader(sb, root_reader, 0, false);
+                    format_item_reader(ctx, root_reader, 0, false);
+                    pool_destroy(ctx_pool);
                     return stringbuf_to_string(sb);
                 }
             }
@@ -123,32 +131,36 @@ String* format_html(Pool* pool, Item root_item) {
     }
 
     // add minimal HTML document structure for non-HTML root elements
-    stringbuf_append_str(sb, "<!DOCTYPE html>\n<html>\n<head>");
-    stringbuf_append_str(sb, "<meta charset=\"UTF-8\">");
-    stringbuf_append_str(sb, "<title>Data</title>");
-    stringbuf_append_str(sb, "</head>\n<body>\n");
+    stringbuf_append_str(ctx.output(), "<!DOCTYPE html>\n<html>\n<head>");
+    stringbuf_append_str(ctx.output(), "<meta charset=\"UTF-8\">");
+    stringbuf_append_str(ctx.output(), "<title>Data</title>");
+    stringbuf_append_str(ctx.output(), "</head>\n<body>\n");
 
     ItemReader root_reader(root_item.to_const());
-    format_item_reader(sb, root_reader, 0, false);
+    format_item_reader(ctx, root_reader, 0, false);
 
-    stringbuf_append_str(sb, "\n</body>\n</html>");
+    stringbuf_append_str(ctx.output(), "\n</body>\n</html>");
 
+    pool_destroy(ctx_pool);
     return stringbuf_to_string(sb);
 }
 
 // Convenience function that formats HTML to a provided StringBuf
 void format_html_to_strbuf(StringBuf* sb, Item root_item) {
+    Pool* pool = pool_create();
+    HtmlContext ctx(pool, sb);
     ItemReader reader(root_item.to_const());
-    format_item_reader(sb, reader, 0, false);
+    format_item_reader(ctx, reader, 0, false);
+    pool_destroy(pool);
 }
 
 // ===== MarkReader-based implementations =====
 
 // format element using reader API
-static void format_element_reader(StringBuf* sb, const ElementReader& elem, int depth, bool raw_text_mode) {
+static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, int depth, bool raw_text_mode) {
     const char* tag_name = elem.tagName();
     if (!tag_name) {
-        stringbuf_append_str(sb, "<element/>");
+        stringbuf_append_str(ctx.output(), "<element/>");
         return;
     }
     
@@ -157,7 +169,7 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
     // special handling for HTML comments (tag name "!--")
     if (tag_len == 3 && memcmp(tag_name, "!--", 3) == 0) {
         // this is a comment element - format as <!--content-->
-        stringbuf_append_str(sb, "<!--");
+        stringbuf_append_str(ctx.output(), "<!--");
         
         // output comment content (first child text node)
         ItemReader first_child = elem.childAt(0);
@@ -165,11 +177,11 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
             String* str = first_child.asString();
             if (str && str->chars) {
                 // output comment content as-is (no escaping)
-                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         }
         
-        stringbuf_append_str(sb, "-->");
+        stringbuf_append_str(ctx.output(), "-->");
         return;
     }
     
@@ -178,9 +190,9 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
         (memcmp(tag_name, "!DOCTYPE", 8) == 0 ||
          memcmp(tag_name, "!doctype", 8) == 0)) {
         // this is a DOCTYPE element - format as <!DOCTYPE content>
-        stringbuf_append_str(sb, "<!");
+        stringbuf_append_str(ctx.output(), "<!");
         // preserve the case of "DOCTYPE" or "doctype"
-        stringbuf_append_format(sb, "%.*s", (int)(tag_len - 1), tag_name + 1);
+        stringbuf_append_format(ctx.output(), "%.*s", (int)(tag_len - 1), tag_name + 1);
         
         // output DOCTYPE content (first child text node)
         ItemReader first_child = elem.childAt(0);
@@ -188,12 +200,12 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
             String* str = first_child.asString();
             if (str && str->chars) {
                 // output DOCTYPE content as-is (no escaping)
-                stringbuf_append_char(sb, ' ');
-                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                stringbuf_append_char(ctx.output(), ' ');
+                stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         }
         
-        stringbuf_append_char(sb, '>');
+        stringbuf_append_char(ctx.output(), '>');
         return;
     }
     
@@ -205,15 +217,15 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
             String* str = first_child.asString();
             if (str && str->chars) {
                 // output XML declaration as-is
-                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         }
         return;
     }
     
     // format as proper HTML element
-    stringbuf_append_char(sb, '<');
-    stringbuf_append_str(sb, tag_name);
+    stringbuf_append_char(ctx.output(), '<');
+    stringbuf_append_str(ctx.output(), tag_name);
     
     // add attributes - iterate through element's type shape to get all attributes
     if (elem.element() && elem.element()->type && elem.element()->data) {
@@ -241,18 +253,18 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
                     // boolean attribute - output name only if true
                     bool bool_val = *(bool*)data;
                     if (bool_val) {
-                        stringbuf_append_char(sb, ' ');
-                        stringbuf_append_format(sb, "%.*s", field_name_len, field_name);
+                        stringbuf_append_char(ctx.output(), ' ');
+                        stringbuf_append_format(ctx.output(), "%.*s", field_name_len, field_name);
                     }
                 } else if (field_type == LMD_TYPE_STRING || field_type == LMD_TYPE_NULL) {
                     // string attribute or NULL (empty string)
                     String* str = *(String**)data;
-                    stringbuf_append_char(sb, ' ');
-                    stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
+                    stringbuf_append_char(ctx.output(), ' ');
+                    stringbuf_append_format(ctx.output(), "%.*s=\"", field_name_len, field_name);
                     if (str && str->chars) {
-                        format_html_string_safe(sb, str, true);  // true = is_attribute
+                        format_html_string_safe(ctx.output(), str, true);  // true = is_attribute
                     }
-                    stringbuf_append_char(sb, '"');
+                    stringbuf_append_char(ctx.output(), '"');
                 }
             }
             field = field->next;
@@ -264,9 +276,9 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
     
     if (is_void) {
         // void elements don't have closing tags in HTML5
-        stringbuf_append_char(sb, '>');
+        stringbuf_append_char(ctx.output(), '>');
     } else {
-        stringbuf_append_char(sb, '>');
+        stringbuf_append_char(ctx.output(), '>');
         
         // check if this is a raw text element (script, style, etc.)
         bool is_raw = is_raw_text_element(tag_name, tag_len);
@@ -275,78 +287,78 @@ static void format_element_reader(StringBuf* sb, const ElementReader& elem, int 
         auto it = elem.children();
         ItemReader child_item;
         while (it.next(&child_item)) {
-            format_item_reader(sb, child_item, depth + 1, is_raw);
+            format_item_reader(ctx, child_item, depth + 1, is_raw);
         }
         
         // close tag (only for non-void elements)
-        stringbuf_append_str(sb, "</");
-        stringbuf_append_str(sb, tag_name);
-        stringbuf_append_char(sb, '>');
+        stringbuf_append_str(ctx.output(), "</");
+        stringbuf_append_str(ctx.output(), tag_name);
+        stringbuf_append_char(ctx.output(), '>');
     }
 }
 
 // format item using reader API
-static void format_item_reader(StringBuf* sb, const ItemReader& item, int depth, bool raw_text_mode) {
+static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int depth, bool raw_text_mode) {
     // safety check for null
-    if (!sb) return;
+    if (!ctx.output()) return;
     if (item.isNull()) {
-        stringbuf_append_str(sb, "null");
+        stringbuf_append_str(ctx.output(), "null");
         return;
     }
     
     if (item.isBool()) {
         bool val = item.asBool();
-        stringbuf_append_str(sb, val ? "true" : "false");
+        stringbuf_append_str(ctx.output(), val ? "true" : "false");
     }
     else if (item.isInt()) {
         int val = item.asInt();
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", val);
-        stringbuf_append_str(sb, num_buf);
+        stringbuf_append_str(ctx.output(), num_buf);
     }
     else if (item.isFloat()) {
         double val = item.asFloat();
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%.15g", val);
-        stringbuf_append_str(sb, num_buf);
+        stringbuf_append_str(ctx.output(), num_buf);
     }
     else if (item.isString()) {
         String* str = item.asString();
         if (str) {
             if (raw_text_mode) {
                 // in raw text mode (script, style, etc.), output string as-is without escaping
-                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             } else {
                 // in normal mode, escape HTML entities
-                format_html_string_safe(sb, str, false);  // false = text content, not attribute
+                format_html_string_safe(ctx.output(), str, false);  // false = text content, not attribute
             }
         }
     }
     else if (item.isArray()) {
         ArrayReader arr = item.asArray();
         if (!arr.isEmpty()) {
-            stringbuf_append_str(sb, "<ul>");
+            stringbuf_append_str(ctx.output(), "<ul>");
             auto it = arr.items();
             ItemReader array_item;
             while (it.next(&array_item)) {
-                stringbuf_append_str(sb, "<li>");
-                format_item_reader(sb, array_item, depth + 1, raw_text_mode);
-                stringbuf_append_str(sb, "</li>");
+                stringbuf_append_str(ctx.output(), "<li>");
+                format_item_reader(ctx, array_item, depth + 1, raw_text_mode);
+                stringbuf_append_str(ctx.output(), "</li>");
             }
-            stringbuf_append_str(sb, "</ul>");
+            stringbuf_append_str(ctx.output(), "</ul>");
         } else {
-            stringbuf_append_str(sb, "[]");
+            stringbuf_append_str(ctx.output(), "[]");
         }
     }
     else if (item.isMap()) {
         // simple map representation
-        stringbuf_append_str(sb, "<div>{object}</div>");
+        stringbuf_append_str(ctx.output(), "<div>{object}</div>");
     }
     else if (item.isElement()) {
         ElementReader elem = item.asElement();
-        format_element_reader(sb, elem, depth, raw_text_mode);
+        format_element_reader(ctx, elem, depth, raw_text_mode);
     }
     else {
-        stringbuf_append_str(sb, "unknown");
+        stringbuf_append_str(ctx.output(), "unknown");
     }
 }

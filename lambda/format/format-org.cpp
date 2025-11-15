@@ -1,17 +1,18 @@
 #include "format.h"
+#include "format-utils.hpp"
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include <string.h>
 
-// Forward declarations
+// Forward declarations - old Element* API
 static void format_inline_element(StringBuf* sb, Element* elem);
 static void format_scheduling(StringBuf* sb, Element* elem);
 static void format_timestamp(StringBuf* sb, Element* elem);
 static void format_footnote_definition(StringBuf* sb, Element* elem);
 
-// MarkReader-based forward declarations
-static void format_org_element_reader(StringBuf* sb, const ElementReader& elem);
-static void format_org_text_reader(StringBuf* sb, const ItemReader& item);
+// MarkReader-based forward declarations - new OrgContext& API
+static void format_org_element_reader(OrgContext& ctx, const ElementReader& elem);
+static void format_org_text_reader(OrgContext& ctx, const ItemReader& item);
 
 // Simple helper to append a string to the buffer
 static void append_string(StringBuf* sb, const char* str) {
@@ -929,22 +930,26 @@ static void format_org_text(StringBuf* sb, Item item) {
 }
 
 // MarkReader-based implementations
-static void format_org_element_reader(StringBuf* sb, const ElementReader& elem) {
+static void format_org_element_reader(OrgContext& ctx, const ElementReader& elem) {
     // Delegate to existing Element-based implementation
     Element* raw_elem = const_cast<Element*>(elem.element());
-    format_org_element(sb, raw_elem);
+    format_org_element(ctx.output(), raw_elem);
 }
 
-static void format_org_text_reader(StringBuf* sb, const ItemReader& item) {
+static void format_org_text_reader(OrgContext& ctx, const ItemReader& item) {
     // Delegate to existing Item-based implementation
     Item raw_item = item.item();
-    format_org_text(sb, raw_item);
+    format_org_text(ctx.output(), raw_item);
 }
 
 
 // Main Org formatting function
 void format_org(StringBuf* sb, Item root_item) {
     if (!sb || root_item.item == ITEM_NULL) return;
+    
+    // Create context for org formatting
+    Pool* pool = pool_create();
+    OrgContext ctx(pool, sb);
     
     // Use MarkReader API
     ItemReader root(root_item.to_const());
@@ -959,16 +964,18 @@ void format_org(StringBuf* sb, Item root_item) {
             List* list = (List*)raw_elem;
             for (long i = 0; i < list->length; i++) {
                 Item child_item = list->items[i];
-                format_org_text_reader(sb, ItemReader(child_item.to_const()));
+                format_org_text_reader(ctx, ItemReader(child_item.to_const()));
             }
         } else {
             // Format single element
-            format_org_element_reader(sb, elem);
+            format_org_element_reader(ctx, elem);
         }
     } else {
         // Fallback for other types
-        format_org_text_reader(sb, root);
+        format_org_text_reader(ctx, root);
     }
+    
+    pool_destroy(pool);
 }
 
 // String version of the formatter
