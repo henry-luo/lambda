@@ -12,6 +12,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 extern "C" {
     #include "../lib/url.h"  // Use new URL parser
     #include <tree_sitter/api.h>
@@ -176,11 +177,13 @@ bool are_math_expressions_equivalent(const std::string& expr1, const std::string
 class MathRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Setup code
+        // Initialize logging
+        log_init("log.conf");
     }
 
     void TearDown() override {
-        // Teardown code
+        // Cleanup logging
+        log_finish();
     }
 };
 
