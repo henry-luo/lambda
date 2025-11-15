@@ -22,7 +22,6 @@ extern "C" {
 
 // C++ function declarations (no extern "C" needed)
 void find_errors(TSNode node);
-void print_tree(TSNode node, int depth);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 ArrayList* arraylist_new(size_t initial_capacity);
 
@@ -30,28 +29,6 @@ ArrayList* arraylist_new(size_t initial_capacity);
 Transpiler* transpiler_create(Pool* pool);
 void transpiler_destroy(Transpiler* transpiler);
 AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
-
-// Helper to print tree structure for debugging
-void print_tree(TSNode node, int depth) {
-    if (ts_node_is_null(node)) return;
-
-    const char *node_type = ts_node_type(node);
-    TSPoint start = ts_node_start_point(node);
-    TSPoint end = ts_node_end_point(node);
-
-    for (int i = 0; i < depth; ++i) printf("  ");
-    printf("%s [%u:%u-%u:%u] %s%s\n",
-           node_type,
-           start.row + 1, start.column + 1,
-           end.row + 1, end.column + 1,
-           ts_node_is_error(node) ? " ERROR" : "",
-           ts_node_is_missing(node) ? " MISSING" : "");
-
-    uint32_t child_count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < child_count; ++i) {
-        print_tree(ts_node_child(node, i), depth + 1);
-    }
-}
 
 // Forward declarations for functions we need to implement
 Transpiler* transpiler_create(Pool* pool) {
@@ -485,11 +462,6 @@ void add_validation_error(ValidationResult* result, ValidationError* error) {
     }
 }
 
-void free_ast_validation_result(ValidationResult* result) {
-    // Memory cleanup handled by pool
-    (void)result;
-}
-
 bool is_item_compatible_with_type(ConstItem item, Type* type) {
     if (!type) return false;
 
@@ -545,30 +517,6 @@ void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
 
 // ==================== Validation Functions ====================
 
-// validate 'item' against Type* directly
-ValidationResult* ast_validator_validate_type(SchemaValidator* validator, ConstItem item, Type* type) {
-    if (!validator || !type) {
-        ValidationResult* result = create_validation_result(validator ? validator->get_pool() : nullptr);
-        if (result) {
-            add_validation_error(result, create_validation_error(
-                AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type pointer",
-                nullptr, validator ? validator->get_pool() : nullptr));
-        }
-        return result;
-    }
-
-    // reset validation state - use accessor methods for encapsulation
-    validator->set_current_path(nullptr);
-    validator->set_current_depth(0);
-
-    // initialize validation session for timeout tracking
-    if (validator->get_options()->timeout_ms > 0) {
-        validator->set_validation_start_time(clock());
-    }
-
-    return validate_against_type(validator, item, type);
-}
-
 // validate 'item' against type named 'type_name'
 ValidationResult* SchemaValidator::validate(ConstItem item, const char* type_name) {
     if (!type_name) {
@@ -622,25 +570,6 @@ ValidationResult* SchemaValidator::validate_type(ConstItem item, Type* type) {
 }
 
 // ==================== Validation Options Functions ====================
-
-/**
- * Create default validation options
- */
-ValidationOptions ast_validator_default_options() {
-    ValidationOptions opts = {};
-    opts.strict_mode = false;
-    opts.allow_unknown_fields = false;
-    opts.allow_empty_elements = false;
-    opts.max_depth = 100;
-    opts.timeout_ms = 0;  // no timeout
-    opts.max_errors = 0;  // unlimited
-    opts.show_suggestions = true;
-    opts.show_context = true;
-    opts.enabled_rules = nullptr;
-    opts.disabled_rules = nullptr;
-    return opts;
-}
-
 /**
  * Set validation options
  */

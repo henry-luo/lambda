@@ -166,7 +166,7 @@ void pop_path_segment(EnhancedValidationContext* ctx) {
 }
 
 // Create validation error with full context
-ValidationError* create_ast_validation_error(ValidationErrorCode code, const char* message,
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
                                            EnhancedValidationContext* ctx) {
     if (!ctx || !ctx->pool) return nullptr;
 
@@ -180,11 +180,11 @@ ValidationError* create_ast_validation_error(ValidationErrorCode code, const cha
 }
 
 // Add validation error to result
-void add_ast_validation_error(ValidationResult* result, ValidationErrorCode code,
+void add_validation_error(ValidationResult* result, ValidationErrorCode code,
                              const char* message, EnhancedValidationContext* ctx) {
     if (!result || !ctx) return;
 
-    ValidationError* error = create_ast_validation_error(code, message, ctx);
+    ValidationError* error = create_validation_error(code, message, ctx);
     if (error) {
         add_validation_error(result, error);
     }
@@ -194,7 +194,7 @@ void add_ast_validation_error(ValidationResult* result, ValidationErrorCode code
 ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationContext* ctx) {
     if (!node || !ctx) {
         ValidationResult* result = create_validation_result(ctx->pool);
-        add_ast_validation_error(result, VALID_ERROR_PARSE_ERROR, "Invalid AST node or context", ctx);
+        add_validation_error(result, VALID_ERROR_PARSE_ERROR, "Invalid AST node or context", ctx);
         return result;
     }
 
@@ -202,7 +202,7 @@ ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationC
 
     // Check depth limit
     if (ctx->current_depth >= ctx->max_depth) {
-        add_ast_validation_error(result, VALID_ERROR_CONSTRAINT_VIOLATION,
+        add_validation_error(result, VALID_ERROR_CONSTRAINT_VIOLATION,
                                "Maximum validation depth exceeded", ctx);
         return result;
     }
@@ -214,7 +214,7 @@ ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationC
 
     // Basic validation - just check if node exists
     if (!node) {
-        add_ast_validation_error(result, VALID_ERROR_INVALID_ELEMENT,
+        add_validation_error(result, VALID_ERROR_INVALID_ELEMENT,
                                "AST node is null", ctx);
     }
 
@@ -798,11 +798,4 @@ extern "C" ValidationResult* run_validation(const char *data_file, const char *s
     opts.disabled_rules = nullptr;
 
     return run_ast_validation(data_file, schema_file, input_format, &opts);
-}
-
-// Cleanup function for validation results
-void ast_validation_result_destroy(ValidationResult* result) {
-    // Note: Memory pool cleanup should be handled by caller
-    // since ValidationResult and its errors are allocated from the pool
-    validation_result_destroy(result);
 }

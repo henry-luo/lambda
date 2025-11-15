@@ -433,11 +433,6 @@ String* format_type_name(void* type, Pool* pool);
  */
 void validation_result_destroy(ValidationResult* result);
 
-// Legacy function names for backward compatibility
-#define create_ast_validation_result create_validation_result
-#define create_ast_validation_error create_validation_error
-#define add_ast_validation_error add_validation_error
-#define free_ast_validation_result validation_result_destroy
 
 // ==================== Utility Functions ====================
 
