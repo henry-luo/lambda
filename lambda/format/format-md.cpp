@@ -403,13 +403,99 @@ static bool element_contains_only_math(Element* elem, bool* only_display_math) {
     return false;
 }
 
+// Check if an element (via MarkReader) contains only math
+static bool element_reader_contains_only_math(const ElementReader& elem, bool* only_display_math) {
+    const char* elem_name = elem.tagName();
+    if (!elem_name) return false;
+
+    // If this is a math element, check its type
+    if (strcmp(elem_name, "math") == 0) {
+        ItemReader type_attr = elem.get_attr("type");
+        if (!type_attr.isString()) {
+            *only_display_math = false;
+        } else {
+            String* type_str = type_attr.asString();
+            if (strcmp(type_str->chars, "block") != 0 && strcmp(type_str->chars, "code") != 0) {
+                *only_display_math = false;
+            }
+        }
+        return true;
+    }
+
+    // If this is a span or similar container, check its children
+    if (strcmp(elem_name, "span") == 0) {
+        auto it = elem.children();
+        ItemReader child;
+        
+        while (it.next(&child)) {
+            if (child.isElement()) {
+                ElementReader child_elem = child.asElement();
+                if (!element_reader_contains_only_math(child_elem, only_display_math)) {
+                    return false;
+                }
+            } else if (child.isString()) {
+                // Check if it's just whitespace
+                String* str = child.asString();
+                if (str && str->chars) {
+                    for (int j = 0; j < str->len; j++) {
+                        if (!isspace(str->chars[j])) {
+                            return false;
+                        }
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Other elements are not math-only
+    return false;
+}
+
 // Format paragraph elements
 // MarkReader version: Format paragraph elements  
 static void format_paragraph_reader(StringBuf* sb, const ElementReader& elem) {
-    // For now, simplified version without math-only detection
-    // (math detection would require MarkReader version of element_contains_only_math)
+    // Check if paragraph contains only math (to avoid adding extra newline)
+    bool only_display_math = true;
+    
+    // Check each child of the paragraph
+    bool contains_only_math = true;
+    auto it = elem.children();
+    ItemReader child;
+    
+    while (it.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            if (!element_reader_contains_only_math(child_elem, &only_display_math)) {
+                contains_only_math = false;
+                break;
+            }
+        } else if (child.isString()) {
+            // Check if it's just whitespace
+            String* str = child.asString();
+            if (str && str->chars) {
+                for (int j = 0; j < str->len; j++) {
+                    if (!isspace(str->chars[j])) {
+                        contains_only_math = false;
+                        break;
+                    }
+                }
+            }
+            if (!contains_only_math) break;
+        } else {
+            contains_only_math = false;
+            break;
+        }
+    }
+    
     format_element_children_reader(sb, elem);
-    stringbuf_append_char(sb, '\n');
+    
+    // Only add newline if paragraph doesn't contain just inline math
+    if (!contains_only_math || only_display_math) {
+        stringbuf_append_char(sb, '\n');
+    }
 }
 
 // Format thematic break (hr)
@@ -1175,8 +1261,6 @@ void format_markdown(StringBuf* sb, Item root_item) {
     // handle null/empty root item
     if (root_item.item == ITEM_NULL || (root_item.item == ITEM_NULL)) return;
 
-    printf("format_markdown: root_item %p, type %d\n", (void*)root_item.pointer, get_type_id(root_item));
-    
     // use MarkReader API for type-safe traversal
     ItemReader reader(root_item.to_const());
     format_item_reader(sb, reader);
