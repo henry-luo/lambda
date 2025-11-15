@@ -3,43 +3,40 @@
 #include <ctype.h>
 #include "../../lib/stringbuf.h"
 #include "../mark_reader.hpp"
+#include "format-utils.hpp"
 
-// Global recursion depth counter to prevent infinite recursion
-static thread_local int recursion_depth = 0;
-#define MAX_RECURSION_DEPTH 50
-
-// Forward declarations (MarkReader-based only)
-static void format_item_text_reader(StringBuf* sb, const ItemReader& item);
-static void format_element_text_reader(StringBuf* sb, const ElementReader& elem);
-static void format_array_text_reader(StringBuf* sb, const ArrayReader& arr);
-static void format_map_text_reader(StringBuf* sb, const MapReader& mp);
-static void format_scalar_value_reader(StringBuf* sb, const ItemReader& item);
+// Forward declarations (MarkReader-based with context)
+static void format_item_text_reader(TextContext& ctx, const ItemReader& item);
+static void format_element_text_reader(TextContext& ctx, const ElementReader& elem);
+static void format_array_text_reader(TextContext& ctx, const ArrayReader& arr);
+static void format_map_text_reader(TextContext& ctx, const MapReader& mp);
+static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item);
 
 // Helper function to format scalar values as raw text (no quotes) - MarkReader version
-static void format_scalar_value_reader(StringBuf* sb, const ItemReader& item) {
+static void format_scalar_value_reader(TextContext& ctx, const ItemReader& item) {
     if (item.isBool()) {
         bool val = item.asBool();
-        stringbuf_append_str(sb, val ? "true" : "false");
+        ctx.write_text(val ? "true" : "false");
     }
     else if (item.isInt()) {
         int val = item.asInt();
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", val);
-        stringbuf_append_str(sb, num_buf);
+        ctx.write_text(num_buf);
     }
     else if (item.isFloat()) {
         double val = item.asFloat();
         if (!isnan(val) && !isinf(val)) {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%.15g", val);
-            stringbuf_append_str(sb, num_buf);
+            ctx.write_text(num_buf);
         }
     }
     else if (item.isString()) {
         String* str = item.asString();
         if (str && str->chars && str->len > 0) {
             // Output string content without quotes
-            stringbuf_append_str_n(sb, str->chars, str->len);
+            ctx.write_text(str);
         }
     }
     else {
@@ -58,20 +55,19 @@ static void format_scalar_value_reader(StringBuf* sb, const ItemReader& item) {
                 // Format as ISO 8601 string without quotes
                 snprintf(date_buf, sizeof(date_buf), "%04d-%02d-%02d", 
                         year, month, day);
-                stringbuf_append_str(sb, date_buf);
+                ctx.write_text(date_buf);
             }
         } else {
             // For non-scalar types, recursively process them
-            format_item_text_reader(sb, item);
+            format_item_text_reader(ctx, item);
         }
     }
 }
 
 // MarkReader-based version: format an array by extracting scalar values
-static void format_array_text_reader(StringBuf* sb, const ArrayReader& arr) {
-    if (recursion_depth >= MAX_RECURSION_DEPTH) return;
-    
-    recursion_depth++;
+static void format_array_text_reader(TextContext& ctx, const ArrayReader& arr) {
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) return;
     
     auto items_iter = arr.items();
     ItemReader item;
@@ -79,21 +75,18 @@ static void format_array_text_reader(StringBuf* sb, const ArrayReader& arr) {
     
     while (items_iter.next(&item)) {
         if (!first) {
-            stringbuf_append_char(sb, ' ');
+            ctx.write_char(' ');
         }
         first = false;
         
-        format_item_text_reader(sb, item);
+        format_item_text_reader(ctx, item);
     }
-    
-    recursion_depth--;
 }
 
 // MarkReader-based version: format a map by extracting scalar values
-static void format_map_text_reader(StringBuf* sb, const MapReader& mp) {
-    if (recursion_depth >= MAX_RECURSION_DEPTH) return;
-    
-    recursion_depth++;
+static void format_map_text_reader(TextContext& ctx, const MapReader& mp) {
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) return;
     
     auto entries = mp.entries();
     const char* key;
@@ -102,21 +95,18 @@ static void format_map_text_reader(StringBuf* sb, const MapReader& mp) {
     
     while (entries.next(&key, &value)) {
         if (!first) {
-            stringbuf_append_char(sb, ' ');
+            ctx.write_char(' ');
         }
         first = false;
         
-        format_item_text_reader(sb, value);
+        format_item_text_reader(ctx, value);
     }
-    
-    recursion_depth--;
 }
 
 // MarkReader-based version: format element by extracting scalar values
-static void format_element_text_reader(StringBuf* sb, const ElementReader& elem) {
-    if (recursion_depth >= MAX_RECURSION_DEPTH) return;
-    
-    recursion_depth++;
+static void format_element_text_reader(TextContext& ctx, const ElementReader& elem) {
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) return;
     
     // for text extraction, we focus on element children/content
     // attributes are typically metadata, not content text
@@ -128,21 +118,18 @@ static void format_element_text_reader(StringBuf* sb, const ElementReader& elem)
     
     while (children_iter.next(&child)) {
         if (!first) {
-            stringbuf_append_char(sb, ' ');
+            ctx.write_char(' ');
         }
         first = false;
         
-        format_item_text_reader(sb, child);
+        format_item_text_reader(ctx, child);
     }
-    
-    recursion_depth--;
 }
 
 // MarkReader-based version: main recursive function to extract scalar values
-static void format_item_text_reader(StringBuf* sb, const ItemReader& item) {
-    if (recursion_depth >= MAX_RECURSION_DEPTH) {
-        return; // prevent stack overflow
-    }
+static void format_item_text_reader(TextContext& ctx, const ItemReader& item) {
+    FormatterContextCpp::RecursionGuard guard(ctx);
+    if (guard.exceeded()) return;
     
     if (item.isNull()) {
         // skip null values
@@ -150,23 +137,23 @@ static void format_item_text_reader(StringBuf* sb, const ItemReader& item) {
     }
     else if (item.isBool() || item.isInt() || item.isFloat() || item.isString()) {
         // handle common scalar types
-        format_scalar_value_reader(sb, item);
+        format_scalar_value_reader(ctx, item);
     }
     else if (item.isArray()) {
         ArrayReader arr = item.asArray();
-        format_array_text_reader(sb, arr);
+        format_array_text_reader(ctx, arr);
     }
     else if (item.isMap()) {
         MapReader mp = item.asMap();
-        format_map_text_reader(sb, mp);
+        format_map_text_reader(ctx, mp);
     }
     else if (item.isElement()) {
         ElementReader elem = item.asElement();
-        format_element_text_reader(sb, elem);
+        format_element_text_reader(ctx, elem);
     }
     else {
         // for other types (like DateTime), try format_scalar_value_reader
-        format_scalar_value_reader(sb, item);
+        format_scalar_value_reader(ctx, item);
     }
 }
 
@@ -174,12 +161,15 @@ static void format_item_text_reader(StringBuf* sb, const ItemReader& item) {
 void format_text(StringBuf* sb, Item root_item) {
     if (!sb) return;
     
-    // Reset recursion depth
-    recursion_depth = 0;
+    // Create context with pool from root item's structure
+    Pool* pool = pool_create();
+    TextContext ctx(pool, sb);
     
     // use MarkReader API for type-safe traversal
     ItemReader root(root_item.to_const());
-    format_item_text_reader(sb, root);
+    format_item_text_reader(ctx, root);
+    
+    pool_destroy(pool);
 }
 
 // String variant that returns a String* allocated from the pool
