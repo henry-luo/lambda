@@ -161,15 +161,15 @@ static void format_item_text_reader(TextContext& ctx, const ItemReader& item) {
 void format_text(StringBuf* sb, Item root_item) {
     if (!sb) return;
     
-    // Create context with pool from root item's structure
-    Pool* pool = pool_create();
-    TextContext ctx(pool, sb);
+    // Create a temporary pool for context operations
+    Pool* temp_pool = pool_create();
+    TextContext ctx(temp_pool, sb);
     
     // use MarkReader API for type-safe traversal
     ItemReader root(root_item.to_const());
     format_item_text_reader(ctx, root);
     
-    pool_destroy(pool);
+    pool_destroy(temp_pool);
 }
 
 // String variant that returns a String* allocated from the pool
@@ -179,7 +179,12 @@ String* format_text_string(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
-    format_text(sb, root_item);
+    // Create context using the passed pool (not a temporary one)
+    TextContext ctx(pool, sb);
+    
+    // use MarkReader API for type-safe traversal
+    ItemReader root(root_item.to_const());
+    format_item_text_reader(ctx, root);
     
     String* result = stringbuf_to_string(sb);
     stringbuf_free(sb);
