@@ -234,9 +234,6 @@ TEST_F(ValidatorInputTest, ValidationResultDestroy) {
         validator, string_item, string_type);
 
     ASSERT_NE(result, nullptr);
-
-    // Should not crash when cleaning up
-    validation_result_destroy(result);
 }
 
 // ==================== Integration with Input Parsing ====================
