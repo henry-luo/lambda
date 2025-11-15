@@ -20,14 +20,14 @@
 class FormatValidationTest : public ::testing::Test {
 protected:
     Pool* pool;
-    AstValidator* validator;
+    SchemaValidator* validator;
     Input* input;
 
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
 
-        validator = ast_validator_create(pool);
+        validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
 
         // create Input context for MarkBuilder
@@ -50,7 +50,7 @@ protected:
             arraylist_free(input->type_list);
         }
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
         }
         if (pool) {
             pool_destroy(pool);
@@ -200,7 +200,7 @@ TEST_F(FormatValidationTest, UnwrapHTMLHandlesHTMLWithoutBody) {
 TEST_F(FormatValidationTest, ValidateWithXMLFormat) {
     // load a simple schema
     const char* schema = "type Article = <article>;";
-    int load_result = ast_validator_load_schema(validator, schema, "Article");
+    int load_result = schema_validator_load_schema(validator, schema, "Article");
     ASSERT_EQ(load_result, 0);
 
     // create <document><article/></document>
@@ -211,7 +211,7 @@ TEST_F(FormatValidationTest, ValidateWithXMLFormat) {
     ConstItem const_item = *(ConstItem*)&nested;
 
     // validate with XML format (should unwrap document)
-    ValidationResult* result = ast_validator_validate_with_format(
+    ValidationResult* result = schema_validator_validate_with_format(
         validator, const_item, "Article", "xml"
     );
 
@@ -223,7 +223,7 @@ TEST_F(FormatValidationTest, ValidateWithXMLFormat) {
 TEST_F(FormatValidationTest, ValidateWithAutoDetectedFormat) {
     // load a simple schema
     const char* schema = "type Doc = <document>;";
-    int load_result = ast_validator_load_schema(validator, schema, "Doc");
+    int load_result = schema_validator_load_schema(validator, schema, "Doc");
     ASSERT_EQ(load_result, 0);
 
     // create <document/> element
@@ -232,7 +232,7 @@ TEST_F(FormatValidationTest, ValidateWithAutoDetectedFormat) {
     ConstItem const_item = *(ConstItem*)&item;
 
     // validate without format hint (should auto-detect XML)
-    ValidationResult* result = ast_validator_validate_with_format(
+    ValidationResult* result = schema_validator_validate_with_format(
         validator, const_item, "Doc", nullptr
     );
 

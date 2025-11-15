@@ -44,84 +44,27 @@ StrView strview_from_cstr(const char* str) {
 
 // ==================== Error Reporting Implementation ====================
 // Note: Error reporting functions now implemented in error_reporting.cpp
+// Note: SchemaValidator C wrapper functions (schema_validator_*) are now in doc_validator.cpp
 
-// Schema validator stubs
-SchemaValidator* schema_validator_create(Pool* pool) {
-    SchemaValidator* validator = (SchemaValidator*)pool_calloc(pool, sizeof(SchemaValidator));
-    if (validator) {
-        validator->pool = pool;
-        validator->schemas = nullptr;
-        validator->context = nullptr;
-        validator->custom_validators = nullptr;
-    }
-    return validator;
-}
-
-void schema_validator_destroy(SchemaValidator* validator) {
-    // Memory pool cleanup handles deallocation
-}
-
-int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source,
-                                const char* schema_name) {
-    if (!validator || !schema_source) {
-        log_error("schema_validator_load_schema: invalid parameters");
-        return -1;
-    }
-
-    // Create AstValidator if not already created
-    if (!validator->ast_validator) {
-        validator->ast_validator = ast_validator_create(validator->pool);
-        if (!validator->ast_validator) {
-            log_error("Failed to create AST validator");
-            return -1;
-        }
-    }
-
-    // Use the existing AST validator to load the schema
-    int result = ast_validator_load_schema(validator->ast_validator, schema_source, schema_name);
-    if (result != 0) {
-        log_error("Failed to load schema into AST validator");
-        return -1;
-    }
-
-    log_info("Loaded schema: %s (AST validator initialized)", schema_name ? schema_name : "<unnamed>");
-    return 0;
-}
-
+// Document validation function - uses the new SchemaValidator API
 ValidationResult* validate_document(SchemaValidator* validator, Item document,
                                    const char* schema_name) {
     if (!validator || document.item == ITEM_NULL || !schema_name) {
-        ValidationResult* result = create_validation_result(validator->pool);
+        ValidationResult* result = create_validation_result(validator->get_pool());
         ValidationError* error = create_validation_error(
             VALID_ERROR_PARSE_ERROR,
             "Invalid validation parameters",
             nullptr,
-            validator->pool
+            validator->get_pool()
         );
         add_validation_error(result, error);
         return result;
     }
 
-    // Check if AST validator was initialized (schema was loaded)
-    if (!validator->ast_validator) {
-        ValidationResult* result = create_validation_result(validator->pool);
-        ValidationError* error = create_validation_error(
-            VALID_ERROR_PARSE_ERROR,
-            "Schema not loaded - call schema_validator_load_schema first",
-            nullptr,
-            validator->pool
-        );
-        add_validation_error(result, error);
-        return result;
-    }
-
-    // Use the existing AST validator to validate the document
-    // ConstItem constructor takes a raw item value
+    // Use the SchemaValidator to validate the document
     Item mutable_item = document;
     ConstItem const_doc = *(ConstItem*)&mutable_item;
-    ValidationResult* result = ast_validator_validate(validator->ast_validator, const_doc, schema_name);
-
-    return result;
+    ValidationResult* result = validator->validate(const_doc, schema_name);
 
     return result;
 }

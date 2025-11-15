@@ -337,7 +337,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.context_alloc = heap_alloc;
     mpd_defaultcontext(runner->context.decimal_ctx);
     // init AST validator
-    runner->context.validator = ast_validator_create(runner->context.ast_pool);
+    runner->context.validator = schema_validator_create(runner->context.ast_pool);
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
@@ -364,7 +364,7 @@ void runner_cleanup(Runner* runner) {
     }
     // free AST validator
     if (runner->context.validator) {
-        ast_validator_destroy(runner->context.validator);
+        schema_validator_destroy(runner->context.validator);
         runner->context.validator = NULL;
     }
 }

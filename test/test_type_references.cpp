@@ -12,18 +12,18 @@
 class TypeReferenceTest : public ::testing::Test {
 protected:
     Pool* pool;
-    AstValidator* validator;
+    SchemaValidator* validator;
 
     void SetUp() override {
         log_set_level(LOG_LEVEL_DEBUG);
         pool = pool_create();
-        validator = ast_validator_create(pool);
+        validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
     }
 
     void TearDown() override {
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
         }
         if (pool) {
             pool_destroy(pool);
@@ -67,7 +67,7 @@ protected:
     }
 
     ValidationResult* validate_by_name(Item item, const char* type_name) {
-        Type* type = ast_validator_find_type(validator, type_name);
+        Type* type = schema_validator_find_type(validator, type_name);
         if (!type) {
             ValidationResult* result = create_validation_result(pool);
             char error_msg[256];
@@ -76,7 +76,7 @@ protected:
                 AST_VALID_ERROR_PARSE_ERROR, error_msg, nullptr, pool));
             return result;
         }
-        return ast_validator_validate_type(validator, item.to_const(), type);
+        return schema_validator_validate_type(validator, item.to_const(), type);
     }
 };
 
@@ -86,13 +86,13 @@ TEST_F(TypeReferenceTest, SimpleTypeAlias) {
         type Username = string
     )";
 
-    int result = ast_validator_load_schema(validator, schema, "Username");
+    int result = schema_validator_load_schema(validator, schema, "Username");
     ASSERT_EQ(result, 0);
 
     // Validate a string against Username type
     Item string_item = create_string("alice");
-    ValidationResult* validation = ast_validator_validate_type(validator, string_item,
-        ast_validator_find_type(validator, "Username"));
+    ValidationResult* validation = schema_validator_validate_type(validator, string_item,
+        schema_validator_find_type(validator, "Username"));
 
     ASSERT_NE(validation, nullptr);
     EXPECT_TRUE(validation->valid) << "Username (string alias) should validate string";
@@ -104,7 +104,7 @@ TEST_F(TypeReferenceTest, TypeAliasToInt) {
         type Age = int
     )";
 
-    int result = ast_validator_load_schema(validator, schema, "Age");
+    int result = schema_validator_load_schema(validator, schema, "Age");
     ASSERT_EQ(result, 0);
 
     // Valid: int against Age
@@ -133,7 +133,7 @@ TEST_F(TypeReferenceTest, NestedTypeReferences) {
         }
     )";
 
-    int result = ast_validator_load_schema(validator, schema, "User");
+    int result = schema_validator_load_schema(validator, schema, "User");
     ASSERT_EQ(result, 0);
 
     // Create valid user
@@ -155,7 +155,7 @@ TEST_F(TypeReferenceTest, UndefinedTypeReference) {
         }
     )";
 
-    int result = ast_validator_load_schema(validator, schema, "User");
+    int result = schema_validator_load_schema(validator, schema, "User");
     ASSERT_EQ(result, 0);
 
     // Try to validate against non-existent type
@@ -186,7 +186,7 @@ TEST_F(TypeReferenceTest, CircularTypeReference) {
     )";
 
     // Schema loading might fail or succeed depending on transpiler behavior
-    int result = ast_validator_load_schema(validator, schema, "A");
+    int result = schema_validator_load_schema(validator, schema, "A");
 
     if (result == 0) {
         // If schema loaded, validation should detect circular reference
@@ -214,7 +214,7 @@ TEST_F(TypeReferenceTest, ChainedTypeReferences) {
         type D = C
     )";
 
-    int result = ast_validator_load_schema(validator, schema, "D");
+    int result = schema_validator_load_schema(validator, schema, "D");
     ASSERT_EQ(result, 0);
 
     // Validate through the chain: D -> C -> B -> A -> string
@@ -253,7 +253,7 @@ TEST_F(TypeReferenceTest, TypeReferenceInComplexMap) {
         }
     )";
 
-    int result = ast_validator_load_schema(validator, schema, "Person");
+    int result = schema_validator_load_schema(validator, schema, "Person");
     ASSERT_EQ(result, 0);
 
     // Create nested map structure

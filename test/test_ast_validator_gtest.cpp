@@ -76,15 +76,15 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
 class AstValidatorTest : public ::testing::Test {
 protected:
     Pool* test_pool = nullptr;
-    AstValidator* validator = nullptr;
+    SchemaValidator* validator = nullptr;
     Input* input = nullptr;
 
     void SetUp() override {
         test_pool = pool_create();
         ASSERT_NE(test_pool, nullptr) << "Failed to create memory pool";
 
-        validator = ast_validator_create(test_pool);
-        ASSERT_NE(validator, nullptr) << "Failed to create AST validator";
+        validator = schema_validator_create(test_pool);
+        ASSERT_NE(validator, nullptr) << "Failed to create schema validator";
 
         // Create Input context for MarkBuilder
         NamePool* name_pool = name_pool_create(test_pool, nullptr);
@@ -106,7 +106,7 @@ protected:
             arraylist_free(input->type_list);
         }
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
             validator = nullptr;
         }
 
@@ -184,13 +184,13 @@ protected:
 
 TEST_F(AstValidatorTest, CreateValidator) {
     EXPECT_NE(validator, nullptr) << "Validator should be created successfully";
-    EXPECT_NE(validator->pool, nullptr) << "Validator should have memory pool";
-    EXPECT_NE(validator->transpiler, nullptr) << "Validator should have transpiler";
-    EXPECT_NE(validator->type_definitions, nullptr) << "Validator should have type registry";
+    EXPECT_NE(validator->get_pool(), nullptr) << "Validator should have memory pool";
+    EXPECT_NE(validator->get_transpiler(), nullptr) << "Validator should have transpiler";
+    EXPECT_NE(validator->get_type_definitions(), nullptr) << "Validator should have type registry";
 }
 
 TEST(AstValidatorCreation, CreateValidatorNullPool) {
-    AstValidator* null_validator = ast_validator_create(nullptr);
+    SchemaValidator* null_validator = schema_validator_create(nullptr);
     EXPECT_EQ(null_validator, nullptr) << "Validator creation should fail with null pool";
 }
 
@@ -200,7 +200,7 @@ TEST_F(AstValidatorTest, ValidateStringSuccess) {
     ConstItem string_item = create_test_string("hello world");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(validator, string_item, string_type);
+    ValidationResult* result = schema_validator_validate_type(validator, string_item, string_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_TRUE(result->valid) << "String validation should succeed";
@@ -212,7 +212,7 @@ TEST_F(AstValidatorTest, ValidateStringTypeMismatch) {
     ConstItem string_item = create_test_string("hello world");
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
-    ValidationResult* result = ast_validator_validate_type(validator, string_item, int_type);
+    ValidationResult* result = schema_validator_validate_type(validator, string_item, int_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_FALSE(result->valid) << "Validation should fail for type mismatch";
@@ -224,7 +224,7 @@ TEST_F(AstValidatorTest, ValidateIntSuccess) {
     ConstItem int_item = create_test_int(42);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
-    ValidationResult* result = ast_validator_validate_type(validator, int_item, int_type);
+    ValidationResult* result = schema_validator_validate_type(validator, int_item, int_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_TRUE(result->valid) << "Int validation should succeed";
@@ -235,7 +235,7 @@ TEST_F(AstValidatorTest, ValidateFloatSuccess) {
     ConstItem float_item = create_test_float(3.14);
     Type* float_type = create_test_type(LMD_TYPE_FLOAT);
 
-    ValidationResult* result = ast_validator_validate_type(validator, float_item, float_type);
+    ValidationResult* result = schema_validator_validate_type(validator, float_item, float_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_TRUE(result->valid) << "Float validation should succeed";
@@ -246,7 +246,7 @@ TEST_F(AstValidatorTest, ValidateBoolSuccess) {
     ConstItem bool_item = create_test_bool(true);
     Type* bool_type = create_test_type(LMD_TYPE_BOOL);
 
-    ValidationResult* result = ast_validator_validate_type(validator, bool_item, bool_type);
+    ValidationResult* result = schema_validator_validate_type(validator, bool_item, bool_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_TRUE(result->valid) << "Bool validation should succeed";
@@ -257,7 +257,7 @@ TEST_F(AstValidatorTest, ValidateNullSuccess) {
     ConstItem null_item = create_test_null();
     Type* null_type = create_test_type(LMD_TYPE_NULL);
 
-    ValidationResult* result = ast_validator_validate_type(validator, null_item, null_type);
+    ValidationResult* result = schema_validator_validate_type(validator, null_item, null_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_TRUE(result->valid) << "Null validation should succeed";
@@ -270,7 +270,7 @@ TEST_F(AstValidatorTest, ValidateWithNullValidator) {
     ConstItem string_item = create_test_string("test");
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
-    ValidationResult* result = ast_validator_validate_type(nullptr, string_item, string_type);
+    ValidationResult* result = schema_validator_validate_type(nullptr, string_item, string_type);
 
     EXPECT_NE(result, nullptr) << "Should return error result";
     EXPECT_FALSE(result->valid) << "Should be invalid";
@@ -281,7 +281,7 @@ TEST_F(AstValidatorTest, ValidateWithNullValidator) {
 TEST_F(AstValidatorTest, ValidateWithNullType) {
     ConstItem string_item = create_test_string("test");
 
-    ValidationResult* result = ast_validator_validate_type(validator, string_item, nullptr);
+    ValidationResult* result = schema_validator_validate_type(validator, string_item, nullptr);
 
     EXPECT_NE(result, nullptr) << "Should return error result";
     EXPECT_FALSE(result->valid) << "Should be invalid";
@@ -292,7 +292,7 @@ TEST_F(AstValidatorTest, ValidateWithNullType) {
 TEST_F(AstValidatorTest, CreateValidationError) {
     PathSegment* path = create_path_segment(PATH_FIELD, "test_field", 0, test_pool);
 
-    ValidationError* error = create_validation_error(VALID_ERROR_TYPE_MISMATCH, "Test error message", path, validator->pool);
+    ValidationError* error = create_validation_error(VALID_ERROR_TYPE_MISMATCH, "Test error message", path, validator->get_pool());
 
     ASSERT_NE(error, nullptr) << "Error creation should succeed";
     EXPECT_STREQ(error->message->chars, "Test error message") << "Error message should match";
@@ -347,8 +347,8 @@ TEST_F(AstValidatorTest, MultipleValidations) {
     Type* string_type = create_test_type(LMD_TYPE_STRING);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
-    ValidationResult* string_result = ast_validator_validate_type(validator, string_item, string_type);
-    ValidationResult* int_result = ast_validator_validate_type(validator, int_item, int_type);
+    ValidationResult* string_result = schema_validator_validate_type(validator, string_item, string_type);
+    ValidationResult* int_result = schema_validator_validate_type(validator, int_item, int_type);
 
     ASSERT_NE(string_result, nullptr) << "String validation result should not be null";
     ASSERT_NE(int_result, nullptr) << "Int validation result should not be null";
@@ -370,7 +370,7 @@ TEST_F(AstValidatorTest, ValidationDepthCheck) {
     field_segment->next = index_segment;
     index_segment->next = element_segment;
 
-    ValidationResult* result = ast_validator_validate_type(validator, string_item, string_type);
+    ValidationResult* result = schema_validator_validate_type(validator, string_item, string_type);
 
     ASSERT_NE(result, nullptr) << "Validation result should not be null";
     EXPECT_TRUE(result->valid) << "Deep validation should succeed";
@@ -387,13 +387,10 @@ TEST_F(AstValidatorTest, ValidElementValidation) {
 
     TypeElmt* element_type = create_test_element_type("testElement", nullptr);
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_element_type(&ctx, element.to_const(), element_type);
+    AstValidationResult* result = validate_against_element_type(ctx, element.to_const(), element_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Valid element should pass validation";
@@ -414,13 +411,10 @@ TEST_F(AstValidatorTest, ElementContentLengthViolation) {
     item_mut.element = element.element;
     ConstItem item = item_mut.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_element_type(&ctx, item, element_type);
+    AstValidationResult* result = validate_against_element_type(ctx, item, element_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Element with wrong child count should fail validation";
@@ -435,13 +429,10 @@ TEST_F(AstValidatorTest, ElementTypeMismatch) {
     item_mut.item = s2it(str);
     ConstItem item = item_mut.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_element_type(&ctx, item, element_type);
+    AstValidationResult* result = validate_against_element_type(ctx, item, element_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Type mismatch should fail validation";
@@ -467,13 +458,10 @@ TEST_F(AstValidatorTest, ValidStringInUnion) {
     item_mut.item = s2it(str);
     ConstItem item = item_mut.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_union_type(&ctx, item, union_types, 2);
+    AstValidationResult* result = validate_against_union_type(ctx, item, union_types, 2);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Valid string in union should pass validation";
@@ -495,13 +483,10 @@ TEST_F(AstValidatorTest, ValidIntInUnion) {
     item_mut.item = i2it(42);
     ConstItem item = item_mut.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_union_type(&ctx, item, union_types, 2);
+    AstValidationResult* result = validate_against_union_type(ctx, item, union_types, 2);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Valid int in union should pass validation";
@@ -526,13 +511,10 @@ TEST_F(AstValidatorTest, InvalidTypeNotInUnion) {
     item_mut._type_id = LMD_TYPE_FLOAT;
     ConstItem item = item_mut.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_union_type(&ctx, item, union_types, 2);
+    AstValidationResult* result = validate_against_union_type(ctx, item, union_types, 2);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Invalid float in union should fail validation";
@@ -545,13 +527,10 @@ TEST_F(AstValidatorTest, OptionalConstraintZeroItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_occurrence(&ctx, nullptr, 0, string_type, OPERATOR_OPTIONAL);
+    AstValidationResult* result = validate_against_occurrence(ctx, nullptr, 0, string_type, OPERATOR_OPTIONAL);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Optional constraint with 0 items should be valid";
@@ -570,13 +549,10 @@ TEST_F(AstValidatorTest, OptionalConstraintTooManyItems) {
     items[0] = item1.to_const();
     items[1] = item2.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_occurrence(&ctx, items, 2, string_type, OPERATOR_OPTIONAL);
+    AstValidationResult* result = validate_against_occurrence(ctx, items, 2, string_type, OPERATOR_OPTIONAL);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Optional constraint with 2 items should be invalid";
@@ -587,13 +563,10 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintZeroItems) {
     Type* string_type = (Type*)pool_calloc(test_pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_occurrence(&ctx, nullptr, 0, string_type, OPERATOR_ONE_MORE);
+    AstValidationResult* result = validate_against_occurrence(ctx, nullptr, 0, string_type, OPERATOR_ONE_MORE);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "One-or-more constraint with 0 items should be invalid";
@@ -616,13 +589,10 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintMultipleItems) {
     items[1] = item2.to_const();
     items[2] = item3.to_const();
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_occurrence(&ctx, items, 3, string_type, OPERATOR_ONE_MORE);
+    AstValidationResult* result = validate_against_occurrence(ctx, items, 3, string_type, OPERATOR_ONE_MORE);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "One-or-more constraint with 3 items should be valid";
@@ -640,13 +610,10 @@ TEST_F(AstValidatorTest, ZeroOrMoreConstraintAnyItems) {
         items[i] = item_mut.to_const();
     }
 
-    AstValidator ctx = *validator;
-    ctx.pool = test_pool;
-    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
-    ctx.current_depth = 0;
-    ctx.options.max_depth = 10;
+    SchemaValidator* ctx = validator;
+    ctx->get_options()->max_depth = 10;
 
-    AstValidationResult* result = validate_against_occurrence(&ctx, items, 5, string_type, OPERATOR_ZERO_MORE);
+    AstValidationResult* result = validate_against_occurrence(ctx, items, 5, string_type, OPERATOR_ZERO_MORE);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Zero-or-more constraint with any number of items should be valid";
@@ -659,7 +626,7 @@ TEST_F(AstValidatorTest, NullPointerHandling) {
     ConstItem string_item = create_test_string("test");
     // Type* string_type = create_test_type(LMD_TYPE_STRING); // Unused
 
-    AstValidationResult* result = ast_validator_validate_type(validator, string_item, nullptr);
+    AstValidationResult* result = schema_validator_validate_type(validator, string_item, nullptr);
 
     ASSERT_NE(result, nullptr) << "Should return error result for null type";
     EXPECT_FALSE(result->valid) << "Should be invalid with null type";
@@ -674,7 +641,7 @@ TEST_F(AstValidatorTest, EmptyStringHandling) {
 
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, empty_string_item, string_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, empty_string_item, string_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Empty string should be valid for string type";
@@ -689,7 +656,7 @@ TEST_F(AstValidatorTest, UnicodeStringHandling) {
 
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, unicode_item, string_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, unicode_item, string_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Unicode string should be valid for string type";
@@ -701,7 +668,7 @@ TEST_F(AstValidatorTest, NumericBoundaryConditions) {
     ConstItem max_int_item = create_test_int(max_int);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, max_int_item, int_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, max_int_item, int_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Maximum integer value should be valid";
@@ -710,7 +677,7 @@ TEST_F(AstValidatorTest, NumericBoundaryConditions) {
     int min_int = -2147483648; // INT_MIN value to avoid macro issues
     ConstItem min_int_item = create_test_int(min_int);
 
-    result = ast_validator_validate_type(validator, min_int_item, int_type);
+    result = schema_validator_validate_type(validator, min_int_item, int_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Minimum integer value should be valid";
@@ -721,7 +688,7 @@ TEST_F(AstValidatorTest, ZeroValues) {
     ConstItem zero_int_item = create_test_int(0);
     Type* int_type = create_test_type(LMD_TYPE_INT);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, zero_int_item, int_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, zero_int_item, int_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Zero integer should be valid";
@@ -730,7 +697,7 @@ TEST_F(AstValidatorTest, ZeroValues) {
     ConstItem zero_float_item = create_test_float(0.0);
     Type* float_type = create_test_type(LMD_TYPE_FLOAT);
 
-    result = ast_validator_validate_type(validator, zero_float_item, float_type);
+    result = schema_validator_validate_type(validator, zero_float_item, float_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Zero float should be valid";
@@ -741,9 +708,9 @@ TEST_F(AstValidatorTest, DepthLimitBoundary) {
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     // Test at maximum depth boundary
-    validator->options.max_depth = 1;
+    validator->get_options()->max_depth = 1;
 
-    AstValidationResult* result = ast_validator_validate_type(validator, string_item, string_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, string_item, string_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     // Result depends on implementation - could be valid at depth 1 or invalid due to depth limit
@@ -756,7 +723,7 @@ TEST_F(AstValidatorTest, MultipleErrorAccumulation) {
     ConstItem int_item = create_test_int(42);
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, int_item, string_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, int_item, string_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Should be invalid due to type mismatch";
@@ -771,7 +738,7 @@ TEST_F(AstValidatorTest, ErrorMessageContent) {
     ConstItem float_item = create_test_float(3.14);
     Type* bool_type = create_test_type(LMD_TYPE_BOOL);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, float_item, bool_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, float_item, bool_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Should be invalid due to type mismatch";
@@ -787,13 +754,13 @@ TEST_F(AstValidatorTest, ValidationStateIsolation) {
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
     // First validation (should pass)
-    AstValidationResult* result1 = ast_validator_validate_type(validator, valid_item, string_type);
+    AstValidationResult* result1 = schema_validator_validate_type(validator, valid_item, string_type);
 
     // Second validation (should fail)
-    AstValidationResult* result2 = ast_validator_validate_type(validator, invalid_item, string_type);
+    AstValidationResult* result2 = schema_validator_validate_type(validator, invalid_item, string_type);
 
     // Third validation (should pass again)
-    AstValidationResult* result3 = ast_validator_validate_type(validator, valid_item, string_type);
+    AstValidationResult* result3 = schema_validator_validate_type(validator, valid_item, string_type);
 
     EXPECT_TRUE(result1->valid) << "First validation should pass";
     EXPECT_FALSE(result2->valid) << "Second validation should fail";
@@ -810,7 +777,7 @@ TEST_F(AstValidatorTest, RepeatedValidationStability) {
     int successful_validations = 0;
 
     for (int i = 0; i < ITERATIONS; i++) {
-        AstValidationResult* result = ast_validator_validate_type(validator, string_item, string_type);
+        AstValidationResult* result = schema_validator_validate_type(validator, string_item, string_type);
         if (result && result->valid) {
             successful_validations++;
         }
@@ -828,7 +795,7 @@ TEST_F(AstValidatorTest, LargeErrorMessageHandling) {
 
     Type* string_type = create_test_type(LMD_TYPE_STRING);
 
-    AstValidationResult* result = ast_validator_validate_type(validator, item, string_type);
+    AstValidationResult* result = schema_validator_validate_type(validator, item, string_type);
 
     ASSERT_NE(result, nullptr) << "Should return validation result";
     // The result may be valid or invalid depending on implementation

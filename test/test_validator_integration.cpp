@@ -26,7 +26,7 @@
 class ValidatorIntegrationTest : public ::testing::Test {
 protected:
     Pool* pool;
-    AstValidator* validator;
+    SchemaValidator* validator;
     Input* input;
 
     void SetUp() override {
@@ -37,7 +37,7 @@ protected:
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
 
-        validator = ast_validator_create(pool);
+        validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
 
         // Create Input context for MarkBuilder
@@ -60,7 +60,7 @@ protected:
             arraylist_free(input->type_list);
         }
         if (validator) {
-            ast_validator_destroy(validator);
+            schema_validator_destroy(validator);
         }
         if (pool) {
             pool_destroy(pool);
@@ -79,7 +79,7 @@ TEST_F(ValidatorIntegrationTest, ValidateArticleWithOptionalFields) {
         }
     )";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Article");
+    int load_result = schema_validator_load_schema(validator, schema, "Article");
     ASSERT_EQ(load_result, 0) << "Schema should load successfully";
 
     // Test: Valid article with required fields using simpler builder
@@ -89,7 +89,7 @@ TEST_F(ValidatorIntegrationTest, ValidateArticleWithOptionalFields) {
         .put("author", "Alice")
         .final();
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&article, "Article");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&article, "Article");
     ASSERT_NE(result, nullptr);
     EXPECT_TRUE(result->valid) << "Article with required fields should be valid";
     EXPECT_EQ(result->error_count, 0);
@@ -104,12 +104,12 @@ TEST_F(ValidatorIntegrationTest, ValidateWithStrictModeAndMaxErrors) {
         }
     )";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Person");
+    int load_result = schema_validator_load_schema(validator, schema, "Person");
     ASSERT_EQ(load_result, 0);
 
     // Configure validation options
-    ast_validator_set_strict_mode(validator, true);
-    ast_validator_set_max_errors(validator, 100);
+    schema_validator_set_strict_mode(validator, true);
+    schema_validator_set_max_errors(validator, 100);
 
     // Create invalid document with wrong types
     MarkBuilder builder(input);
@@ -118,7 +118,7 @@ TEST_F(ValidatorIntegrationTest, ValidateWithStrictModeAndMaxErrors) {
         .put("age", "thirty")  // wrong type (string instead of int)
         .final();
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&person, "Person");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&person, "Person");
     ASSERT_NE(result, nullptr);
     EXPECT_FALSE(result->valid);
 
@@ -131,7 +131,7 @@ TEST_F(ValidatorIntegrationTest, ValidateXMLDocumentWithUnwrapping) {
     // Schema for article element
     const char* schema = "type Article = <article>;";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Article");
+    int load_result = schema_validator_load_schema(validator, schema, "Article");
     ASSERT_EQ(load_result, 0);
 
     // Create XML document with wrapper: <document><article/></document>
@@ -141,7 +141,7 @@ TEST_F(ValidatorIntegrationTest, ValidateXMLDocumentWithUnwrapping) {
         .final();
 
     // Validate with XML format - should automatically unwrap
-    ValidationResult* result = ast_validator_validate_with_format(
+    ValidationResult* result = schema_validator_validate_with_format(
         validator,
         *(ConstItem*)&wrapped_doc,
         "Article",
@@ -164,7 +164,7 @@ TEST_F(ValidatorIntegrationTest, ValidateNestedStructureWithErrors) {
         }
     )";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Book");
+    int load_result = schema_validator_load_schema(validator, schema, "Book");
     ASSERT_EQ(load_result, 0);
 
     // Create book with invalid nested author
@@ -178,7 +178,7 @@ TEST_F(ValidatorIntegrationTest, ValidateNestedStructureWithErrors) {
         .put("author", author)
         .final();
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&book, "Book");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&book, "Book");
     ASSERT_NE(result, nullptr);
     EXPECT_TRUE(result->valid) << "Valid nested structure should pass";
 }
@@ -188,13 +188,13 @@ TEST_F(ValidatorIntegrationTest, ValidateNestedStructureWithErrors) {
 TEST_F(ValidatorIntegrationTest, ValidateEmptyMap) {
     const char* schema = "type Empty = {};";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Empty");
+    int load_result = schema_validator_load_schema(validator, schema, "Empty");
     ASSERT_EQ(load_result, 0);
 
     MarkBuilder builder(input);
     Item empty = builder.createMap();
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&empty, "Empty");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&empty, "Empty");
     ASSERT_NE(result, nullptr);
     EXPECT_TRUE(result->valid) << "Empty map should match empty schema";
 }
@@ -207,7 +207,7 @@ TEST_F(ValidatorIntegrationTest, ValidateNullVsOptional) {
         }
     )";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Data");
+    int load_result = schema_validator_load_schema(validator, schema, "Data");
     ASSERT_EQ(load_result, 0);
 
     // Test: Required field present
@@ -216,7 +216,7 @@ TEST_F(ValidatorIntegrationTest, ValidateNullVsOptional) {
         .put("required", "present")
         .final();
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&data, "Data");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&data, "Data");
     ASSERT_NE(result, nullptr);
     EXPECT_TRUE(result->valid) << "Required field present should be valid";
 }
@@ -230,7 +230,7 @@ TEST_F(ValidatorIntegrationTest, ValidateArrayOccurrences) {
         }
     )";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Lists");
+    int load_result = schema_validator_load_schema(validator, schema, "Lists");
     ASSERT_EQ(load_result, 0);
 
     // Valid: empty array for zero_or_more, non-empty for one_or_more
@@ -240,7 +240,7 @@ TEST_F(ValidatorIntegrationTest, ValidateArrayOccurrences) {
         .put("one_or_more", builder.array().append((int64_t)1).final())
         .final();
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&lists, "Lists");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&lists, "Lists");
     ASSERT_NE(result, nullptr);
     ASSERT_NE(result, nullptr);
 
@@ -293,11 +293,11 @@ TEST_F(ValidatorIntegrationTest, ValidateWithDepthLimit) {
         }
     )";
 
-    int load_result = ast_validator_load_schema(validator, schema, "Node");
+    int load_result = schema_validator_load_schema(validator, schema, "Node");
     ASSERT_EQ(load_result, 0);
 
     // Set a reasonable depth limit
-    ValidationOptions* opts = ast_validator_get_options(validator);
+    ValidationOptions* opts = schema_validator_get_options(validator);
     opts->max_depth = 10;
 
     // Create deeply nested structure (beyond limit)
@@ -313,7 +313,7 @@ TEST_F(ValidatorIntegrationTest, ValidateWithDepthLimit) {
         current = parent;
     }
 
-    ValidationResult* result = ast_validator_validate(validator, *(ConstItem*)&current, "Node");
+    ValidationResult* result = schema_validator_validate(validator, *(ConstItem*)&current, "Node");
     ASSERT_NE(result, nullptr);
 
     // Should fail due to depth limit
@@ -322,7 +322,7 @@ TEST_F(ValidatorIntegrationTest, ValidateWithDepthLimit) {
 
 TEST_F(ValidatorIntegrationTest, ValidateDefaultOptionsValues) {
     // Verify default options are sensible
-    ValidationOptions defaults = ast_validator_default_options();
+    ValidationOptions defaults = schema_validator_default_options();
 
     EXPECT_FALSE(defaults.strict_mode) << "Default should not be strict";
     EXPECT_FALSE(defaults.allow_unknown_fields) << "Default should not allow unknown fields";

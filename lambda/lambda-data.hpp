@@ -32,6 +32,9 @@ extern "C" {
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+// Forward declarations for C++ types
+class SchemaValidator;
+
 // Avoid conflicts with C++ headers by undefining after including lambda.h
 #include "lambda.hpp"
 #undef max
@@ -63,7 +66,6 @@ typedef struct Heap Heap;
 typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
 typedef struct num_stack_t num_stack_t;
-typedef struct AstValidator AstValidator;
 
 typedef struct EvalContext : Context {
     Heap* heap;
@@ -73,7 +75,7 @@ typedef struct EvalContext : Context {
     void* type_info;  // meta info for the base types
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
-    AstValidator* validator; // AST validator
+    SchemaValidator* validator; // Schema validator for document validation
 } EvalContext;
 
 // get raw value out of an Item
