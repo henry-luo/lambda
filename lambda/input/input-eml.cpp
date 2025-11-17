@@ -150,12 +150,12 @@ static String* extract_email_address(Input *input, MarkBuilder* builder, const c
 }
 
 // Helper function to parse date value
-static String* parse_date_value(Input *input, const char* date_str) {
+static String* parse_date_value(Input *input, MarkBuilder* builder, const char* date_str) {
     if (!date_str) return NULL;
 
     // For now, just return the raw date string
     // TODO: Could parse into structured datetime format
-    return input_create_string(input, date_str);
+    return builder->createString(date_str);
 }
 
 // Main EML parsing function
@@ -238,7 +238,7 @@ void parse_eml(Input* input, const char* eml_string) {
         if (strcmp(header_name->chars, "from") == 0) {
             String* from_email = extract_email_address(input, &builder, header_value->chars);
             if (from_email) {
-                String* from_key = input_create_string(input, "from");
+                String* from_key = builder.createString("from");
                 Item from_value = {.item = s2it(from_email)};
                 map_put(email_map, from_key, from_value, input);
             }
@@ -246,33 +246,33 @@ void parse_eml(Input* input, const char* eml_string) {
         else if (strcmp(header_name->chars, "to") == 0) {
             String* to_email = extract_email_address(input, &builder, header_value->chars);
             if (to_email) {
-                String* to_key = input_create_string(input, "to");
+                String* to_key = builder.createString("to");
                 Item to_value = {.item = s2it(to_email)};
                 map_put(email_map, to_key, to_value, input);
             }
         }
         else if (strcmp(header_name->chars, "subject") == 0) {
-            String* subject_key = input_create_string(input, "subject");
+            String* subject_key = builder.createString("subject");
             Item subject_value = {.item = s2it(header_value)};
             map_put(email_map, subject_key, subject_value, input);
         }
         else if (strcmp(header_name->chars, "date") == 0) {
-            String* date_parsed = parse_date_value(input, header_value->chars);
+            String* date_parsed = parse_date_value(input, &builder, header_value->chars);
             if (date_parsed) {
-                String* date_key = input_create_string(input, "date");
+                String* date_key = builder.createString("date");
                 Item date_value = {.item = s2it(date_parsed)};
                 map_put(email_map, date_key, date_value, input);
             }
         }
         else if (strcmp(header_name->chars, "message-id") == 0) {
-            String* msgid_key = input_create_string(input, "message_id");
+            String* msgid_key = builder.createString("message_id");
             Item msgid_value = {.item = s2it(header_value)};
             map_put(email_map, msgid_key, msgid_value, input);
         }
     }
 
     // Store headers map in email
-    String* headers_key = input_create_string(input, "headers");
+    String* headers_key = builder.createString("headers");
     Item headers_value = {.item = (uint64_t)headers_map};
     map_put(email_map, headers_key, headers_value, input);
 

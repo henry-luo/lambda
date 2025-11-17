@@ -1,4 +1,5 @@
 #include "input.hpp"
+#include "../mark_builder.hpp"
 #include "input-common.h"
 #include <string.h>
 #include <stdlib.h>
@@ -150,8 +151,8 @@ static const ASCIIConstant ascii_constants[] = {
 
 // Forward declarations
 static ASCIIToken* ascii_tokenize(const char* input, size_t* token_count);
-static Item parse_ascii_expression(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
-static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_expression(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_simple_expression(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count);
 static const ASCIIConstant* find_ascii_constant(const char* text, size_t length);
 static void skip_ascii_whitespace(const char** text);
 
@@ -360,7 +361,7 @@ static ASCIIToken* ascii_tokenize(const char* input, size_t* token_count) {
 }
 
 // Parse simple expression (constants, bracketed expressions, unary operations)
-static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+static Item parse_ascii_simple_expression(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count) {
     if (*pos >= token_count || tokens[*pos].type == ASCII_TOKEN_EOF) {
         return {.item = ITEM_ERROR};
     }
@@ -376,7 +377,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
         strncpy(number_str, token->start, token->length);
         number_str[token->length] = '\0';
 
-        String* number_string = input_create_string(input, number_str);
+        String* number_string = builder->createString(number_str);
         free(number_str);
 
         (*pos)++;
@@ -392,7 +393,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
         strncpy(name_str, token->start, token->length);
         name_str[token->length] = '\0';
 
-        String* name_string = input_create_string(input, name_str);
+        String* name_string = builder->createString(name_str);
         free(name_str);
 
         (*pos)++;
@@ -432,7 +433,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
                 tokens[*pos].start[0] == '_') {
                 (*pos)++; // skip _
 
-                Item lower_bound = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                Item lower_bound = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
                 if (lower_bound.item != ITEM_ERROR) {
                     list_push((List*)func_element, lower_bound);
                 }
@@ -442,7 +443,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
                     tokens[*pos].start[0] == '^') {
                     (*pos)++; // skip ^
 
-                    Item upper_bound = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                    Item upper_bound = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
                     if (upper_bound.item != ITEM_ERROR) {
                         list_push((List*)func_element, upper_bound);
                     }
@@ -450,7 +451,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
 
                 // Parse summand/integrand (the expression after the bounds)
                 if (*pos < token_count) {
-                    Item summand = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                    Item summand = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
                     if (summand.item != ITEM_ERROR) {
                         list_push((List*)func_element, summand);
                     }
@@ -461,7 +462,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
                     tokens[*pos].start[0] == '(') {
                     (*pos)++; // skip (
 
-                    Item arg = parse_ascii_expression(input, tokens, pos, token_count);
+                    Item arg = parse_ascii_expression(input, builder, tokens, pos, token_count);
                     if (arg.item != ITEM_ERROR) {
                         list_push((List*)func_element, arg);
                     }
@@ -479,7 +480,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
                 tokens[*pos].start[0] == '(') {
                 (*pos)++; // skip (
 
-                Item arg = parse_ascii_expression(input, tokens, pos, token_count);
+                Item arg = parse_ascii_expression(input, builder, tokens, pos, token_count);
                 if (arg.item != ITEM_ERROR) {
                     list_push((List*)func_element, arg);
                 }
@@ -502,7 +503,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
     // Handle parentheses
     if (token->type == ASCII_TOKEN_GROUPING && token->start[0] == '(') {
         (*pos)++; // skip (
-        Item expr = parse_ascii_expression(input, tokens, pos, token_count);
+        Item expr = parse_ascii_expression(input, builder, tokens, pos, token_count);
 
         // Skip closing )
         if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_GROUPING &&
@@ -517,19 +518,19 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
 }
 
 // Forward declarations for precedence levels
-static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
-static Item parse_ascii_addition(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
-static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
-static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_relation(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_addition(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_multiplication(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_power(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count);
 
 // Parse full ASCII math expression (lowest precedence - relations)
-static Item parse_ascii_expression(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
-    return parse_ascii_relation(input, tokens, pos, token_count);
+static Item parse_ascii_expression(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    return parse_ascii_relation(input, builder, tokens, pos, token_count);
 }
 
 // Parse relations (=, <, >, etc.) - lowest precedence
-static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
-    Item left = parse_ascii_addition(input, tokens, pos, token_count);
+static Item parse_ascii_relation(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_addition(input, builder, tokens, pos, token_count);
     if (left.item == ITEM_ERROR) {
         return left;
     }
@@ -547,7 +548,7 @@ static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, 
 
         if (rel_name) {
             (*pos)++; // skip relation
-            Item right = parse_ascii_addition(input, tokens, pos, token_count);
+            Item right = parse_ascii_addition(input, builder, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
                 return right;
             }
@@ -572,8 +573,8 @@ static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, 
 }
 
 // Parse addition and subtraction
-static Item parse_ascii_addition(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
-    Item left = parse_ascii_multiplication(input, tokens, pos, token_count);
+static Item parse_ascii_addition(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_multiplication(input, builder, tokens, pos, token_count);
     if (left.item == ITEM_ERROR) {
         return left;
     }
@@ -587,7 +588,7 @@ static Item parse_ascii_addition(Input* input, ASCIIToken* tokens, size_t* pos, 
         else break; // Not addition/subtraction
 
         (*pos)++; // skip operator
-        Item right = parse_ascii_multiplication(input, tokens, pos, token_count);
+        Item right = parse_ascii_multiplication(input, builder, tokens, pos, token_count);
         if (right.item == ITEM_ERROR) {
             return right;
         }
@@ -609,8 +610,8 @@ static Item parse_ascii_addition(Input* input, ASCIIToken* tokens, size_t* pos, 
 }
 
 // Parse multiplication, division, and implicit multiplication
-static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
-    Item left = parse_ascii_power(input, tokens, pos, token_count);
+static Item parse_ascii_multiplication(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_power(input, builder, tokens, pos, token_count);
     if (left.item == ITEM_ERROR) {
         return left;
     }
@@ -624,7 +625,7 @@ static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t*
             const char* op_name = (op_token->start[0] == '*') ? "mul" : "div";
             (*pos)++; // skip operator
 
-            Item right = parse_ascii_power(input, tokens, pos, token_count);
+            Item right = parse_ascii_power(input, builder, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
                 return right;
             }
@@ -645,7 +646,7 @@ static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t*
 
         // Handle implicit multiplication between adjacent identifiers/numbers
         if (op_token->type == ASCII_TOKEN_IDENTIFIER || op_token->type == ASCII_TOKEN_NUMBER) {
-            Item right = parse_ascii_power(input, tokens, pos, token_count);
+            Item right = parse_ascii_power(input, builder, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
                 return right;
             }
@@ -671,8 +672,8 @@ static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t*
 }
 
 // Parse power operations (highest precedence)
-static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
-    Item left = parse_ascii_simple_expression(input, tokens, pos, token_count);
+static Item parse_ascii_power(Input* input, MarkBuilder* builder, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
     if (left.item == ITEM_ERROR) {
         return left;
     }
@@ -686,7 +687,7 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
         // Handle subscript (_) - higher precedence, parse first
         if (op_token->start[0] == '_') {
             (*pos)++; // skip _
-            Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
+            Item right = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
                 return right;
             }
@@ -709,7 +710,7 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
                  (tokens[*pos].type == ASCII_TOKEN_OPERATOR && tokens[*pos].length == 2 &&
                   tokens[*pos].start[0] == '*' && tokens[*pos].start[1] == '*'))) {
                 (*pos)++; // skip ^
-                Item power = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                Item power = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
                 if (power.item == ITEM_ERROR) {
                     return power;
                 }
@@ -733,7 +734,7 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
         if (op_token->start[0] == '^' ||
             (op_token->length == 2 && op_token->start[0] == '*' && op_token->start[1] == '*')) {
             (*pos)++; // skip ^
-            Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
+            Item right = parse_ascii_simple_expression(input, builder, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
                 return right;
             }
@@ -778,10 +779,13 @@ Item parse_ascii_math(Input* input, const char* math_text) {
         printf("DEBUG: Token %zu: type=%d, text='%.*s'\n", i, tokens[i].type, (int)tokens[i].length, tokens[i].start);
     }
 
+    // Create MarkBuilder for memory-safe string handling
+    MarkBuilder builder(input);
+
     // Parse expression
     size_t pos = 0;
     printf("DEBUG: About to parse ASCII expression\n");
-    Item result = parse_ascii_expression(input, tokens, &pos, token_count);
+    Item result = parse_ascii_expression(input, &builder, tokens, &pos, token_count);
     printf("DEBUG: Parse result: item=0x%lx\n", result.item);
 
     // Clean up

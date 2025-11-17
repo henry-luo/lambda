@@ -1205,7 +1205,7 @@ static Array* parse_css_value_list(Input *input, MarkBuilder* builder, const cha
         // because skip_css_comments would consume the space we want to detect
         if (**css == ',') {
             // Preserve comma separator by adding a marker symbol
-            String* comma_marker = input_create_string(input, ",");
+            String* comma_marker = builder->createString(",");
             if (comma_marker) {
                 Item comma_item = {.item = y2it(comma_marker)};
                 array_append(values, comma_item, input->pool);
@@ -1218,7 +1218,7 @@ static Array* parse_css_value_list(Input *input, MarkBuilder* builder, const cha
             // We need to look ahead to distinguish from comment
             if (*(*css + 1) != '*' && *(*css + 1) != '/') {
                 // Preserve slash separator by adding a marker symbol
-                String* slash_marker = input_create_string(input, "/");
+                String* slash_marker = builder->createString("/");
                 if (slash_marker) {
                     Item slash_item = {.item = y2it(slash_marker)};
                     array_append(values, slash_item, input->pool);
@@ -1242,7 +1242,7 @@ static Array* parse_css_value_list(Input *input, MarkBuilder* builder, const cha
             // After skipping whitespace, check if we now have a separator
             if (**css == ',') {
                 // Preserve comma separator
-                String* comma_marker = input_create_string(input, ",");
+                String* comma_marker = builder->createString(",");
                 if (comma_marker) {
                     Item comma_item = {.item = y2it(comma_marker)};
                     array_append(values, comma_item, input->pool);
@@ -1251,7 +1251,7 @@ static Array* parse_css_value_list(Input *input, MarkBuilder* builder, const cha
                 skip_css_comments(css);
             } else if (**css == '/' && *(*css + 1) != '*' && *(*css + 1) != '/') {
                 // Preserve slash separator
-                String* slash_marker = input_create_string(input, "/");
+                String* slash_marker = builder->createString("/");
                 if (slash_marker) {
                     Item slash_item = {.item = y2it(slash_marker)};
                     array_append(values, slash_item, input->pool);

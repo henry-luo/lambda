@@ -111,9 +111,9 @@ static String* parse_jsx_expression_content(Input* input, MarkBuilder* builder, 
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static Element* create_jsx_js_expression_element(Input* input, const char* js_content) {
+static Element* create_jsx_js_expression_element(Input* input, MarkBuilder* builder, const char* js_content) {
     Element* js_elem = input_create_element(input, "js");
-    String* content = input_create_string(input, js_content);
+    String* content = builder->createString(js_content);
     Item content_item = {.item = s2it(content)};
     list_push((List*)js_elem, content_item);
     return js_elem;
@@ -137,7 +137,7 @@ static Element* parse_jsx_expression(Input* input, MarkBuilder* builder, const c
         (*jsx)++; // Skip closing }
     }
 
-    return create_jsx_js_expression_element(input, expr_content->chars);
+    return create_jsx_js_expression_element(input, builder, expr_content->chars);
 }
 
 // Parse JSX text content until < or {

@@ -41,28 +41,6 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
 
 __thread Context* input_context = NULL;
 
-// Helper function to create string from char content
-String* create_input_string(Input* input, const char* text, int start, int len) {
-    // Allocate string from pool instead of using shared StrBuf
-    String* str = (String*)pool_calloc(input->pool, sizeof(String) + len + 1);
-    if (!str) return &EMPTY_STRING;
-    str->len = len;
-    str->ref_cnt = 0;
-    memcpy(str->chars, text + start, len);
-    str->chars[len] = '\0';  // Null-terminate the string
-    return str;
-}
-
-String* input_create_string(Input *input, const char* text) {
-    if (!text) return NULL;
-
-    // Add safety check for valid string pointer
-    size_t len = strlen(text);
-    if (len == 0) return &EMPTY_STRING;
-
-    return create_input_string(input, text, 0, len);
-}
-
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
     StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
@@ -749,19 +727,14 @@ InputManager::~InputManager() {
 // Global singleton instance
 static InputManager* g_input_manager = nullptr;
 
-// Get or create the global singleton instance
-InputManager* InputManager::get_global() {
+// Static method to create input using global manager
+Input* InputManager::create_input(Url* abs_url) {
+    // Lazy initialization of singleton
     if (!g_input_manager) {
         g_input_manager = new InputManager();
     }
-    return g_input_manager;
-}
-
-// Static method to create input using global manager
-Input* InputManager::create_input(Url* abs_url) {
-    InputManager* manager = get_global();
-    if (!manager) return nullptr;
-    return manager->create_input_instance(abs_url);
+    if (!g_input_manager) return nullptr;
+    return g_input_manager->create_input_instance(abs_url);
 }
 
 // Instance method to create input
@@ -787,11 +760,11 @@ void InputManager::destroy_global() {
 }
 
 Input* input_new(Url* abs_url) {
-    // Use global InputManager for backward compatibility
-    InputManager* manager = InputManager::get_global();
-    if (!manager) {
+    // Use InputManager::create_input for backward compatibility
+    Input* input = InputManager::create_input(abs_url);
+    if (!input) {
         // Fallback to old behavior if manager creation fails
-        Input* input = (Input*)malloc(sizeof(Input));
+        input = (Input*)malloc(sizeof(Input));
         input->url = abs_url;
         input->pool = pool_create();
         if (input->pool == NULL) { free(input);  return NULL; }
@@ -800,9 +773,6 @@ Input* input_new(Url* abs_url) {
         input->type_list = arraylist_new(16);
         input->root = {.item = ITEM_NULL};
         input->sb = stringbuf_new(input->pool);
-        return input;
     }
-
-    // Use InputManager to create input with managed pool
-    return manager->create_input_instance(abs_url);
+    return input;
 }
