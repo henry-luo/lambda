@@ -88,19 +88,27 @@ public:
     void addError(const SourceLocation& loc, const std::string& message,
                   const std::string& hint);
 
+    void addWarning(const SourceLocation& loc, const char* fmt, ...);
     void addWarning(const SourceLocation& loc, const std::string& message);
+
+    void addNote(const SourceLocation& loc, const char* fmt, ...);
     void addNote(const SourceLocation& loc, const std::string& message);
 
     // Error handling - at current position (requires tracker)
     void addError(const char* fmt, ...);
     void addError(const std::string& message);
+
+    void addWarning(const char* fmt, ...);
     void addWarning(const std::string& message);
+
+    void addNote(const char* fmt, ...);
     void addNote(const std::string& message);
 
     // Error state queries
     bool hasErrors() const { return errors_.hasErrors(); }
     bool hasWarnings() const { return errors_.hasWarnings(); }
     size_t errorCount() const { return errors_.errorCount(); }
+    size_t warningCount() const { return errors_.warningCount(); }
     bool shouldStopParsing() const { return errors_.shouldStop(); }
 
     // Format and log all errors
