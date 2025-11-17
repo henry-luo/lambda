@@ -197,7 +197,7 @@ static Array* parse_command_arguments(Input *input, MarkBuilder* builder, const 
                     free(arg_input);
                 } else {
                     // Fallback to string if parsing fails
-                    String *arg_string = input_create_string(input, content_chars);
+                    String *arg_string = builder->createString(content_chars);
                     if (arg_string) {
                         Item arg_item = {.item = s2it(arg_string)};
                         array_append(args, arg_item, input->pool);
@@ -452,7 +452,7 @@ static Item parse_latex_command(Input *input, MarkBuilder* builder, const char *
                     *(end + 1) = '\0';
 
                     if (strlen(start) > 0) {
-                        String *trimmed_string = input_create_string(input, start);
+                        String *trimmed_string = builder->createString(start);
                         if (trimmed_string) {
                             // printf("DEBUG: Adding item content: '%s'\n", start);
                             Item content_item = {.item = s2it(trimmed_string)};

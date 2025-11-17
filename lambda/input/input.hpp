@@ -22,9 +22,6 @@ private:
     InputManager& operator=(const InputManager&) = delete;
 
 public:
-    // Get or create the global singleton instance
-    static InputManager* get_global();
-
     // Create a new input using the managed pool
     static Input* create_input(Url* abs_url);
 
@@ -41,9 +38,6 @@ extern "C" {
 #endif// Input creation and management
 Input* input_new(Url* abs_url);
 
-String* create_input_string(Input* input, const char* text, int start, int len);
-String* input_create_string(Input *input, const char* text);
-
 // Common input utility functions
 void map_put(Map* mp, String* key, Item value, Input *input);
 void input_skip_whitespace(const char **text);
@@ -56,7 +50,6 @@ void input_free_lines(char** lines, int line_count);
 Element* input_create_element(Input *input, const char* tag_name);
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value);
-String* input_create_string(Input *input, const char* str);
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);

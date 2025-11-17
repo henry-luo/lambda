@@ -5,7 +5,7 @@
 
 // Forward declarations for Mermaid parsing
 static void skip_whitespace_and_comments_mermaid(const char **mermaid);
-static String* parse_mermaid_identifier(Input* input, const char **mermaid);
+static String* parse_mermaid_identifier(Input* input, MarkBuilder* builder, const char **mermaid);
 static String* parse_mermaid_label(Input* input, MarkBuilder* builder, const char **mermaid);
 static void parse_mermaid_node_def(Input* input, MarkBuilder* builder, Element* graph, const char **mermaid);
 static void parse_mermaid_edge_def(Input* input, MarkBuilder* builder, Element* graph, const char **mermaid);
@@ -34,7 +34,7 @@ static void skip_whitespace_and_comments_mermaid(const char **mermaid) {
 }
 
 // Parse Mermaid identifier (alphanumeric + underscore + dash)
-static String* parse_mermaid_identifier(Input* input, const char **mermaid) {
+static String* parse_mermaid_identifier(Input* input, MarkBuilder* builder, const char **mermaid) {
     skip_whitespace_and_comments_mermaid(mermaid);
 
     const char* start = *mermaid;
@@ -47,7 +47,7 @@ static String* parse_mermaid_identifier(Input* input, const char **mermaid) {
     }
 
     int len = *mermaid - start;
-    return create_input_string(input, start, 0, len);
+    return builder->createString(start, len);
 }
 
 // Parse Mermaid node shape and extract label
@@ -85,7 +85,7 @@ static String* parse_mermaid_node_shape(Input* input, MarkBuilder* builder, cons
         (*mermaid)++;
     } else {
         // No shape specified, return node_id as label
-        return input_create_string(input, node_id);
+        return builder->createString(node_id);
     }
 
     // Extract label text
@@ -157,7 +157,7 @@ static void parse_mermaid_node_def(Input* input, MarkBuilder* builder, Element* 
     skip_whitespace_and_comments_mermaid(mermaid);
 
     // Parse node ID
-    String* node_id = parse_mermaid_identifier(input, mermaid);
+    String* node_id = parse_mermaid_identifier(input, builder, mermaid);
     if (!node_id) {
         return;
     }
@@ -182,7 +182,7 @@ static void parse_mermaid_edge_def(Input* input, MarkBuilder* builder, Element* 
     skip_whitespace_and_comments_mermaid(mermaid);
 
     // Parse from node
-    String* from_id = parse_mermaid_identifier(input, mermaid);
+    String* from_id = parse_mermaid_identifier(input, builder, mermaid);
     if (!from_id) {
         return;
     }
@@ -202,28 +202,28 @@ static void parse_mermaid_edge_def(Input* input, MarkBuilder* builder, Element* 
     skip_whitespace_and_comments_mermaid(mermaid);
 
     // Parse edge operator
-    String* edge_style = input_create_string(input, "solid");
+    String* edge_style = builder->createString("solid");
     String* edge_label = NULL;
 
     // Detect edge type
     if (strncmp(*mermaid, "-->", 3) == 0) {
         *mermaid += 3;
-        edge_style = input_create_string(input, "solid");
+        edge_style = builder->createString("solid");
     } else if (strncmp(*mermaid, "-.->", 4) == 0) {
         *mermaid += 4;
-        edge_style = input_create_string(input, "dashed");
+        edge_style = builder->createString("dashed");
     } else if (strncmp(*mermaid, "==>", 3) == 0) {
         *mermaid += 3;
-        edge_style = input_create_string(input, "bold");
+        edge_style = builder->createString("bold");
     } else if (strncmp(*mermaid, "---", 3) == 0) {
         *mermaid += 3;
-        edge_style = input_create_string(input, "solid");
+        edge_style = builder->createString("solid");
     } else if (strncmp(*mermaid, "-.-", 3) == 0) {
         *mermaid += 3;
-        edge_style = input_create_string(input, "dashed");
+        edge_style = builder->createString("dashed");
     } else if (strncmp(*mermaid, "===", 3) == 0) {
         *mermaid += 3;
-        edge_style = input_create_string(input, "bold");
+        edge_style = builder->createString("bold");
     } else {
         return; // No valid edge operator
     }
@@ -237,7 +237,7 @@ static void parse_mermaid_edge_def(Input* input, MarkBuilder* builder, Element* 
     }
 
     // Parse to node
-    String* to_id = parse_mermaid_identifier(input, mermaid);
+    String* to_id = parse_mermaid_identifier(input, builder, mermaid);
     if (!to_id) {
         return;
     }
@@ -280,7 +280,7 @@ static void parse_mermaid_class_def(Input* input, MarkBuilder* builder, Element*
     skip_whitespace_and_comments_mermaid(mermaid);
 
     // Parse class name
-    String* class_name = parse_mermaid_identifier(input, mermaid);
+    String* class_name = parse_mermaid_identifier(input, builder, mermaid);
     if (!class_name) {
         return;
     }
@@ -319,7 +319,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     String* diagram_type = NULL;
 
     if (strncmp(mermaid, "graph", 5) == 0) {
-        diagram_type = input_create_string(input, "flowchart");
+        diagram_type = builder->createString("flowchart");
         mermaid += 5;
 
         // Check for direction
@@ -334,7 +334,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             mermaid += 2;
         }
     } else if (strncmp(mermaid, "flowchart", 9) == 0) {
-        diagram_type = input_create_string(input, "flowchart");
+        diagram_type = builder->createString("flowchart");
         mermaid += 9;
 
         // Check for direction
@@ -345,11 +345,11 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             mermaid += 2;
         }
     } else if (strncmp(mermaid, "sequenceDiagram", 15) == 0) {
-        diagram_type = input_create_string(input, "sequence");
+        diagram_type = builder->createString("sequence");
         mermaid += 15;
     } else {
         // Default to flowchart
-        diagram_type = input_create_string(input, "flowchart");
+        diagram_type = builder->createString("flowchart");
     }
 
     // Create main graph element with CSS-aligned attributes
@@ -375,7 +375,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
 
         // Try to parse as edge (look for edge operators)
         const char* checkpoint = mermaid;
-        String* potential_node = parse_mermaid_identifier(input, &mermaid);
+        String* potential_node = parse_mermaid_identifier(input, &builder, &mermaid);
 
         if (potential_node) {
             // Check if node has shape

@@ -3,6 +3,7 @@
 // Implements directory listing and element generation
 
 #include "input.hpp"
+#include "../mark_builder.hpp"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -35,7 +36,7 @@ static int is_directory(const char* path) {
 #include <time.h>
 
 // Helper: create <file> or <dir> element with metadata
-static Element* create_entry_element(Input* input, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
+static Element* create_entry_element(Input* input, MarkBuilder* builder, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
     Element* elmt = input_create_element(input, is_dir ? "dir" : "file");
     if (!elmt) return NULL;
     input_add_attribute_to_element(input, elmt, "name", name);
@@ -65,13 +66,13 @@ static Element* create_entry_element(Input* input, const char* name, const char*
     // Keep mode as string for permissions
     char buf[64];
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
-    String* mode_str = input_create_string(input, buf);
+    String* mode_str = builder->createString(buf);
     input_add_attribute_item_to_element(input, elmt, "mode", {.item = y2it(mode_str)});
     return elmt;
 }
 
 // Recursive directory traversal
-static void traverse_directory(Input* input, Element* parent, const char* dir_path, bool recursive, int max_depth, int cur_depth) {
+static void traverse_directory(Input* input, MarkBuilder* builder, Element* parent, const char* dir_path, bool recursive, int max_depth, int cur_depth) {
     DIR* dir = opendir(dir_path);
     if (!dir) return;
     struct dirent* entry;
@@ -94,7 +95,7 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
         }
 
         int is_dir = S_ISDIR(st.st_mode);
-        Element* elmt = create_entry_element(input, entry->d_name, full_path, &st, is_dir, is_link);
+        Element* elmt = create_entry_element(input, builder, entry->d_name, full_path, &st, is_dir, is_link);
         if (!elmt) continue;
         // Add as child content, not attribute
         Item elmt_item = {.element = elmt};
@@ -102,7 +103,7 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
         ((TypeElmt*)parent->type)->content_length++;
         // Recurse if directory
         if (recursive && is_dir && (max_depth < 0 || cur_depth < max_depth)) {
-            traverse_directory(input, elmt, full_path, recursive, max_depth, cur_depth + 1);
+            traverse_directory(input, builder, elmt, full_path, recursive, max_depth, cur_depth + 1);
         }
     }
     closedir(dir);
@@ -118,6 +119,8 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     Input* input = InputManager::create_input(NULL);
     if (!input) return NULL;
 
+    MarkBuilder builder(input);
+
     struct stat st;
     if (stat(directory_path, &st) != 0) return NULL;
 
@@ -129,14 +132,14 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
         dir_name = directory_path; // No '/' found, use the whole path
     }
 
-    Element* root = create_entry_element(input, dir_name, directory_path, &st, 1, false);
+    Element* root = create_entry_element(input, &builder, dir_name, directory_path, &st, 1, false);
     if (!root) { free(input); return NULL; }
 
     // Add the full path as a separate attribute for the root directory
     input_add_attribute_to_element(input, root, "path", directory_path);
 
     // Traverse and populate
-    traverse_directory(input, root, directory_path, recursive, max_depth, 0);
+    traverse_directory(input, &builder, root, directory_path, recursive, max_depth, 0);
     input->root = {.item = (uint64_t)root};
     return input;
 }
