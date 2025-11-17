@@ -393,11 +393,14 @@ extern TypeInfo type_info[];
 typedef struct Input {
     void* url;
     void* path;
-    Pool* pool;      // memory pool
+    Pool* pool;                 // memory pool
     NamePool* name_pool;        // centralized name management
     ArrayList* type_list;       // list of types
     Item root;
     StringBuf* sb;
+
+    // member functions
+    static Input* create(Pool* pool);
 } Input;
 
 #ifdef __cplusplus

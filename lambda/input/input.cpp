@@ -704,3 +704,15 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         return NULL;
     }
 }
+
+Input* Input::create(Pool* pool) {
+    Input* input = (Input*)pool_alloc(pool, sizeof(Input));
+    input->pool = pool;
+    input->name_pool = nullptr;
+    input->type_list = nullptr;
+    input->sb = nullptr;
+    input->url = nullptr;
+    input->path = nullptr;
+    input->root = (Item){.item = 0};
+    return input;
+}
