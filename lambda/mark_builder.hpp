@@ -20,23 +20,30 @@ class ArrayBuilder;
  * MEMORY MODEL:
  * - MarkBuilder itself is STACK-ALLOCATED in the parser function scope
  * - Automatically destroyed when parser function exits (RAII)
- * - Only the FINAL Mark data (Element, Map, Array, String) is pool-allocated
- * - Pool allocation happens only when build() is called
- * - No manual memory management needed for the builder
+ * - Mark data (Element, Map, Array, String) is allocated from Input's ARENA
+ * - Arena allocation is FAST (bump-pointer, O(1)) with zero per-allocation overhead
+ * - All arena data lives until Input's arena is reset/destroyed
+ * - No manual memory management needed for the builder or its created data
+ *
+ * ARENA vs POOL:
+ * - Arena: Used for Mark structures (String, Map, Element, primitives)
+ * - Pool: Used internally by map_put/elmt_put for dynamic data buffers
  *
  * USAGE PATTERN:
  *   void parse_json(Input* input, const char* json) {
  *       MarkBuilder builder(input);  // Stack allocation
  *       Item result = builder.map()  // Returns MapBuilder by value
  *           .put("key", "value")     // Fluent chaining by reference
- *           .build();                // Pool-allocates final Map
+ *           .build();                // Arena-allocates final Map
  *       input->root = result;
  *   }  // builder automatically destroyed here
+ *      // Arena data lives on in input until arena_reset/arena_destroy
  */
 class MarkBuilder {
 private:
-    Input* input_;              // input context (pool, type_list, name_pool, etc.)
-    Pool* pool_;                // memory pool (cached from input) - for Mark data only
+    Input* input_;              // input context (pool, arena, type_list, name_pool, etc.)
+    Pool* pool_;                // memory pool (cached from input) - for compatibility
+    Arena* arena_;              // arena allocator (cached from input) - primary allocator
     NamePool* name_pool_;       // string interning pool
     ArrayList* type_list_;      // type registry
     StringBuf* sb_;             // shared string buffer for temp work
@@ -65,11 +72,11 @@ public:
     MarkBuilder& operator=(MarkBuilder&&) = default;
 
     // ============================================================================
-    // String Creation Methods (pool-allocates strings for final Mark data)
+    // String Creation Methods (arena-allocates strings for final Mark data)
     // ============================================================================
 
     /**
-     * Create a pool-allocated String from C string
+     * Create an arena-allocated String from C string
      * Uses string interning if enabled
      */
     String* createString(const char* str);
@@ -108,7 +115,7 @@ public:
     ArrayBuilder array();
 
     // ============================================================================
-    // Direct Item Creation (convenience - pool-allocates final data immediately)
+    // Direct Item Creation (convenience - arena-allocates final data immediately)
     // ============================================================================
 
     /**
@@ -161,6 +168,7 @@ public:
 
     Input* input() const { return input_; }
     Pool* pool() const { return pool_; }
+    Arena* arena() const { return arena_; }
     NamePool* namePool() const { return name_pool_; }
     ArrayList* typeList() const { return type_list_; }
     StringBuf* stringBuf() const { return sb_; }
@@ -173,7 +181,7 @@ public:
  *
  * MEMORY MODEL: Stack-allocated value type
  * - Automatically destroyed when scope ends
- * - Only final Element is pool-allocated when build() is called
+ * - Final Element is arena-allocated when final() is called
  */
 class ElementBuilder {
 private:
@@ -268,12 +276,12 @@ public:
     ElementBuilder& end();
 
     // ============================================================================
-    // Finalization (pool-allocates and returns final Element)
+    // Finalization (returns final Element from arena)
     // ============================================================================
 
     /**
      * Build and return the final Element Item
-     * Pool-allocates the Element structure
+     * Element structure was arena-allocated during construction
      */
     Item final();
 };
@@ -283,12 +291,13 @@ public:
  *
  * MEMORY MODEL: Stack-allocated value type
  * - Automatically destroyed when scope ends
- * - Only final Map is pool-allocated when build() is called
+ * - Final Map structure is arena-allocated on construction
+ * - Internal data buffers use pool (for dynamic resizing)
  */
 class MapBuilder {
 private:
     MarkBuilder* builder_;      // parent builder
-    Map* map_;                  // map data (pool-allocated)
+    Map* map_;                  // map data (arena-allocated structure)
     TypeMap* map_type_;         // map type descriptor
 
     friend class MarkBuilder;
@@ -350,12 +359,12 @@ public:
     MapBuilder& putNull(const char* key);
 
     // ============================================================================
-    // Finalization (pool-allocates and returns final Map)
+    // Finalization (returns final Map from arena)
     // ============================================================================
 
     /**
      * Build and return the final Map Item
-     * Pool-allocates the Map structure
+     * Map structure was arena-allocated during construction
      */
     Item final();
 };
@@ -365,12 +374,12 @@ public:
  *
  * MEMORY MODEL: Stack-allocated value type
  * - Automatically destroyed when scope ends
- * - Only final Array is pool-allocated when build() is called
+ * - Final Array is arena/pool-allocated (via array_pooled)
  */
 class ArrayBuilder {
 private:
     MarkBuilder* builder_;      // parent builder
-    Array* array_;              // array being built (direct pool allocation)
+    Array* array_;              // array being built (pool-allocated via array_pooled)
 
     friend class MarkBuilder;
 
@@ -426,12 +435,12 @@ public:
     ArrayBuilder& appendItems(std::initializer_list<Item> items);
 
     // ============================================================================
-    // Finalization (pool-allocates and returns final Array)
+    // Finalization (returns final Array)
     // ============================================================================
 
     /**
      * Build and return the final Array Item
-     * Pool-allocates the Array structure
+     * Array was pool-allocated via array_pooled during construction
      */
     Item final();
 };
