@@ -621,8 +621,8 @@ int view_pdf_in_window(const char* pdf_file) {
         return 1;
     }
 
-    // Create Input structure properly using input_new
-    Input* input = input_new(nullptr); // URL not needed for direct parsing
+    // Create Input structure properly using InputManager
+    Input* input = InputManager_create_input(nullptr); // URL not needed for direct parsing
     if (!input) {
         log_error("Failed to create Input structure");
         free(pdf_content);
@@ -760,4 +760,3 @@ int view_pdf_in_window(const char* pdf_file) {
 
     return 0;
 }
-

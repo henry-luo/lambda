@@ -706,17 +706,114 @@ Input* Input::create(Pool* pool) {
     return input;
 }
 
-Input* input_new(Url* abs_url) {
-    Input* input = (Input*)malloc(sizeof(Input));
-    input->url = abs_url;
-    size_t grow_size = 1024;  // 1k
-    size_t tolerance_percent = 20;
-    input->pool = pool_create();
-    if (input->pool == NULL) { free(input);  return NULL; }
-    input->arena = arena_create_default(input->pool);  // Initialize arena allocator
-    input->name_pool = name_pool_create(input->pool, NULL);  // Initialize name pool for string interning
+Input* Input::create(Pool* pool, Url* abs_url) {
+    Input* input = (Input*)pool_alloc(pool, sizeof(Input));
+    input->pool = pool;
+    input->arena = arena_create_default(pool);
+    input->name_pool = name_pool_create(pool, NULL);  // Initialize name pool for string interning
     input->type_list = arraylist_new(16);
-    input->root = {.item = ITEM_NULL};
-    input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
+    input->sb = stringbuf_new(pool);  // Always allocate StringBuf
+    input->url = abs_url;
+    input->path = nullptr;
+    input->root = (Item){.item = ITEM_NULL};
     return input;
+}
+
+// InputManager implementation - manages global pool and input lifecycle
+struct InputManager {
+    Pool* global_pool;
+    ArrayList* inputs;  // Track all created inputs for cleanup
+};
+
+InputManager* input_manager_create(void) {
+    InputManager* manager = (InputManager*)malloc(sizeof(InputManager));
+    if (!manager) return NULL;
+
+    manager->global_pool = pool_create();
+    if (!manager->global_pool) {
+        free(manager);
+        return NULL;
+    }
+
+    manager->inputs = arraylist_new(16);
+    if (!manager->inputs) {
+        pool_destroy(manager->global_pool);
+        free(manager);
+        return NULL;
+    }
+
+    return manager;
+}
+
+void input_manager_destroy(InputManager* manager) {
+    if (!manager) return;
+
+    // Clean up all tracked inputs
+    if (manager->inputs) {
+        for (int i = 0; i < manager->inputs->length; i++) {
+            Input* input = (Input*)manager->inputs->data[i];
+            if (input && input->type_list) {
+                arraylist_free(input->type_list);
+            }
+        }
+        arraylist_free(manager->inputs);
+    }
+
+    // Destroy the global pool (this frees all pool-allocated memory)
+    if (manager->global_pool) {
+        pool_destroy(manager->global_pool);
+    }
+
+    free(manager);
+}
+
+Input* input_manager_create_input(InputManager* manager, Url* abs_url) {
+    if (!manager || !manager->global_pool) return NULL;
+
+    // Use the static create method with the managed pool
+    Input* input = Input::create(manager->global_pool, abs_url);
+    if (!input) return NULL;
+
+    // Track this input for cleanup
+    arraylist_append(manager->inputs, input);
+
+    return input;
+}
+
+// Global InputManager instance (optional - for convenience)
+static InputManager* g_input_manager = NULL;
+
+InputManager* input_manager_get_global(void) {
+    if (!g_input_manager) {
+        g_input_manager = input_manager_create();
+    }
+    return g_input_manager;
+}
+
+// Static convenience function - creates input using global manager
+Input* InputManager_create_input(Url* abs_url) {
+    InputManager* manager = input_manager_get_global();
+    if (!manager) return NULL;
+    return input_manager_create_input(manager, abs_url);
+}
+
+Input* input_new(Url* abs_url) {
+    // Use global InputManager for backward compatibility
+    InputManager* manager = input_manager_get_global();
+    if (!manager) {
+        // Fallback to old behavior if manager creation fails
+        Input* input = (Input*)malloc(sizeof(Input));
+        input->url = abs_url;
+        input->pool = pool_create();
+        if (input->pool == NULL) { free(input);  return NULL; }
+        input->arena = arena_create_default(input->pool);
+        input->name_pool = name_pool_create(input->pool, NULL);
+        input->type_list = arraylist_new(16);
+        input->root = {.item = ITEM_NULL};
+        input->sb = stringbuf_new(input->pool);
+        return input;
+    }
+
+    // Use InputManager to create input with managed pool
+    return input_manager_create_input(manager, abs_url);
 }

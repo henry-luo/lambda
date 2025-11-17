@@ -10,6 +10,17 @@
 extern "C" {
 #endif
 
+// InputManager - manages global pool and input lifecycle
+typedef struct InputManager InputManager;
+
+InputManager* input_manager_create(void);
+void input_manager_destroy(InputManager* manager);
+Input* input_manager_create_input(InputManager* manager, Url* abs_url);
+InputManager* input_manager_get_global(void);
+
+// Static convenience function - creates input using global manager
+Input* InputManager_create_input(Url* abs_url);
+
 // Input creation and management
 Input* input_new(Url* abs_url);
 
