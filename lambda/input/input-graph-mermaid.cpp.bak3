@@ -262,8 +262,13 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
             is_directed = false;
         }
     } else {
-        std::string msg = "Invalid edge syntax, expected edge arrow like '-->', '--->', or '-.->'";;
-        ctx.addError(tracker.location(), msg);
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::ERROR,
+            .location = loc,
+            .message = "Invalid edge syntax",
+            .hint = "Expected edge arrow like '-->', '--->', or '-.->'"
+        });
         return;
     }
 
@@ -272,7 +277,13 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
     // parse target node
     String* to_id = parse_mermaid_identifier(ctx, tracker);
     if (!to_id) {
-        ctx.addError(tracker.location(), "Expected target node identifier");
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::ERROR,
+            .location = loc,
+            .message = "Expected target node identifier",
+            .hint = "Edge definition requires a target node ID"
+        });
         return;
     }
 
@@ -314,7 +325,13 @@ static void parse_mermaid_class_def(InputContext& ctx, SourceTracker& tracker, E
     // parse class name
     String* class_name = parse_mermaid_identifier(ctx, tracker);
     if (!class_name) {
-        ctx.addWarning(tracker.location(), "Expected class name in class definition");
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::WARNING,
+            .location = loc,
+            .message = "Expected class name in class definition",
+            .hint = "Use format: class nodeId className"
+        });
     }
 
     // Note: For now we just parse and discard class definitions
@@ -372,7 +389,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             break;
         }
 
-        const char* line_start = tracker.rest();
+        const char* line_start = tracker.current();
 
         // check for classDef
         if (tracker.match("classDef")) {
@@ -382,7 +399,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         }
 
         // try to parse as edge (look for edge operators)
-        // size_t checkpoint = tracker.offset();
+        size_t checkpoint = tracker.offset();
         String* potential_node = parse_mermaid_identifier(ctx, tracker);
 
         if (potential_node) {
@@ -399,17 +416,21 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             if (tracker.match("-->") || tracker.match("-.->") ||
                 tracker.match("==>") || tracker.match("---") ||
                 tracker.match("-.-") || tracker.match("===")) {
-                // this is an edge
-                parse_mermaid_edge_def(ctx, tracker, graph, potential_node);
+                // this is an edge - reset and parse as edge
+                // tracker.setPosition(checkpoint);
+                String* from_id = parse_mermaid_identifier(ctx, tracker);
+                if (from_id) {
+                    parse_mermaid_edge_def(ctx, tracker, graph, from_id);
+                }
             } else {
-                // this is a standalone node
+                // this is a standalone node - reset and parse as node
+                // tracker.setPosition(checkpoint);
                 parse_mermaid_node_def(ctx, tracker, graph);
             }
         }
 
         // skip to next line if we haven't made progress
-        const char* line_end = tracker.rest();
-        if (line_end == line_start) {
+        if (tracker.current() == line_start) {
             skip_to_eol(tracker);
             if (!tracker.atEnd() && tracker.current() == '\n') {
                 tracker.advance();
@@ -418,10 +439,10 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     }
 
     // set graph as root
-    input->root = {.element = graph};
+    ctx.setRoot({.element = graph});
 
     // report errors if any
     if (ctx.hasErrors()) {
-        ctx.logErrors();
+        ctx.reportErrors();
     }
 }

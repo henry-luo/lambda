@@ -136,7 +136,8 @@ static String* parse_quoted_string(InputContext& ctx, SourceTracker& tracker) {
     }
 
     if (tracker.atEnd()) {
-        ctx.addError(start_loc, "Unterminated quoted string");
+        ctx.addError(start_loc, "Unterminated quoted string",
+                    "Add closing \" to complete the string");
         return nullptr;
     }
 
@@ -366,7 +367,7 @@ static void parse_subgraph(InputContext& ctx, SourceTracker& tracker, Element* g
                           (tracker.peek(1) == '>' || tracker.peek(1) == '-');
 
             // restore position
-            // tracker.reset(checkpoint);
+            tracker.reset(checkpoint);
 
             if (is_edge) {
                 // this is an edge statement
@@ -439,8 +440,9 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         is_directed = false;
         tracker.advance(5);
     } else {
-        ctx.addError(tracker.location(), "Expected 'graph' or 'digraph' keyword");
-
+        ctx.addError(tracker.location(), "Expected 'graph' or 'digraph' keyword",
+                    "DOT format starts with: [strict] (graph|digraph) [name] { ... }");
+        ctx.setErrorResult();
         return;
     }
 
@@ -457,7 +459,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
     // expect {
     if (tracker.atEnd() || tracker.current() != '{') {
         ctx.addError(tracker.location(), "Expected '{' to start graph body");
-
+        ctx.setErrorResult();
         return;
     }
     tracker.advance();
@@ -509,7 +511,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
                           (tracker.peek(1) == '>' || tracker.peek(1) == '-');
 
             // restore position
-            // tracker.reset(checkpoint);
+            tracker.reset(checkpoint);
 
             if (is_edge) {
                 // this is an edge statement
@@ -527,7 +529,6 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         }
 
         skip_whitespace_and_comments(tracker);
-
 
         // skip optional semicolon
         if (!tracker.atEnd() && tracker.current() == ';') {
@@ -547,11 +548,11 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         ctx.addError(tracker.location(), "Expected '}' to close graph");
     }
 
-    // set result
-    input->root = {.element = graph};
-
+    // set result based on error state
     if (ctx.hasErrors()) {
-        ctx.logErrors();
+        ctx.logAllErrors();
+        ctx.setErrorResult();
+    } else {
+        ctx.setRoot({.element = graph});
     }
 }
-

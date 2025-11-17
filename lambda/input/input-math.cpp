@@ -2,9 +2,13 @@
 #include "input-common.h"
 #include "../lambda.h"
 #include "../../lib/log.h"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+
+using namespace lambda;
 
 // math parser for latex math, typst math, and ascii math
 // produces syntax tree of nested <expr op:...> elements
@@ -4647,6 +4651,10 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     printf("parse_math called with: '%s', flavor: '%s' (length: %zu)\n", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(math_string, strlen(math_string));
+
     // Add timeout protection
     clock_t start_time = clock();
     const double PARSING_TIMEOUT_SECONDS = 30.0; // 30 second timeout
@@ -4670,6 +4678,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
 
     // Check timeout before parsing
     if ((clock() - start_time) / CLOCKS_PER_SEC > PARSING_TIMEOUT_SECONDS) {
+        ctx.addError(tracker.location(), "Math parsing timed out before parsing (%.2f seconds)", PARSING_TIMEOUT_SECONDS);
         fprintf(stderr, "Error: Math parsing timed out before parsing (%.2f seconds)\n", PARSING_TIMEOUT_SECONDS);
         input->root = {.item = ITEM_ERROR};
         return;
@@ -4688,12 +4697,14 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     // Check timeout after parsing
     double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
     if (elapsed_time > PARSING_TIMEOUT_SECONDS) {
+        ctx.addError(tracker.location(), "Math parsing timed out (%.2f seconds)", elapsed_time);
         fprintf(stderr, "Error: Math parsing timed out (%.2f seconds)\n", elapsed_time);
         input->root = {.item = ITEM_ERROR};
         return;
     }
 
     if (result .item == ITEM_ERROR || result .item == ITEM_NULL) {
+        ctx.addWarning(tracker.location(), "Math parsing returned error or null result");
         printf("Result is error or null, setting input->root to ITEM_ERROR\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -4701,6 +4712,10 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
 
     printf("Setting input->root to result: %lu (0x%lx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
     input->root = result;
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }
 
 // Parse styled fractions: \dfrac, \tfrac, \cfrac

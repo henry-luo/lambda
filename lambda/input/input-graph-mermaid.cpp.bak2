@@ -53,7 +53,7 @@ static String* parse_mermaid_identifier(InputContext& ctx, SourceTracker& tracke
         return nullptr;
     }
 
-    const char* start = tracker.rest();
+    const char* start = tracker.current();
     size_t len = 0;
 
     while (!tracker.atEnd()) {
@@ -128,8 +128,13 @@ static String* parse_mermaid_node_shape(InputContext& ctx, SourceTracker& tracke
     }
 
     if (tracker.atEnd() || tracker.current() != close_char) {
-        std::string msg = std::string("Expected closing character '") + close_char + "' for node shape";
-        ctx.addError(tracker.location(), msg);
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::ERROR,
+            .location = loc,
+            .message = "Expected closing character for node shape",
+            .hint = std::string("Expected '") + close_char + "' to close shape"
+        });
         return ctx.builder().createString(node_id);
     }
 
@@ -140,7 +145,7 @@ static String* parse_mermaid_node_shape(InputContext& ctx, SourceTracker& tracke
         tracker.advance();
     }
 
-    const char* label_text = sb->str->chars;
+    const char* label_text = stringbuf_cstr(sb);
     return ctx.builder().createString(label_text);
 }
 
@@ -177,13 +182,18 @@ static String* parse_mermaid_label(InputContext& ctx, SourceTracker& tracker) {
     }
 
     if (tracker.atEnd()) {
-        std::string msg = std::string("Unterminated label, expected closing '") + closing + "'";
-        ctx.addError(tracker.location(), msg);
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::ERROR,
+            .location = loc,
+            .message = "Unterminated label",
+            .hint = std::string("Expected closing '") + closing + "'"
+        });
         return nullptr;
     }
 
     tracker.advance(); // skip closing quote
-    return ctx.builder().createString(sb->str->chars);
+    return ctx.builder().createString(stringbuf_cstr(sb));
 }
 
 // Parse Mermaid node definition: nodeId[label] or nodeId(label) etc.
@@ -245,7 +255,7 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
 
             if (!tracker.atEnd() && tracker.current() == '|') {
                 tracker.advance();
-                label = ctx.builder().createString(sb->str->chars);
+                label = ctx.builder().createString(stringbuf_cstr(sb));
             }
 
             // skip remaining dashes after label
@@ -262,8 +272,13 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
             is_directed = false;
         }
     } else {
-        std::string msg = "Invalid edge syntax, expected edge arrow like '-->', '--->', or '-.->'";;
-        ctx.addError(tracker.location(), msg);
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::ERROR,
+            .location = loc,
+            .message = "Invalid edge syntax",
+            .hint = "Expected edge arrow like '-->', '--->', or '-.->'"
+        });
         return;
     }
 
@@ -272,13 +287,19 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
     // parse target node
     String* to_id = parse_mermaid_identifier(ctx, tracker);
     if (!to_id) {
-        ctx.addError(tracker.location(), "Expected target node identifier");
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::ERROR,
+            .location = loc,
+            .message = "Expected target node identifier",
+            .hint = "Edge definition requires a target node ID"
+        });
         return;
     }
 
     // create edge element
     Element* edge = create_edge_element(ctx.input(), from_id->chars, to_id->chars,
-                                        label ? label->chars : nullptr);
+                                        label ? label->chars : nullptr, is_directed);
 
     // add edge type attribute if dashed
     if (strcmp(edge_type, "dashed") == 0) {
@@ -314,7 +335,13 @@ static void parse_mermaid_class_def(InputContext& ctx, SourceTracker& tracker, E
     // parse class name
     String* class_name = parse_mermaid_identifier(ctx, tracker);
     if (!class_name) {
-        ctx.addWarning(tracker.location(), "Expected class name in class definition");
+        auto loc = tracker.location();
+        ctx.addError({
+            .severity = ParseErrorSeverity::WARNING,
+            .location = loc,
+            .message = "Expected class name in class definition",
+            .hint = "Use format: class nodeId className"
+        });
     }
 
     // Note: For now we just parse and discard class definitions
@@ -372,7 +399,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             break;
         }
 
-        const char* line_start = tracker.rest();
+        const char* line_start = tracker.current();
 
         // check for classDef
         if (tracker.match("classDef")) {
@@ -382,7 +409,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         }
 
         // try to parse as edge (look for edge operators)
-        // size_t checkpoint = tracker.offset();
+        size_t checkpoint = tracker.position();
         String* potential_node = parse_mermaid_identifier(ctx, tracker);
 
         if (potential_node) {
@@ -399,17 +426,21 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             if (tracker.match("-->") || tracker.match("-.->") ||
                 tracker.match("==>") || tracker.match("---") ||
                 tracker.match("-.-") || tracker.match("===")) {
-                // this is an edge
-                parse_mermaid_edge_def(ctx, tracker, graph, potential_node);
+                // this is an edge - reset and parse as edge
+                tracker.setPosition(checkpoint);
+                String* from_id = parse_mermaid_identifier(ctx, tracker);
+                if (from_id) {
+                    parse_mermaid_edge_def(ctx, tracker, graph, from_id);
+                }
             } else {
-                // this is a standalone node
+                // this is a standalone node - reset and parse as node
+                tracker.setPosition(checkpoint);
                 parse_mermaid_node_def(ctx, tracker, graph);
             }
         }
 
         // skip to next line if we haven't made progress
-        const char* line_end = tracker.rest();
-        if (line_end == line_start) {
+        if (tracker.current() == line_start) {
             skip_to_eol(tracker);
             if (!tracker.atEnd() && tracker.current() == '\n') {
                 tracker.advance();
@@ -418,10 +449,10 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     }
 
     // set graph as root
-    input->root = {.element = graph};
+    ctx.setRoot({.element = graph});
 
     // report errors if any
     if (ctx.hasErrors()) {
-        ctx.logErrors();
+        ctx.reportErrors();
     }
 }

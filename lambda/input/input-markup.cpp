@@ -1,8 +1,12 @@
 #include "input.hpp"
 #include "markup-parser.h"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <string.h>
 #include <ctype.h>
+
+using namespace lambda;
 
 // Forward declarations for Phase 2 enhanced parsing
 static Item parse_document(MarkupParser* parser, MarkBuilder* builder);
@@ -2231,6 +2235,10 @@ Item input_markup(Input *input, const char* content) {
         return (Item){.item = ITEM_ERROR};
     }
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(content, strlen(content));
+
     // Extract filename from URL if available for format detection
     const char* filename = NULL;
     if (input->url) {
@@ -2263,14 +2271,23 @@ Item input_markup(Input *input, const char* content) {
     // Create parser
     MarkupParser* parser = parser_create(input, config);
     if (!parser) {
+        ctx.addError(tracker.location(), "Failed to create markup parser");
         return (Item){.item = ITEM_ERROR};
     }
 
     // Parse content
     Item result = parse_markup_content(parser, content);
 
+    if (result.item == ITEM_ERROR) {
+        ctx.addWarning(tracker.location(), "Markup parsing returned error");
+    }
+
     // Cleanup
     parser_destroy(parser);
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 
     return result;
 }
@@ -2280,6 +2297,10 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     if (!input || !content) {
         return (Item){.item = ITEM_ERROR};
     }
+
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(content, strlen(content));
 
     const char* flavor = detect_markup_flavor(format, content);
 
@@ -2293,14 +2314,23 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     // Create parser
     MarkupParser* parser = parser_create(input, config);
     if (!parser) {
+        ctx.addError(tracker.location(), "Failed to create markup parser with explicit format");
         return (Item){.item = ITEM_ERROR};
     }
 
     // Parse content
     Item result = parse_markup_content(parser, content);
 
+    if (result.item == ITEM_ERROR) {
+        ctx.addWarning(tracker.location(), "Markup parsing with explicit format returned error");
+    }
+
     // Cleanup
     parser_destroy(parser);
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 
     return result;
 }
