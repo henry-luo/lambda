@@ -319,7 +319,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     String* diagram_type = NULL;
 
     if (strncmp(mermaid, "graph", 5) == 0) {
-        diagram_type = builder->createString("flowchart");
+        diagram_type = builder.createString("flowchart");
         mermaid += 5;
 
         // Check for direction
@@ -334,7 +334,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             mermaid += 2;
         }
     } else if (strncmp(mermaid, "flowchart", 9) == 0) {
-        diagram_type = builder->createString("flowchart");
+        diagram_type = builder.createString("flowchart");
         mermaid += 9;
 
         // Check for direction
@@ -345,11 +345,11 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             mermaid += 2;
         }
     } else if (strncmp(mermaid, "sequenceDiagram", 15) == 0) {
-        diagram_type = builder->createString("sequence");
+        diagram_type = builder.createString("sequence");
         mermaid += 15;
     } else {
         // Default to flowchart
-        diagram_type = builder->createString("flowchart");
+        diagram_type = builder.createString("flowchart");
     }
 
     // Create main graph element with CSS-aligned attributes

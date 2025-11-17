@@ -1,4 +1,5 @@
 #include "input.hpp"
+#include "../mark_builder.hpp"
 #include "../name_pool.h"
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
@@ -132,7 +133,8 @@ Element* input_create_element(Input *input, const char* tag_name) {
     // initialize with no attributes
 
     // Set element name
-    String* name_str = input_create_string(input, tag_name);
+    MarkBuilder builder(input);
+    String* name_str = builder.createString(tag_name);
     if (name_str) {
         element_type->name.str = name_str->chars;
         element_type->name.length = name_str->len;
@@ -374,8 +376,9 @@ void input_free_lines(char** lines, int line_count) {
 
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
     // Create key and value strings
-    String* key = input_create_string(input, attr_name);
-    String* value = input_create_string(input, attr_value);
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
     if (!key || !value) return;
     Item lambda_value = {.item = s2it(value)};
     elmt_put(element, key, lambda_value, input->pool);
@@ -383,7 +386,8 @@ void input_add_attribute_to_element(Input *input, Element* element, const char* 
 
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value) {
     // Create key string
-    String* key = input_create_string(input, attr_name);
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
     if (!key) return;
     elmt_put(element, key, attr_value, input->pool);
 }

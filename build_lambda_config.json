@@ -338,6 +338,9 @@
                 "lambda/mark_reader.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
+                "lambda/input/parse_error.cpp",
+                "lambda/input/source_tracker.cpp",
+                "lambda/input/input_context.cpp",
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
                 "lambda/input/css/css_value_parser.cpp",
@@ -1080,6 +1083,19 @@
                             "rpmalloc"
                         ],
                         "binary": "test_mark_reader_gtest.exe"
+                    },
+                    {
+                        "source": "test_error_tracking.cpp",
+                        "name": "🛡️ Error Tracking System Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_error_tracking.exe"
                     },
                     {
                         "source": "test_math_gtest.cpp",

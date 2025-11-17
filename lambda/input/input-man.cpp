@@ -176,7 +176,7 @@ static Item parse_man_list_item(Input *input, MarkBuilder* builder, char** lines
         }
 
         // Add content as paragraph
-        Item content_item = parse_man_paragraph(input, content_line);
+        Item content_item = parse_man_paragraph(input, builder, content_line);
         if (content_item .item != ITEM_NULL) {
             list_push((List*)list_item, content_item);
             ((TypeElmt*)list_item->type)->content_length++;
