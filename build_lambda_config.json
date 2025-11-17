@@ -287,6 +287,7 @@
             ],
             "sources": [
                 "lib/mempool.c",
+                "lib/arena.c",
                 "lib/strbuf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
@@ -1005,6 +1006,19 @@
                             "lib/mempool.c"
                         ],
                         "binary": "test_avl_tree.exe"
+                    },
+                    {
+                        "source": "test_arena_gtest.cpp",
+                        "name": "\ud83c\udfdf\ufe0f  Arena Allocator Tests (GTest)",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_arena_gtest.exe"
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",
