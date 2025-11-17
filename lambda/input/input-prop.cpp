@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 static void skip_whitespace(const char **prop) {
     while (**prop && (**prop == ' ' || **prop == '\t')) {
@@ -227,12 +231,19 @@ static Item parse_typed_value(Input *input, String* value_str) {
 }
 
 void parse_properties(Input* input, const char* prop_string) {
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(prop_string, strlen(prop_string));
+
     // Create MarkBuilder for memory-safe string handling
     MarkBuilder builder(input);
 
     // create root map to hold all properties
     Map* root_map = map_pooled(input->pool);
-    if (!root_map) { return; }
+    if (!root_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for properties map");
+        return;
+    }
     input->root = {.item = (uint64_t)root_map};
 
     const char *current = prop_string;
@@ -258,6 +269,7 @@ void parse_properties(Input* input, const char* prop_string) {
         // parse key-value pair
         String* key = parse_key(input, &builder, &current);
         if (!key) {
+            ctx.addWarning(tracker.location(), "Failed to parse property key, skipping line");
             skip_to_newline(&current);
             continue;
         }
@@ -275,11 +287,16 @@ void parse_properties(Input* input, const char* prop_string) {
         if (raw_value) {
             Item typed_value = parse_typed_value(input, raw_value);
             map_put(root_map, key, typed_value, input);
-        }
-
-        // move to next line
+        } else {
+            ctx.addWarning(tracker.location(), "Failed to parse value for key '%.*s'",
+                          (int)key->len, key->chars);
+        }        // move to next line
         skip_to_newline(&current);
     }
 
-    printf("Properties parsing completed\n");
+    if (ctx.hasErrors()) {
+        printf("Properties parsing completed with errors\n");
+    } else {
+        printf("Properties parsing completed\n");
+    }
 }

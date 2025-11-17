@@ -2,6 +2,10 @@
 #include "input-common.h"
 #include "../../lib/log.h"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 // Forward declaration for math parser integration
 void parse_math(Input* input, const char* math_string, const char* flavor);
@@ -996,6 +1000,10 @@ static Item parse_latex_element(Input *input, MarkBuilder* builder, const char *
 void parse_latex(Input* input, const char* latex_string) {
     // printf("DEBUG: Starting LaTeX parsing...\n");
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(latex_string, strlen(latex_string));
+
     // Create MarkBuilder for memory-safe string handling
     MarkBuilder builder(input);
 
@@ -1004,6 +1012,7 @@ void parse_latex(Input* input, const char* latex_string) {
     // Create root document element
     Element* root_element = create_latex_element(input, "latex_document");
     if (!root_element) {
+        ctx.addError(tracker.location(), "Failed to create LaTeX root document element");
         // printf("DEBUG: Failed to create root element\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -1078,5 +1087,10 @@ void parse_latex(Input* input, const char* latex_string) {
     // printf("DEBUG: Set content_length to: %lld\n", ((TypeElmt*)root_element->type)->content_length);
 
     input->root = {.item = (uint64_t)root_element};
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
+
     // printf("DEBUG: LaTeX parsing completed\n");
 }

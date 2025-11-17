@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 static void skip_whitespace(const char **ini) {
     while (**ini && (**ini == ' ' || **ini == '\t')) {
@@ -7,13 +11,19 @@ static void skip_whitespace(const char **ini) {
     }
 }
 
-static void skip_to_newline(const char **ini) {
+static void skip_to_newline(const char **ini, SourceTracker* tracker = nullptr) {
     while (**ini && **ini != '\n' && **ini != '\r') {
+        if (tracker) tracker->advance(**ini);
         (*ini)++;
     }
     if (**ini == '\r' && *(*ini + 1) == '\n') {
+        if (tracker) {
+            tracker->advance('\r');
+            tracker->advance('\n');
+        }
         (*ini) += 2; // skip \r\n
     } else if (**ini == '\n' || **ini == '\r') {
+        if (tracker) tracker->advance(**ini);
         (*ini)++; // skip \n or \r
     }
 }
@@ -26,43 +36,59 @@ static bool is_comment(const char *ini) {
     return *ini == ';' || *ini == '#';
 }
 
-static String* parse_section_name(Input *input, MarkBuilder* builder, const char **ini) {
+static String* parse_section_name(InputContext& ctx, SourceTracker& tracker, const char **ini) {
     if (**ini != '[') return NULL;
+    SourceLocation section_loc = tracker.location();
+    MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     (*ini)++; // skip '['
+    tracker.advance(1);
     while (**ini && **ini != ']' && **ini != '\n' && **ini != '\r') {
         stringbuf_append_char(sb, **ini);
+        tracker.advance(1);
         (*ini)++;
     }
     if (**ini == ']') {
         (*ini)++; // skip ']'
+        tracker.advance(1);
+    } else {
+        ctx.addError(section_loc, "Unterminated section name: missing ']'");
     }
 
     if (sb->length > 0) {
         return builder->createString(sb->str->chars, sb->length);
     }
+
+    ctx.addError(section_loc, "Empty section name");
     return NULL;
 }
 
-static String* parse_key(Input *input, MarkBuilder* builder, const char **ini) {
+static String* parse_key(InputContext& ctx, SourceTracker& tracker, const char **ini) {
+    SourceLocation key_loc = tracker.location();
+    MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
     // Read until '=' or whitespace
     while (**ini && **ini != '=' && **ini != '\n' && **ini != '\r' && !isspace(**ini)) {
         stringbuf_append_char(sb, **ini);
+        tracker.advance(1);
         (*ini)++;
     }
 
-    if (sb->length > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+    if (sb->length == 0) {
+        ctx.addError(key_loc, "Empty key name");
+        return NULL;
     }
-    return NULL;
+
+    return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_raw_value(Input *input, MarkBuilder* builder, const char **ini) {
+static String* parse_raw_value(InputContext& ctx, SourceTracker& tracker, const char **ini) {
+    SourceLocation value_loc = tracker.location();
+    MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
 
@@ -73,25 +99,33 @@ static String* parse_raw_value(Input *input, MarkBuilder* builder, const char **
         char quote_char = **ini;
         quoted = true;
         (*ini)++; // skip opening quote
+        tracker.advance(quote_char);
 
         while (**ini && **ini != quote_char) {
             if (**ini == '\\' && *(*ini + 1) == quote_char) {
                 // handle escaped quotes
                 (*ini)++; // skip backslash
+                tracker.advance(1);
                 stringbuf_append_char(sb, **ini);
+                tracker.advance(1);
             } else {
                 stringbuf_append_char(sb, **ini);
+                tracker.advance(1);
             }
             (*ini)++;
         }
 
         if (**ini == quote_char) {
             (*ini)++; // skip closing quote
+            tracker.advance(quote_char);
+        } else {
+            ctx.addError(value_loc, "Unterminated quoted value: missing closing %c", quote_char);
         }
     } else {
         // read until end of line or comment
         while (**ini && **ini != '\n' && **ini != '\r' && **ini != ';' && **ini != '#') {
             stringbuf_append_char(sb, **ini);
+            tracker.advance(1);
             (*ini)++;
         }
         // trim trailing whitespace
@@ -203,9 +237,10 @@ static Item parse_typed_value(Input *input, String* value_str) {
     return {.item = s2it(value_str)};
 }
 
-static Map* parse_section(Input *input, MarkBuilder* builder, const char **ini, String* section_name) {
+static Map* parse_section(InputContext& ctx, SourceTracker& tracker, const char **ini, String* section_name) {
     printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
 
+    Input* input = ctx.input();
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
 
@@ -216,37 +251,44 @@ static Map* parse_section(Input *input, MarkBuilder* builder, const char **ini, 
         if (!**ini) break;
 
         // skip empty lines
-        if (**ini == '\n' || **ini == '\r') { skip_to_newline(ini);  continue; }
+        if (**ini == '\n' || **ini == '\r') { skip_to_newline(ini, &tracker);  continue; }
 
         // check for comments
-        if (is_comment(*ini)) { skip_to_newline(ini);  continue; }
+        if (is_comment(*ini)) { skip_to_newline(ini, &tracker);  continue; }
 
         // check for next section
         if (is_section_start(*ini)) { break; }
 
         // parse key-value pair
-        String* key = parse_key(input, builder, ini);
+        SourceLocation line_loc = tracker.location();
+        String* key = parse_key(ctx, tracker, ini);
         if (!key || key->len == 0) {
-            // todo: raise error for empty key
-            skip_to_newline(ini);  continue;
+            ctx.addError(line_loc, "Invalid or empty key");
+            skip_to_newline(ini, &tracker);
+            continue;
         }
 
         skip_whitespace(ini);
-        if (**ini != '=') { skip_to_newline(ini);  continue; }
+        if (**ini != '=') {
+            ctx.addError(tracker.location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
+            skip_to_newline(ini, &tracker);
+            continue;
+        }
         (*ini)++; // skip '='
+        tracker.advance(1);
 
-        String* value_str = parse_raw_value(input, builder, ini);
+        String* value_str = parse_raw_value(ctx, tracker, ini);
         Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(input, value_str)) : (Item){.item = 0};
         map_put(section_map, key, value, input);
 
-        skip_to_newline(ini);
+        skip_to_newline(ini, &tracker);
     }
     return section_map;
 }
 
 void parse_ini(Input* input, const char* ini_string) {
-    // Create MarkBuilder for memory-safe string handling
-    MarkBuilder builder(input);
+    InputContext ctx(input, ini_string);
+    SourceTracker tracker(ini_string);
 
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);
@@ -265,19 +307,22 @@ void parse_ini(Input* input, const char* ini_string) {
         if (!*current) break;
 
         // skip empty lines
-        if (*current == '\n' || *current == '\r') { skip_to_newline(&current);  continue; }
+        if (*current == '\n' || *current == '\r') { skip_to_newline(&current, &tracker);  continue; }
 
         // check for comments
-        if (is_comment(current)) { skip_to_newline(&current);  continue; }
+        if (is_comment(current)) { skip_to_newline(&current, &tracker);  continue; }
 
         // check for section header
         if (is_section_start(current)) {
-            current_section_name = parse_section_name(input, &builder, &current);
-            if (!current_section_name) { skip_to_newline(&current);  continue; }
+            current_section_name = parse_section_name(ctx, tracker, &current);
+            if (!current_section_name) {
+                skip_to_newline(&current, &tracker);
+                continue;
+            }
 
-            skip_to_newline(&current);
+            skip_to_newline(&current, &tracker);
             // parse the section content
-            Map* section_map = parse_section(input, &builder, &current, current_section_name);
+            Map* section_map = parse_section(ctx, tracker, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
                 map_put(root_map, current_section_name,
@@ -295,7 +340,7 @@ void parse_ini(Input* input, const char* ini_string) {
                     memcpy(global_name->chars, "global", 6);
                     global_name->chars[6] = '\0';
 
-                    global_section = parse_section(input, &builder, &current, global_name);
+                    global_section = parse_section(ctx, tracker, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
                         map_put(root_map, global_name,
@@ -303,8 +348,14 @@ void parse_ini(Input* input, const char* ini_string) {
                     }
                 }
             } else {
-                skip_to_newline(&current);
+                ctx.addWarning(tracker.location(), "Orphaned key-value pair outside of any section");
+                skip_to_newline(&current, &tracker);
             }
         }
+    }
+
+    // Log any errors encountered during parsing
+    if (ctx.hasErrors() || ctx.hasWarnings()) {
+        ctx.logErrors();
     }
 }

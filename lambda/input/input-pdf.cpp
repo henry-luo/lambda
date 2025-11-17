@@ -1,6 +1,10 @@
 // pdf parser implementation
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 static Item parse_pdf_object(Input *input, MarkBuilder* builder, const char **pdf);
 static String* parse_pdf_name(Input *input, MarkBuilder* builder, const char **pdf);
@@ -1085,6 +1089,11 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
 
 void parse_pdf(Input* input, const char* pdf_string) {
     printf("pdf_parse\n");
+
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(pdf_string, strlen(pdf_string));
+
     // Create MarkBuilder for memory-safe string handling
     MarkBuilder builder(input);
 
@@ -1092,6 +1101,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Validate input
     if (!pdf_string || !*pdf_string) {
+        ctx.addError(tracker.location(), "Empty PDF content");
         printf("Error: Empty PDF content\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -1099,6 +1109,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
+        ctx.addError(tracker.location(), "Invalid PDF format - must start with %%PDF-");
         printf("Error: Invalid PDF format - must start with %%PDF-\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -1107,6 +1118,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // Create a simple map with basic PDF info
     Map* pdf_info = map_pooled(input->pool);
     if (!pdf_info) {
+        ctx.addError(tracker.location(), "Failed to allocate PDF info map");
         printf("Error: Failed to allocate PDF info map\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -1453,5 +1465,10 @@ void parse_pdf(Input* input, const char* pdf_string) {
             map_put(pdf_info, stats_key, stats_item, input);
         }
     }
+
     input->root = {.item = (uint64_t)pdf_info};
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }

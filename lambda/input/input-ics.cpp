@@ -1,6 +1,10 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <ctype.h>
+
+using namespace lambda;
 
 // Helper function to skip whitespace at the beginning of a line
 static void skip_line_whitespace(const char **ics) {
@@ -339,6 +343,10 @@ void parse_ics(Input* input, const char* ics_string) {
         return;
     }
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(ics_string, strlen(ics_string));
+
     // Initialize MarkBuilder for proper Lambda Item creation
     MarkBuilder builder(input);
 
@@ -347,6 +355,7 @@ void parse_ics(Input* input, const char* ics_string) {
     // Initialize calendar map
     Map* calendar_map = map_pooled(input->pool);
     if (!calendar_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for calendar map");
         return;
     }
 
@@ -359,12 +368,14 @@ void parse_ics(Input* input, const char* ics_string) {
         components_list->items = NULL;
     }
     if (!components_list) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for components list");
         return;
     }
 
     // Initialize properties map to store calendar-level properties
     Map* properties_map = map_pooled(input->pool);
     if (!properties_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for properties map");
         return;
     }
 
@@ -567,4 +578,8 @@ void parse_ics(Input* input, const char* ics_string) {
 
     // Set the calendar map as the root of the input
     input->root = {.item = (uint64_t)calendar_map};
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }

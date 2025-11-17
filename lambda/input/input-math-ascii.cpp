@@ -1,9 +1,13 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include "input-common.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+
+using namespace lambda;
 
 // Standalone ASCII Math parser
 // Produces Lambda AST compliant with Math.md schema
@@ -765,11 +769,16 @@ Item parse_ascii_math(Input* input, const char* math_text) {
         return {.item = ITEM_ERROR};
     }
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(math_text, strlen(math_text));
+
     printf("DEBUG: ASCII math parsing: '%s'\n", math_text);
 
     size_t token_count;
     ASCIIToken* tokens = ascii_tokenize(math_text, &token_count);
     if (!tokens) {
+        ctx.addError(tracker.location(), "Failed to tokenize ASCII math expression");
         printf("DEBUG: Tokenization failed\n");
         return {.item = ITEM_ERROR};
     }
@@ -787,6 +796,10 @@ Item parse_ascii_math(Input* input, const char* math_text) {
     printf("DEBUG: About to parse ASCII expression\n");
     Item result = parse_ascii_expression(input, &builder, tokens, &pos, token_count);
     printf("DEBUG: Parse result: item=0x%lx\n", result.item);
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 
     // Clean up
     free(tokens);

@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 // Forward declarations
 static Item parse_asciidoc_content(Input *input, char** lines, int line_count);
@@ -611,6 +615,10 @@ void parse_asciidoc(Input* input, const char* asciidoc_string) {
         return;
     }
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(asciidoc_string, strlen(asciidoc_string));
+
     // Initialize MarkBuilder for proper Lambda Item creation
     MarkBuilder builder(input);
 
@@ -619,12 +627,17 @@ void parse_asciidoc(Input* input, const char* asciidoc_string) {
     char** lines = split_lines(asciidoc_string, &line_count);
 
     if (!lines || line_count == 0) {
+        ctx.addError(tracker.location(), "Failed to split AsciiDoc content into lines");
         input->root = {.item = ITEM_NULL};
         return;
     }
 
     // Parse content using the full AsciiDoc parser
     input->root = parse_asciidoc_content(input, lines, line_count);
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 
     // Clean up lines
     free_lines(lines, line_count);

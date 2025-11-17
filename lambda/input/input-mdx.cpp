@@ -1,8 +1,12 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+
+using namespace lambda;
 
 // Forward declarations
 static Element* parse_mdx_content(Input* input, MarkBuilder* builder, const char* content);
@@ -269,10 +273,20 @@ static Element* create_mdx_document(Input* input, MarkBuilder* builder, const ch
 void parse_mdx(Input* input, const char* mdx_string) {
     if (!mdx_string || !input) return;
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(mdx_string, strlen(mdx_string));
+
     MarkBuilder builder(input);
     Element* root = create_mdx_document(input, &builder, mdx_string);
     if (root) {
         input->root = (Item){.element = root};
+    } else {
+        ctx.addError(tracker.location(), "Failed to parse MDX document");
+    }
+
+    if (ctx.hasErrors()) {
+        // errors were tracked, root may be partial
     }
 }
 

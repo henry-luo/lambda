@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 static Element* parse_element(Input *input, MarkBuilder* builder, const char **mark);
 static Item parse_value(Input *input, MarkBuilder* builder, const char **mark);
@@ -552,6 +556,10 @@ static Item parse_value(Input *input, MarkBuilder* builder, const char **mark) {
 }
 
 void parse_mark(Input* input, const char* mark_string) {
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(mark_string, strlen(mark_string));
+
     MarkBuilder builder(input);
 
     const char* mark = mark_string;
@@ -559,4 +567,8 @@ void parse_mark(Input* input, const char* mark_string) {
 
     // Parse the root content - could be a single value or element
     input->root = parse_content(input, &builder, &mark);
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }

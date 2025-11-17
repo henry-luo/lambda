@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 // External declaration for thread-local input context
 extern __thread Context* input_context;
@@ -1376,6 +1380,10 @@ static Item parse_css_value(Input *input, MarkBuilder* builder, const char **css
 void parse_css(Input* input, const char* css_string) {
     printf("css_parse (stylesheet)\n");
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(css_string, strlen(css_string));
+
     // Create MarkBuilder for string management
     MarkBuilder builder(input);
 
@@ -1393,7 +1401,12 @@ void parse_css(Input* input, const char* css_string) {
             input_add_attribute_item_to_element(input, empty_stylesheet, "rules", {.item = (uint64_t)empty_rules});
             input->root = {.item = (uint64_t)empty_stylesheet};
         } else {
+            ctx.addError(tracker.location(), "Failed to allocate memory for empty CSS stylesheet");
             input->root = {.item = ITEM_ERROR};
         }
+    }
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
     }
 }
