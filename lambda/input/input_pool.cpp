@@ -2,7 +2,7 @@
 // Memory cache/pooling for Input objects
 // Implements LRU cache for parsed Input*
 
-#include "input.h"
+#include "input.hpp"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../mark_builder.hpp"
 
 static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines, int* current_line, int total_lines, int target_indent);

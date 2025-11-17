@@ -139,7 +139,7 @@ Test(memory_safety, infinite_loop_protection) {
     for (int i = 0; malformed_inputs[i] != NULL; i++) {
         // This should not hang or cause infinite loops
         // We'll use a timeout to ensure it completes
-        Input* input = InputManager_create_input(NULL);
+        Input* input = InputManager::create_input(NULL);
         if (input) {
             parse_json(input, malformed_inputs[i]);
             // Note: Input is managed by InputManager, no explicit destroy needed

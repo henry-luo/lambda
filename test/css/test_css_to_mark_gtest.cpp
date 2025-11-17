@@ -11,7 +11,7 @@
 #include "../../lambda/input/css/css_value_parser.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_style.hpp"
-#include "../../lambda/input/input.h"
+#include "../../lambda/input/input.hpp"
 #include "../../lambda/format/format.h"
 #include "../../lambda/lambda-data.hpp"
 #include "../../lambda/name_pool.h"

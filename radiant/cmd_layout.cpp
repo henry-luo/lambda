@@ -33,7 +33,7 @@ extern "C" {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/document_styler.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include "../radiant/dom.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"

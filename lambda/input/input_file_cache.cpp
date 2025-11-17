@@ -2,7 +2,7 @@
 // Filesystem cache for downloaded/network files
 // Implements content-addressable storage and cache aging
 
-#include "input.h"
+#include "input.hpp"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -4,7 +4,7 @@
  */
 
 #include "input-html-tree.h"
-#include "input.h"
+#include "input.hpp"
 
 extern "C" {
 #include "../../lib/log.h"

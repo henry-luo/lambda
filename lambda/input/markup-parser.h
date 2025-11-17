@@ -1,7 +1,7 @@
 #ifndef MARKUP_PARSER_H
 #define MARKUP_PARSER_H
 
-#include "input.h"
+#include "input.hpp"
 #include "../lambda-data.hpp"
 
 #ifdef __cplusplus
@@ -70,21 +70,21 @@ typedef struct {
     char** lines;
     int line_count;
     int current_line;
-    
+
     // Format-specific state
     struct {
         char list_markers[10];      // Stack of list markers
         int list_levels[10];        // Stack of list indentation levels
         int list_depth;             // Current nesting depth
-        
+
         char table_state;           // Current table parsing state
         bool in_code_block;         // Whether we're in a code block
         char code_fence_char;       // Current code fence character
         int code_fence_length;      // Current code fence length
-        
+
         bool in_math_block;         // Whether we're in math block
         char math_delimiter[10];    // Math block delimiter
-        
+
         // Phase 2 enhancements
         int header_level;           // Current header level
         bool in_quote_block;        // Whether we're in blockquote

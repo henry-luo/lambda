@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../mark_builder.hpp"
 
 static void skip_whitespace(const char **ini) {

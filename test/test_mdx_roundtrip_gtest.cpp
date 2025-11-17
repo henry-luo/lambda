@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include "../lambda/format/format.h"
 
 class MdxRoundtripTest : public ::testing::Test {
@@ -70,7 +70,7 @@ TEST_F(MdxRoundtripTest, DISABLED_SimpleMdx) {
         "More markdown here.";
 
     // Parse MDX
-    Input* input = InputManager_create_input(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -108,7 +108,7 @@ TEST_F(MdxRoundtripTest, JsxFragments) {
         "</>\n\n"
         "Regular markdown.";
 
-    Input* input = InputManager_create_input(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -143,7 +143,7 @@ TEST_F(MdxRoundtripTest, DISABLED_NestedComponents) {
         "## More Content\n\n"
         "Final paragraph.";
 
-    Input* input = InputManager_create_input(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -176,7 +176,7 @@ TEST_F(MdxRoundtripTest, DISABLED_JsxExpressions) {
         "<div>{name}</div>\n\n"
         "End content.";
 
-    Input* input = InputManager_create_input(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -197,7 +197,7 @@ TEST_F(MdxRoundtripTest, DISABLED_JsxExpressions) {
 TEST_F(MdxRoundtripTest, EmptyMdx) {
     const char* mdx_content = "";
 
-    Input* input = InputManager_create_input(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);

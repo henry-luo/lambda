@@ -7,7 +7,7 @@
 
 #include "../view.hpp"
 #include "../pdf/pdf_to_view.hpp"
-#include "../../lambda/input/input.h"
+#include "../../lambda/input/input.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 
@@ -622,7 +622,7 @@ int view_pdf_in_window(const char* pdf_file) {
     }
 
     // Create Input structure properly using InputManager
-    Input* input = InputManager_create_input(nullptr); // URL not needed for direct parsing
+    Input* input = InputManager::create_input(nullptr); // URL not needed for direct parsing
     if (!input) {
         log_error("Failed to create Input structure");
         free(pdf_content);

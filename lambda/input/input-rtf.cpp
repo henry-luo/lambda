@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../mark_builder.hpp"
 
 static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **rtf);

@@ -5,7 +5,7 @@
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/mark_builder.hpp"
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
 #include "../lib/arraylist.h"

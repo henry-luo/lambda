@@ -3,7 +3,7 @@
 // Tests the new directory listing feature implemented for Lambda input system
 
 #include <gtest/gtest.h>
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -59,14 +59,14 @@ TEST_F(InputDirTest, ListCurrentDirectory) {
     const char* dir = ".";
     Input* input = input_from_directory(dir, false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL";
-    
+
     // Use get_type_id() to properly check the type
     TypeId root_type = get_type_id(input->root);
     ASSERT_EQ(root_type, LMD_TYPE_ELEMENT) << "Root is not an element (got type " << root_type << ", expected " << LMD_TYPE_ELEMENT << ")";
-    
+
     Element* root = (Element*)input->root.element;
     ASSERT_NE(root, nullptr) << "Root element is NULL";
-    
+
     // Basic validation that we got a valid element structure
     ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
 }
@@ -75,16 +75,16 @@ TEST_F(InputDirTest, ListCurrentDirectory) {
 TEST_F(InputDirTest, ListTestDirectory) {
     Input* input = input_from_directory(test_dir_name, false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for test directory";
-    
+
     TypeId root_type = get_type_id(input->root);
     ASSERT_EQ(root_type, LMD_TYPE_ELEMENT) << "Root is not an element (got type " << root_type << ", expected " << LMD_TYPE_ELEMENT << ")";
-    
+
     Element* root = (Element*)input->root.element;
     ASSERT_NE(root, nullptr) << "Root element is NULL";
-    
+
     // Basic validation that we got a valid element structure
     ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
-    
+
     // For now, just verify we can create the directory listing without crashing
     // More detailed structure validation would require understanding the exact Lambda data model
     SUCCEED() << "Directory listing created successfully";
@@ -94,11 +94,11 @@ TEST_F(InputDirTest, ListTestDirectory) {
 TEST_F(InputDirTest, RecursiveDirectoryListing) {
     Input* input = input_from_directory(test_dir_name, true, 2);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for recursive listing";
-    
+
     Element* root = (Element*)input->root.element;
     ASSERT_NE(root, nullptr) << "Root element is NULL";
     ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
-    
+
     // Basic test that recursive listing works without crashing
     SUCCEED() << "Recursive directory listing completed successfully";
 }
@@ -108,11 +108,11 @@ TEST_F(InputDirTest, DepthLimitedTraversal) {
     // Test with max_depth = 1 (should not go into nested subdirectories)
     Input* input = input_from_directory(test_dir_name, true, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for depth-limited listing";
-    
+
     Element* root = (Element*)input->root.element;
     ASSERT_NE(root, nullptr) << "Root element is NULL";
     ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
-    
+
     SUCCEED() << "Depth limiting test completed successfully";
 }
 
@@ -120,11 +120,11 @@ TEST_F(InputDirTest, DepthLimitedTraversal) {
 TEST_F(InputDirTest, NonRecursiveListing) {
     Input* input = input_from_directory(test_dir_name, false, 0);
     ASSERT_NE(input, nullptr) << "input_from_directory returned NULL for non-recursive listing";
-    
+
     Element* root = (Element*)input->root.element;
     ASSERT_NE(root, nullptr) << "Root element is NULL";
     ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
-    
+
     SUCCEED() << "Non-recursive directory listing completed successfully";
 }
 
@@ -157,14 +157,14 @@ protected:
 // Test empty directory handling
 TEST_F(InputDirTestSimple, EmptyDirectoryHandling) {
     system("mkdir -p test_empty_dir");
-    
+
     Input* input = input_from_directory("test_empty_dir", false, 1);
     ASSERT_NE(input, nullptr) << "input_from_directory should handle empty directories";
-    
+
     Element* root = (Element*)input->root.element;
     ASSERT_NE(root, nullptr) << "Root element should exist for empty directory";
     ASSERT_NE(root->type, nullptr) << "Root element type should not be NULL";
-    
+
     system("rm -rf test_empty_dir");
 }
 
@@ -177,12 +177,12 @@ TEST_F(InputDirTestSimple, UrlDirectoryIntegrationSimple) {
     url_str->len = url_len;
     url_str->ref_cnt = 1;
     strcpy(url_str->chars, url_text);
-    
+
     Input* input = input_from_url(url_str, NULL, NULL, NULL);
-    
+
     // The test passes if input_from_url doesn't crash/hang
     // We don't assert on the result since /tmp might not be accessible
     printf("URL directory integration test completed without hanging\n");
-    
+
     free(url_str);
 }

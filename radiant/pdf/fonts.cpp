@@ -3,7 +3,7 @@
 
 #include "operators.h"
 #include "../view.hpp"
-#include "../../lambda/input/input.h"
+#include "../../lambda/input/input.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include <string.h>

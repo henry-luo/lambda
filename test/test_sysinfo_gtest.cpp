@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/url.h"
 #include "../lib/string.h"

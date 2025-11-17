@@ -2,7 +2,7 @@
 // Directory handling for Lambda Script input system
 // Implements directory listing and element generation
 
-#include "input.h"
+#include "input.hpp"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -115,7 +115,7 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
         return NULL;
     }
     // Create Input and root <dir> element
-    Input* input = InputManager_create_input(NULL);
+    Input* input = InputManager::create_input(NULL);
     if (!input) return NULL;
 
     struct stat st;

@@ -4,7 +4,7 @@
  */
 
 #include "input-html-context.h"
-#include "input.h"
+#include "input.hpp"
 #include "input-html-tree.h"
 #include <stdlib.h>
 #include <string.h>

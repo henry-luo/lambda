@@ -1,4 +1,4 @@
-#include "input/input.h"
+#include "input/input.hpp"
 #include "format/format.h"
 #include "format/format-latex-html.h"
 #include "../lib/mime-detect.h"

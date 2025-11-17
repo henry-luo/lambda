@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "input-common.h"
 #include "../../lib/log.h"
 #include "../mark_builder.hpp"
@@ -161,7 +161,7 @@ static Array* parse_command_arguments(Input *input, MarkBuilder* builder, const 
 
                 // Parse the argument content as LaTeX instead of treating it as raw string
                 // Create a temporary input context for parsing the argument
-                Input* arg_input = InputManager_create_input(NULL);
+                Input* arg_input = InputManager::create_input(NULL);
                 if (arg_input) {
                     arg_input->pool = input->pool; // Share the same memory pool
                     arg_input->sb = stringbuf_new(input->pool);
@@ -553,7 +553,7 @@ static Item parse_latex_command(Input *input, MarkBuilder* builder, const char *
                     if (content_string->len > 0) {
                         if (is_math_env) {
                             // Parse math content using our math parser
-                            Input* math_input = InputManager_create_input((Url*)input->url);
+                            Input* math_input = InputManager::create_input((Url*)input->url);
                             if (math_input) {
                                 // Reset our StrBuf before calling math parser
                                 stringbuf_reset(input->sb);
@@ -798,7 +798,7 @@ static Item parse_latex_element(Input *input, MarkBuilder* builder, const char *
 
             if (math_string->len > 0) {
                 // Create temporary input for math parsing
-                Input* math_input = InputManager_create_input((Url*)input->url);
+                Input* math_input = InputManager::create_input((Url*)input->url);
                 if (math_input) {
                     // Reset our StrBuf before calling math parser
                     stringbuf_reset(input->sb);

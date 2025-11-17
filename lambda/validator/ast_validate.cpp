@@ -9,7 +9,7 @@
 #include "../transpiler.hpp"
 #include "../ast.hpp"
 #include "../lambda-data.hpp"
-#include "../input/input.h"
+#include "../input/input.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/file.h"
