@@ -5,7 +5,7 @@
 #include "operators.h"
 #include "pages.hpp"
 #include "../../lib/log.h"
-#include "../../lambda/input/input.h"
+#include "../../lambda/input/input.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include <string.h>
 

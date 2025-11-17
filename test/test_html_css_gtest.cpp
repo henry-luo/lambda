@@ -11,7 +11,7 @@
 #include "../lambda/input/css/css_tokenizer.hpp"
 
 extern "C" {
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/url.h"
 }

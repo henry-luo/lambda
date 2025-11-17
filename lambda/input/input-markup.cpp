@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "markup-parser.h"
 #include "../mark_builder.hpp"
 #include <string.h>

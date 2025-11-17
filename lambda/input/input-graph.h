@@ -1,7 +1,7 @@
 #ifndef LAMBDA_INPUT_GRAPH_H
 #define LAMBDA_INPUT_GRAPH_H
 
-#include "input.h"
+#include "input.hpp"
 
 #ifdef __cplusplus
 extern "C" {

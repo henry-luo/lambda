@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../mark_builder.hpp"
 
 // External declaration for thread-local input context

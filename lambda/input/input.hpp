@@ -1,3 +1,4 @@
+#pragma once
 #ifndef LAMBDA_INPUT_H
 #define LAMBDA_INPUT_H
 
@@ -6,22 +7,38 @@
 #include "../../lib/url.h"
 #include "../../lib/log.h"
 
+// InputManager - manages global pool and input lifecycle
+class InputManager {
+private:
+    Pool* global_pool;
+    ArrayList* inputs;  // Track all created inputs for cleanup
+
+    // Private constructor for singleton pattern
+    InputManager();
+    ~InputManager();
+
+    // Delete copy constructor and assignment operator
+    InputManager(const InputManager&) = delete;
+    InputManager& operator=(const InputManager&) = delete;
+
+public:
+    // Get or create the global singleton instance
+    static InputManager* get_global();
+
+    // Create a new input using the managed pool
+    static Input* create_input(Url* abs_url);
+
+    // Destroy the global instance (optional cleanup)
+    static void destroy_global();
+
+    // Instance methods for direct manager usage
+    Input* create_input_instance(Url* abs_url);
+    Pool* get_pool() const { return global_pool; }
+};
+
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-// InputManager - manages global pool and input lifecycle
-typedef struct InputManager InputManager;
-
-InputManager* input_manager_create(void);
-void input_manager_destroy(InputManager* manager);
-Input* input_manager_create_input(InputManager* manager, Url* abs_url);
-InputManager* input_manager_get_global(void);
-
-// Static convenience function - creates input using global manager
-Input* InputManager_create_input(Url* abs_url);
-
-// Input creation and management
+#endif// Input creation and management
 Input* input_new(Url* abs_url);
 
 String* create_input_string(Input* input, const char* text, int start, int len);

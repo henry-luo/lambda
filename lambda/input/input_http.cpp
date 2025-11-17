@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
-#include "input.h"
+#include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 
@@ -34,17 +34,17 @@ static HttpConfig default_http_config = {
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     size_t total_size = size * nmemb;
     char* new_data = (char*)realloc(response->data, response->size + total_size + 1);
-    
+
     if (!new_data) {
         fprintf(stderr, "HTTP: Memory allocation failed\n");
         return 0;
     }
-    
+
     response->data = new_data;
     memcpy(&(response->data[response->size]), contents, total_size);
     response->size += total_size;
     response->data[response->size] = '\0';
-    
+
     return total_size;
 }
 
@@ -68,15 +68,15 @@ static char* generate_cache_filename(const char* url, const char* cache_dir) {
     unsigned long hash = 5381;
     const char* str = url;
     int c;
-    
+
     while ((c = *str++)) {
         hash = ((hash << 5) + hash) + c;
     }
-    
+
     // Create filename with hash
     char* filename = (char*)malloc(strlen(cache_dir) + 32);
     if (!filename) return NULL;
-    
+
     snprintf(filename, strlen(cache_dir) + 32, "%s/%08lx.cache", cache_dir, hash);
     return filename;
 }
@@ -86,16 +86,16 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     if (!init_curl()) {
         return NULL;
     }
-    
+
     CURL* curl = curl_easy_init();
     if (!curl) {
         fprintf(stderr, "HTTP: Failed to initialize curl handle\n");
         return NULL;
     }
-    
+
     HttpResponse response = {0};
     CURLcode res;
-    
+
     // Configure curl options
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
@@ -104,7 +104,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, config ? config->max_redirects : default_http_config.max_redirects);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, config ? config->user_agent : default_http_config.user_agent);
-    
+
     // SSL/TLS configuration
     if (config ? config->verify_ssl : default_http_config.verify_ssl) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
@@ -113,41 +113,41 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     }
-    
+
     // Compression support
     if (config ? config->enable_compression : default_http_config.enable_compression) {
         curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
     }
-    
+
     // Perform the request
     printf("HTTP: Downloading %s\n", url);
     res = curl_easy_perform(curl);
-    
+
     if (res != CURLE_OK) {
         fprintf(stderr, "HTTP: Download failed: %s\n", curl_easy_strerror(res));
         free(response.data);
         curl_easy_cleanup(curl);
         return NULL;
     }
-    
+
     // Check HTTP response code
     long response_code;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-    
+
     if (response_code >= 400) {
         fprintf(stderr, "HTTP: Server returned error %ld for %s\n", response_code, url);
         free(response.data);
         curl_easy_cleanup(curl);
         return NULL;
     }
-    
-    printf("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n", 
+
+    printf("HTTP: Successfully downloaded %zu bytes from %s (HTTP %ld)\n",
            response.size, url, response_code);
-    
+
     if (content_size) {
         *content_size = response.size;
     }
-    
+
     curl_easy_cleanup(curl);
     return response.data;
 }
@@ -157,48 +157,48 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     if (!url || !cache_dir) {
         return NULL;
     }
-    
+
     // Ensure cache directory exists
     if (!create_dir(cache_dir)) {
         return NULL;
     }
-    
+
     // Generate cache filename
     char* cache_filename = generate_cache_filename(url, cache_dir);
     if (!cache_filename) {
         return NULL;
     }
-    
+
     // Check if file already exists in cache
     struct stat st;
     if (stat(cache_filename, &st) == 0) {
         printf("HTTP: Using cached file %s\n", cache_filename);
-        
+
         // Read cached file
         FILE* file = fopen(cache_filename, "rb");
         if (file) {
             fseek(file, 0, SEEK_END);
             long file_size = ftell(file);
             fseek(file, 0, SEEK_SET);
-            
+
             char* content = (char*)malloc(file_size + 1);
             if (content) {
                 size_t bytes_read = fread(content, 1, file_size, file);
                 content[bytes_read] = '\0';
                 fclose(file);
-                
+
                 if (out_cache_path) {
                     *out_cache_path = cache_filename;
                 } else {
                     free(cache_filename);
                 }
-                
+
                 return content;
             }
             fclose(file);
         }
     }
-    
+
     // Download content
     size_t content_size;
     char* content = download_http_content(url, &content_size, NULL);
@@ -206,7 +206,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
         free(cache_filename);
         return NULL;
     }
-    
+
     // Save to cache
     FILE* cache_file = fopen(cache_filename, "wb");
     if (cache_file) {
@@ -214,16 +214,16 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
         fclose(cache_file);
         printf("HTTP: Cached content to %s\n", cache_filename);
     } else {
-        fprintf(stderr, "HTTP: Failed to write cache file %s: %s\n", 
+        fprintf(stderr, "HTTP: Failed to write cache file %s: %s\n",
                 cache_filename, strerror(errno));
     }
-    
+
     if (out_cache_path) {
         *out_cache_path = cache_filename;
     } else {
         free(cache_filename);
     }
-    
+
     return content;
 }
 
@@ -232,18 +232,18 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     if (!url) {
         return NULL;
     }
-    
+
     // Use default cache directory if none provided
     const char* effective_cache_dir = cache_dir ? cache_dir : "./temp/cache";
-    
+
     // Download content (with caching)
     char* cache_path = NULL;
     char* content = download_to_cache(url, effective_cache_dir, &cache_path);
-    
+
     if (!content) {
         return NULL;
     }
-    
+
     // Parse URL to create Url object
     Url* abs_url = url_parse(url);
     if (!abs_url) {
@@ -251,11 +251,11 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
         free(cache_path);
         return NULL;
     }
-    
+
     // Create type and flavor strings
     String* type_str = NULL;
     String* flavor_str = NULL;
-    
+
     if (type) {
         type_str = (String*)malloc(sizeof(String) + strlen(type) + 1);
         if (type_str) {
@@ -264,7 +264,7 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
             strcpy(type_str->chars, type);
         }
     }
-    
+
     if (flavor) {
         flavor_str = (String*)malloc(sizeof(String) + strlen(flavor) + 1);
         if (flavor_str) {
@@ -273,16 +273,16 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
             strcpy(flavor_str->chars, flavor);
         }
     }
-    
+
     // Parse content using existing input system
     Input* input = input_from_source(content, abs_url, type_str, flavor_str);
-    
+
     // Cleanup
     free(content);
     free(cache_path);
     free(type_str);
     free(flavor_str);
-    
+
     return input;
 }
 
@@ -292,23 +292,23 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
 // Callback to collect response headers
 static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchResponse* response) {
     size_t header_size = size * nitems;
-    
+
     // Skip status line and empty lines
     if (header_size < 3 || buffer[0] == '\r' || buffer[0] == '\n') {
         return header_size;
     }
-    
+
     // Extract Content-Type header
     if (strncasecmp(buffer, "content-type:", 13) == 0) {
         char* value_start = buffer + 13;
         while (*value_start == ' ' || *value_start == '\t') value_start++;
-        
+
         size_t value_len = header_size - (value_start - buffer);
         // Remove trailing CRLF
         while (value_len > 0 && (value_start[value_len-1] == '\r' || value_start[value_len-1] == '\n')) {
             value_len--;
         }
-        
+
         if (response->content_type) free(response->content_type);
         response->content_type = (char*)malloc(value_len + 1);
         if (response->content_type) {
@@ -316,26 +316,26 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
             response->content_type[value_len] = '\0';
         }
     }
-    
+
     // Store all headers
-    response->response_headers = (char**)realloc(response->response_headers, 
+    response->response_headers = (char**)realloc(response->response_headers,
                                                (response->response_header_count + 1) * sizeof(char*));
     if (response->response_headers) {
         char* header_copy = (char*)malloc(header_size + 1);
         if (header_copy) {
             memcpy(header_copy, buffer, header_size);
             header_copy[header_size] = '\0';
-            
+
             // Remove trailing CRLF
             size_t len = header_size;
             while (len > 0 && (header_copy[len-1] == '\r' || header_copy[len-1] == '\n')) {
                 header_copy[--len] = '\0';
             }
-            
+
             response->response_headers[response->response_header_count++] = header_copy;
         }
     }
-    
+
     return header_size;
 }
 
@@ -345,12 +345,12 @@ static void free_fetch_response(FetchResponse* response) {
         free(response->data);
         response->data = NULL;
     }
-    
+
     if (response->content_type) {
         free(response->content_type);
         response->content_type = NULL;
     }
-    
+
     for (int i = 0; i < response->response_header_count; i++) {
         free(response->response_headers[i]);
     }
@@ -364,28 +364,28 @@ static void free_fetch_response(FetchResponse* response) {
 // Perform HTTP request with full fetch-like functionality
 FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     if (!init_curl()) { return NULL; }
-    
+
     CURL* curl = curl_easy_init();
     if (!curl) {
         log_error("HTTP: Failed to initialize curl handle\n");
         return NULL;
     }
-    
+
     FetchResponse* response = (FetchResponse*)calloc(1, sizeof(FetchResponse));
     if (!response) {
         curl_easy_cleanup(curl);
         return NULL;
     }
-    
+
     CURLcode res;
-    
+
     // Basic configuration
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, response);
-    
+
     // Method configuration
     if (config && config->method) {
         if (strcasecmp(config->method, "POST") == 0) {
@@ -413,7 +413,7 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         }
         // GET is default, no special handling needed
     }
-    
+
     // Headers configuration
     struct curl_slist* headers = NULL;
     if (config && config->headers && config->header_count > 0) {
@@ -422,13 +422,13 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         }
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     }
-    
+
     // Other configuration
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, config ? config->timeout_seconds : default_http_config.timeout_seconds);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, config ? config->max_redirects : default_http_config.max_redirects);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, config ? config->user_agent : default_http_config.user_agent);
-    
+
     // SSL/TLS configuration
     bool verify_ssl = config ? config->verify_ssl : default_http_config.verify_ssl;
     if (verify_ssl) {
@@ -438,17 +438,17 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     }
-    
+
     // Compression support
     bool enable_compression = config ? config->enable_compression : default_http_config.enable_compression;
     if (enable_compression) {
         curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
     }
-    
+
     // Perform the request
     log_debug("HTTP: Fetching %s\n", url);
     res = curl_easy_perform(curl);
-    
+
     if (res != CURLE_OK) {
         log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
         free_fetch_response(response);
@@ -457,16 +457,16 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
         if (headers) curl_slist_free_all(headers);
         return NULL;
     }
-    
+
     // Get HTTP response code
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);
 
-    log_debug("HTTP: Successfully fetched %zu bytes from %s (HTTP %ld)\n", 
+    log_debug("HTTP: Successfully fetched %zu bytes from %s (HTTP %ld)\n",
            response->size, url, response->status_code);
-    
+
     // Cleanup
     curl_easy_cleanup(curl);
     if (headers) curl_slist_free_all(headers);
-    
+
     return response;
 }

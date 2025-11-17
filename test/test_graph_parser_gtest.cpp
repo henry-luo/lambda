@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/input/input.h"
+#include "../lambda/input/input.hpp"
 #include "../lambda/input/input-graph.h"
 #include "../lib/arraylist.h"
 #include "../lib/mempool.h"

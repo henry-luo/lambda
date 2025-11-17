@@ -1,5 +1,5 @@
 // pdf parser implementation
-#include "input.h"
+#include "input.hpp"
 #include "../mark_builder.hpp"
 
 static Item parse_pdf_object(Input *input, MarkBuilder* builder, const char **pdf);

@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "input-html-scan.h"
 #include "input-html-tokens.h"
 #include "input-html-tree.h"

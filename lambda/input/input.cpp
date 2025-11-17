@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../name_pool.h"
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
@@ -719,87 +719,76 @@ Input* Input::create(Pool* pool, Url* abs_url) {
     return input;
 }
 
-// InputManager implementation - manages global pool and input lifecycle
-struct InputManager {
-    Pool* global_pool;
-    ArrayList* inputs;  // Track all created inputs for cleanup
-};
+// InputManager implementation - C++ class for managing global pool and input lifecycle
 
-InputManager* input_manager_create(void) {
-    InputManager* manager = (InputManager*)malloc(sizeof(InputManager));
-    if (!manager) return NULL;
-
-    manager->global_pool = pool_create();
-    if (!manager->global_pool) {
-        free(manager);
-        return NULL;
-    }
-
-    manager->inputs = arraylist_new(16);
-    if (!manager->inputs) {
-        pool_destroy(manager->global_pool);
-        free(manager);
-        return NULL;
-    }
-
-    return manager;
+// Private constructor
+InputManager::InputManager() {
+    global_pool = pool_create();
+    inputs = arraylist_new(16);
 }
 
-void input_manager_destroy(InputManager* manager) {
-    if (!manager) return;
-
+// Private destructor
+InputManager::~InputManager() {
     // Clean up all tracked inputs
-    if (manager->inputs) {
-        for (int i = 0; i < manager->inputs->length; i++) {
-            Input* input = (Input*)manager->inputs->data[i];
+    if (inputs) {
+        for (int i = 0; i < inputs->length; i++) {
+            Input* input = (Input*)inputs->data[i];
             if (input && input->type_list) {
                 arraylist_free(input->type_list);
             }
         }
-        arraylist_free(manager->inputs);
+        arraylist_free(inputs);
     }
 
     // Destroy the global pool (this frees all pool-allocated memory)
-    if (manager->global_pool) {
-        pool_destroy(manager->global_pool);
+    if (global_pool) {
+        pool_destroy(global_pool);
     }
-
-    free(manager);
 }
 
-Input* input_manager_create_input(InputManager* manager, Url* abs_url) {
-    if (!manager || !manager->global_pool) return NULL;
+// Global singleton instance
+static InputManager* g_input_manager = nullptr;
 
-    // Use the static create method with the managed pool
-    Input* input = Input::create(manager->global_pool, abs_url);
-    if (!input) return NULL;
-
-    // Track this input for cleanup
-    arraylist_append(manager->inputs, input);
-
-    return input;
-}
-
-// Global InputManager instance (optional - for convenience)
-static InputManager* g_input_manager = NULL;
-
-InputManager* input_manager_get_global(void) {
+// Get or create the global singleton instance
+InputManager* InputManager::get_global() {
     if (!g_input_manager) {
-        g_input_manager = input_manager_create();
+        g_input_manager = new InputManager();
     }
     return g_input_manager;
 }
 
-// Static convenience function - creates input using global manager
-Input* InputManager_create_input(Url* abs_url) {
-    InputManager* manager = input_manager_get_global();
-    if (!manager) return NULL;
-    return input_manager_create_input(manager, abs_url);
+// Static method to create input using global manager
+Input* InputManager::create_input(Url* abs_url) {
+    InputManager* manager = get_global();
+    if (!manager) return nullptr;
+    return manager->create_input_instance(abs_url);
+}
+
+// Instance method to create input
+Input* InputManager::create_input_instance(Url* abs_url) {
+    if (!global_pool) return nullptr;
+
+    // Use the static create method with the managed pool
+    Input* input = Input::create(global_pool, abs_url);
+    if (!input) return nullptr;
+
+    // Track this input for cleanup
+    arraylist_append(inputs, input);
+
+    return input;
+}
+
+// Destroy the global instance
+void InputManager::destroy_global() {
+    if (g_input_manager) {
+        delete g_input_manager;
+        g_input_manager = nullptr;
+    }
 }
 
 Input* input_new(Url* abs_url) {
     // Use global InputManager for backward compatibility
-    InputManager* manager = input_manager_get_global();
+    InputManager* manager = InputManager::get_global();
     if (!manager) {
         // Fallback to old behavior if manager creation fails
         Input* input = (Input*)malloc(sizeof(Input));
@@ -815,5 +804,5 @@ Input* input_new(Url* abs_url) {
     }
 
     // Use InputManager to create input with managed pool
-    return input_manager_create_input(manager, abs_url);
+    return manager->create_input_instance(abs_url);
 }

@@ -2,7 +2,7 @@
 #include "fixture_loader.h"
 #include "html_comparison.h"
 #include "../../lambda/format/format-latex-html.h"
-#include "../../lambda/input/input.h"
+#include "../../lambda/input/input.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/url.h"

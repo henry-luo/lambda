@@ -9,7 +9,7 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #endif
-#include "input.h"
+#include "input.hpp"
 #include "input-common.h"
 #include "../lambda-data.hpp"
 #include "../../lib/hashmap.h"
@@ -412,7 +412,7 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
     }
 
     // Create Input object using the InputManager
-    Input* input = InputManager_create_input(url);
+    Input* input = InputManager::create_input(url);
     if (!input) {
         log_error("Failed to create Input object");
         free(category);

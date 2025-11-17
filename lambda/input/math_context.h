@@ -1,18 +1,18 @@
 // Math Context Management for Enhanced Markdown Integration
-// This file provides a math parsing context that can be cached and reused 
+// This file provides a math parsing context that can be cached and reused
 // for consecutive math expressions within the same document
 
 #ifndef MATH_CONTEXT_H
 #define MATH_CONTEXT_H
 
-#include "input.h"
+#include "input.hpp"
 
 // Math parsing context structure
 typedef struct MathContext {
     Input* base_input;              // Reference to the main document input
     VariableMemPool* shared_pool;   // Shared memory pool for math expressions
     char* current_flavor;           // Current math flavor (latex, typst, ascii)
-    void* parser_state;             // Internal parser state 
+    void* parser_state;             // Internal parser state
     int expression_count;           // Number of expressions parsed so far
     bool context_valid;             // Whether the context is still valid
 } MathContext;

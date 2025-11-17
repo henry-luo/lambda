@@ -15,7 +15,7 @@
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #endif
 #include <string.h>  // for strlen
-#include "input/input.h"
+#include "input/input.hpp"
 
 extern __thread Context* context;
 

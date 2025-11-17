@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
 #include <string.h>
 #include <ctype.h>
@@ -108,7 +108,7 @@ static const char* parse_math_expr(Input* input, Element* container, const char*
     math_content[len] = '\0';
 
     // parse math using input-math.cpp
-    Input* math_input = InputManager_create_input((Url*)input->url);
+    Input* math_input = InputManager::create_input((Url*)input->url);
     if (math_input) {
         parse_math(math_input, math_content, "latex");
 

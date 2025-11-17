@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 extern "C" {
-    #include "../lambda/input/input.h"
+    #include "../lambda/input/input.hpp"
     #include "../lambda/input/input-html-context.h"
     #include "../lib/mempool.h"
     #include "../lib/stringbuf.h"

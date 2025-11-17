@@ -1,4 +1,4 @@
-#include "input.h"
+#include "input.hpp"
 #include "../mark_builder.hpp"
 
 static Element* parse_element(Input *input, MarkBuilder* builder, const char **mark);

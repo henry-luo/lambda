@@ -7,7 +7,7 @@
 #ifndef PDF_PAGES_HPP
 #define PDF_PAGES_HPP
 
-#include "../../lambda/input/input.h"
+#include "../../lambda/input/input.hpp"
 #include "../view.hpp"
 
 #ifdef __cplusplus
