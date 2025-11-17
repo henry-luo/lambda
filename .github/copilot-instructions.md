@@ -27,7 +27,6 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 
 ### Validation & Analysis
 - **Schema Validator**: Type-safe document validation (`lambda/validator/`)
-- **Unicode Support**: Comprehensive Unicode handling with ICU integration (`lambda/unicode_string.cpp`)
 
 ## Language Syntax & Features
 
@@ -55,8 +54,7 @@ let output = format(transform(doc), 'markdown')
 ```
 
 ### Advanced Features
-- **Type System**: `type Person < name: string, age: int >`
-- **Pattern Matching**: Destructuring in let expressions and function parameters
+- **Type System**: `type <Person name: string, age: int>`
 - **Comprehensions**: `for (x in list, y in range) x + y`
 - **Ranges**: `1 to 10` syntax for sequence generation
 - **Elements**: Document structure `<element attr: value; content>`
@@ -65,10 +63,9 @@ let output = format(transform(doc), 'markdown')
 
 ### Code Style & Safety
 - **Memory Safety**: Always use proper pool allocation and reference counting
-- **Type Safety**: Leverage type system macros for field access
 - **Defensive Programming**: Validate pointers and range check arrays
-- **Error Handling**: Graceful fallbacks and proper error propagation
 - **Comment**: Start inline-level comments in lowercase
+- **Debugging**: Use `log_debug()` from `lib/log.h` for tracing execution. Don't use printf(), fprintf(), or std::cout for debugging. The log file is at `./log.txt`
 
 ### Build System
 - **Primary**: Use `make build` for incremental builds
@@ -89,8 +86,14 @@ Test executables are located in the `./test/` directory.
 - `test/` - Test suites and sample files
 - `test/input` - Test suites input data files
 - `test/lambda` - Tests in Lambda script
-- `test/*.c` - Tests in Criterion C/C++ code
-- `typeset/` - Document typesetting system
-- `build/` - Build artifacts (auto-generated)
+- `test/*.cpp` - Tests in GTest C++ code
+- `radiant/` - HTML/CSS rendering engine
+- `doc/` - Documentation and design notes
+- `utils/` - Build and utility scripts
+- `vibe/` - Vibe coding plans and progress tracking
 - `*.json` - Build configuration files
+- `build/` - Build artifacts (auto-generated)
 - `temp/` - Temporary files (auto-generated)
+
+## Notes
+- Token limit for each session: 1000000 tokens.
