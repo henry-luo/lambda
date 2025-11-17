@@ -1,6 +1,10 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <ctype.h>
+
+using namespace lambda;
 
 // Helper function to skip whitespace at the beginning of a line
 static void skip_line_whitespace(const char **eml) {
@@ -162,17 +166,27 @@ static String* parse_date_value(Input *input, MarkBuilder* builder, const char* 
 void parse_eml(Input* input, const char* eml_string) {
     if (!eml_string || !input) return;
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(eml_string, strlen(eml_string));
+
     MarkBuilder builder(input);
 
     const char* eml = eml_string;
 
     // Create root map for the email
     Map* email_map = map_pooled(input->pool);
-    if (!email_map) return;
+    if (!email_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for email map");
+        return;
+    }
 
     // Initialize headers map
     Map* headers_map = map_pooled(input->pool);
-    if (!headers_map) return;
+    if (!headers_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for headers map");
+        return;
+    }
 
     // Parse headers
     while (*eml) {
@@ -292,9 +306,15 @@ void parse_eml(Input* input, const char* eml_string) {
             String* body_key = builder.createString("body");
             Item body_value = {.item = s2it(body_string)};
             map_put(email_map, body_key, body_value, input);
+        } else {
+            ctx.addWarning(tracker.location(), "Failed to create body string");
         }
     }
 
     // Set the email map as the root of the input
     input->root = {.item = (uint64_t)email_map};
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }

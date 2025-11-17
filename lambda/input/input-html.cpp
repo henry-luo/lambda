@@ -4,7 +4,11 @@
 #include "input-html-tree.h"
 #include "input-html-context.h"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <stdarg.h>
+
+using namespace lambda;
 
 static Item parse_element(Input *input, MarkBuilder* builder, const char **html, const char *html_start, HtmlParserContext* context);
 
@@ -813,12 +817,17 @@ __attribute__((visibility("hidden")))
 void parse_html_impl(Input* input, const char* html_string) {
     const char *html = html_string;
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(html_string, strlen(html_string));
+
     // Create MarkBuilder for string management
     MarkBuilder builder(input);
 
     // Create parser context to track document structure
     HtmlParserContext* context = html_context_create(input);
     if (!context) {
+        ctx.addError(tracker.location(), "Failed to create HTML parser context");
         log_error("Failed to create HTML parser context");
         input->root = (Item){.item = ITEM_ERROR};
         return;
@@ -831,6 +840,13 @@ void parse_html_impl(Input* input, const char* html_string) {
         root_list->length = 0;
         root_list->capacity = 0;
         root_list->items = NULL;
+    }
+
+    if (!root_list) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for root list");
+        html_context_destroy(context);
+        input->root = (Item){.item = ITEM_ERROR};
+        return;
     }
 
     // Skip leading whitespace (optional - could preserve as text node if needed)
@@ -917,6 +933,10 @@ void parse_html_impl(Input* input, const char* html_string) {
     } else {
         // Empty document - return null
         input->root = (Item){.item = ITEM_NULL};
+    }
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
     }
 
     // Clean up parser context

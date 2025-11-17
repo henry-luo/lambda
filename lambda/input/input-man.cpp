@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 // Forward declarations
 static Item parse_man_content(Input *input, MarkBuilder* builder, char** lines, int line_count);
@@ -404,6 +408,10 @@ void parse_man(Input* input, const char* man_string) {
         return;
     }
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(man_string, strlen(man_string));
+
     // Initialize MarkBuilder for proper Lambda Item creation
     MarkBuilder builder(input);
 
@@ -412,12 +420,17 @@ void parse_man(Input* input, const char* man_string) {
     char** lines = split_lines(man_string, &line_count);
 
     if (!lines || line_count == 0) {
+        ctx.addError(tracker.location(), "Failed to split man page into lines");
         input->root = {.item = ITEM_NULL};
         return;
     }
 
     // Parse content using the full man page parser
     input->root = parse_man_content(input, &builder, lines, line_count);
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 
     // Clean up
     free_lines(lines, line_count);

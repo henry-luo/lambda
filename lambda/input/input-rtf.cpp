@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **rtf);
 
@@ -421,13 +425,16 @@ static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **r
 
 void parse_rtf(Input* input, const char* rtf_string) {
     printf("rtf_parse\n");
-    MarkBuilder builder(input);
+    InputContext ctx(input);
+    SourceTracker tracker(rtf_string, strlen(rtf_string));
+    MarkBuilder* builder = &ctx.builder();
 
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);
 
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
+        ctx.addError(tracker.location(), "Invalid RTF format: document must start with '{\\rtf'");
         printf("Error: Invalid RTF format - must start with {\\rtf\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -436,6 +443,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
     // Create document root to hold all groups
     Array* document = array_pooled(input->pool);
     if (!document) {
+        ctx.addError(tracker.location(), "Memory allocation failed for RTF document array");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -446,14 +454,22 @@ void parse_rtf(Input* input, const char* rtf_string) {
         if (*rtf == '\0') break;
 
         if (*rtf == '{') {
-            Item group = parse_rtf_group(input, &builder, &rtf);
-            if (group .item != ITEM_ERROR && group .item != ITEM_NULL) {
+            Item group = parse_rtf_group(input, builder, &rtf);
+            if (group.item != ITEM_ERROR && group.item != ITEM_NULL) {
                 array_append(document, group, input->pool);
+            } else if (group.item == ITEM_ERROR) {
+                ctx.addWarning(tracker.location(), "Failed to parse RTF group, skipping");
             }
         } else {
             // Skip unknown content
+            ctx.addWarning(tracker.location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
             rtf++;
         }
+    }
+
+    // Report completion status
+    if (ctx.hasErrors()) {
+        ctx.addError(SourceLocation{0, 1, 1}, "RTF parsing completed with errors");
     }
 
     input->root = {.item = (uint64_t)document};

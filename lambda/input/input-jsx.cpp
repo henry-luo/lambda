@@ -1,6 +1,10 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <ctype.h>
+
+using namespace lambda;
 
 // JSX JavaScript expression parsing state
 typedef struct {
@@ -461,6 +465,10 @@ static Element* parse_jsx_element(Input* input, MarkBuilder* builder, const char
 Item input_jsx(Input* input, const char* jsx_string) {
     if (!input || !jsx_string) return {.item = ITEM_NULL};
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(jsx_string, strlen(jsx_string));
+
     MarkBuilder builder(input);
 
     const char* jsx = jsx_string;
@@ -474,7 +482,13 @@ Item input_jsx(Input* input, const char* jsx_string) {
         Element* root = parse_jsx_element(input, &builder, &jsx, end);
         if (root) {
             return {.item = (uint64_t)root};
+        } else {
+            ctx.addError(tracker.location(), "Failed to parse JSX element");
         }
+    }
+
+    if (ctx.hasErrors()) {
+        // errors occurred
     }
 
     return {.item = ITEM_NULL};

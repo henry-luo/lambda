@@ -1,6 +1,10 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <ctype.h>
+
+using namespace lambda;
 
 // Helper function to skip whitespace at the beginning of a line
 static void skip_line_whitespace(const char **vcf) {
@@ -225,17 +229,27 @@ static Map* parse_address(Input *input, MarkBuilder* builder, const char* value)
 void parse_vcf(Input* input, const char* vcf_string) {
     if (!vcf_string || !input) return;
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(vcf_string, strlen(vcf_string));
+
     MarkBuilder builder(input);
 
     const char* vcf = vcf_string;
 
     // Initialize contact map
     Map* contact_map = map_pooled(input->pool);
-    if (!contact_map) return;
+    if (!contact_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for contact map");
+        return;
+    }
 
     // Initialize properties map to store all raw properties
     Map* properties_map = map_pooled(input->pool);
-    if (!properties_map) return;
+    if (!properties_map) {
+        ctx.addError(tracker.location(), "Failed to allocate memory for properties map");
+        return;
+    }
 
     bool in_vcard = false;
 
@@ -378,4 +392,8 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
     // Set the contact map as the root of the input
     input->root = {.item = ((uint64_t)LMD_TYPE_MAP << 56) | (uint64_t)contact_map};
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }

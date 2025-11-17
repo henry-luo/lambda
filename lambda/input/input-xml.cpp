@@ -1,5 +1,9 @@
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
+#include "source_tracker.hpp"
+
+using namespace lambda;
 
 static Item parse_element(Input *input, MarkBuilder* builder, const char **xml);
 static Item parse_comment(Input *input, MarkBuilder* builder, const char **xml);
@@ -7,6 +11,7 @@ static Item parse_cdata(Input *input, MarkBuilder* builder, const char **xml);
 static Item parse_entity(Input *input, MarkBuilder* builder, const char **xml);
 static Item parse_doctype(Input *input, MarkBuilder* builder, const char **xml);
 static Item parse_dtd_declaration(Input *input, MarkBuilder* builder, const char **xml);
+static String* parse_string_content(Input *input, MarkBuilder* builder, const char **xml, char end_char);
 
 // Simple entity resolution - for now just handle common predefined ones
 static const char* resolve_entity(const char* entity_name, size_t length) {
@@ -679,13 +684,15 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **xml) 
 }
 
 void parse_xml(Input* input, const char* xml_string) {
-    MarkBuilder builder(input);
+    InputContext ctx(input);
+    SourceTracker tracker(xml_string, strlen(xml_string));
+    MarkBuilder* builder = &ctx.builder();
 
     const char* xml = xml_string;
     skip_whitespace(&xml);
 
     // Create a document root element to contain all top-level elements
-    ElementBuilder doc_element = builder.element("document");
+    ElementBuilder doc_element = builder->element("document");
 
     int actual_element_count = 0;  // Count only actual XML elements (not PIs, comments, etc.)
     Item actual_root_element = {.item = ITEM_ERROR};
@@ -698,7 +705,7 @@ void parse_xml(Input* input, const char* xml_string) {
         const char* old_xml = xml; // Save position to detect infinite loops
 
         if (*xml == '<') {
-            Item element = parse_element(input, &builder, &xml);
+            Item element = parse_element(input, builder, &xml);
             if (element.item != ITEM_ERROR) {
                 doc_element.child(element);
 
@@ -725,8 +732,14 @@ void parse_xml(Input* input, const char* xml_string) {
 
         // Safety check: ensure we always advance to prevent infinite loops
         if (xml == old_xml) {
+            ctx.addWarning(tracker.location(), "Possible infinite loop detected in XML parsing, forcing advance");
             xml++; // Force advance by at least one character
         }
+    }
+
+    // Report errors if any
+    if (ctx.hasErrors()) {
+        ctx.addError(SourceLocation{0, 1, 1}, "XML parsing completed with errors");
     }
 
     // Always return the document wrapper to maintain consistent structure

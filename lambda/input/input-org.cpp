@@ -1,7 +1,11 @@
 #include "input.hpp"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
+#include "input_context.hpp"
+#include "source_tracker.hpp"
 #include <string.h>
 #include <ctype.h>
+
+using namespace lambda;
 
 // Forward declarations
 static Element* parse_inline_text(Input* input, const char* text);
@@ -1530,9 +1534,16 @@ static Element* create_heading(Input* input, int level, const char* title) {
 void parse_org(Input* input, const char* org_string) {
     if (!org_string || !input) return;
 
+    // create error tracking context
+    InputContext ctx(input);
+    SourceTracker tracker(org_string, strlen(org_string));
+
     // Create document structure
     Element* doc = create_org_element(input, "org_document");
-    if (!doc) return;
+    if (!doc) {
+        ctx.addError(tracker.location(), "Failed to create org document element");
+        return;
+    }
 
     // Split content into lines for parsing
     const char* line_start = org_string;
@@ -2074,6 +2085,10 @@ void parse_org(Input* input, const char* org_string) {
     }
 
     input->root = {.item = (uint64_t)doc};
+
+    if (ctx.hasErrors()) {
+        // errors occurred during parsing
+    }
 }
 
 // Clean up macros to avoid pollution
