@@ -1,7 +1,10 @@
 #include "input.hpp"
+#include "input_context.hpp"
 #include "../mark_builder.hpp"
 
-static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines, int* current_line, int total_lines, int target_indent);
+using namespace lambda;
+
+static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_line, int total_lines, int target_indent);
 
 // Helper function to strip comments from YAML lines
 static char* strip_yaml_comments(const char* line) {
@@ -39,9 +42,9 @@ static char* strip_yaml_comments(const char* line) {
 }
 
 // Helper function to create String* from char*
-static String* create_string_from_cstr(MarkBuilder& builder, const char* str) {
+static String* create_string_from_cstr(InputContext* ctx, const char* str) {
     if (!str) return NULL;
-    return builder.createString(str);
+    return ctx->builder().createString(str);
 }
 
 // Utility functions
@@ -61,31 +64,31 @@ void trim_string_inplace(char* str) {
     }
 }
 
-Item parse_scalar_value(MarkBuilder& builder, const char* str) {
-    if (!str) return builder.createNull();
+Item parse_scalar_value(InputContext* ctx, const char* str) {
+    if (!str) return ctx->builder().createNull();
 
     char* copy = strdup(str);
     trim_string_inplace(copy);
 
     if (strlen(copy) == 0) {
         free(copy);
-        return builder.createNull();
+        return ctx->builder().createNull();
     }
 
     // Check for null
     if (strcmp(copy, "null") == 0 || strcmp(copy, "~") == 0) {
         free(copy);
-        return builder.createNull();
+        return ctx->builder().createNull();
     }
 
     // Check for boolean
     if (strcmp(copy, "true") == 0 || strcmp(copy, "yes") == 0) {
         free(copy);
-        return builder.createBool(true);
+        return ctx->builder().createBool(true);
     }
     if (strcmp(copy, "false") == 0 || strcmp(copy, "no") == 0) {
         free(copy);
-        return builder.createBool(false);
+        return ctx->builder().createBool(false);
     }
 
     // Check for number
@@ -93,32 +96,32 @@ Item parse_scalar_value(MarkBuilder& builder, const char* str) {
     int64_t int_val = strtol(copy, &end, 10);
     if (*end == '\0') {
         free(copy);
-        return builder.createInt(int_val);
+        return ctx->builder().createInt(int_val);
     }
 
     double float_val = strtod(copy, &end);
     if (*end == '\0') {
         free(copy);
-        return builder.createFloat(float_val);
+        return ctx->builder().createFloat(float_val);
     }
 
     // Handle quoted strings
     if (copy[0] == '"' && copy[strlen(copy) - 1] == '"') {
         copy[strlen(copy) - 1] = '\0';
-        String* str_result = builder.createString(copy + 1);
+        String* str_result = ctx->builder().createString(copy + 1);
         free(copy);
         return (Item){.item = s2it(str_result)};
     }
 
     // Default to string
-    String* str_result = builder.createString(copy);
+    String* str_result = ctx->builder().createString(copy);
     free(copy);
     return (Item){.item = s2it(str_result)};
 }
 
 // Parse flow array like [item1, item2, item3]
-Array* parse_flow_array(MarkBuilder& builder, const char* str) {
-    ArrayBuilder array_builder = builder.array();
+Array* parse_flow_array(InputContext* ctx, const char* str) {
+    ArrayBuilder array_builder = ctx->builder().array();
 
     if (!str || strlen(str) < 2) {
         return array_builder.final().array;
@@ -149,7 +152,7 @@ Array* parse_flow_array(MarkBuilder& builder, const char* str) {
 
         trim_string_inplace(token);
         if (strlen(token) > 0) {
-            Item item = parse_scalar_value(builder, token);
+            Item item = parse_scalar_value(ctx, token);
             array_builder.append(item);
         }
 
@@ -161,8 +164,10 @@ Array* parse_flow_array(MarkBuilder& builder, const char* str) {
 }
 
 // Parse YAML content
-static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines, int* current_line, int total_lines, int target_indent) {
-    if (*current_line >= total_lines) { return builder.createNull(); }
+static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_line, int total_lines, int target_indent) {
+    if (*current_line >= total_lines) {
+        return ctx->builder().createNull();
+    }
 
     char* line = lines[*current_line];
 
@@ -170,16 +175,30 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
     int indent = 0;
     while (line[indent] == ' ') indent++;
 
+    // Check for tab indentation (invalid in YAML)
+    for (int i = 0; i < indent; i++) {
+        if (line[i] == '\t') {
+            ctx->addError("YAML does not allow tab characters for indentation");
+            // Convert tabs to spaces for recovery
+            line[i] = ' ';
+        }
+    }
+
     // If we've dedented, return
     if (indent < target_indent) {
-        return builder.createNull();
+        return ctx->builder().createNull();
+    }
+
+    // Warn about inconsistent indentation
+    if (indent > target_indent && (indent - target_indent) % 2 != 0) {
+        ctx->addWarning("Inconsistent indentation detected (not a multiple of 2 spaces)");
     }
 
     char* content = line + indent;
 
     // Check for array item
     if (content[0] == '-' && (content[1] == ' ' || content[1] == '\0')) {
-        ArrayBuilder array_builder = builder.array();
+        ArrayBuilder array_builder = ctx->builder().array();
 
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -204,10 +223,10 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
             Item item;
             if (strlen(item_content) > 0) {
                 // Item on same line
-                item = parse_scalar_value(builder, item_content);
+                item = parse_scalar_value(ctx, item_content);
             } else {
                 // Item on following lines
-                item = parse_yaml_content(input, builder, lines, current_line, total_lines, target_indent + 2);
+                item = parse_yaml_content(ctx, lines, current_line, total_lines, target_indent + 2);
             }
 
             array_builder.append(item);
@@ -219,7 +238,7 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
     // Check for object (key: value)
     char* colon_pos = strstr(content, ":");
     if (colon_pos && (colon_pos[1] == ' ' || colon_pos[1] == '\0')) {
-        MapBuilder map_builder = builder.map();
+        MapBuilder map_builder = ctx->builder().map();
 
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -234,7 +253,15 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
 
             content = line + indent;
             colon_pos = strstr(content, ":");
-            if (!colon_pos || (colon_pos[1] != ' ' && colon_pos[1] != '\0')) break;
+            if (!colon_pos || (colon_pos[1] != ' ' && colon_pos[1] != '\0')) {
+                if (!colon_pos) {
+                    ctx->addError("Expected key-value pair with colon separator");
+                } else {
+                    ctx->addError("Missing space after colon in key-value pair");
+                }
+                (*current_line)++;
+                continue;  // Skip invalid line
+            }
 
             (*current_line)++;
 
@@ -245,8 +272,15 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
             key_str[key_len] = '\0';
             trim_string_inplace(key_str);
 
+            // Validate key is not empty
+            if (strlen(key_str) == 0) {
+                ctx->addError("Empty key in YAML mapping");
+                free(key_str);
+                continue;
+            }
+
             // Create String object for key
-            String* key = create_string_from_cstr(builder, key_str);
+            String* key = create_string_from_cstr(ctx, key_str);
             free(key_str);
             if (!key) continue;
 
@@ -259,15 +293,15 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
                 // Value on same line
                 if (value_content[0] == '[') {
                     // Flow array
-                    Array* flow_array = parse_flow_array(builder, value_content);
+                    Array* flow_array = parse_flow_array(ctx, value_content);
                     value = {.item = (uint64_t)flow_array};
                 } else {
                     // Scalar value
-                    value = parse_scalar_value(builder, value_content);
+                    value = parse_scalar_value(ctx, value_content);
                 }
             } else {
                 // Value on following lines
-                value = parse_yaml_content(input, builder, lines, current_line, total_lines, target_indent + 2);
+                value = parse_yaml_content(ctx, lines, current_line, total_lines, target_indent + 2);
             }
 
             // Add to map using builder
@@ -278,11 +312,11 @@ static Item parse_yaml_content(Input *input, MarkBuilder& builder, char** lines,
 
     // Single scalar value
     (*current_line)++;
-    return parse_scalar_value(builder, content);
+    return parse_scalar_value(ctx, content);
 }
 
 void parse_yaml(Input *input, const char* yaml_str) {
-    MarkBuilder builder(input);
+    InputContext ctx(input);
 
     // Split into lines
     char* yaml_copy = strdup(yaml_str);
@@ -302,6 +336,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
 
     if (total_line_count == 0) {
         free(all_lines);
+        ctx.addWarning("Empty YAML document");
         return;
     }
 
@@ -340,8 +375,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
     }
 
     // Parse each document
-    ArrayBuilder documents_builder = builder.array();
-    Item final_result = builder.createNull();
+    ArrayBuilder documents_builder = ctx.builder().array();
+    Item final_result = ctx.builder().createNull();
     int parsed_doc_count = 0;
 
     for (int doc_idx = 0; doc_idx < doc_count; doc_idx++) {
@@ -349,7 +384,10 @@ void parse_yaml(Input *input, const char* yaml_str) {
         int end_line = (doc_idx + 1 < doc_count) ? doc_starts[doc_idx + 1] - 1 : total_line_count;
 
         // Skip if start line is at or beyond end
-        if (start_line >= end_line) continue;
+        if (start_line >= end_line) {
+            ctx.addWarning("Empty YAML document found");
+            continue;
+        }
 
         // Create lines array for this document, excluding document markers and empty lines
         char** doc_lines = (char**)malloc(1000 * sizeof(char*));
@@ -365,7 +403,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
         // Parse this document if it has content
         if (doc_line_count > 0) {
             int current_line = 0;
-            Item doc_result = parse_yaml_content(input, builder, doc_lines, &current_line, doc_line_count, 0);
+            Item doc_result = parse_yaml_content(&ctx, doc_lines, &current_line, doc_line_count, 0);
 
             if (parsed_doc_count == 0) {
                 // Store first document
@@ -382,6 +420,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
                 documents_builder.append(doc_result);
                 parsed_doc_count++;
             }
+        } else {
+            ctx.addWarning("Empty YAML document (only comments or whitespace)");
         }
 
         // cleanup document lines
@@ -395,6 +435,9 @@ void parse_yaml(Input *input, const char* yaml_str) {
     } else {
         input->root = final_result;
     }
+
+    // Log any errors that occurred during parsing
+    ctx.logErrors();
 
     // cleanup
     for (int i = 0; i < total_line_count; i++) { free(all_lines[i]); }

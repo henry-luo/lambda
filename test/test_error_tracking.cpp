@@ -91,3 +91,137 @@ TEST(ErrorTrackingTests, InputContext) {
 
     // Note: Input cleanup is handled by InputManager
 }
+
+TEST(ErrorTrackingTests, VariadicErrorFormatting) {
+    // Test variadic addError at current position
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+
+    const char* source = "line 1\nline 2\nline 3";
+    InputContext ctx(input, source, strlen(source));
+
+    // Test variadic error formatting
+    int line_num = 42;
+    int col_num = 15;
+    ctx.addError("Parse error at line %d, column %d", line_num, col_num);
+
+    EXPECT_TRUE(ctx.hasErrors());
+    EXPECT_EQ(ctx.errorCount(), 1u);
+
+    std::string formatted = ctx.formatErrors();
+    EXPECT_NE(formatted.find("Parse error at line 42, column 15"), std::string::npos);
+}
+
+TEST(ErrorTrackingTests, VariadicWarningFormatting) {
+    // Test variadic addWarning
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+
+    InputContext ctx(input);
+
+    // Test variadic warning with multiple parameters
+    const char* field_name = "username";
+    int max_length = 50;
+    int actual_length = 75;
+    ctx.addWarning("Field '%s' exceeds max length of %d (got %d)",
+                   field_name, max_length, actual_length);
+
+    EXPECT_TRUE(ctx.hasWarnings());
+    EXPECT_EQ(ctx.warningCount(), 1u);
+
+    std::string formatted = ctx.formatErrors();
+    EXPECT_NE(formatted.find("Field 'username' exceeds max length of 50 (got 75)"),
+              std::string::npos);
+}
+
+TEST(ErrorTrackingTests, VariadicNoteFormatting) {
+    // Test variadic addNote
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+
+    InputContext ctx(input);
+
+    // Test variadic note with multiple types
+    int row_count = 1250;
+    int col_count = 8;
+    double parse_time = 3.14;
+    ctx.addNote("Parsed %d rows with %d columns in %.2f seconds",
+                row_count, col_count, parse_time);
+
+    EXPECT_EQ(ctx.errorCount(), 0u);  // Notes don't count as errors
+
+    std::string formatted = ctx.formatErrors();
+    EXPECT_NE(formatted.find("Parsed 1250 rows with 8 columns in 3.14 seconds"),
+              std::string::npos);
+}
+
+TEST(ErrorTrackingTests, VariadicWithLocation) {
+    // Test variadic methods with explicit SourceLocation
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+
+    const char* source = "first line\nsecond line\nthird line";
+    InputContext ctx(input, source, strlen(source));
+
+    // Test variadic error with location
+    SourceLocation loc1(11, 2, 1);  // Start of second line
+    ctx.addError(loc1, "Invalid token '%s' at position %d", "@@", 11);
+
+    // Test variadic warning with location
+    SourceLocation loc2(23, 3, 1);  // Start of third line
+    ctx.addWarning(loc2, "Deprecated syntax on line %d", 3);
+
+    // Test variadic note with location
+    SourceLocation loc3(0, 1, 1);  // Start of first line
+    ctx.addNote(loc3, "Processing section %d of %d", 1, 5);
+
+    EXPECT_EQ(ctx.errorCount(), 1u);
+    EXPECT_EQ(ctx.warningCount(), 1u);
+
+    std::string formatted = ctx.formatErrors();
+    EXPECT_NE(formatted.find("Invalid token '@@' at position 11"), std::string::npos);
+    EXPECT_NE(formatted.find("Deprecated syntax on line 3"), std::string::npos);
+    EXPECT_NE(formatted.find("Processing section 1 of 5"), std::string::npos);
+}
+
+TEST(ErrorTrackingTests, VariadicComplexFormatting) {
+    // Test complex format strings with multiple types
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+
+    InputContext ctx(input);
+
+    // Test with various format specifiers
+    ctx.addError("Error: expected %s but got %s at offset 0x%X", "STRING", "NUMBER", 0xFF);
+    ctx.addWarning("Column mismatch: row %d has %d columns (expected %d)", 42, 5, 8);
+    ctx.addNote("Statistics: %.1f%% complete (%d/%d items)", 75.5, 3, 4);
+
+    std::string formatted = ctx.formatErrors();
+    EXPECT_NE(formatted.find("expected STRING but got NUMBER at offset 0xFF"), std::string::npos);
+    EXPECT_NE(formatted.find("row 42 has 5 columns (expected 8)"), std::string::npos);
+    EXPECT_NE(formatted.find("75.5% complete (3/4 items)"), std::string::npos);
+}
+
+TEST(ErrorTrackingTests, VariadicEdgeCases) {
+    // Test edge cases for variadic methods
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+
+    InputContext ctx(input);
+
+    // Empty format string
+    ctx.addError("");
+    EXPECT_EQ(ctx.errorCount(), 1u);
+
+    // Single parameter
+    ctx.addWarning("Warning: %d", 123);
+    EXPECT_EQ(ctx.warningCount(), 1u);
+
+    // Long message
+    ctx.addNote("This is a very long note message with parameter %d and another %s and more %d",
+                1, "text", 2);
+
+    std::string formatted = ctx.formatErrors();
+    EXPECT_FALSE(formatted.empty());
+    EXPECT_NE(formatted.find("This is a very long note message"), std::string::npos);
+}
