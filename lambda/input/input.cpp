@@ -3,6 +3,7 @@
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mime-detect.h"
+#include "../../lib/arena.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -223,19 +224,6 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     }
 }
 
-Input* input_new(Url* abs_url) {
-    Input* input = (Input*)malloc(sizeof(Input));
-    input->url = abs_url;
-    size_t grow_size = 1024;  // 1k
-    size_t tolerance_percent = 20;
-    input->pool = pool_create();
-    if (input->pool == NULL) { free(input);  return NULL; }
-    input->name_pool = name_pool_create(input->pool, NULL);  // Initialize name pool for string interning
-    input->type_list = arraylist_new(16);
-    input->root = {.item = ITEM_NULL};
-    input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
-    return input;
-}
 
 // Helper function to map MIME types to parser types
 static const char* mime_to_parser_type(const char* mime_type) {
@@ -708,11 +696,27 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
 Input* Input::create(Pool* pool) {
     Input* input = (Input*)pool_alloc(pool, sizeof(Input));
     input->pool = pool;
+    input->arena = arena_create_default(pool);
     input->name_pool = nullptr;
     input->type_list = nullptr;
     input->sb = nullptr;
     input->url = nullptr;
     input->path = nullptr;
     input->root = (Item){.item = 0};
+    return input;
+}
+
+Input* input_new(Url* abs_url) {
+    Input* input = (Input*)malloc(sizeof(Input));
+    input->url = abs_url;
+    size_t grow_size = 1024;  // 1k
+    size_t tolerance_percent = 20;
+    input->pool = pool_create();
+    if (input->pool == NULL) { free(input);  return NULL; }
+    input->arena = arena_create_default(input->pool);  // Initialize arena allocator
+    input->name_pool = name_pool_create(input->pool, NULL);  // Initialize name pool for string interning
+    input->type_list = arraylist_new(16);
+    input->root = {.item = ITEM_NULL};
+    input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
     return input;
 }

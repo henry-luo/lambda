@@ -19,6 +19,7 @@ extern "C" {
 #include "../lib/stringbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/mempool.h"
+#include "../lib/arena.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 #include "../lib/num_stack.h"
@@ -394,6 +395,7 @@ typedef struct Input {
     void* url;
     void* path;
     Pool* pool;                 // memory pool
+    Arena* arena;               // arena allocator
     NamePool* name_pool;        // centralized name management
     ArrayList* type_list;       // list of types
     Item root;
@@ -401,6 +403,7 @@ typedef struct Input {
 
     // member functions
     static Input* create(Pool* pool);
+    static Input* create(Pool* pool, Url* abs_url);
 } Input;
 
 #ifdef __cplusplus

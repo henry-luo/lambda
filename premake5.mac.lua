@@ -344,6 +344,7 @@ project "lambda"
         "lib/cmdedit.c",
         "lib/cmdedit_utf8.c",
         "lib/mempool.c",
+        "lib/arena.c",
         "lib/avl_tree.c",
         "lib/url.c",
         "lib/url_parser.c",

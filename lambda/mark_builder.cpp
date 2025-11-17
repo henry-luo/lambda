@@ -3,6 +3,7 @@
 #include "name_pool.h"
 #include "input/input.h"
 #include "../lib/mempool.h"
+#include "../lib/arena.h"
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"
 #include "../lib/arraylist.h"
@@ -19,6 +20,7 @@ extern TypeMap EmptyMap;
 MarkBuilder::MarkBuilder(Input* input)
     : input_(input)
     , pool_(input->pool)
+    , arena_(input->arena)
     , name_pool_(input->name_pool)
     , type_list_(input->type_list)
     , sb_(input->sb)
@@ -27,12 +29,13 @@ MarkBuilder::MarkBuilder(Input* input)
 {
     assert(input != nullptr);
     assert(pool_ != nullptr);
+    assert(arena_ != nullptr);
     assert(type_list_ != nullptr);
 }
 
 MarkBuilder::~MarkBuilder() {
     // RAII cleanup - nothing to do since we don't own any resources
-    // All temporary data was stack-allocated or pool-allocated
+    // Arena-allocated data lives until Input's arena is reset/destroyed
 }
 
 //------------------------------------------------------------------------------
@@ -48,11 +51,11 @@ String* MarkBuilder::createString(const char* str, size_t len) {
     if (!str || len == 0) return &EMPTY_STRING;
 
     if (intern_strings_ && name_pool_) {
-        // use string interning
+        // use string interning (name_pool manages its own memory)
         return name_pool_create_len(name_pool_, str, len);
     } else {
-        // allocate from pool (use flexible array member layout)
-        String* s = (String*)pool_alloc(pool_, sizeof(String) + len + 1);
+        // allocate from arena (fast sequential allocation)
+        String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
         s->ref_cnt = 1;
         s->len = len;
         memcpy(s->chars, str, len);
@@ -116,16 +119,16 @@ Item MarkBuilder::createInt(int32_t value) {
 }
 
 Item MarkBuilder::createLong(int64_t value) {
-    // allocate double from pool
-    int64_t* long_ptr = (int64_t*)pool_alloc(pool_, sizeof(int64_t));
+    // allocate long from arena
+    int64_t* long_ptr = (int64_t*)arena_alloc(arena_, sizeof(int64_t));
     *long_ptr = value;
     Item item = {.item = l2it(long_ptr)};
     return item;
 }
 
 Item MarkBuilder::createFloat(double value) {
-    // allocate double from pool
-    double* float_ptr = (double*)pool_alloc(pool_, sizeof(double));
+    // allocate double from arena
+    double* float_ptr = (double*)arena_alloc(arena_, sizeof(double));
     *float_ptr = value;
     Item item = {.item = d2it(float_ptr)};
     return item;
@@ -255,8 +258,9 @@ MapBuilder::MapBuilder(MarkBuilder* builder)
     , map_(nullptr)
     , map_type_(nullptr)
 {
-    // allocate map from pool
-    map_ = (Map*)pool_calloc(builder_->pool(), sizeof(Map));
+    // allocate map structure from arena (fast sequential allocation)
+    // Note: map_put() uses pool for internal data buffers (needs pool_free for resizing)
+    map_ = (Map*)arena_calloc(builder_->arena(), sizeof(Map));
     map_->type_id = LMD_TYPE_MAP;
     map_->type = &EmptyMap;  // Will be replaced by map_put on first insert
     map_->data = nullptr;
@@ -264,7 +268,7 @@ MapBuilder::MapBuilder(MarkBuilder* builder)
 }
 
 MapBuilder::~MapBuilder() {
-    // map_ is pool-allocated, no cleanup needed
+    // map_ is arena-allocated, no cleanup needed
 }
 
 MapBuilder& MapBuilder::put(const char* key, Item value) {
