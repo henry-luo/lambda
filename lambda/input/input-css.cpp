@@ -8,31 +8,35 @@ using namespace lambda;
 // External declaration for thread-local input context
 extern __thread Context* input_context;
 
+// Helper macro to access tracker from context
+#define TRACKER (*ctx.tracker())
+
 // Forward declarations for CSS stylesheet parsing
-static Item parse_css_stylesheet(InputContext& ctx, SourceTracker& tracker);
-static Array* parse_css_rules(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_rule(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_at_rule(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_qualified_rule(InputContext& ctx, SourceTracker& tracker);
-static Array* parse_css_selectors(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_selector(InputContext& ctx, SourceTracker& tracker);
-static Array* parse_css_declarations(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_declaration(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_value(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_function(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_measure(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_color(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_string(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_url(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_number(InputContext& ctx, SourceTracker& tracker);
-static Item parse_css_identifier(InputContext& ctx, SourceTracker& tracker);
-static Array* parse_css_value_list(InputContext& ctx, SourceTracker& tracker);
-static Array* parse_css_function_params(InputContext& ctx, SourceTracker& tracker);
+static Item parse_css_stylesheet(InputContext& ctx);
+static Array* parse_css_rules(InputContext& ctx);
+static Item parse_css_rule(InputContext& ctx);
+static Item parse_css_at_rule(InputContext& ctx);
+static Item parse_css_qualified_rule(InputContext& ctx);
+static Array* parse_css_selectors(InputContext& ctx);
+static Item parse_css_selector(InputContext& ctx);
+static Array* parse_css_declarations(InputContext& ctx);
+static Item parse_css_declaration(InputContext& ctx);
+static Item parse_css_value(InputContext& ctx);
+static Item parse_css_function(InputContext& ctx);
+static Item parse_css_measure(InputContext& ctx);
+static Item parse_css_color(InputContext& ctx);
+static Item parse_css_string(InputContext& ctx);
+static Item parse_css_url(InputContext& ctx);
+static Item parse_css_number(InputContext& ctx);
+static Item parse_css_identifier(InputContext& ctx);
+static Array* parse_css_value_list(InputContext& ctx);
+static Array* parse_css_function_params(InputContext& ctx);
 static Item flatten_single_array(Array* arr);
 
 // Global array to collect all rules including nested ones
 static Array* g_all_rules = NULL;
 
+// Helper functions for whitespace/comment skipping that still use tracker directly
 static void skip_css_whitespace(SourceTracker& tracker) {
     while (!tracker.atEnd() && (tracker.current() == ' ' || tracker.current() == '\n' ||
                                   tracker.current() == '\r' || tracker.current() == '\t')) {
@@ -71,7 +75,8 @@ static bool is_css_hex_digit(char c) {
 }
 
 // CSS Stylesheet parsing functions
-static Item parse_css_stylesheet(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_stylesheet(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Element* stylesheet = input_create_element(ctx.input(), "stylesheet");
     if (!stylesheet) return {.item = ITEM_ERROR};
 
@@ -122,7 +127,7 @@ static Item parse_css_stylesheet(InputContext& ctx, SourceTracker& tracker) {
             }
         }
 
-        Item rule = parse_css_rule(ctx, tracker);
+        Item rule = parse_css_rule(ctx);
         if (rule .item != ITEM_ERROR) {
 
             if (is_at_rule && at_rule_name) {
@@ -181,7 +186,8 @@ static Item parse_css_stylesheet(InputContext& ctx, SourceTracker& tracker) {
     return {.item = (uint64_t)stylesheet};
 }
 
-static Array* parse_css_rules(InputContext& ctx, SourceTracker& tracker) {
+static Array* parse_css_rules(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Array* rules = array_pooled(ctx.input()->pool);
     if (!rules) return NULL;
 
@@ -190,7 +196,7 @@ static Array* parse_css_rules(InputContext& ctx, SourceTracker& tracker) {
         if (tracker.atEnd()) break;
 
         printf("Parsing CSS rule\n");
-        Item rule = parse_css_rule(ctx, tracker);
+        Item rule = parse_css_rule(ctx);
         if (rule .item != ITEM_ERROR) {
             array_append(rules, rule, ctx.input()->pool);
         } else {
@@ -209,17 +215,19 @@ static Array* parse_css_rules(InputContext& ctx, SourceTracker& tracker) {
     return rules;
 }
 
-static Item parse_css_rule(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_rule(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     skip_css_comments(tracker);
 
     if (tracker.current() == '@') {
-        return parse_css_at_rule(ctx, tracker);
+        return parse_css_at_rule(ctx);
     } else {
-        return parse_css_qualified_rule(ctx, tracker);
+        return parse_css_qualified_rule(ctx);
     }
 }
 
-static Item parse_css_at_rule(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_at_rule(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     if (tracker.current() != '@') return {.item = ITEM_ERROR};
 
     tracker.advance(); // Skip @
@@ -291,7 +299,7 @@ static Item parse_css_at_rule(InputContext& ctx, SourceTracker& tracker) {
                     skip_css_comments(tracker);
                     if (tracker.current() == '}') break;
 
-                    Item nested_rule = parse_css_rule(ctx, tracker);
+                    Item nested_rule = parse_css_rule(ctx);
                     if (nested_rule .item != ITEM_ERROR) {
                         array_append(nested_rules, nested_rule, ctx.input()->pool);
 
@@ -374,7 +382,7 @@ static Item parse_css_at_rule(InputContext& ctx, SourceTracker& tracker) {
                                     skip_css_comments(tracker);
 
                                     // Parse value list
-                                    Array* values = parse_css_value_list(ctx, tracker);
+                                    Array* values = parse_css_value_list(ctx);
                                     if (values) {
                                         Item values_item = flatten_single_array(values);
                                         input_add_attribute_item_to_element(ctx.input(), keyframe_rule, property_str->chars, values_item);
@@ -434,7 +442,7 @@ static Item parse_css_at_rule(InputContext& ctx, SourceTracker& tracker) {
                     skip_css_comments(tracker);
 
                     // Parse value list
-                    Array* values = parse_css_value_list(ctx, tracker);
+                    Array* values = parse_css_value_list(ctx);
                     if (values) {
                         // Flatten single property value array
                         Item values_item = flatten_single_array(values);
@@ -467,13 +475,14 @@ static Item parse_css_at_rule(InputContext& ctx, SourceTracker& tracker) {
     return {.item = (uint64_t)at_rule};
 }
 
-static Item parse_css_qualified_rule(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_qualified_rule(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Element* rule = input_create_element(ctx.input(), "rule");
     if (!rule) return {.item = ITEM_ERROR};
 
     // Parse selectors
     printf("Parsing CSS qualified rule\n");
-    Array* selectors = parse_css_selectors(ctx, tracker);
+    Array* selectors = parse_css_selectors(ctx);
     if (selectors) {
         // Flatten single selector array
         Item selectors_item = flatten_single_array(selectors);
@@ -512,7 +521,7 @@ static Item parse_css_qualified_rule(InputContext& ctx, SourceTracker& tracker) 
                 skip_css_comments(tracker);
 
                 // Parse value list
-                Array* values = parse_css_value_list(ctx, tracker);
+                Array* values = parse_css_value_list(ctx);
                 if (values) {
                     // Flatten single property value array
                     Item values_item = flatten_single_array(values);
@@ -558,7 +567,8 @@ static Item parse_css_qualified_rule(InputContext& ctx, SourceTracker& tracker) 
     return {.item = (uint64_t)rule};
 }
 
-static Array* parse_css_selectors(InputContext& ctx, SourceTracker& tracker) {
+static Array* parse_css_selectors(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Array* selectors = array_pooled(ctx.input()->pool);
     if (!selectors) return NULL;
 
@@ -566,7 +576,7 @@ static Array* parse_css_selectors(InputContext& ctx, SourceTracker& tracker) {
         skip_css_comments(tracker);
         if (tracker.current() == '{') break;
 
-        Item selector = parse_css_selector(ctx, tracker);
+        Item selector = parse_css_selector(ctx);
         if (selector .item != ITEM_ERROR) {
             array_append(selectors, selector, ctx.input()->pool);
         }
@@ -583,7 +593,8 @@ static Array* parse_css_selectors(InputContext& ctx, SourceTracker& tracker) {
     return selectors;
 }
 
-static Item parse_css_selector(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_selector(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     StringBuf* sb = ctx.builder().stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing each selector
 
@@ -642,7 +653,8 @@ static Item parse_css_selector(InputContext& ctx, SourceTracker& tracker) {
     return {.item = ITEM_ERROR};
 }
 
-static Array* parse_css_declarations(InputContext& ctx, SourceTracker& tracker) {
+static Array* parse_css_declarations(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Array* declarations = array_pooled(ctx.input()->pool);
     if (!declarations) return NULL;
 
@@ -650,7 +662,7 @@ static Array* parse_css_declarations(InputContext& ctx, SourceTracker& tracker) 
         skip_css_comments(tracker);
         if (tracker.current() == '}') break;
 
-        Item declaration = parse_css_declaration(ctx, tracker);
+        Item declaration = parse_css_declaration(ctx);
         if (declaration .item != ITEM_ERROR) {
             array_append(declarations, declaration, ctx.input()->pool);
         }
@@ -665,7 +677,8 @@ static Array* parse_css_declarations(InputContext& ctx, SourceTracker& tracker) 
     return declarations;
 }
 
-static Item parse_css_declaration(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_declaration(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     printf("Parsing CSS declaration\n");
     skip_css_comments(tracker);
 
@@ -702,7 +715,7 @@ static Item parse_css_declaration(InputContext& ctx, SourceTracker& tracker) {
         skip_css_comments(tracker);
 
         // Parse value
-        Array* values = parse_css_value_list(ctx, tracker);
+        Array* values = parse_css_value_list(ctx);
         if (values) {
             input_add_attribute_item_to_element(ctx.input(), declaration, "values", {.item = (uint64_t)values});
         }
@@ -718,7 +731,8 @@ static Item parse_css_declaration(InputContext& ctx, SourceTracker& tracker) {
     return {.item = (uint64_t)declaration};
 }
 
-static Item parse_css_string(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_string(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     printf("Parsing CSS string\n");
     char quote = tracker.current();
     if (quote != '"' && quote != '\'') return {.item = ITEM_ERROR};
@@ -785,7 +799,8 @@ static Item parse_css_string(InputContext& ctx, SourceTracker& tracker) {
     return str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
 }
 
-static Item parse_css_url(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_url(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     if (!tracker.match("url(")) return {.item = ITEM_ERROR};
 
     tracker.advance(4); // Skip "url("
@@ -795,7 +810,7 @@ static Item parse_css_url(InputContext& ctx, SourceTracker& tracker) {
 
     // Parse URL - can be quoted or unquoted
     if (tracker.current() == '"' || tracker.current() == '\'') {
-        url_value = parse_css_string(ctx, tracker);
+        url_value = parse_css_string(ctx);
     } else {
         // Unquoted URL
         StringBuf* sb = ctx.builder().stringBuf();
@@ -830,7 +845,8 @@ static Item parse_css_url(InputContext& ctx, SourceTracker& tracker) {
     return url_element ? (Item){.item = (((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)url_element} : (Item){.item = ITEM_ERROR};
 }
 
-static Item parse_css_color(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_color(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     log_debug("parse_css_color called, current='%c' (0x%02x), next 10='%.10s'",
               tracker.current(), (unsigned char)tracker.current(), tracker.rest());
 
@@ -865,7 +881,7 @@ static Item parse_css_color(InputContext& ctx, SourceTracker& tracker) {
             tracker.match("rgb(") ||
             tracker.match("hsl(")) {
             // Parse as function
-            return parse_css_function(ctx, tracker);
+            return parse_css_function(ctx);
         }
 
         // Check for named colors
@@ -895,7 +911,8 @@ static Item parse_css_color(InputContext& ctx, SourceTracker& tracker) {
     return {.item = ITEM_ERROR};
 }
 
-static Item parse_css_number(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_number(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     double *dval;
     dval = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
     if (dval == NULL) return {.item = ITEM_ERROR};
@@ -908,7 +925,8 @@ static Item parse_css_number(InputContext& ctx, SourceTracker& tracker) {
     return {.item = d2it(dval)};
 }
 
-static Item parse_css_measure(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_measure(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     log_debug("parse_css_measure: START, current='%c' (0x%02x)", tracker.current(), (unsigned char)tracker.current());
     StringBuf* sb = ctx.builder().stringBuf();
     stringbuf_reset(sb);  // Reset the buffer before parsing measure
@@ -971,7 +989,8 @@ static Item parse_css_measure(InputContext& ctx, SourceTracker& tracker) {
     }
 }
 
-static Item parse_css_identifier(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_identifier(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     log_debug("parse_css_identifier: START, current='%c' (0x%02x)", tracker.current(), (unsigned char)tracker.current());
     if (!is_css_identifier_start(tracker.current())) return {.item = ITEM_ERROR};
 
@@ -1022,7 +1041,8 @@ static Item parse_css_identifier(InputContext& ctx, SourceTracker& tracker) {
     return (Item){.item = y2it(id_str)};
 }
 
-static Array* parse_css_function_params(InputContext& ctx, SourceTracker& tracker) {
+static Array* parse_css_function_params(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Array* params = array_pooled(ctx.input()->pool);
     if (!params) return NULL;
 
@@ -1038,7 +1058,7 @@ static Array* parse_css_function_params(InputContext& ctx, SourceTracker& tracke
 
         const char* start_pos = tracker.rest(); // track position to detect infinite loops
 
-        Item param = parse_css_value(ctx, tracker);
+        Item param = parse_css_value(ctx);
         if (param .item != ITEM_ERROR) {
             array_append(params, param, ctx.input()->pool);
         } else {
@@ -1139,7 +1159,8 @@ static Item flatten_single_array(Array* arr) {
     return single_item;
 }
 
-static Item parse_css_function(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_function(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     // Parse function name
     if (!is_css_identifier_start(tracker.current())) return {.item = ITEM_ERROR};
 
@@ -1165,7 +1186,7 @@ static Item parse_css_function(InputContext& ctx, SourceTracker& tracker) {
     tracker.advance(); // Skip opening parenthesis
 
     // Parse function parameters
-    Array* params = parse_css_function_params(ctx, tracker);
+    Array* params = parse_css_function_params(ctx);
 
     if (tracker.current() == ')') {
         tracker.advance(); // Skip closing parenthesis
@@ -1195,7 +1216,8 @@ static Item parse_css_function(InputContext& ctx, SourceTracker& tracker) {
     return {.item = func_element ? ((((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)func_element) : ITEM_ERROR};
 }
 
-static Array* parse_css_value_list(InputContext& ctx, SourceTracker& tracker) {
+static Array* parse_css_value_list(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     Array* values = array_pooled(ctx.input()->pool);
     if (!values) return NULL;
 
@@ -1215,7 +1237,7 @@ static Array* parse_css_value_list(InputContext& ctx, SourceTracker& tracker) {
         log_debug("parse_css_value_list: Loop iteration %d, current='%c' (0x%02x), text='%.30s'",
                   values->length, tracker.current(), (unsigned char)tracker.current(), tracker.rest());
 
-        Item value = parse_css_value(ctx, tracker);
+        Item value = parse_css_value(ctx);
         log_debug("parse_css_value_list: Parsed value, type_id=%d, error=%d",
                   get_type_id(value), value.item == ITEM_ERROR);
         if (value .item != ITEM_ERROR) {
@@ -1325,7 +1347,8 @@ static Array* parse_css_value_list(InputContext& ctx, SourceTracker& tracker) {
     return values;
 }
 
-static Item parse_css_value(InputContext& ctx, SourceTracker& tracker) {
+static Item parse_css_value(InputContext& ctx) {
+    SourceTracker& tracker = TRACKER;
     skip_css_comments(tracker);
 
     if (tracker.atEnd()) return {.item = ITEM_ERROR};
@@ -1338,33 +1361,33 @@ static Item parse_css_value(InputContext& ctx, SourceTracker& tracker) {
         case '"':
         case '\'':
             log_debug("parse_css_value: Parsing string");
-            return parse_css_string(ctx, tracker);
+            return parse_css_string(ctx);
 
         case '#':
             log_debug("parse_css_value: Parsing color (hash)");
-            return parse_css_color(ctx, tracker);
+            return parse_css_color(ctx);
 
         case '+':
         case '-':
             // Check if this is a CSS custom property (starts with --)
             if (tracker.current() == '-' && tracker.peek(1) == '-') {
                 log_debug("parse_css_value: Parsing custom property");
-                return parse_css_identifier(ctx, tracker);
+                return parse_css_identifier(ctx);
             }
             // Otherwise fall through to parse as number
             log_debug("parse_css_value: Parsing measure (signed)");
-            return parse_css_measure(ctx, tracker);
+            return parse_css_measure(ctx);
 
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
         case '.':
             log_debug("parse_css_value: Parsing measure (digit)");
-            return parse_css_measure(ctx, tracker);
+            return parse_css_measure(ctx);
 
         default:
             if (tracker.current() == 'u' && tracker.match("url(")) {
                 log_debug("parse_css_value: Matched 'url(', parsing url. Current position: '%.20s'", tracker.rest());
-                return parse_css_url(ctx, tracker);
+                return parse_css_url(ctx);
             } else if (is_css_identifier_start(tracker.current())) {
                 log_debug("parse_css_value: Identifier start detected at '%.20s'", tracker.rest());
                 log_debug("parse_css_value: Identifier start detected, checking for function");
@@ -1427,14 +1450,14 @@ static Item parse_css_value(InputContext& ctx, SourceTracker& tracker) {
                         strncmp(start, "minmax(", 7) == 0 ||
                         strncmp(start, "repeat(", 7) == 0 ||
                         strncmp(start, "fit-content(", 12) == 0) {
-                        return parse_css_function(ctx, tracker);
+                        return parse_css_function(ctx);
                     } else {
-                        return parse_css_function(ctx, tracker);
+                        return parse_css_function(ctx);
                     }
                 } else {
                     log_debug("parse_css_value: No '(' found, parsing as identifier");
                     // Just parse as identifier - parse_css_identifier handles color keywords too
-                    return parse_css_identifier(ctx, tracker);
+                    return parse_css_identifier(ctx);
                 }
             }
             log_debug("parse_css_value: No match found, returning ERROR");
@@ -1445,15 +1468,15 @@ static Item parse_css_value(InputContext& ctx, SourceTracker& tracker) {
 void parse_css(Input* input, const char* css_string) {
     printf("css_parse (stylesheet)\n");
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(css_string, strlen(css_string));
+    // create error tracking context with tracker
+    InputContext ctx(input, css_string, strlen(css_string));
+    SourceTracker& tracker = *ctx.tracker();
 
     skip_css_comments(tracker);
 
     // Parse as complete CSS stylesheet
     if (!tracker.atEnd()) {
-        input->root = parse_css_stylesheet(ctx, tracker);
+        input->root = parse_css_stylesheet(ctx);
     } else {
         // Empty stylesheet
         Element* empty_stylesheet = input_create_element(input, "stylesheet");
@@ -1462,7 +1485,7 @@ void parse_css(Input* input, const char* css_string) {
             input_add_attribute_item_to_element(input, empty_stylesheet, "rules", {.item = (uint64_t)empty_rules});
             input->root = {.item = (uint64_t)empty_stylesheet};
         } else {
-            ctx.addError(tracker.location(), "Failed to allocate memory for empty CSS stylesheet");
+            ctx.addError("Failed to allocate memory for empty CSS stylesheet");
             input->root = {.item = ITEM_ERROR};
         }
     }
