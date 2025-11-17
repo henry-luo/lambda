@@ -411,8 +411,8 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
         return nullptr;
     }
 
-    // Create Input object using the standard function
-    Input* input = input_new(url);
+    // Create Input object using the InputManager
+    Input* input = InputManager_create_input(url);
     if (!input) {
         log_error("Failed to create Input object");
         free(category);
@@ -421,6 +421,7 @@ Input* input_from_sysinfo(Url* url, Pool* pool) {
         return nullptr;
     }
 
+    // Note: Input now uses managed pool from InputManager
     // Set the memory pool for sys:// specific allocations
     input->pool = pool;
 

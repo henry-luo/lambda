@@ -115,7 +115,9 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
         return NULL;
     }
     // Create Input and root <dir> element
-    Input* input = input_new(NULL);
+    Input* input = InputManager_create_input(NULL);
+    if (!input) return NULL;
+
     struct stat st;
     if (stat(directory_path, &st) != 0) return NULL;
 
