@@ -1,7 +1,11 @@
 #include "input.hpp"
+#include "input_context.hpp"
 #include "../mark_builder.hpp"
+#include <cstring>
 
-static Item parse_value(Input *input, MarkBuilder* builder, const char **json);
+using namespace lambda;
+
+static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **json);
 
 static void skip_whitespace(const char **json) {
     while (**json && (**json == ' ' || **json == '\n' || **json == '\r' || **json == '\t')) {
@@ -9,15 +13,29 @@ static void skip_whitespace(const char **json) {
     }
 }
 
-static String* parse_string(Input *input, MarkBuilder* builder, const char **json) {
-    if (**json != '"') return NULL;
-    StringBuf* sb = builder->stringBuf();
+static String* parse_string(InputContext& ctx, SourceTracker& tracker, const char **json) {
+    if (**json != '"') {
+        ctx.addError(tracker.location(), "Expected '\"' to start string");
+        return nullptr;
+    }
+
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     (*json)++; // Skip opening quote
+    tracker.advance(1);
+
     while (**json && **json != '"') {
         if (**json == '\\') {
             (*json)++;
+            tracker.advance(1);
+
+            if (!**json) {
+                ctx.addError(tracker.location(), "Unexpected end of string after escape");
+                return nullptr;
+            }
+
             switch (**json) {
                 case '"': stringbuf_append_char(sb, '"'); break;
                 case '\\': stringbuf_append_char(sb, '\\'); break;
@@ -30,9 +48,18 @@ static String* parse_string(Input *input, MarkBuilder* builder, const char **jso
                 // handle \uXXXX escapes
                 case 'u': {
                     (*json)++; // skip 'u'
+                    tracker.advance(1);
+
+                    if (strlen(*json) < 4) {
+                        ctx.addError(tracker.location(), "Invalid unicode escape: need 4 hex digits");
+                        return nullptr;
+                    }
+
                     char hex[5] = {0};
                     strncpy(hex, *json, 4);
                     (*json) += 4; // skip 4 hex digits
+                    tracker.advance(4);
+
                     int codepoint = (int)strtol(hex, NULL, 16);
                     if (codepoint < 0x80) {
                         stringbuf_append_char(sb, (char)codepoint);
@@ -45,143 +72,251 @@ static String* parse_string(Input *input, MarkBuilder* builder, const char **jso
                         stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                     }
                 } break;
-                default: break; // invalid escape
+                default:
+                    ctx.addWarning(tracker.location(),
+                                   std::string("Invalid escape sequence: \\") + **json);
+                    break;
             }
         } else {
             stringbuf_append_char(sb, **json);
         }
         (*json)++;
+        tracker.advance(1);
     }
 
     if (**json == '"') {
         (*json)++; // skip closing quote
+        tracker.advance(1);
+    } else {
+        ctx.addError(tracker.location(), "Unterminated string");
+        return nullptr;
     }
-    return builder->createString(sb->str->chars, sb->length);
+
+    return builder.createString(sb->str->chars, sb->length);
 }
 
-static Item parse_number(Input *input, MarkBuilder* builder, const char **json) {
+static Item parse_number(InputContext& ctx, SourceTracker& tracker, const char **json) {
+    const char* start = *json;
     char* end;
     double value = strtod(*json, &end);
+
+    if (end == *json) {
+        ctx.addError(tracker.location(), "Invalid number format");
+        return ctx.builder().createNull();
+    }
+
+    size_t len = end - *json;
     *json = end;
+    tracker.advance(len);
 
     // Check if it's an integer
     if (value == (int64_t)value) {
-        return builder->createInt((int64_t)value);
+        return ctx.builder().createInt((int64_t)value);
     } else {
-        return builder->createFloat(value);
+        return ctx.builder().createFloat(value);
     }
 }
 
-static Item parse_array(Input *input, MarkBuilder* builder, const char **json) {
-    if (**json != '[') return builder->createNull();
+static Item parse_array(InputContext& ctx, SourceTracker& tracker, const char **json) {
+    if (**json != '[') {
+        ctx.addError(tracker.location(), "Expected '[' to start array");
+        return ctx.builder().createNull();
+    }
 
-    ArrayBuilder arr_builder = builder->array();
+    ArrayBuilder arr_builder = ctx.builder().array();
 
     (*json)++; // skip [
+    tracker.advance(1);
     skip_whitespace(json);
+
     if (**json == ']') {
         (*json)++;
+        tracker.advance(1);
         return arr_builder.final();
     }
 
-    while (**json) {
-        Item item = parse_value(input, builder, json);
+    while (**json && !ctx.shouldStopParsing()) {
+        Item item = parse_value(ctx, tracker, json);
         arr_builder.append(item);
 
         skip_whitespace(json);
         if (**json == ']') {
             (*json)++;
+            tracker.advance(1);
             break;
         }
+
         if (**json != ',') {
-            printf("Expected ',' or ']', got '%c'\n", **json);
-            return builder->createNull();
+            ctx.addError(tracker.location(), "Expected ',' or ']' in array");
+            // Error recovery: skip to next comma or closing bracket
+            while (**json && **json != ',' && **json != ']') {
+                (*json)++;
+                tracker.advance(1);
+            }
+            if (**json == ',') {
+                (*json)++;
+                tracker.advance(1);
+            }
+            continue;
         }
+
         (*json)++;
+        tracker.advance(1);
         skip_whitespace(json);
     }
+
     return arr_builder.final();
 }
 
-static Item parse_object(Input *input, MarkBuilder* builder, const char **json) {
-    if (**json != '{') return builder->createNull();
+static Item parse_object(InputContext& ctx, SourceTracker& tracker, const char **json) {
+    if (**json != '{') {
+        ctx.addError(tracker.location(), "Expected '{' to start object");
+        return ctx.builder().createNull();
+    }
 
-    MapBuilder map_builder = builder->map();
+    MapBuilder map_builder = ctx.builder().map();
 
     (*json)++; // skip '{'
+    tracker.advance(1);
     skip_whitespace(json);
+
     if (**json == '}') { // empty map
         (*json)++;
+        tracker.advance(1);
         return map_builder.final();
     }
 
-    while (**json) {
-        String* key = parse_string(input, builder, json);
-        if (!key) return map_builder.final();
+    while (**json && !ctx.shouldStopParsing()) {
+        String* key = parse_string(ctx, tracker, json);
+        if (!key) {
+            // Error recovery: skip to next comma or closing brace
+            while (**json && **json != ',' && **json != '}') {
+                (*json)++;
+                tracker.advance(1);
+            }
+            if (**json == ',') {
+                (*json)++;
+                tracker.advance(1);
+                skip_whitespace(json);
+                continue;
+            }
+            break;
+        }
 
         skip_whitespace(json);
-        if (**json != ':') return map_builder.final();
+        if (**json != ':') {
+            ctx.addError(tracker.location(), "Expected ':' after object key");
+            // Error recovery: skip to next comma or closing brace
+            while (**json && **json != ',' && **json != '}') {
+                (*json)++;
+                tracker.advance(1);
+            }
+            if (**json == ',') {
+                (*json)++;
+                tracker.advance(1);
+                skip_whitespace(json);
+                continue;
+            }
+            break;
+        }
+
         (*json)++;
+        tracker.advance(1);
         skip_whitespace(json);
 
-        Item value = parse_value(input, builder, json);
-        // Use the String* directly
+        Item value = parse_value(ctx, tracker, json);
         map_builder.put(key, value);
 
         skip_whitespace(json);
         if (**json == '}') {
             (*json)++;
+            tracker.advance(1);
             break;
         }
-        if (**json != ',') return map_builder.final();
+
+        if (**json != ',') {
+            ctx.addError(tracker.location(), "Expected ',' or '}' in object");
+            // Error recovery: skip to next comma or closing brace
+            while (**json && **json != ',' && **json != '}') {
+                (*json)++;
+                tracker.advance(1);
+            }
+            if (**json == ',') {
+                (*json)++;
+                tracker.advance(1);
+            }
+            continue;
+        }
+
         (*json)++;
+        tracker.advance(1);
         skip_whitespace(json);
     }
+
     return map_builder.final();
 }
 
-static Item parse_value(Input *input, MarkBuilder* builder, const char **json) {
+static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **json) {
     skip_whitespace(json);
+
+    if (!**json) {
+        ctx.addError(tracker.location(), "Unexpected end of JSON");
+        return ctx.builder().createNull();
+    }
+
     switch (**json) {
         case '{':
-            return parse_object(input, builder, json);
+            return parse_object(ctx, tracker, json);
         case '[':
-            return parse_array(input, builder, json);
+            return parse_array(ctx, tracker, json);
         case '"': {
-            String* str = parse_string(input, builder, json);
-            if (!str) return builder->createNull();
-            if (str == &EMPTY_STRING) return builder->createNull();
-            // String is already allocated, just wrap it in an Item
+            String* str = parse_string(ctx, tracker, json);
+            if (!str) return ctx.builder().createNull();
+            if (str == &EMPTY_STRING) return ctx.builder().createNull();
             return (Item){.item = s2it(str)};
         }
         case 't':
             if (strncmp(*json, "true", 4) == 0) {
                 *json += 4;
-                return builder->createBool(true);
+                tracker.advance(4);
+                return ctx.builder().createBool(true);
             }
-            return builder->createNull();
+            ctx.addError(tracker.location(), "Invalid value, expected 'true'");
+            return ctx.builder().createNull();
         case 'f':
             if (strncmp(*json, "false", 5) == 0) {
                 *json += 5;
-                return builder->createBool(false);
+                tracker.advance(5);
+                return ctx.builder().createBool(false);
             }
-            return builder->createNull();
+            ctx.addError(tracker.location(), "Invalid value, expected 'false'");
+            return ctx.builder().createNull();
         case 'n':
             if (strncmp(*json, "null", 4) == 0) {
                 *json += 4;
-                return builder->createNull();
+                tracker.advance(4);
+                return ctx.builder().createNull();
             }
-            return builder->createNull();
+            ctx.addError(tracker.location(), "Invalid value, expected 'null'");
+            return ctx.builder().createNull();
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {
-                return parse_number(input, builder, json);
+                return parse_number(ctx, tracker, json);
             }
-            return builder->createNull();
+            ctx.addError(tracker.location(),
+                        std::string("Unexpected character: '") + **json + "'");
+            return ctx.builder().createNull();
     }
 }
 
 void parse_json(Input* input, const char* json_string) {
-    printf("json_parse\n");
-    MarkBuilder builder(input);
-    input->root = parse_value(input, &builder, &json_string);
+    InputContext ctx(input, json_string);
+    SourceTracker tracker(json_string, strlen(json_string));
+
+    input->root = parse_value(ctx, tracker, &json_string);
+
+    // Log any errors that occurred during parsing
+    if (ctx.hasErrors()) {
+        ctx.logErrors();
+    }
 }

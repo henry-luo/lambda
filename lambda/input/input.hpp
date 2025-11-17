@@ -33,6 +33,14 @@ public:
     Pool* get_pool() const { return global_pool; }
 };
 
+// Temporary compatibility function for legacy code
+// TODO: Remove this once all parsers are refactored to use MarkBuilder directly
+#include "../mark_builder.hpp"
+inline String* input_create_string(Input* input, const char* str) {
+    MarkBuilder builder(input);
+    return builder.createString(str);
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif// Input creation and management

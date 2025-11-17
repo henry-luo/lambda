@@ -289,7 +289,7 @@ void parse_eml(Input* input, const char* eml_string) {
     if (body_sb->str && body_sb->str->len > 0) {
         String* body_string = builder.createString(body_sb->str->chars, body_sb->length);
         if (body_string) {
-            String* body_key = input_create_string(input, "body");
+            String* body_key = builder.createString("body");
             Item body_value = {.item = s2it(body_string)};
             map_put(email_map, body_key, body_value, input);
         }
