@@ -435,7 +435,7 @@ public:
 
 #### 1.2 Enhanced InputContext Class
 
-**File**: `lambda/input/input_context.hpp`
+**File**: `lambda/input/input-context.hpp`
 
 ```cpp
 #ifndef LAMBDA_INPUT_CONTEXT_HPP
@@ -1058,7 +1058,7 @@ bool SourceTracker::startsWith(const char* prefix) const {
 **File**: `lambda/input/input_context.cpp`
 
 ```cpp
-#include "input_context.hpp"
+#include "input-context.hpp"
 #include <stdarg.h>
 #include <ctype.h>
 #include <cstring>
@@ -1677,7 +1677,7 @@ Item item = ctx.builder().createFloat(3.14);
 #ifndef LAMBDA_INPUT_UTILS_HPP
 #define LAMBDA_INPUT_UTILS_HPP
 
-#include "input_context.hpp"
+#include "input-context.hpp"
 
 namespace lambda {
 namespace input {
@@ -1910,7 +1910,7 @@ void parse_complex(Input* input, const char* content) {
 #### ✅ Completed Infrastructure (Week 1)
 - `parse_error.hpp/.cpp` - Error tracking with location info
 - `source_tracker.hpp/.cpp` - Position tracking for error reporting
-- `input_context.hpp/.cpp` - Unified parser context API
+- `input-context.hpp/.cpp` - Unified parser context API
 - All unit tests passing
 
 #### ✅ All Parsers Fully Migrated (33 of 33 files) ✅ COMPLETE
@@ -2024,7 +2024,7 @@ The document previously indicated 3 graph parsers were incomplete, but verificat
   - Unit tests for error tracking and position tracking ✅
 
 - [x] **Day 2-3**: Implement `InputContext` class with error support
-  - Write `input_context.hpp` and `input_context.cpp` ✅
+  - Write `input-context.hpp` and `input_context.cpp` ✅
   - Integrate SourceTracker and ParseErrorList ✅
   - Unit tests for InputContext methods ✅
   - Test error recovery patterns ✅

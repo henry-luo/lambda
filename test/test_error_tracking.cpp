@@ -1,6 +1,6 @@
 // Test error tracking infrastructure with GTest
 #include <gtest/gtest.h>
-#include "lambda/input/input_context.hpp"
+#include "lambda/input/input-context.hpp"
 #include "lambda/input/parse_error.hpp"
 #include "lambda/input/source_tracker.hpp"
 #include "lambda/input/input.hpp"

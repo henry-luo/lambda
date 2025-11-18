@@ -340,7 +340,7 @@
                 "lambda/parse.c",
                 "lambda/input/parse_error.cpp",
                 "lambda/input/source_tracker.cpp",
-                "lambda/input/input_context.cpp",
+                "lambda/input/input-context.cpp",
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
                 "lambda/input/css/css_value_parser.cpp",
