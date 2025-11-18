@@ -113,7 +113,7 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
     }
 
     // Create JSX element
-    Element* jsx_elem = input_create_element(input, "jsx_element");
+    ElementBuilder jsx_elem = builder.element("jsx_element");
 
     // Store the JSX content as text for now
     size_t jsx_len = jsx_end - jsx_start;
@@ -123,12 +123,13 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
         jsx_buffer[jsx_len] = '\0';
         String* jsx_content = builder.createString(jsx_buffer);
         Item jsx_item = {.item = s2it(jsx_content)};
-        input_add_attribute_item_to_element(input, jsx_elem, "content", jsx_item);
+        jsx_elem.attr("content", jsx_item);
         free(jsx_buffer);
     }
 
     *pos = jsx_end;
-    return jsx_elem;
+    // Return raw Element* for compatibility with existing list_push code
+    return jsx_elem.final().element;
 }
 
 // Parse HTML element using existing HTML parser
@@ -156,7 +157,7 @@ static Element* parse_html_element(InputContext& ctx, const char** pos, const ch
     }
 
     // Create HTML element
-    Element* html_elem = input_create_element(input, "html_element");
+    ElementBuilder html_elem = builder.element("html_element");
 
     // Store the HTML content as text for now
     size_t html_len = html_end - html_start;
@@ -166,12 +167,13 @@ static Element* parse_html_element(InputContext& ctx, const char** pos, const ch
         html_buffer[html_len] = '\0';
         String* html_content = builder.createString(html_buffer);
         Item html_item = {.item = s2it(html_content)};
-        input_add_attribute_item_to_element(input, html_elem, "content", html_item);
+        html_elem.attr("content", html_item);
         free(html_buffer);
     }
 
     *pos = html_end;
-    return html_elem;
+    // Return raw Element* for compatibility with existing list_push code
+    return html_elem.final().element;
 }
 
 // Parse MDX element (either JSX component or HTML element)
@@ -198,8 +200,8 @@ static Element* parse_mdx_element(InputContext& ctx, const char** pos, const cha
 static Element* parse_mdx_content(InputContext& ctx, const char* content) {
     Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder();
-    Element* root = input_create_element(input, "mdx_document");
-    Element* body = input_create_element(input, "body");
+    ElementBuilder root = builder.element("mdx_document");
+    ElementBuilder body = builder.element("body");
 
     const char* pos = content;
     const char* end = content + strlen(content);
@@ -221,7 +223,7 @@ static Element* parse_mdx_content(InputContext& ctx, const char* content) {
                     Item markdown_item = input_markup(input, text_buffer);
                     if (markdown_item.item != ITEM_NULL && get_type_id(markdown_item) == LMD_TYPE_ELEMENT) {
                         // Add markdown content to body as children
-                        list_push((List*)body, markdown_item);
+                        body.child(markdown_item);
                     }
 
                     free(text_buffer);
@@ -233,7 +235,7 @@ static Element* parse_mdx_content(InputContext& ctx, const char* content) {
             if (element) {
                 Item element_item = {.element = element};
                 // Add element as child
-                list_push((List*)body, element_item);
+                body.child(element_item);
             } else {
                 // If parsing failed, treat as regular text
                 pos++;
@@ -257,7 +259,7 @@ static Element* parse_mdx_content(InputContext& ctx, const char* content) {
             Item markdown_item = input_markup(input, text_buffer);
             if (markdown_item.item != ITEM_NULL && get_type_id(markdown_item) == LMD_TYPE_ELEMENT) {
                 // Add final markdown content to body as child
-                list_push((List*)body, markdown_item);
+                body.child(markdown_item);
             }
 
             free(text_buffer);
@@ -265,10 +267,11 @@ static Element* parse_mdx_content(InputContext& ctx, const char* content) {
     }
 
     // Add body to root as child
-    Item body_item = {.element = body};
-    list_push((List*)root, body_item);
+    Item body_item = body.final();
+    root.child(body_item);
 
-    return root;
+    // Return raw Element* for compatibility
+    return root.final().element;
 }
 
 // Enhanced MDX document creation with proper parsing

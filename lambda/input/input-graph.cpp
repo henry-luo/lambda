@@ -22,70 +22,76 @@ void parse_graph(Input* input, const char* graph_string, const char* flavor) {
 
 // Helper function to create a graph element
 Element* create_graph_element(Input* input, const char* type, const char* layout, const char* flavor) {
-    Element* graph = input_create_element(input, "graph");
-    if (!graph) return NULL;
+    MarkBuilder builder(input);
+    ElementBuilder graph = builder.element("graph");
 
     // Add basic graph attributes with CSS-aligned naming
-    input_add_attribute_to_element(input, graph, "type", type);
-    input_add_attribute_to_element(input, graph, "layout", layout);
-    input_add_attribute_to_element(input, graph, "flavor", flavor);
+    graph.attr("type", type);
+    graph.attr("layout", layout);
+    graph.attr("flavor", flavor);
 
     // Note: No separate arrays for nodes/edges/clusters - they are direct children
     // The Lambda Element system automatically manages child elements
 
-    return graph;
+    // Return raw Element* for compatibility with existing code
+    return graph.final().element;
 }
 
 // Helper function to create a node element
 Element* create_node_element(Input* input, const char* id, const char* label) {
-    Element* node = input_create_element(input, "node");
-    if (!node) return NULL;
+    MarkBuilder builder(input);
+    ElementBuilder node = builder.element("node");
 
-    input_add_attribute_to_element(input, node, "id", id);
+    node.attr("id", id);
     if (label) {
-        input_add_attribute_to_element(input, node, "label", label);
+        node.attr("label", label);
     }
 
     // Note: Attributes are now stored directly in the element, no separate attributes map
 
-    return node;
+    // Return raw Element* for compatibility with existing code
+    return node.final().element;
 }
 
 // Helper function to create an edge element
 Element* create_edge_element(Input* input, const char* from, const char* to, const char* label) {
-    Element* edge = input_create_element(input, "edge");
-    if (!edge) return NULL;
+    MarkBuilder builder(input);
+    ElementBuilder edge = builder.element("edge");
 
-    input_add_attribute_to_element(input, edge, "from", from);
-    input_add_attribute_to_element(input, edge, "to", to);
+    edge.attr("from", from);
+    edge.attr("to", to);
     if (label) {
-        input_add_attribute_to_element(input, edge, "label", label);
+        edge.attr("label", label);
     }
 
     // Note: Attributes are now stored directly in the element, no separate attributes map
 
-    return edge;
+    // Return raw Element* for compatibility with existing code
+    return edge.final().element;
 }
 
 // Helper function to create a cluster element
 Element* create_cluster_element(Input* input, const char* id, const char* label) {
-    Element* cluster = input_create_element(input, "subgraph");
-    if (!cluster) return NULL;
+    MarkBuilder builder(input);
+    ElementBuilder cluster = builder.element("subgraph");
 
-    input_add_attribute_to_element(input, cluster, "id", id);
+    cluster.attr("id", id);
     if (label) {
-        input_add_attribute_to_element(input, cluster, "label", label);
+        cluster.attr("label", label);
     }
 
     // Note: Subgraphs contain direct child nodes and edges, no separate arrays
 
-    return cluster;
+    // Return raw Element* for compatibility with existing code
+    return cluster.final().element;
 }
 
 // Helper function to add an attribute to any graph element
 // Generic function to add graph attributes with CSS-aligned naming
 void add_graph_attribute(Input* input, Element* element, const char* name, const char* value) {
     if (!element || !name || !value) return;
+
+    MarkBuilder builder(input);
 
     // Convert legacy attribute names to CSS-aligned equivalents
     const char* css_name = name;
@@ -117,8 +123,13 @@ void add_graph_attribute(Input* input, Element* element, const char* name, const
         css_name = "stroke-dasharray";
     }
 
-    // Add the attribute directly to the element
-    input_add_attribute_to_element(input, element, css_name, value);
+    // Add the attribute directly to the element using putToElement
+    String* key = builder.createString(css_name);
+    String* val = builder.createString(value);
+    if (key && val) {
+        Item lambda_value = {.item = s2it(val)};
+        builder.putToElement(element, key, lambda_value);
+    }
 }
 
 // Helper function to add a node to a graph (as direct child)

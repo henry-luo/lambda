@@ -77,8 +77,6 @@ static bool is_css_hex_digit(char c) {
 // CSS Stylesheet parsing functions
 static Item parse_css_stylesheet(InputContext& ctx) {
     SourceTracker& tracker = TRACKER;
-    Element* stylesheet = input_create_element(ctx.input(), "stylesheet");
-    if (!stylesheet) return {.item = ITEM_ERROR};
 
     skip_css_comments(tracker);
 
@@ -165,25 +163,27 @@ static Item parse_css_stylesheet(InputContext& ctx) {
         skip_css_comments(tracker);
     }
 
-    // Add all collections to the stylesheet
-    input_add_attribute_item_to_element(ctx.input(), stylesheet, "rules", {.item = (uint64_t)rules});
+    // Build stylesheet element with all collections as attributes
+    ElementBuilder stylesheet = ctx.builder().element("stylesheet");
+    stylesheet.attr("rules", {.item = (uint64_t)rules});
+
     if (keyframes->length > 0) {
-        input_add_attribute_item_to_element(ctx.input(), stylesheet, "keyframes", {.item = (uint64_t)keyframes});
+        stylesheet.attr("keyframes", {.item = (uint64_t)keyframes});
     }
     if (media_queries->length > 0) {
-        input_add_attribute_item_to_element(ctx.input(), stylesheet, "media", {.item = (uint64_t)media_queries});
+        stylesheet.attr("media", {.item = (uint64_t)media_queries});
     }
     if (supports_queries->length > 0) {
-        input_add_attribute_item_to_element(ctx.input(), stylesheet, "supports", {.item = (uint64_t)supports_queries});
+        stylesheet.attr("supports", {.item = (uint64_t)supports_queries});
     }
     if (font_faces->length > 0) {
-        input_add_attribute_item_to_element(ctx.input(), stylesheet, "font_faces", {.item = (uint64_t)font_faces});
+        stylesheet.attr("font_faces", {.item = (uint64_t)font_faces});
     }
     if (other_at_rules->length > 0) {
-        input_add_attribute_item_to_element(ctx.input(), stylesheet, "at_rules", {.item = (uint64_t)other_at_rules});
+        stylesheet.attr("at_rules", {.item = (uint64_t)other_at_rules});
     }
 
-    return {.item = (uint64_t)stylesheet};
+    return stylesheet.final();
 }
 
 static Array* parse_css_rules(InputContext& ctx) {
@@ -243,10 +243,9 @@ static Item parse_css_at_rule(InputContext& ctx) {
     String* at_rule_name = ctx.builder().createString(sb->str->chars, sb->length);
     if (!at_rule_name) return {.item = ITEM_ERROR};
 
-    Element* at_rule = input_create_element(ctx.input(), "at-rule");
-    if (!at_rule) return {.item = ITEM_ERROR};
-
-    input_add_attribute_to_element(ctx.input(), at_rule, "name", at_rule_name->chars);
+    // Start building the at-rule element
+    ElementBuilder at_rule = ctx.builder().element("at-rule");
+    at_rule.attr("name", at_rule_name->chars);
 
     skip_css_comments(tracker);
 
@@ -276,7 +275,7 @@ static Item parse_css_at_rule(InputContext& ctx) {
     if (prelude_str && prelude_str->len > 0) {
         char* trimmed = input_trim_whitespace(prelude_str->chars);
         if (trimmed && strlen(trimmed) > 0) {
-            input_add_attribute_to_element(ctx.input(), at_rule, "prelude", trimmed);
+            at_rule.attr("prelude", trimmed);
         }
         if (trimmed) free(trimmed);
     }
@@ -327,7 +326,7 @@ static Item parse_css_at_rule(InputContext& ctx) {
                     skip_css_comments(tracker);
                 }
 
-                input_add_attribute_item_to_element(ctx.input(), at_rule, "rules", {.item = (uint64_t)nested_rules});
+                at_rule.attr("rules", {.item = (uint64_t)nested_rules});
             }
         } else if (strcmp(at_rule_name->chars, "keyframes") == 0) {
             // @keyframes contains keyframe rules
@@ -348,72 +347,71 @@ static Item parse_css_at_rule(InputContext& ctx) {
                     if (keyframe_selector && tracker.current() == '{') {
                         tracker.advance(); // Skip opening brace
 
-                        Element* keyframe_rule = input_create_element(ctx.input(), "keyframe");
-                        if (keyframe_rule) {
-                            char* trimmed = input_trim_whitespace(keyframe_selector->chars);
-                            if (trimmed) {
-                                input_add_attribute_to_element(ctx.input(), keyframe_rule, "selector", trimmed);
-                                free(trimmed);
-                            }
+                        ElementBuilder keyframe_rule = ctx.builder().element("keyframe");
 
-                            // Parse declarations within keyframe
-                            while (!tracker.atEnd() && tracker.current() != '}') {
-                                skip_css_comments(tracker);
-                                if (tracker.current() == '}') break;
-
-                                // Parse property name
-                                StringBuf* prop_sb = stringbuf_new(ctx.input()->pool);
-                                while (!tracker.atEnd() && tracker.current() != ':' && tracker.current() != ';' && tracker.current() != '}' && !isspace(tracker.current())) {
-                                    stringbuf_append_char(prop_sb, tracker.current());
-                                    tracker.advance();
-                                }
-                                String* property_str = stringbuf_to_string(prop_sb);
-                                if (!property_str) {
-                                    // Skip to next declaration
-                                    while (!tracker.atEnd() && tracker.current() != ';' && tracker.current() != '}') tracker.advance();
-                                    if (tracker.current() == ';') tracker.advance();
-                                    continue;
-                                }
-
-                                skip_css_comments(tracker);
-
-                                if (tracker.current() == ':') {
-                                    tracker.advance(); // Skip colon
-                                    skip_css_comments(tracker);
-
-                                    // Parse value list
-                                    Array* values = parse_css_value_list(ctx);
-                                    if (values) {
-                                        Item values_item = flatten_single_array(values);
-                                        input_add_attribute_item_to_element(ctx.input(), keyframe_rule, property_str->chars, values_item);
-                                    }
-
-                                    // Check for !important
-                                    skip_css_comments(tracker);
-                                    if (tracker.current() == '!' && tracker.match("!important")) {
-                                        tracker.advance(10);
-                                    }
-                                }
-
-                                skip_css_comments(tracker);
-                                if (tracker.current() == ';') {
-                                    tracker.advance(); // Skip semicolon
-                                    skip_css_comments(tracker);
-                                }
-                            }
-
-                            if (tracker.current() == '}') {
-                                tracker.advance(); // Skip closing brace
-                            }
-
-                            array_append(keyframe_rules, {.item = (uint64_t)keyframe_rule}, ctx.input()->pool);
+                        char* trimmed = input_trim_whitespace(keyframe_selector->chars);
+                        if (trimmed) {
+                            keyframe_rule.attr("selector", trimmed);
+                            free(trimmed);
                         }
+
+                        // Parse declarations within keyframe
+                        while (!tracker.atEnd() && tracker.current() != '}') {
+                            skip_css_comments(tracker);
+                            if (tracker.current() == '}') break;
+
+                            // Parse property name
+                            StringBuf* prop_sb = stringbuf_new(ctx.input()->pool);
+                            while (!tracker.atEnd() && tracker.current() != ':' && tracker.current() != ';' && tracker.current() != '}' && !isspace(tracker.current())) {
+                                stringbuf_append_char(prop_sb, tracker.current());
+                                tracker.advance();
+                            }
+                            String* property_str = stringbuf_to_string(prop_sb);
+                            if (!property_str) {
+                                // Skip to next declaration
+                                while (!tracker.atEnd() && tracker.current() != ';' && tracker.current() != '}') tracker.advance();
+                                if (tracker.current() == ';') tracker.advance();
+                                continue;
+                            }
+
+                            skip_css_comments(tracker);
+
+                            if (tracker.current() == ':') {
+                                tracker.advance(); // Skip colon
+                                skip_css_comments(tracker);
+
+                                // Parse value list
+                                Array* values = parse_css_value_list(ctx);
+                                if (values) {
+                                    Item values_item = flatten_single_array(values);
+                                    keyframe_rule.attr(property_str->chars, values_item);
+                                }
+
+                                // Check for !important
+                                skip_css_comments(tracker);
+                                if (tracker.current() == '!' && tracker.match("!important")) {
+                                    tracker.advance(10);
+                                }
+                            }
+
+                            skip_css_comments(tracker);
+                            if (tracker.current() == ';') {
+                                tracker.advance(); // Skip semicolon
+                                skip_css_comments(tracker);
+                            }
+                        }
+
+                        if (tracker.current() == '}') {
+                            tracker.advance(); // Skip closing brace
+                        }
+
+                        array_append(keyframe_rules, keyframe_rule.final(), ctx.input()->pool);
                     }
 
                     skip_css_comments(tracker);
                 }
 
-                input_add_attribute_item_to_element(ctx.input(), at_rule, "keyframes", {.item = (uint64_t)keyframe_rules});
+                at_rule.attr("keyframes", {.item = (uint64_t)keyframe_rules});
             }
         } else {
             // Other at-rules contain declarations - parse them directly as properties
@@ -446,7 +444,7 @@ static Item parse_css_at_rule(InputContext& ctx) {
                     if (values) {
                         // Flatten single property value array
                         Item values_item = flatten_single_array(values);
-                        input_add_attribute_item_to_element(ctx.input(), at_rule, property_str->chars, values_item);
+                        at_rule.attr(property_str->chars, values_item);
                     }
                     // Check for !important
                     skip_css_comments(tracker);
@@ -472,13 +470,14 @@ static Item parse_css_at_rule(InputContext& ctx) {
         tracker.advance(); // Skip semicolon
     }
 
-    return {.item = (uint64_t)at_rule};
+    return at_rule.final();
 }
 
 static Item parse_css_qualified_rule(InputContext& ctx) {
     SourceTracker& tracker = TRACKER;
-    Element* rule = input_create_element(ctx.input(), "rule");
-    if (!rule) return {.item = ITEM_ERROR};
+
+    // Start building the rule element
+    ElementBuilder rule = ctx.builder().element("rule");
 
     // Parse selectors
     printf("Parsing CSS qualified rule\n");
@@ -486,7 +485,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
     if (selectors) {
         // Flatten single selector array
         Item selectors_item = flatten_single_array(selectors);
-        input_add_attribute_item_to_element(ctx.input(), rule, "_", selectors_item);
+        rule.attr("_", selectors_item);
     }
 
     skip_css_comments(tracker);
@@ -536,7 +535,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
 
                     // If important, add the flag as a separate property
                     printf("Adding property %s with values %p\n", property_str->chars, (void*)values_item.item);
-                    input_add_attribute_item_to_element(ctx.input(), rule, property_str->chars, values_item);
+                    rule.attr(property_str->chars, values_item);
 
                     if (is_important) {
                         // Add an "important" flag attribute with boolean true value
@@ -546,7 +545,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
                         String* important_key = stringbuf_to_string(important_sb);
 
                         Item true_item = {.item = ITEM_TRUE};
-                        input_add_attribute_item_to_element(ctx.input(), rule, important_key->chars, true_item);
+                        rule.attr(important_key->chars, true_item);
                     }
                 }
             }
@@ -564,7 +563,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
         }
     }
 
-    return {.item = (uint64_t)rule};
+    return rule.final();
 }
 
 static Array* parse_css_selectors(InputContext& ctx) {
@@ -699,13 +698,8 @@ static Item parse_css_declaration(InputContext& ctx) {
         return {.item = ITEM_ERROR};
     }
 
-    Element* declaration = input_create_element(ctx.input(), "declaration");
-    if (!declaration) {
-        free(property_trimmed);
-        return {.item = ITEM_ERROR};
-    }
-
-    input_add_attribute_to_element(ctx.input(), declaration, "property", property_trimmed);
+    ElementBuilder declaration = ctx.builder().element("declaration");
+    declaration.attr("property", property_trimmed);
     free(property_trimmed);
 
     skip_css_comments(tracker);
@@ -717,18 +711,18 @@ static Item parse_css_declaration(InputContext& ctx) {
         // Parse value
         Array* values = parse_css_value_list(ctx);
         if (values) {
-            input_add_attribute_item_to_element(ctx.input(), declaration, "values", {.item = (uint64_t)values});
+            declaration.attr("values", {.item = (uint64_t)values});
         }
 
         // Check for !important
         skip_css_comments(tracker);
         if (tracker.current() == '!' && tracker.match("!important")) {
             tracker.advance(10);
-            input_add_attribute_to_element(ctx.input(), declaration, "important", "true");
+            declaration.attr("important", "true");
         }
     }
 
-    return {.item = (uint64_t)declaration};
+    return declaration.final();
 }
 
 static Item parse_css_string(InputContext& ctx) {
@@ -836,13 +830,13 @@ static Item parse_css_url(InputContext& ctx) {
     }
 
     // Create url element with the URL as content
-    Element* url_element = input_create_element(ctx.input(), "url");
-    if (url_element && url_value .item != ITEM_ERROR) {
-        // Add URL as parameter so it shows up in formatting
-        list_push((List*)url_element, url_value);
+    ElementBuilder url_element = ctx.builder().element("url");
+    if (url_value .item != ITEM_ERROR) {
+        // Add URL as child content
+        url_element.child(url_value);
     }
 
-    return url_element ? (Item){.item = (((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)url_element} : (Item){.item = ITEM_ERROR};
+    return url_element.final();
 }
 
 static Item parse_css_color(InputContext& ctx) {
@@ -1193,10 +1187,9 @@ static Item parse_css_function(InputContext& ctx) {
     }
 
     // Create Lambda element with function name as element name
-    Element* func_element = input_create_element(ctx.input(), func_name->chars);
-    if (!func_element) return {.item = ITEM_ERROR};
+    ElementBuilder func_element = ctx.builder().element(func_name->chars);
 
-    // Add parameters as child content using list_push
+    // Add parameters as child content
     // Disable string merging to keep function parameters separate
     if (params && params->length > 0) {
         bool prev_disable_string_merging = input_context->disable_string_merging;
@@ -1204,7 +1197,7 @@ static Item parse_css_function(InputContext& ctx) {
 
         for (long i = 0; i < params->length; i++) {
             Item param = params->items[i];
-            list_push((List*)func_element, param);
+            func_element.child(param);
         }
 
         input_context->disable_string_merging = prev_disable_string_merging;
@@ -1213,7 +1206,7 @@ static Item parse_css_function(InputContext& ctx) {
     printf("Created function element '%s' with %ld parameters\n", func_name->chars, params ? params->length : 0);
 
     // Return element with proper type tagging for LMD_TYPE_ELEMENT
-    return {.item = func_element ? ((((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)func_element) : ITEM_ERROR};
+    return func_element.final();
 }
 
 static Array* parse_css_value_list(InputContext& ctx) {
@@ -1479,11 +1472,11 @@ void parse_css(Input* input, const char* css_string) {
         input->root = parse_css_stylesheet(ctx);
     } else {
         // Empty stylesheet
-        Element* empty_stylesheet = input_create_element(input, "stylesheet");
+        ElementBuilder empty_stylesheet = ctx.builder().element("stylesheet");
         Array* empty_rules = array_pooled(input->pool);
-        if (empty_stylesheet && empty_rules) {
-            input_add_attribute_item_to_element(input, empty_stylesheet, "rules", {.item = (uint64_t)empty_rules});
-            input->root = {.item = (uint64_t)empty_stylesheet};
+        if (empty_rules) {
+            empty_stylesheet.attr("rules", {.item = (uint64_t)empty_rules});
+            input->root = empty_stylesheet.final();
         } else {
             ctx.addError("Failed to allocate memory for empty CSS stylesheet");
             input->root = {.item = ITEM_ERROR};

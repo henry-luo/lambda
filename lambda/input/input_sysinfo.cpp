@@ -200,31 +200,28 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
     const char* nodename = uname_info.nodename;
 #endif
 
+    // Create MarkBuilder for element creation
+    MarkBuilder builder(input);
+
     // Create system element
-    Element* system_elem = input_create_element(input, "system");
-    if (!system_elem) {
-        log_error("Failed to create system element");
-        return nullptr;
-    }
+    ElementBuilder system_elem = builder.element("system");
 
     // Add timestamp
     time_t current_time = time(nullptr);
     if (current_time != -1) {
         char timestamp_str[32];
         snprintf(timestamp_str, sizeof(timestamp_str), "%ld", current_time);
-        input_add_attribute_to_element(input, system_elem, "timestamp", timestamp_str);
+        system_elem.attr("timestamp", timestamp_str);
     }
 
     // Add OS information
-    Element* os_elem = input_create_element(input, "os");
-    if (os_elem) {
-        input_add_attribute_to_element(input, os_elem, "name", sysname);
-        input_add_attribute_to_element(input, os_elem, "version", get_os_version());
-        input_add_attribute_to_element(input, os_elem, "kernel", release);
-        input_add_attribute_to_element(input, os_elem, "machine", machine);
-        input_add_attribute_to_element(input, os_elem, "nodename", nodename);
-        input_add_attribute_item_to_element(input, system_elem, "os", {.item = (uint64_t)os_elem});
-    }
+    ElementBuilder os_elem = builder.element("os");
+    os_elem.attr("name", sysname);
+    os_elem.attr("version", get_os_version());
+    os_elem.attr("kernel", release);
+    os_elem.attr("machine", machine);
+    os_elem.attr("nodename", nodename);
+    system_elem.attr("os", os_elem.final());
 
     // Add hostname information
     char hostname[256];
@@ -234,63 +231,57 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
 #else
     if (gethostname(hostname, sizeof(hostname)) == 0) {
 #endif
-        Element* hostname_elem = input_create_element(input, "hostname");
-        if (hostname_elem) {
-            input_add_attribute_to_element(input, hostname_elem, "value", hostname);
-            input_add_attribute_item_to_element(input, system_elem, "hostname", {.item = (uint64_t)hostname_elem});
-        }
+        ElementBuilder hostname_elem = builder.element("hostname");
+        hostname_elem.attr("value", hostname);
+        system_elem.attr("hostname", hostname_elem.final());
     }
 
     // Add uptime information
     double uptime_seconds = get_system_uptime();
     if (uptime_seconds > 0) {
-        Element* uptime_elem = input_create_element(input, "uptime");
-        if (uptime_elem) {
-            char uptime_str[32];
-            snprintf(uptime_str, sizeof(uptime_str), "%.2f", uptime_seconds);
-            input_add_attribute_to_element(input, uptime_elem, "seconds", uptime_str);
+        ElementBuilder uptime_elem = builder.element("uptime");
 
-            // Convert to human-readable format
-            int days = (int)(uptime_seconds / 86400);
-            int hours = (int)((uptime_seconds - days * 86400) / 3600);
-            int minutes = (int)((uptime_seconds - days * 86400 - hours * 3600) / 60);
+        char uptime_str[32];
+        snprintf(uptime_str, sizeof(uptime_str), "%.2f", uptime_seconds);
+        uptime_elem.attr("seconds", uptime_str);
 
-            char days_str[16], hours_str[16], minutes_str[16];
-            snprintf(days_str, sizeof(days_str), "%d", days);
-            snprintf(hours_str, sizeof(hours_str), "%d", hours);
-            snprintf(minutes_str, sizeof(minutes_str), "%d", minutes);
+        // Convert to human-readable format
+        int days = (int)(uptime_seconds / 86400);
+        int hours = (int)((uptime_seconds - days * 86400) / 3600);
+        int minutes = (int)((uptime_seconds - days * 86400 - hours * 3600) / 60);
 
-            input_add_attribute_to_element(input, uptime_elem, "days", days_str);
-            input_add_attribute_to_element(input, uptime_elem, "hours", hours_str);
-            input_add_attribute_to_element(input, uptime_elem, "minutes", minutes_str);
-            input_add_attribute_item_to_element(input, system_elem, "uptime", {.item = (uint64_t)uptime_elem});
-        }
+        char days_str[16], hours_str[16], minutes_str[16];
+        snprintf(days_str, sizeof(days_str), "%d", days);
+        snprintf(hours_str, sizeof(hours_str), "%d", hours);
+        snprintf(minutes_str, sizeof(minutes_str), "%d", minutes);
+
+        uptime_elem.attr("days", days_str);
+        uptime_elem.attr("hours", hours_str);
+        uptime_elem.attr("minutes", minutes_str);
+        system_elem.attr("uptime", uptime_elem.final());
     }
 
     // Add architecture information
-    Element* arch_elem = input_create_element(input, "architecture");
-    if (arch_elem) {
-        input_add_attribute_to_element(input, arch_elem, "value", machine);
-        input_add_attribute_item_to_element(input, system_elem, "architecture", {.item = (uint64_t)arch_elem});
-    }
+    ElementBuilder arch_elem = builder.element("architecture");
+    arch_elem.attr("value", machine);
+    system_elem.attr("architecture", arch_elem.final());
 
     // Add platform information
-    Element* platform_elem = input_create_element(input, "platform");
-    if (platform_elem) {
+    ElementBuilder platform_elem = builder.element("platform");
 #ifdef __APPLE__
-        input_add_attribute_to_element(input, platform_elem, "value", "darwin");
+    platform_elem.attr("value", "darwin");
 #elif defined(__linux__)
-        input_add_attribute_to_element(input, platform_elem, "value", "linux");
+    platform_elem.attr("value", "linux");
 #elif defined(_WIN32)
-        input_add_attribute_to_element(input, platform_elem, "value", "windows");
+    platform_elem.attr("value", "windows");
 #else
-        input_add_attribute_to_element(input, platform_elem, "value", "unknown");
+    platform_elem.attr("value", "unknown");
 #endif
-        input_add_attribute_item_to_element(input, system_elem, "platform", {.item = (uint64_t)platform_elem});
-    }
+    system_elem.attr("platform", platform_elem.final());
 
     log_info("Created system information element successfully");
-    return system_elem;
+    // Return raw Element* for compatibility
+    return system_elem.final().element;
 }
 
 // Parse sys:// URL and extract components

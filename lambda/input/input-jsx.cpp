@@ -117,14 +117,15 @@ static String* parse_jsx_expression_content(InputContext& ctx, const char** js_e
 }
 
 static Element* create_jsx_js_expression_element(InputContext& ctx, const char* js_content) {
-    Input* input = ctx.input();
     MarkBuilder& builder = ctx.builder();
 
-    Element* js_elem = input_create_element(input, "js");
+    ElementBuilder js_elem = builder.element("js");
     String* content = builder.createString(js_content);
     Item content_item = {.item = s2it(content)};
-    list_push((List*)js_elem, content_item);
-    return js_elem;
+    js_elem.child(content_item);
+
+    // Return raw Element* for compatibility with existing list_push code
+    return js_elem.final().element;
 }
 
 // Parse JSX expression: {expression}
@@ -266,8 +267,8 @@ static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, co
     }
 }
 
-// Parse JSX attributes
-static void parse_jsx_attributes(InputContext& ctx, Element* element, const char** jsx, const char* end) {
+// Parse JSX attributes (mutates ElementBuilder)
+static void parse_jsx_attributes(InputContext& ctx, ElementBuilder& element, const char** jsx, const char* end) {
     while (*jsx < end) {
         skip_jsx_whitespace(jsx, end);
 
@@ -300,22 +301,19 @@ static void parse_jsx_attributes(InputContext& ctx, Element* element, const char
                 // JSX expression attribute value
                 Element* expr = parse_jsx_expression(ctx, jsx, end);
                 if (expr) {
-                    Input* input = ctx.input();
                     Item expr_item = {.item = (uint64_t)expr};
-                    input_add_attribute_item_to_element(input, element, attr_name->chars, expr_item);
+                    element.attr(attr_name->chars, expr_item);
                 }
             } else {
                 // String attribute value
                 String* attr_value = parse_jsx_attribute_value(ctx, jsx, end);
                 if (attr_value) {
-                    Input* input = ctx.input();
-                    input_add_attribute_to_element(input, element, attr_name->chars, attr_value->chars);
+                    element.attr(attr_name->chars, attr_value->chars);
                 }
             }
         } else {
             // Boolean attribute (no value)
-            Input* input = ctx.input();
-            input_add_attribute_to_element(input, element, attr_name->chars, "true");
+            element.attr(attr_name->chars, "true");
         }
     }
 }
@@ -328,9 +326,8 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
 
     *jsx += 2; // Skip <>
 
-    Input* input = ctx.input();
-    Element* fragment = input_create_element(input, "jsx_fragment");
-    input_add_attribute_to_element(input, fragment, "type", "jsx_fragment");
+    ElementBuilder fragment = ctx.builder().element("jsx_fragment");
+    fragment.attr("type", "jsx_fragment");
 
     // Parse children until </>
     while (*jsx < end) {
@@ -347,13 +344,13 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
             Element* child = parse_jsx_element(ctx, jsx, end);
             if (child) {
                 Item child_item = {.item = (uint64_t)child};
-                list_push((List*)fragment, child_item);
+                fragment.child(child_item);
             }
         } else if (**jsx == '{') {
             Element* expr = parse_jsx_expression(ctx, jsx, end);
             if (expr) {
                 Item expr_item = {.item = (uint64_t)expr};
-                list_push((List*)fragment, expr_item);
+                fragment.child(expr_item);
             }
         } else {
             String* text = parse_jsx_text_content(ctx, jsx, end);
@@ -368,13 +365,14 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
                 }
                 if (has_non_whitespace) {
                     Item text_item = {.item = s2it(text)};
-                    list_push((List*)fragment, text_item);
+                    fragment.child(text_item);
                 }
             }
         }
     }
 
-    return fragment;
+    // Return raw Element* for compatibility with existing list_push code
+    return fragment.final().element;
 }
 
 // Parse JSX element: <tag>...</tag> or <tag />
@@ -396,13 +394,12 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
         return NULL;
     }
 
-    Input* input = ctx.input();
-    Element* element = input_create_element(input, tag_name->chars);
-    input_add_attribute_to_element(input, element, "type", "jsx_element");
+    ElementBuilder element = ctx.builder().element(tag_name->chars);
+    element.attr("type", "jsx_element");
 
     // Mark as component if starts with uppercase
     if (is_jsx_component_name(tag_name->chars)) {
-        input_add_attribute_to_element(input, element, "is_component", "true");
+        element.attr("is_component", "true");
     }
 
     // Parse attributes
@@ -416,8 +413,9 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
         skip_jsx_whitespace(jsx, end);
         if (*jsx < end && **jsx == '>') {
             (*jsx)++; // Skip >
-            input_add_attribute_to_element(input, element, "self_closing", "true");
-            return element;
+            element.attr("self_closing", "true");
+            // Return raw Element* for compatibility with existing list_push code
+            return element.final().element;
         }
     }
 
@@ -444,13 +442,13 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
             Element* child = parse_jsx_element(ctx, jsx, end);
             if (child) {
                 Item child_item = {.item = (uint64_t)child};
-                list_push((List*)element, child_item);
+                element.child(child_item);
             }
         } else if (**jsx == '{') {
             Element* expr = parse_jsx_expression(ctx, jsx, end);
             if (expr) {
                 Item expr_item = {.item = (uint64_t)expr};
-                list_push((List*)element, expr_item);
+                element.child(expr_item);
             }
         } else {
             String* text = parse_jsx_text_content(ctx, jsx, end);
@@ -465,13 +463,14 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
                 }
                 if (has_non_whitespace) {
                     Item text_item = {.item = s2it(text)};
-                    list_push((List*)element, text_item);
+                    element.child(text_item);
                 }
             }
         }
     }
 
-    return element;
+    // Return raw Element* for compatibility with existing list_push code
+    return element.final().element;
 }
 
 // Main JSX parser entry point

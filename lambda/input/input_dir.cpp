@@ -40,9 +40,8 @@ static int is_directory(const char* path) {
 
 // Helper: create <file> or <dir> element with metadata
 static Element* create_entry_element(InputContext& ctx, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
-    Element* elmt = input_create_element(ctx.input(), is_dir ? "dir" : "file");
-    if (!elmt) return NULL;
-    input_add_attribute_to_element(ctx.input(), elmt, "name", name);
+    ElementBuilder elmt = ctx.builder().element(is_dir ? "dir" : "file");
+    elmt.attr("name", name);
 
     // Create size as integer
     int64_t* size_ptr;
@@ -50,28 +49,30 @@ static Element* create_entry_element(InputContext& ctx, const char* name, const 
     if (size_ptr != NULL) {
         *size_ptr = (int64_t)st->st_size;
         Item size_item = {.item = l2it(size_ptr)};
-        input_add_attribute_item_to_element(ctx.input(), elmt, "size", size_item);
+        elmt.attr("size", size_item);
     }
 
     // Create modified as Lambda datetime from Unix timestamp
     DateTime* dt_ptr = datetime_from_unix(ctx.input()->pool, (int64_t)st->st_mtime);
     if (dt_ptr) {
         Item datetime_item = {.item = k2it(dt_ptr)};
-        input_add_attribute_item_to_element(ctx.input(), elmt, "modified", datetime_item);
+        elmt.attr("modified", datetime_item);
     }
 
     // Add is_link attribute if it's a symbolic link
     if (is_link) {
         Item link_item = {.item = b2it(true)};
-        input_add_attribute_item_to_element(ctx.input(), elmt, "is_link", link_item);
+        elmt.attr("is_link", link_item);
     }
 
     // Keep mode as string for permissions
     char buf[64];
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
     String* mode_str = ctx.builder().createString(buf);
-    input_add_attribute_item_to_element(ctx.input(), elmt, "mode", {.item = y2it(mode_str)});
-    return elmt;
+    elmt.attr("mode", {.item = y2it(mode_str)});
+
+    // Return raw Element* for compatibility with existing code
+    return elmt.final().element;
 }
 
 // Recursive directory traversal
@@ -139,7 +140,11 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     if (!root) { free(input); return NULL; }
 
     // Add the full path as a separate attribute for the root directory
-    input_add_attribute_to_element(input, root, "path", directory_path);
+    String* path_key = ctx.builder().createString("path");
+    String* path_value = ctx.builder().createString(directory_path);
+    if (path_key && path_value) {
+        ctx.builder().putToElement(root, path_key, {.item = s2it(path_value)});
+    }
 
     // Traverse and populate
     traverse_directory(ctx, root, directory_path, recursive, max_depth, 0);
