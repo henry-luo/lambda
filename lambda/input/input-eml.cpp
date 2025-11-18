@@ -243,7 +243,7 @@ void parse_eml(Input* input, const char* eml_string) {
 
         // Store header in headers map
         Item value = {.item = s2it(header_value)};
-        map_put(headers_map, header_name, value, input);
+        ctx.builder().putToMap(headers_map, header_name, value);
 
         // Also store common headers as top-level fields for easier access
         if (strcmp(header_name->chars, "from") == 0) {
@@ -251,7 +251,7 @@ void parse_eml(Input* input, const char* eml_string) {
             if (from_email) {
                 String* from_key = ctx.builder().createString("from");
                 Item from_value = {.item = s2it(from_email)};
-                map_put(email_map, from_key, from_value, input);
+                ctx.builder().putToMap(email_map, from_key, from_value);
             }
         }
         else if (strcmp(header_name->chars, "to") == 0) {
@@ -259,33 +259,33 @@ void parse_eml(Input* input, const char* eml_string) {
             if (to_email) {
                 String* to_key = ctx.builder().createString("to");
                 Item to_value = {.item = s2it(to_email)};
-                map_put(email_map, to_key, to_value, input);
+                ctx.builder().putToMap(email_map, to_key, to_value);
             }
         }
         else if (strcmp(header_name->chars, "subject") == 0) {
             String* subject_key = ctx.builder().createString("subject");
             Item subject_value = {.item = s2it(header_value)};
-            map_put(email_map, subject_key, subject_value, input);
+            ctx.builder().putToMap(email_map, subject_key, subject_value);
         }
         else if (strcmp(header_name->chars, "date") == 0) {
             String* date_parsed = parse_date_value(ctx, header_value->chars);
             if (date_parsed) {
                 String* date_key = ctx.builder().createString("date");
                 Item date_value = {.item = s2it(date_parsed)};
-                map_put(email_map, date_key, date_value, input);
+                ctx.builder().putToMap(email_map, date_key, date_value);
             }
         }
         else if (strcmp(header_name->chars, "message-id") == 0) {
             String* msgid_key = ctx.builder().createString("message_id");
             Item msgid_value = {.item = s2it(header_value)};
-            map_put(email_map, msgid_key, msgid_value, input);
+            ctx.builder().putToMap(email_map, msgid_key, msgid_value);
         }
     }
 
     // Store headers map in email
     String* headers_key = ctx.builder().createString("headers");
     Item headers_value = {.item = (uint64_t)headers_map};
-    map_put(email_map, headers_key, headers_value, input);
+    ctx.builder().putToMap(email_map, headers_key, headers_value);
 
     // At this point, eml should be positioned at the start of the body
     // Parse body
@@ -302,7 +302,7 @@ void parse_eml(Input* input, const char* eml_string) {
         if (body_string) {
             String* body_key = ctx.builder().createString("body");
             Item body_value = {.item = s2it(body_string)};
-            map_put(email_map, body_key, body_value, input);
+            ctx.builder().putToMap(email_map, body_key, body_value);
         } else {
             ctx.addWarning("Failed to create body string");
         }

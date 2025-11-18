@@ -707,7 +707,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
             return NULL;
         }
 
-        map_put(mp, key, value, input);
+        ctx.builder().putToMap(mp, key, value);
 
         skip_whitespace(toml);
         if (**toml == '}') {
@@ -858,7 +858,7 @@ static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char*
     if (!section_map) return NULL;
 
     // Add section to root map
-    map_put(root_map, key, {.item = (uint64_t)section_map}, input);
+    ctx.builder().putToMap(root_map, key, {.item = (uint64_t)section_map});
 
     return section_map;
 }
@@ -916,7 +916,7 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
             nested_map = map_pooled(input->pool);
             if (!nested_map) return NULL;
 
-            map_put(current_map, key, {.item = (uint64_t)nested_map}, input);
+            ctx.builder().putToMap(current_map, key, {.item = (uint64_t)nested_map});
         }
 
         current_map = nested_map;
@@ -1028,7 +1028,7 @@ void parse_toml(Input* input, const char* toml_string) {
             continue;
         }
 
-        map_put(current_table, key, value, input);
+        ctx.builder().putToMap(current_table, key, value);
 
         skip_line(&toml, &line_num);
     }

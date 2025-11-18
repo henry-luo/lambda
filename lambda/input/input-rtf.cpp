@@ -290,7 +290,7 @@ static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
                 } else {
                     value = {.item = b2it(true)};
                 }
-                map_put(props, cw.keyword, value, input);
+                ctx.builder().putToMap(props, cw.keyword, value);
             }
         } else {
             (*rtf)++;
@@ -335,7 +335,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
                             strcpy(key->chars, "color_table");
                             key->len = 11;
                             key->ref_cnt = 0;
-                            map_put(group, key, color_table, input);
+                            ctx.builder().putToMap(group, key, color_table);
                         }
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
@@ -349,7 +349,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
                             strcpy(key->chars, "font_table");
                             key->len = 10;
                             key->ref_cnt = 0;
-                            map_put(group, key, font_table, input);
+                            ctx.builder().putToMap(group, key, font_table);
                         }
                     }
                 } else {
@@ -367,7 +367,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
                     } else {
                         value = {.item = b2it(true)};
                     }
-                    map_put(formatting, cw.keyword, value, input);
+                    ctx.builder().putToMap(formatting, cw.keyword, value);
                 }
             }
         } else if (**rtf == '{') {
@@ -402,7 +402,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
             strcpy(content_key->chars, "content");
             content_key->len = 7;
             content_key->ref_cnt = 0;
-            map_put(group, content_key, content_item, input);
+            ctx.builder().putToMap(group, content_key, content_item);
         }
     }
 
@@ -415,7 +415,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
             strcpy(format_key->chars, "formatting");
             format_key->len = 10;
             format_key->ref_cnt = 0;
-            map_put(group, format_key, format_item, input);
+            ctx.builder().putToMap(group, format_key, format_item);
         }
     }
     return {.item = (uint64_t)group};

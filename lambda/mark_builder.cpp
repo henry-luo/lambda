@@ -11,6 +11,11 @@
 #include <cstring>
 #include <cassert>
 
+// Forward declarations for internal functions in input.cpp
+extern Element* input_create_element_internal(Input *input, const char* tag_name);
+extern void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
+extern void map_put(Map* mp, String* key, Item value, Input *input);
+
 extern TypeMap EmptyMap;
 
 //==============================================================================
@@ -142,6 +147,18 @@ Item MarkBuilder::createNull() {
     return ItemNull;
 }
 
+//------------------------------------------------------------------------------
+// Internal Helpers
+//------------------------------------------------------------------------------
+
+void MarkBuilder::putToElement(Element* elmt, String* key, Item value) {
+    elmt_put(elmt, key, value, pool_);
+}
+
+void MarkBuilder::putToMap(Map* map, String* key, Item value) {
+    map_put(map, key, value, input_);
+}
+
 //==============================================================================
 // ElementBuilder Implementation
 //==============================================================================
@@ -153,7 +170,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     , parent_(nullptr)
 {
     // allocate Array directly from pool for children
-    elmt_ = input_create_element(builder_->input(), tag_name);
+    elmt_ = input_create_element_internal(builder_->input(), tag_name);
 }
 
 ElementBuilder::~ElementBuilder() {
@@ -186,6 +203,29 @@ ElementBuilder& ElementBuilder::attr(const char* key, double value) {
 }
 
 ElementBuilder& ElementBuilder::attr(const char* key, bool value) {
+    return attr(key, builder_->createBool(value));
+}
+
+// String* key overloads
+ElementBuilder& ElementBuilder::attr(String* key, Item value) {
+    if (!key) return *this;
+    builder_->putToElement(elmt_, key, value);
+    return *this;
+}
+
+ElementBuilder& ElementBuilder::attr(String* key, const char* value) {
+    return attr(key, builder_->createStringItem(value));
+}
+
+ElementBuilder& ElementBuilder::attr(String* key, int64_t value) {
+    return attr(key, builder_->createInt(value));
+}
+
+ElementBuilder& ElementBuilder::attr(String* key, double value) {
+    return attr(key, builder_->createFloat(value));
+}
+
+ElementBuilder& ElementBuilder::attr(String* key, bool value) {
     return attr(key, builder_->createBool(value));
 }
 
@@ -317,6 +357,23 @@ MapBuilder& MapBuilder::put(const char* key, bool value) {
 
 MapBuilder& MapBuilder::putNull(const char* key) {
     return put(key, builder_->createNull());
+}
+
+// String* key overloads
+MapBuilder& MapBuilder::put(String* key, const char* value) {
+    return put(key, builder_->createStringItem(value));
+}
+
+MapBuilder& MapBuilder::put(String* key, int64_t value) {
+    return put(key, builder_->createInt(value));
+}
+
+MapBuilder& MapBuilder::put(String* key, double value) {
+    return put(key, builder_->createFloat(value));
+}
+
+MapBuilder& MapBuilder::put(String* key, bool value) {
+    return put(key, builder_->createBool(value));
 }
 
 Item MapBuilder::final() {

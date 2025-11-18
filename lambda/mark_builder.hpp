@@ -174,6 +174,22 @@ public:
     StringBuf* stringBuf() const { return sb_; }
     bool autoStringMerge() const { return auto_string_merge_; }
     bool internStrings() const { return intern_strings_; }
+
+    // ============================================================================
+    // Internal Helpers (for ElementBuilder/MapBuilder to call legacy functions)
+    // ============================================================================
+
+    /**
+     * Internal helper to add attribute to existing element
+     * Wraps the static elmt_put() function
+     */
+    void putToElement(Element* elmt, String* key, Item value);
+
+    /**
+     * Internal helper to add key-value to existing map
+     * Wraps the static map_put() function
+     */
+    void putToMap(Map* map, String* key, Item value);
 };
 
 /**
@@ -238,6 +254,32 @@ public:
      * Set attribute with boolean value (convenience)
      */
     ElementBuilder& attr(const char* key, bool value);
+
+    // NEW: String* key overloads (avoid re-creating strings parsers already have)
+    /**
+     * Set attribute with String* key and Item value
+     */
+    ElementBuilder& attr(String* key, Item value);
+
+    /**
+     * Set attribute with String* key and string value
+     */
+    ElementBuilder& attr(String* key, const char* value);
+
+    /**
+     * Set attribute with String* key and integer value
+     */
+    ElementBuilder& attr(String* key, int64_t value);
+
+    /**
+     * Set attribute with String* key and float value
+     */
+    ElementBuilder& attr(String* key, double value);
+
+    /**
+     * Set attribute with String* key and boolean value
+     */
+    ElementBuilder& attr(String* key, bool value);
 
     // ============================================================================
     // Child Management (return reference for chaining)
@@ -357,6 +399,26 @@ public:
      * Put null value for key
      */
     MapBuilder& putNull(const char* key);
+
+    /**
+     * Put key-value pair with String* key and string value
+     */
+    MapBuilder& put(String* key, const char* value);
+
+    /**
+     * Put key-value pair with String* key and integer value
+     */
+    MapBuilder& put(String* key, int64_t value);
+
+    /**
+     * Put key-value pair with String* key and float value
+     */
+    MapBuilder& put(String* key, double value);
+
+    /**
+     * Put key-value pair with String* key and boolean value
+     */
+    MapBuilder& put(String* key, bool value);
 
     // ============================================================================
     // Finalization (returns final Map from arena)

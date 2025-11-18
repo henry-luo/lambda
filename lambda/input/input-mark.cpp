@@ -340,7 +340,7 @@ static Map* parse_map(InputContext& ctx, const char **mark) {
         skip_comments(mark);
 
         Item value = parse_value(ctx, mark);
-        map_put(mp, key, value, input);
+        ctx.builder().putToMap(mp, key, value);
 
         skip_comments(mark);
         if (**mark == '}') {
