@@ -132,7 +132,7 @@ static String* parse_tag_name(Input *input, MarkBuilder* builder, const char **h
 }
 
 // Parse HTML comment and return it as an element with tag name "!--"
-static Item parse_comment(Input* input, MarkBuilder* builder, const char **html, const char* html_start) {
+static Item parse_comment(InputContext& ctx, const char **html, const char* html_start) {
     if (strncmp(*html, "<!--", 4) != 0) {
         return {.item = ITEM_ERROR};
     }
@@ -154,11 +154,11 @@ static Item parse_comment(Input* input, MarkBuilder* builder, const char **html,
     size_t comment_len = *html - comment_start;
 
     // Create element with tag name "!--" using ElementBuilder
-    ElementBuilder element = builder->element("!--");
+    ElementBuilder element = ctx.builder().element("!--");
 
     // Add comment content as a text node child (if not empty)
     if (comment_len > 0) {
-        String* comment_text = builder->createString(comment_start, comment_len);
+        String* comment_text = ctx.builder().createString(comment_start, comment_len);
         Item text_item = {.item = s2it(comment_text)};
         element.child(text_item);
     }
@@ -169,7 +169,7 @@ static Item parse_comment(Input* input, MarkBuilder* builder, const char **html,
 }
 
 // Parse DOCTYPE declaration and return it as an element with tag name "!DOCTYPE" or "!doctype"
-static Item parse_doctype(Input* input, MarkBuilder* builder, const char **html, const char* html_start) {
+static Item parse_doctype(InputContext& ctx, const char **html, const char* html_start) {
     if (strncasecmp(*html, "<!doctype", 9) != 0) {
         return {.item = ITEM_ERROR};
     }
@@ -201,11 +201,11 @@ static Item parse_doctype(Input* input, MarkBuilder* builder, const char **html,
     size_t content_len = *html - content_start;
 
     // Create element with tag name "!DOCTYPE" or "!doctype" to preserve source case using ElementBuilder
-    ElementBuilder element = builder->element(is_uppercase_DOCTYPE ? "!DOCTYPE" : "!doctype");
+    ElementBuilder element = ctx.builder().element(is_uppercase_DOCTYPE ? "!DOCTYPE" : "!doctype");
 
     // Add DOCTYPE content as a text node child (if not empty)
     if (content_len > 0) {
-        String* doctype_text = builder->createString(content_start, content_len);
+        String* doctype_text = ctx.builder().createString(content_start, content_len);
         Item text_item = {.item = s2it(doctype_text)};
         element.child(text_item);
     }
@@ -217,7 +217,7 @@ static Item parse_doctype(Input* input, MarkBuilder* builder, const char **html,
 
 // Parse XML declaration and return it as an element with tag name "?xml"
 // Example: <?xml version="1.0" encoding="utf-8"?>
-static Item parse_xml_declaration(Input* input, MarkBuilder* builder, const char **html, const char* html_start) {
+static Item parse_xml_declaration(InputContext& ctx, const char **html, const char* html_start) {
     if (strncmp(*html, "<?xml", 5) != 0) {
         return {.item = ITEM_ERROR};
     }
@@ -241,11 +241,11 @@ static Item parse_xml_declaration(Input* input, MarkBuilder* builder, const char
     size_t decl_len = *html - decl_start;
 
     // Create element with tag name "?xml" using ElementBuilder
-    ElementBuilder element = builder->element("?xml");
+    ElementBuilder element = ctx.builder().element("?xml");
 
     // Store the entire XML declaration as a text child (for easy roundtrip)
     if (decl_len > 0) {
-        String* decl_text = builder->createString(decl_start, decl_len);
+        String* decl_text = ctx.builder().createString(decl_start, decl_len);
         Item text_item = {.item = s2it(decl_text)};
         element.child(text_item);
     }
@@ -306,7 +306,8 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
 
     // Parse comments as special elements
     if (strncmp(*html, "<!--", 4) == 0) {
-        Item comment = parse_comment(input, builder, html, html_start);
+        InputContext temp_ctx(input, html_start, strlen(html_start));
+        Item comment = parse_comment(temp_ctx, html, html_start);
         html_exit_element();
         return comment;
     }
@@ -817,17 +818,16 @@ __attribute__((visibility("hidden")))
 void parse_html_impl(Input* input, const char* html_string) {
     const char *html = html_string;
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(html_string, strlen(html_string));
+    // create error tracking context with source
+    InputContext ctx(input, html_string, strlen(html_string));
 
-    // Create MarkBuilder for string management
+    // Create MarkBuilder for parse_element (which still uses old signature)
     MarkBuilder builder(input);
 
     // Create parser context to track document structure
     HtmlParserContext* context = html_context_create(input);
     if (!context) {
-        ctx.addError(tracker.location(), "Failed to create HTML parser context");
+        ctx.addError("Failed to create HTML parser context");
         log_error("Failed to create HTML parser context");
         input->root = (Item){.item = ITEM_ERROR};
         return;
@@ -843,7 +843,7 @@ void parse_html_impl(Input* input, const char* html_string) {
     }
 
     if (!root_list) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for root list");
+        ctx.addError("Failed to allocate memory for root list");
         html_context_destroy(context);
         input->root = (Item){.item = ITEM_ERROR};
         return;
@@ -865,7 +865,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse DOCTYPE
         if (strncasecmp(html, "<!doctype", 9) == 0) {
-            Item doctype_item = parse_doctype(input, &builder, &html, html_string);
+            Item doctype_item = parse_doctype(ctx, &html, html_string);
             if (doctype_item.item != ITEM_ERROR) {
                 list_push(root_list, doctype_item);
             }
@@ -874,7 +874,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse comments
         if (strncmp(html, "<!--", 4) == 0) {
-            Item comment_item = parse_comment(input, &builder, &html, html_string);
+            Item comment_item = parse_comment(ctx, &html, html_string);
             if (comment_item.item != ITEM_ERROR) {
                 list_push(root_list, comment_item);
             }
@@ -883,7 +883,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse XML declaration
         if (strncmp(html, "<?xml", 5) == 0) {
-            Item xml_decl_item = parse_xml_declaration(input, &builder, &html, html_string);
+            Item xml_decl_item = parse_xml_declaration(ctx, &html, html_string);
             if (xml_decl_item.item != ITEM_ERROR) {
                 list_push(root_list, xml_decl_item);
             }
