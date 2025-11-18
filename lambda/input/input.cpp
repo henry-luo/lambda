@@ -122,28 +122,6 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     }
 }
 
-// Internal function renamed to avoid conflict with inline wrapper
-Element* input_create_element_internal(Input *input, const char* tag_name) {
-    Element* element = elmt_pooled(input->pool);
-    if (!element) return NULL;
-
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return NULL;
-    element->type = element_type;
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    // initialize with no attributes
-
-    // Set element name
-    MarkBuilder builder(input);
-    String* name_str = builder.createString(tag_name);
-    if (name_str) {
-        element_type->name.str = name_str->chars;
-        element_type->name.length = name_str->len;
-    }
-    return element;
-}
-
 extern TypeElmt EmptyElmt;
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);

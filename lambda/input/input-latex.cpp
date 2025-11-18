@@ -199,10 +199,8 @@ static Array* parse_command_arguments(InputContext& ctx, const char **latex) {
                     }
 
                     // Cleanup temporary input (but keep the pool)
-                    if (arg_input->sb) {
-                        // Don't free the stringbuf as it uses the shared pool
-                    }
-                    free(arg_input);
+                    // Note: arg_input was allocated from InputManager's pool, so we don't free it
+                    // The pool will be cleaned up when the global InputManager is destroyed
                 } else {
                     // Fallback to string if parsing fails
                     String *arg_string = builder.createString(content_chars);
