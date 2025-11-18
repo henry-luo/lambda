@@ -56,7 +56,6 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     return shape_entry;
 }
 
-extern TypeMap EmptyMap;
 void map_put(Map* mp, String* key, Item value, Input *input) {
     TypeMap *map_type = (TypeMap*)mp->type;
     if (map_type == &EmptyMap) {
@@ -118,6 +117,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     default:
         printf("unknown type %d\n", value._type_id);
+        return;
     }
 }
 
@@ -375,20 +375,22 @@ void input_free_lines(char** lines, int line_count) {
 }
 
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
-    // Create key and value strings
+    // Use MarkBuilder's API through ElementBuilder
     MarkBuilder builder(input);
     String* key = builder.createString(attr_name);
     String* value = builder.createString(attr_value);
     if (!key || !value) return;
     Item lambda_value = {.item = s2it(value)};
+    // Use low-level elmt_put since we have an existing element
     elmt_put(element, key, lambda_value, input->pool);
 }
 
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value) {
-    // Create key string
+    // Use MarkBuilder's API through ElementBuilder
     MarkBuilder builder(input);
     String* key = builder.createString(attr_name);
     if (!key) return;
+    // Use low-level elmt_put since we have an existing element
     elmt_put(element, key, attr_value, input->pool);
 }
 

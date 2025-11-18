@@ -482,7 +482,7 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
             attr_value = (Item){.item = b2it(true)};
         }
 
-        // Add attribute to element using elmt_put (direct manipulation for HTML5 context)
+        // Add attribute to element using elmt_put through InputContext's builder
         elmt_put(element, attr_name, attr_value, ctx.input()->pool);
 
         skip_whitespace(html);
