@@ -36,11 +36,12 @@ static bool is_comment(const char *ini) {
     return *ini == ';' || *ini == '#';
 }
 
-static String* parse_section_name(InputContext& ctx, SourceTracker& tracker, const char **ini) {
+static String* parse_section_name(InputContext& ctx, const char **ini) {
     if (**ini != '[') return NULL;
+    SourceTracker& tracker = *ctx.tracker();
     SourceLocation section_loc = tracker.location();
-    MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     (*ini)++; // skip '['
@@ -58,17 +59,18 @@ static String* parse_section_name(InputContext& ctx, SourceTracker& tracker, con
     }
 
     if (sb->length > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return builder.createString(sb->str->chars, sb->length);
     }
 
     ctx.addError(section_loc, "Empty section name");
     return NULL;
 }
 
-static String* parse_key(InputContext& ctx, SourceTracker& tracker, const char **ini) {
+static String* parse_key(InputContext& ctx, const char **ini) {
+    SourceTracker& tracker = *ctx.tracker();
     SourceLocation key_loc = tracker.location();
-    MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     // Read until '=' or whitespace
@@ -83,13 +85,14 @@ static String* parse_key(InputContext& ctx, SourceTracker& tracker, const char *
         return NULL;
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
-static String* parse_raw_value(InputContext& ctx, SourceTracker& tracker, const char **ini) {
+static String* parse_raw_value(InputContext& ctx, const char **ini) {
+    SourceTracker& tracker = *ctx.tracker();
     SourceLocation value_loc = tracker.location();
-    MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     skip_whitespace(ini);
@@ -135,7 +138,7 @@ static String* parse_raw_value(InputContext& ctx, SourceTracker& tracker, const 
     }
 
     if (sb->length > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return builder.createString(sb->str->chars, sb->length);
     }
     return &EMPTY_STRING;
 }
@@ -149,10 +152,11 @@ static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
     return 0;
 }
 
-static Item parse_typed_value(Input *input, String* value_str) {
+static Item parse_typed_value(InputContext& ctx, String* value_str) {
     if (!value_str || value_str->len == 0) {
         return {.item = s2it(value_str)};
     }
+    Input* input = ctx.input();
     char* str = value_str->chars;  size_t len = value_str->len;
     // check for boolean values (case insensitive)
     if ((len == 4 && case_insensitive_compare(str, "true", 4) == 0) ||
@@ -237,9 +241,10 @@ static Item parse_typed_value(Input *input, String* value_str) {
     return {.item = s2it(value_str)};
 }
 
-static Map* parse_section(InputContext& ctx, SourceTracker& tracker, const char **ini, String* section_name) {
+static Map* parse_section(InputContext& ctx, const char **ini, String* section_name) {
     printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
 
+    SourceTracker& tracker = *ctx.tracker();
     Input* input = ctx.input();
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
@@ -261,7 +266,7 @@ static Map* parse_section(InputContext& ctx, SourceTracker& tracker, const char 
 
         // parse key-value pair
         SourceLocation line_loc = tracker.location();
-        String* key = parse_key(ctx, tracker, ini);
+        String* key = parse_key(ctx, ini);
         if (!key || key->len == 0) {
             ctx.addError(line_loc, "Invalid or empty key");
             skip_to_newline(ini, &tracker);
@@ -277,8 +282,8 @@ static Map* parse_section(InputContext& ctx, SourceTracker& tracker, const char 
         (*ini)++; // skip '='
         tracker.advance(1);
 
-        String* value_str = parse_raw_value(ctx, tracker, ini);
-        Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(input, value_str)) : (Item){.item = 0};
+        String* value_str = parse_raw_value(ctx, ini);
+        Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(ctx, value_str)) : (Item){.item = 0};
         map_put(section_map, key, value, input);
 
         skip_to_newline(ini, &tracker);
@@ -287,8 +292,8 @@ static Map* parse_section(InputContext& ctx, SourceTracker& tracker, const char 
 }
 
 void parse_ini(Input* input, const char* ini_string) {
-    InputContext ctx(input, ini_string);
-    SourceTracker tracker(ini_string);
+    InputContext ctx(input, ini_string, strlen(ini_string));
+    SourceTracker& tracker = *ctx.tracker();
 
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);
@@ -314,7 +319,7 @@ void parse_ini(Input* input, const char* ini_string) {
 
         // check for section header
         if (is_section_start(current)) {
-            current_section_name = parse_section_name(ctx, tracker, &current);
+            current_section_name = parse_section_name(ctx, &current);
             if (!current_section_name) {
                 skip_to_newline(&current, &tracker);
                 continue;
@@ -322,7 +327,7 @@ void parse_ini(Input* input, const char* ini_string) {
 
             skip_to_newline(&current, &tracker);
             // parse the section content
-            Map* section_map = parse_section(ctx, tracker, &current, current_section_name);
+            Map* section_map = parse_section(ctx, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
                 map_put(root_map, current_section_name,
@@ -340,7 +345,7 @@ void parse_ini(Input* input, const char* ini_string) {
                     memcpy(global_name->chars, "global", 6);
                     global_name->chars[6] = '\0';
 
-                    global_section = parse_section(ctx, tracker, &current, global_name);
+                    global_section = parse_section(ctx, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
                         map_put(root_map, global_name,

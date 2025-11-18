@@ -17,6 +17,7 @@ static const char* extract_tag_name(const char* pos, const char* end, char* buff
 static Element* parse_jsx_component(Input* input, MarkBuilder* builder, const char** pos, const char* end);
 static Element* parse_html_element(Input* input, MarkBuilder* builder, const char** pos, const char* end);
 static void skip_whitespace(const char** pos, const char* end);
+static Element* create_mdx_document(Input* input, MarkBuilder* builder, const char* content);
 
 // Utility function to check if a tag name represents a JSX component (starts with uppercase)
 static bool is_jsx_component_tag(const char* tag_name) {
@@ -273,16 +274,15 @@ static Element* create_mdx_document(Input* input, MarkBuilder* builder, const ch
 void parse_mdx(Input* input, const char* mdx_string) {
     if (!mdx_string || !input) return;
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(mdx_string, strlen(mdx_string));
+    // create error tracking context with source
+    InputContext ctx(input, mdx_string, strlen(mdx_string));
 
     MarkBuilder builder(input);
     Element* root = create_mdx_document(input, &builder, mdx_string);
     if (root) {
         input->root = (Item){.element = root};
     } else {
-        ctx.addError(tracker.location(), "Failed to parse MDX document");
+        ctx.addError("Failed to parse MDX document");
     }
 
     if (ctx.hasErrors()) {

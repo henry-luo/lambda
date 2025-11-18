@@ -31,8 +31,8 @@ static bool is_continuation_line(const char *eml) {
 }
 
 // Helper function to parse header name
-static String* parse_header_name(Input *input, MarkBuilder* builder, const char **eml) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_header_name(InputContext& ctx, const char **eml) {
+    StringBuf* sb = ctx.builder().stringBuf();
     stringbuf_reset(sb);
 
     while (**eml && **eml != ':' && **eml != '\n' && **eml != '\r') {
@@ -41,14 +41,14 @@ static String* parse_header_name(Input *input, MarkBuilder* builder, const char 
     }
 
     if (sb->str && sb->str->len > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return ctx.builder().createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
 
 // Helper function to parse header value (including continuation lines)
-static String* parse_header_value(Input *input, MarkBuilder* builder, const char **eml) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_header_value(InputContext& ctx, const char **eml) {
+    StringBuf* sb = ctx.builder().stringBuf();
     stringbuf_reset(sb);
 
     // Skip the colon and initial whitespace
@@ -92,7 +92,7 @@ static String* parse_header_value(Input *input, MarkBuilder* builder, const char
     }
 
     if (sb->str && sb->str->len > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return ctx.builder().createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
@@ -105,10 +105,10 @@ static void normalize_header_name(char* name) {
 }
 
 // Helper function to parse email addresses from a header value
-static String* extract_email_address(Input *input, MarkBuilder* builder, const char* header_value) {
+static String* extract_email_address(InputContext& ctx, const char* header_value) {
     if (!header_value) return NULL;
 
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.builder().stringBuf();
     stringbuf_reset(sb);
     const char* start = strchr(header_value, '<');
     const char* end = NULL;
@@ -147,44 +147,41 @@ static String* extract_email_address(Input *input, MarkBuilder* builder, const c
     }
 
     if (sb->str && sb->str->len > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return ctx.builder().createString(sb->str->chars, sb->length);
     }
 
     return NULL;
 }
 
 // Helper function to parse date value
-static String* parse_date_value(Input *input, MarkBuilder* builder, const char* date_str) {
+static String* parse_date_value(InputContext& ctx, const char* date_str) {
     if (!date_str) return NULL;
 
     // For now, just return the raw date string
     // TODO: Could parse into structured datetime format
-    return builder->createString(date_str);
+    return ctx.builder().createString(date_str);
 }
 
 // Main EML parsing function
 void parse_eml(Input* input, const char* eml_string) {
     if (!eml_string || !input) return;
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(eml_string, strlen(eml_string));
-
-    MarkBuilder builder(input);
+    // create error tracking context with source
+    InputContext ctx(input, eml_string, strlen(eml_string));
 
     const char* eml = eml_string;
 
     // Create root map for the email
     Map* email_map = map_pooled(input->pool);
     if (!email_map) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for email map");
+        ctx.addError("Failed to allocate memory for email map");
         return;
     }
 
     // Initialize headers map
     Map* headers_map = map_pooled(input->pool);
     if (!headers_map) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for headers map");
+        ctx.addError("Failed to allocate memory for headers map");
         return;
     }
 
@@ -228,14 +225,14 @@ void parse_eml(Input* input, const char* eml_string) {
         }
 
         // Parse header name
-        String* header_name = parse_header_name(input, &builder, &eml);
+        String* header_name = parse_header_name(ctx, &eml);
         if (!header_name) {
             skip_to_newline(&eml);
             continue;
         }
 
         // Parse header value
-        String* header_value = parse_header_value(input, &builder, &eml);
+        String* header_value = parse_header_value(ctx, &eml);
         if (!header_value) {
             skip_to_newline(&eml);
             continue;
@@ -250,49 +247,49 @@ void parse_eml(Input* input, const char* eml_string) {
 
         // Also store common headers as top-level fields for easier access
         if (strcmp(header_name->chars, "from") == 0) {
-            String* from_email = extract_email_address(input, &builder, header_value->chars);
+            String* from_email = extract_email_address(ctx, header_value->chars);
             if (from_email) {
-                String* from_key = builder.createString("from");
+                String* from_key = ctx.builder().createString("from");
                 Item from_value = {.item = s2it(from_email)};
                 map_put(email_map, from_key, from_value, input);
             }
         }
         else if (strcmp(header_name->chars, "to") == 0) {
-            String* to_email = extract_email_address(input, &builder, header_value->chars);
+            String* to_email = extract_email_address(ctx, header_value->chars);
             if (to_email) {
-                String* to_key = builder.createString("to");
+                String* to_key = ctx.builder().createString("to");
                 Item to_value = {.item = s2it(to_email)};
                 map_put(email_map, to_key, to_value, input);
             }
         }
         else if (strcmp(header_name->chars, "subject") == 0) {
-            String* subject_key = builder.createString("subject");
+            String* subject_key = ctx.builder().createString("subject");
             Item subject_value = {.item = s2it(header_value)};
             map_put(email_map, subject_key, subject_value, input);
         }
         else if (strcmp(header_name->chars, "date") == 0) {
-            String* date_parsed = parse_date_value(input, &builder, header_value->chars);
+            String* date_parsed = parse_date_value(ctx, header_value->chars);
             if (date_parsed) {
-                String* date_key = builder.createString("date");
+                String* date_key = ctx.builder().createString("date");
                 Item date_value = {.item = s2it(date_parsed)};
                 map_put(email_map, date_key, date_value, input);
             }
         }
         else if (strcmp(header_name->chars, "message-id") == 0) {
-            String* msgid_key = builder.createString("message_id");
+            String* msgid_key = ctx.builder().createString("message_id");
             Item msgid_value = {.item = s2it(header_value)};
             map_put(email_map, msgid_key, msgid_value, input);
         }
     }
 
     // Store headers map in email
-    String* headers_key = builder.createString("headers");
+    String* headers_key = ctx.builder().createString("headers");
     Item headers_value = {.item = (uint64_t)headers_map};
     map_put(email_map, headers_key, headers_value, input);
 
     // At this point, eml should be positioned at the start of the body
     // Parse body
-    StringBuf* body_sb = builder.stringBuf();
+    StringBuf* body_sb = ctx.builder().stringBuf();
     stringbuf_reset(body_sb);
 
     while (*eml) {
@@ -301,13 +298,13 @@ void parse_eml(Input* input, const char* eml_string) {
     }
 
     if (body_sb->str && body_sb->str->len > 0) {
-        String* body_string = builder.createString(body_sb->str->chars, body_sb->length);
+        String* body_string = ctx.builder().createString(body_sb->str->chars, body_sb->length);
         if (body_string) {
-            String* body_key = builder.createString("body");
+            String* body_key = ctx.builder().createString("body");
             Item body_value = {.item = s2it(body_string)};
             map_put(email_map, body_key, body_value, input);
         } else {
-            ctx.addWarning(tracker.location(), "Failed to create body string");
+            ctx.addWarning("Failed to create body string");
         }
     }
 
