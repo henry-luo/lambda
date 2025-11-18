@@ -28,12 +28,6 @@ typedef struct {
     bool has_parameter;
 } RTFControlWord;
 
-static void skip_whitespace(const char **rtf) {
-    while (**rtf && (**rtf == ' ' || **rtf == '\n' || **rtf == '\r' || **rtf == '\t')) {
-        (*rtf)++;
-    }
-}
-
 static void skip_to_brace(const char **rtf, char target_brace) {
     int brace_count = 0;
     while (**rtf) {

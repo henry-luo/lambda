@@ -16,7 +16,6 @@ static bool is_html_element_tag(const char* tag_name);
 static const char* extract_tag_name(const char* pos, const char* end, char* buffer, size_t buffer_size);
 static Element* parse_jsx_component(InputContext& ctx, const char** pos, const char* end);
 static Element* parse_html_element(InputContext& ctx, const char** pos, const char* end);
-static void skip_whitespace(const char** pos, const char* end);
 static Element* create_mdx_document(InputContext& ctx, const char* content);
 
 // Utility function to check if a tag name represents a JSX component (starts with uppercase)
@@ -46,13 +45,6 @@ static const char* extract_tag_name(const char* pos, const char* end, char* buff
 
     buffer[i] = '\0';
     return i > 0 ? buffer : NULL;
-}
-
-// Skip whitespace characters
-static void skip_whitespace(const char** pos, const char* end) {
-    while (*pos < end && (**pos == ' ' || **pos == '\t' || **pos == '\n' || **pos == '\r')) {
-        (*pos)++;
-    }
 }
 
 // Parse JSX component using existing JSX parser

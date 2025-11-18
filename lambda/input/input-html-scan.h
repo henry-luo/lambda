@@ -14,12 +14,6 @@ extern "C" {
 #endif
 
 /**
- * Skip whitespace characters (space, newline, carriage return, tab)
- * @param html Pointer to HTML string pointer (will be advanced)
- */
-void html_skip_whitespace(const char **html);
-
-/**
  * Convert string to lowercase in-place
  * @param str String to convert
  */

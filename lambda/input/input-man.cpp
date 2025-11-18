@@ -11,7 +11,6 @@ static Item parse_man_block(InputContext& ctx, char** lines, int* current_line, 
 static Item parse_man_inline(InputContext& ctx, const char* text);
 
 // Use common utility functions from input.c
-#define skip_whitespace input_skip_whitespace
 #define is_empty_line input_is_empty_line
 #define count_leading_chars input_count_leading_chars
 #define trim_whitespace input_trim_whitespace

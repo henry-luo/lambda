@@ -55,11 +55,6 @@ static bool is_raw_text_element(const char* tag_name) {
     return html_is_raw_text_element(tag_name);
 }
 
-// Compatibility wrapper - skip_whitespace now calls html_skip_whitespace
-static void skip_whitespace(const char **html) {
-    html_skip_whitespace(html);
-}
-
 // Wrapper function for compatibility - now calls html_parse_string_content
 static String* parse_string_content(HtmlInputContext& ctx, const char **html, char end_char) {
     return html_parse_string_content(ctx.builder().stringBuf(), html, end_char);

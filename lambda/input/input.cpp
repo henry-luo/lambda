@@ -245,8 +245,14 @@ static const char* mime_to_parser_type(const char* mime_type) {
 }
 
 // Common utility functions for input parsers
-void input_skip_whitespace(const char **text) {
+void skip_whitespace(const char **text) {
     while (**text && (**text == ' ' || **text == '\n' || **text == '\r' || **text == '\t')) {
+        (*text)++;
+    }
+}
+
+void skip_tab_pace(const char **text) {
+    while (**text && (**text == ' ' || **text == '\t')) {
         (*text)++;
     }
 }

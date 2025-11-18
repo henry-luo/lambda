@@ -5,17 +5,17 @@
 
 // Common LaTeX command definitions - shared between parsers
 const char* greek_letters[] = {
-    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", 
-    "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", 
+    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+    "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho",
     "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega",
-    "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", 
+    "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon",
     "Phi", "Psi", "Omega", NULL
 };
 
 const char* math_operators[] = {
     "sum", "prod", "int", "lim", "inf", "infty", "partial", "nabla",
     "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx",
-    "equiv", "propto", "subset", "supset", "in", "notin", "forall", "exists", 
+    "equiv", "propto", "subset", "supset", "in", "notin", "forall", "exists",
     "to", "mapsto", "rightarrow", "leftarrow", "leftrightarrow",
     // Additional operators
     "circ", "ast", "star", "bullet", "oplus", "otimes", "odot", "oslash",
@@ -28,13 +28,13 @@ const char* math_operators[] = {
 };
 
 const char* trig_functions[] = {
-    "sin", "cos", "tan", "cot", "sec", "csc", 
-    "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", 
+    "sin", "cos", "tan", "cot", "sec", "csc",
+    "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
     "arsinh", "arcosh", "artanh", "sech", "csch", "coth", NULL
 };
 
 const char* log_functions[] = {
-    "log", "ln", "lg", "exp", "max", "min", "arg", "det", "gcd", "lcm", 
+    "log", "ln", "lg", "exp", "max", "min", "arg", "det", "gcd", "lcm",
     "deg", "dim", "ker", "hom", "limsup", "liminf", "sup", "inf", NULL
 };
 
@@ -43,26 +43,26 @@ const char* latex_commands[] = {
     // Document structure
     "documentclass", "usepackage", "begin", "end",
     "part", "chapter", "section", "subsection", "subsubsection", "paragraph", "subparagraph",
-    
+
     // Text formatting
     "textbf", "textit", "texttt", "emph", "underline", "textsc", "textrm", "textsf",
     "large", "Large", "LARGE", "huge", "Huge", "small", "footnotesize", "scriptsize", "tiny",
-    
+
     // Math mode
     "frac", "sqrt", "sum", "int", "prod", "lim", "sin", "cos", "tan", "log", "ln", "exp",
     "alpha", "beta", "gamma", "delta", "epsilon", "theta", "lambda", "mu", "pi", "sigma",
     "infty", "partial", "nabla", "cdot", "times", "div", "pm", "mp",
-    
+
     // Lists and environments
     "item", "itemize", "enumerate", "description", "quote", "quotation", "verse",
     "center", "flushleft", "flushright", "verbatim", "tabular", "table", "figure",
-    
+
     // References and citations
     "label", "ref", "cite", "bibliography", "footnote", "marginpar",
-    
+
     // Special symbols
     "LaTeX", "TeX", "ldots", "vdots", "ddots", "quad", "qquad", "hspace", "vspace",
-    
+
     NULL
 };
 
@@ -70,7 +70,7 @@ const char* latex_commands[] = {
 const char* latex_environments[] = {
     "document", "abstract", "itemize", "enumerate", "description", "quote", "quotation",
     "verse", "center", "flushleft", "flushright", "verbatim", "tabular", "array",
-    "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "cases", 
+    "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "cases",
     "align", "aligned", "equation", "eqnarray", "gather", "multline", "split",
     "figure", "table", "minipage", "theorem", "proof", "definition",
     "example", "remark", "note", "warning", NULL
@@ -84,7 +84,7 @@ const char* math_environments[] = {
 
 // Raw text environments
 const char* raw_text_environments[] = {
-    "verbatim", "lstlisting", "minted", "alltt", "Verbatim", "BVerbatim", 
+    "verbatim", "lstlisting", "minted", "alltt", "Verbatim", "BVerbatim",
     "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", NULL
 };
 
@@ -159,13 +159,6 @@ bool is_raw_text_environment(const char* env_name) {
         }
     }
     return false;
-}
-
-void skip_common_whitespace(const char **math) {
-    if (!math || !*math) return;
-    while (**math != '\0' && (**math == ' ' || **math == '\t' || **math == '\n' || **math == '\r')) {
-        (*math)++;
-    }
 }
 
 void skip_latex_comment(const char **latex) {

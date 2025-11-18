@@ -25,8 +25,4 @@ bool is_latex_environment(const char* env_name);
 bool is_math_environment(const char* env_name);
 bool is_raw_text_environment(const char* env_name);
 
-// Common parsing utilities
-void skip_common_whitespace(const char **text);
-void skip_latex_comment(const char **latex);
-
 #endif // INPUT_COMMON_H

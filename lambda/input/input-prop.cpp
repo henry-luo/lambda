@@ -5,12 +5,6 @@
 
 using namespace lambda;
 
-static void skip_whitespace(const char **prop) {
-    while (**prop && (**prop == ' ' || **prop == '\t')) {
-        (*prop)++;
-    }
-}
-
 static void skip_to_newline(const char **prop) {
     while (**prop && **prop != '\n' && **prop != '\r') {
         (*prop)++;
@@ -48,7 +42,7 @@ static String* parse_raw_value(InputContext& ctx, const char **prop) {
     StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
-    skip_whitespace(prop);
+    skip_tab_pace(prop);
 
     // properties files don't use quotes for strings, read until end of line
     // but handle line continuations with backslash
@@ -65,7 +59,7 @@ static String* parse_raw_value(InputContext& ctx, const char **prop) {
                     (*prop)++; // skip \n or \r
                 }
                 // skip leading whitespace on continuation line
-                skip_whitespace(prop);
+                skip_tab_pace(prop);
                 continue;
             } else if (*next == 'n') {
                 // escaped newline
@@ -249,7 +243,7 @@ void parse_properties(Input* input, const char* prop_string) {
     const char *current = prop_string;
 
     while (*current) {
-        skip_whitespace(&current);
+        skip_tab_pace(&current);
 
         // check for end of file
         if (!*current) break;
@@ -274,12 +268,12 @@ void parse_properties(Input* input, const char* prop_string) {
             continue;
         }
 
-        skip_whitespace(&current);
+        skip_tab_pace(&current);
 
         // skip separator (= or :)
         if (*current == '=' || *current == ':') {
             current++;
-            skip_whitespace(&current);
+            skip_tab_pace(&current);
         }
 
         // parse value
