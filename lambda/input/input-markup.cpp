@@ -1,7 +1,6 @@
 #include "input.hpp"
 #include "markup-parser.h"
 #include "../mark_builder.hpp"
-#include "markup_input_context.hpp"
 #include "source_tracker.hpp"
 #include <string.h>
 #include <ctype.h>
@@ -2275,19 +2274,17 @@ Item input_markup(Input *input, const char* content) {
         .strict_mode = false
     };
 
-    // Create markup input context with source tracking and parser configuration
-    MarkupInputContext ctx(input, content, strlen(content), config);
+    // Create markup parser directly - it extends InputContext
+    MarkupParser parser(input, config);
 
     // Parse content
-    Item result = ctx.markupParser()->parseContent(content);
+    Item result = parser.parseContent(content);
 
     if (result.item == ITEM_ERROR) {
-        ctx.addWarning(ctx.tracker().location(), "Markup parsing returned error");
+        parser.addWarning(parser.tracker().location(), "Markup parsing returned error");
     }
 
-    // MarkupInputContext destructor will automatically clean up MarkupParser
-
-    if (ctx.hasErrors()) {
+    if (parser.hasErrors()) {
         // errors occurred during parsing
     }
 
@@ -2309,19 +2306,17 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
         .strict_mode = false
     };
 
-    // Create markup input context with source tracking and parser configuration
-    MarkupInputContext ctx(input, content, strlen(content), config);
+    // Create markup parser directly - it extends InputContext
+    MarkupParser parser(input, config);
 
     // Parse content
-    Item result = ctx.markupParser()->parseContent(content);
+    Item result = parser.parseContent(content);
 
     if (result.item == ITEM_ERROR) {
-        ctx.addWarning(ctx.tracker().location(), "Markup parsing with explicit format returned error");
+        parser.addWarning(parser.tracker().location(), "Markup parsing with explicit format returned error");
     }
 
-    // MarkupInputContext destructor will automatically clean up MarkupParser
-
-    if (ctx.hasErrors()) {
+    if (parser.hasErrors()) {
         // errors occurred during parsing
     }
 
