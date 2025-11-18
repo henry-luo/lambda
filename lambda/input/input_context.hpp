@@ -123,4 +123,26 @@ public:
 
 } // namespace lambda
 
+// Common utility functions and definitions for input parsers
+
+// Common LaTeX math commands and symbols - shared between input-math.c and input-latex.c
+// const char* greek_letters[];
+// const char* math_operators[];
+// const char* trig_functions[];
+// const char* log_functions[];
+// const char* latex_commands[];
+// const char* latex_environments[];
+// const char* math_environments[];
+// const char* raw_text_environments[];
+
+// Common utility functions
+bool is_greek_letter(const char* cmd_name);
+bool is_math_operator(const char* cmd_name);
+bool is_trig_function(const char* cmd_name);
+bool is_log_function(const char* cmd_name);
+bool is_latex_command(const char* cmd_name);
+bool is_latex_environment(const char* env_name);
+bool is_math_environment(const char* env_name);
+bool is_raw_text_environment(const char* env_name);
+
 #endif // LAMBDA_INPUT_CONTEXT_HPP

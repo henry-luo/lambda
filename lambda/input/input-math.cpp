@@ -1,5 +1,4 @@
 #include "input.hpp"
-#include "input-common.h"
 #include "../lambda.h"
 #include "../../lib/log.h"
 #include "input_context.hpp"

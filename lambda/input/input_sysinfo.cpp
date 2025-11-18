@@ -10,7 +10,6 @@
 #include <unistd.h>
 #endif
 #include "input.hpp"
-#include "input-common.h"
 #include "../lambda-data.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/log.h"
