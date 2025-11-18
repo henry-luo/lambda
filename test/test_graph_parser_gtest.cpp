@@ -74,12 +74,7 @@ TEST_F(GraphParserTest, ParseDOTGraph) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -104,12 +99,7 @@ TEST_F(GraphParserTest, ParseMermaidGraph) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -139,12 +129,7 @@ TEST_F(GraphParserTest, ParseComplexDOTGraph) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -171,12 +156,7 @@ TEST_F(GraphParserTest, ParseUndirectedGraph) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -201,12 +181,7 @@ TEST_F(GraphParserTest, ParseEmptyGraph) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -233,12 +208,7 @@ TEST_F(GraphParserTest, ParseMermaidWithShapes) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }// Test enhanced schema with CSS-aligned attributes
@@ -276,12 +246,7 @@ TEST_F(GraphParserTest, ValidateEnhancedSchema) {
 
     // The fact that parsing completes without errors validates the enhanced schema
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -325,12 +290,7 @@ TEST_F(GraphParserTest, ComplexDOTCSSConversion) {
     // Edge attributes: arrowhead->arrow-head, arrowtail->arrow-tail, style->stroke-dasharray, width->stroke-width
     // Graph attributes: bgcolor->background-color, rankdir->rank-dir
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -381,12 +341,7 @@ TEST_F(GraphParserTest, AdvancedMermaidFeatures) {
     // - CSS class definitions and styling
     // - Comments and formatting
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -457,12 +412,7 @@ TEST_F(GraphParserTest, LargeScaleGraphStructure) {
     // - Cross-layer connections and constraints
     // - Comprehensive CSS attribute conversion at scale
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -516,12 +466,7 @@ TEST_F(GraphParserTest, EdgeCasesAndErrorHandling) {
     // - Self-loops and multiple edges
     // - Strict graph syntax
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -590,12 +535,7 @@ TEST_F(GraphParserTest, CSSConversionEdgeCases) {
     // - Boolean and constraint attributes
     // - Decimal number handling in CSS conversion
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -619,12 +559,7 @@ TEST_F(GraphParserTest, ParseBasicD2Graph) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -654,12 +589,7 @@ TEST_F(GraphParserTest, ParseD2WithProperties) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }
@@ -688,12 +618,7 @@ TEST_F(GraphParserTest, ParseD2MultiLineContent) {
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
 
-    // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(type_str);
     free_lambda_string(flavor_str);
 }

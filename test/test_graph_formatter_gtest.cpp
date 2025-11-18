@@ -84,11 +84,8 @@ TEST_F(GraphFormatterTest, FormatBasicDOTGraph) {
     printf("DOT formatted result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, don't destroy pool
+    // InputManager will clean up when program exits
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -124,11 +121,7 @@ TEST_F(GraphFormatterTest, FormatBasicMermaidGraph) {
     printf("Mermaid formatted result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -162,11 +155,7 @@ TEST_F(GraphFormatterTest, FormatBasicD2Graph) {
     printf("D2 formatted result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -203,11 +192,7 @@ TEST_F(GraphFormatterTest, ConvertDOTtoMermaid) {
     printf("DOT to Mermaid conversion result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -243,11 +228,7 @@ TEST_F(GraphFormatterTest, ConvertMermaidToD2) {
     printf("Mermaid to D2 conversion result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -284,11 +265,7 @@ TEST_F(GraphFormatterTest, ConvertD2toDOT) {
     printf("D2 to DOT conversion result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -339,11 +316,7 @@ TEST_F(GraphFormatterTest, FormatComplexGraphToDOT) {
     printf("Complex graph DOT formatting result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);
@@ -389,11 +362,7 @@ TEST_F(GraphFormatterTest, DefaultFlavorHandling) {
     printf("Default flavor result:\n%s\n", result->chars);
 
     // Clean up
-    if (input) {
-        pool_destroy(input->pool);
-        arraylist_free(input->type_list);
-        free(input);
-    }
+    // Note: input is managed by InputManager singleton, cleanup handled automatically
     free_lambda_string(input_type_str);
     free_lambda_string(input_flavor_str);
     free_lambda_string(format_type_str);

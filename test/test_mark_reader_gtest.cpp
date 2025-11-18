@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/mark_builder.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/mempool.h"
 #include <cmath>
@@ -10,24 +11,16 @@
 // Test fixture for MarkReader tests
 class MarkReaderTest : public ::testing::Test {
 protected:
-    Pool* pool;
     Input* input;
     MarkBuilder* builder;
 
     void SetUp() override {
-        pool = pool_create();
-        input = (Input*)pool_calloc(pool, sizeof(Input));
-        input->pool = pool;
-        input->type_list = arraylist_new(64);
-        input->name_pool = name_pool_create(pool, nullptr);
-        input->root = (Item){.item = ITEM_NULL};
-
+        input = InputManager::create_input(nullptr);
         builder = new MarkBuilder(input);
     }
 
     void TearDown() override {
         delete builder;
-        pool_destroy(pool);
     }
 };
 

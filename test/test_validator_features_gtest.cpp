@@ -33,19 +33,9 @@ protected:
         validator = schema_validator_create(pool);
         ASSERT_NE(validator, nullptr);
 
-        // Create Input context for MarkBuilder
-        NamePool* name_pool = name_pool_create(pool, nullptr);
-        ArrayList* type_list = arraylist_new(32);
-        StringBuf* sb = stringbuf_new_cap(pool, 256);
-
-        input = (Input*)pool_alloc(pool, sizeof(Input));
-        input->pool = pool;
-        input->name_pool = name_pool;
-        input->type_list = type_list;
-        input->sb = sb;
-        input->url = nullptr;
-        input->path = nullptr;
-        input->root = (Item){.item = 0};
+        // Use Input::create to properly initialize all fields including arena
+        input = Input::create(pool, nullptr);
+        ASSERT_NE(input, nullptr);
     }
 
     void TearDown() override {

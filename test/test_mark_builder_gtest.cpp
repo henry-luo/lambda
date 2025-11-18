@@ -22,26 +22,12 @@ protected:
 
     void SetUp() override {
         // Create minimal Input structure for testing
-        Pool* pool = pool_create();
-        NamePool* name_pool = name_pool_create(pool, nullptr);
-        ArrayList* type_list = arraylist_new(32);
-        StringBuf* sb = stringbuf_new_cap(pool, 256);
-
-        input = (Input*)pool_alloc(pool, sizeof(Input));
-        input->pool = pool;
-        input->name_pool = name_pool;
-        input->type_list = type_list;
-        input->sb = sb;
-        input->url = nullptr;
-        input->path = nullptr;
-        input->root = (Item){.item = 0};
+        input = InputManager::create_input(nullptr);
     }
 
     void TearDown() override {
-        if (input) {
-            arraylist_free(input->type_list);
-            pool_destroy(input->pool);
-        }
+        // InputManager will handle cleanup
+        // Don't manually free anything here
     }
 };
 

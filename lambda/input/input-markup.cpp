@@ -1106,7 +1106,7 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
                     increment_element_content_length(math);
                 } else {
                     // Fallback to plain text if math parsing fails
-                    String* content_str = create_string(parser->input->pool, math_content);
+                    String* content_str = create_string(parser->input, math_content);
                     Item text_item = {.item = s2it(content_str)};
                     list_push((List*)math, text_item);
                     increment_element_content_length(math);

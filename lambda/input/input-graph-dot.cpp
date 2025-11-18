@@ -509,34 +509,45 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         // try to parse node or edge statement
         SourceLocation checkpoint = tracker.location();
 
-        // look ahead to determine statement type
-        String* first_id = parse_identifier(ctx);
-        if (!first_id) {
-            first_id = parse_quoted_string(ctx);
+        // Simple lookahead: scan forward to check for edge operator without parsing
+        const char* lookahead_pos = tracker.rest();
+        bool is_edge = false;
+
+        // Skip identifier/quoted string
+        while (*lookahead_pos && (isalnum(*lookahead_pos) || *lookahead_pos == '_')) {
+            lookahead_pos++;
+        }
+        if (*lookahead_pos == '"') {
+            lookahead_pos++;
+            while (*lookahead_pos && *lookahead_pos != '"') {
+                if (*lookahead_pos == '\\') lookahead_pos++;  // skip escaped char
+                lookahead_pos++;
+            }
+            if (*lookahead_pos == '"') lookahead_pos++;
         }
 
-        if (first_id) {
-            skip_whitespace_and_comments(tracker);
+        // Skip whitespace
+        while (*lookahead_pos && (*lookahead_pos == ' ' || *lookahead_pos == '\t' ||
+                                   *lookahead_pos == '\n' || *lookahead_pos == '\r')) {
+            lookahead_pos++;
+        }
 
-            // check for edge operator
-            bool is_edge = !tracker.atEnd() && tracker.current() == '-' &&
-                          (tracker.peek(1) == '>' || tracker.peek(1) == '-');
+        // Check for edge operator (-> or --)
+        if (*lookahead_pos == '-' && (lookahead_pos[1] == '>' || lookahead_pos[1] == '-')) {
+            is_edge = true;
+        }
 
-            // restore position
-            // tracker.reset(checkpoint);
-
-            if (is_edge) {
-                // this is an edge statement
-                Element* edge = parse_edge_statement(ctx);
-                if (edge) {
-                    add_edge_to_graph(input, graph, edge);
-                }
-            } else {
-                // this is a node statement
-                Element* node = parse_node_statement(ctx);
-                if (node) {
-                    add_node_to_graph(input, graph, node);
-                }
+        if (is_edge) {
+            // this is an edge statement
+            Element* edge = parse_edge_statement(ctx);
+            if (edge) {
+                add_edge_to_graph(input, graph, edge);
+            }
+        } else {
+            // this is a node statement
+            Element* node = parse_node_statement(ctx);
+            if (node) {
+                add_node_to_graph(input, graph, node);
             }
         }
 

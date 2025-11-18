@@ -1298,7 +1298,7 @@
                     },
                     {
                         "source": "test_format_validation.cpp",
-                        "name": "🌐 Format-Specific Validation Tests (GTest) - Sprint 4 Implementation",
+                        "name": "🌐 Format-Specific Validation Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
