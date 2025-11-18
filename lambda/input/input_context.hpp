@@ -17,6 +17,7 @@ private:
     Input* input_;                          // The Input being parsed (not owned)
     MarkBuilder builder_;                   // MarkBuilder for creating Items
     ParseErrorList errors_;                 // Error collection
+    std::string owned_source_;              // Owned copy of source (when needed) - MUST be before tracker_!
     SourceTracker* tracker_;                // Optional position tracker (may be owned)
     bool owns_tracker_;                     // Whether we own the tracker
 
@@ -28,6 +29,7 @@ public:
         , errors_(100)  // Default max 100 errors
         , tracker_(nullptr)
         , owns_tracker_(false)
+        , owned_source_()
     {}
 
     // Constructor with position tracking (takes ownership)
@@ -37,11 +39,27 @@ public:
         , errors_(100)
         , tracker_(new SourceTracker(source, len))
         , owns_tracker_(true)
+        , owned_source_()
     {}
 
     // Constructor with position tracking from string
     InputContext(Input* input, const std::string& source)
-        : InputContext(input, source.c_str(), source.length())
+        : input_(input)
+        , builder_(input)
+        , errors_(100)
+        , owned_source_(source)  // Make a copy
+        , tracker_(new SourceTracker(owned_source_.c_str(), owned_source_.length()))
+        , owns_tracker_(true)
+    {}
+
+    // Constructor with position tracking from C string (calculates length)
+    InputContext(Input* input, const char* source)
+        : input_(input)
+        , builder_(input)
+        , errors_(100)
+        , owned_source_(source ? source : "")  // Make a copy
+        , tracker_(new SourceTracker(owned_source_.c_str(), owned_source_.length()))
+        , owns_tracker_(true)
     {}
 
     // Constructor with external tracker (does not take ownership)
@@ -51,6 +69,7 @@ public:
         , errors_(100)
         , tracker_(tracker)
         , owns_tracker_(false)
+        , owned_source_()
     {}
 
     // Destructor

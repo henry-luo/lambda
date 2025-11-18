@@ -1530,12 +1530,12 @@ TEST_F(HtmlParserTest, MixedVoidAndNonVoidWithSlashes) {
 
 TEST_F(HtmlParserTest, ParserContextCreation) {
     // Create a properly initialized input structure for testing
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     // Verify initial state
@@ -1550,17 +1550,17 @@ TEST_F(HtmlParserTest, ParserContextCreation) {
     EXPECT_FALSE(ctx->in_body);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(HtmlParserTest, ParserContextEnsureHtml) {
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     Element* html = html_context_ensure_html(ctx);
@@ -1578,17 +1578,17 @@ TEST_F(HtmlParserTest, ParserContextEnsureHtml) {
     EXPECT_EQ(html, html2);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(HtmlParserTest, ParserContextEnsureHead) {
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     Element* head = html_context_ensure_head(ctx);
@@ -1606,17 +1606,17 @@ TEST_F(HtmlParserTest, ParserContextEnsureHead) {
     EXPECT_FALSE(ctx->has_explicit_html);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(HtmlParserTest, ParserContextEnsureBody) {
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     Element* body = html_context_ensure_body(ctx);
@@ -1637,17 +1637,17 @@ TEST_F(HtmlParserTest, ParserContextEnsureBody) {
     EXPECT_TRUE(ctx->in_body);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(HtmlParserTest, ParserContextGetInsertionPointHeadElement) {
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     // Get insertion point for a head element (title)
@@ -1662,17 +1662,17 @@ TEST_F(HtmlParserTest, ParserContextGetInsertionPointHeadElement) {
     EXPECT_TRUE(ctx->in_head);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(HtmlParserTest, ParserContextGetInsertionPointBodyElement) {
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     // Get insertion point for a body element (div)
@@ -1690,21 +1690,21 @@ TEST_F(HtmlParserTest, ParserContextGetInsertionPointBodyElement) {
     EXPECT_TRUE(ctx->head_closed);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(HtmlParserTest, ParserContextExplicitElements) {
-    Input test_input;
-    test_input.pool = pool_create();
-    test_input.sb = stringbuf_new(test_input.pool);
-    test_input.type_list = arraylist_new(10);
+    Pool* pool = pool_create();
+    Input* test_input = Input::create(pool);
+    test_input->sb = stringbuf_new(pool);
+    test_input->type_list = arraylist_new(10);
 
-    HtmlParserContext* ctx = html_context_create(&test_input);
+    HtmlParserContext* ctx = html_context_create(test_input);
     ASSERT_NE(ctx, nullptr);
 
     // Create explicit html element using MarkBuilder
-    MarkBuilder builder(&test_input);
+    MarkBuilder builder(test_input);
     Element* html = builder.element("html").final().element;
     html_context_set_html(ctx, html);
 
@@ -1732,8 +1732,8 @@ TEST_F(HtmlParserTest, ParserContextExplicitElements) {
     EXPECT_FALSE(ctx->in_head);
 
     html_context_destroy(ctx);
-    arraylist_free(test_input.type_list);
-    pool_destroy(test_input.pool);
+    arraylist_free(test_input->type_list);
+    pool_destroy(pool);
 }
 
 // ============================================================================

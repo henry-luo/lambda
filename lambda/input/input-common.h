@@ -29,8 +29,4 @@ bool is_raw_text_environment(const char* env_name);
 void skip_common_whitespace(const char **text);
 void skip_latex_comment(const char **latex);
 
-// Common element creation functions
-#define create_common_element input_create_element
-#define add_attribute_to_common_element input_add_attribute_to_element
-
 #endif // INPUT_COMMON_H

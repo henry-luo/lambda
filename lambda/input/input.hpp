@@ -92,7 +92,14 @@ typedef struct {
     bool enable_compression;
 } FetchConfig;
 
-typedef struct FetchResponse FetchResponse;
+typedef struct FetchResponse {
+    char* data;
+    size_t size;
+    long status_code;
+    char** response_headers;
+    int response_header_count;
+    char* content_type;
+} FetchResponse;
 
 char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
