@@ -1703,23 +1703,24 @@ TEST_F(HtmlParserTest, ParserContextExplicitElements) {
     HtmlParserContext* ctx = html_context_create(&test_input);
     ASSERT_NE(ctx, nullptr);
 
-    // Create explicit html element
-    Element* html = input_create_element(&test_input, "html");
+    // Create explicit html element using MarkBuilder
+    MarkBuilder builder(&test_input);
+    Element* html = builder.element("html").final().element;
     html_context_set_html(ctx, html);
 
     EXPECT_EQ(ctx->html_element, html);
     EXPECT_TRUE(ctx->has_explicit_html);
 
-    // Create explicit head element
-    Element* head = input_create_element(&test_input, "head");
+    // Create explicit head element using MarkBuilder
+    Element* head = builder.element("head").final().element;
     html_context_set_head(ctx, head);
 
     EXPECT_EQ(ctx->head_element, head);
     EXPECT_TRUE(ctx->has_explicit_head);
     EXPECT_TRUE(ctx->in_head);
 
-    // Create explicit body element
-    Element* body = input_create_element(&test_input, "body");
+    // Create explicit body element using MarkBuilder
+    Element* body = builder.element("body").final().element;
     html_context_set_body(ctx, body);
 
     EXPECT_EQ(ctx->body_element, body);

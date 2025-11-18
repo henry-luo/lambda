@@ -36,6 +36,7 @@ public:
 // Temporary compatibility function for legacy code
 // TODO: Remove this once all parsers are refactored to use MarkBuilder directly
 #include "../mark_builder.hpp"
+
 inline String* input_create_string(Input* input, const char* str) {
     MarkBuilder builder(input);
     return builder.createString(str);
@@ -44,9 +45,8 @@ inline String* input_create_string(Input* input, const char* str) {
 // Temporary compatibility functions for parsers during migration
 // These create elements using ElementBuilder but return the raw Element*
 inline Element* input_create_element(Input* input, const char* tag_name) {
-    // Use static function directly (it's now declared externally in mark_builder.cpp)
-    extern Element* input_create_element_internal(Input *input, const char* tag_name);
-    return input_create_element_internal(input, tag_name);
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
 }
 
 inline void input_add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
