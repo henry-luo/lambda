@@ -2,11 +2,8 @@
 #define MARKUP_PARSER_H
 
 #include "input.hpp"
+#include "input_context.hpp"
 #include "../lambda-data.hpp"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 // Markup format enumeration
 typedef enum {
@@ -63,14 +60,18 @@ typedef enum {
     INLINE_WIKI_TEMPLATE
 } InlineType;
 
-// Parser state for tracking parsing context
-typedef struct {
-    Input* input;
+#ifdef __cplusplus
+
+namespace lambda {
+
+// MarkupParser extends InputContext for unified parsing
+// Inherits: Input* input_, MarkBuilder builder_, ParseErrorList errors_, SourceTracker tracker_
+class MarkupParser : public InputContext {
+public:
     ParseConfig config;
     char** lines;
     int line_count;
     int current_line;
-    StringBuf* sb;              // Shared string buffer for parsing operations
 
     // Format-specific state
     struct {
@@ -93,19 +94,47 @@ typedef struct {
         bool in_table;              // Whether we're parsing table
         int table_columns;          // Number of table columns
     } state;
-} MarkupParser;
 
-// Core Infrastructure Functions
-MarkupParser* parser_create(Input* input, ParseConfig config);
-void parser_destroy(MarkupParser* parser);
-void parser_reset_state(MarkupParser* parser);
+    // Constructor
+    MarkupParser(Input* input, ParseConfig config);
 
-// Format Detection
+    // Destructor
+    ~MarkupParser();
+
+    // Reset parsing state
+    void resetState();
+
+    // Main parsing function
+    Item parseContent(const char* content);
+
+    // Non-copyable
+    MarkupParser(const MarkupParser&) = delete;
+    MarkupParser& operator=(const MarkupParser&) = delete;
+};
+
+} // namespace lambda
+
+extern "C" {
+#endif
+
+// C-compatible wrapper functions for legacy code
+#ifdef __cplusplus
+typedef lambda::MarkupParser MarkupParser_t;
+#else
+typedef struct MarkupParser_t MarkupParser_t;
+#endif
+
+// Core Infrastructure Functions (C wrappers)
+MarkupParser_t* parser_create(Input* input, ParseConfig config);
+void parser_destroy(MarkupParser_t* parser);
+void parser_reset_state(MarkupParser_t* parser);
+
+// Format Detection (pure C functions)
 MarkupFormat detect_markup_format(const char* content, const char* filename);
 const char* detect_markup_flavor(MarkupFormat format, const char* content);
 
-// Main parsing function
-Item parse_markup_content(MarkupParser* parser, const char* content);
+// Main parsing function (C wrapper)
+Item parse_markup_content(MarkupParser_t* parser, const char* content);
 
 #ifdef __cplusplus
 }

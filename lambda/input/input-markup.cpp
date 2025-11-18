@@ -9,13 +9,13 @@
 using namespace lambda;
 
 // Forward declarations for Phase 2 enhanced parsing
-static Item parse_document(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_block_element(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, const char* text);
+static Item parse_document(MarkupParser* parser);
+static Item parse_block_element(MarkupParser* parser);
+static Item parse_inline_content(MarkupParser* parser, const char* text);
 
 // Phase 3: Forward declarations for enhanced list processing
-static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int base_indent);
-static Item parse_nested_list_content(MarkupParser* parser, MarkBuilder* builder, int base_indent);
+static Item parse_list_structure(MarkupParser* parser, int base_indent);
+static Item parse_nested_list_content(MarkupParser* parser, int base_indent);
 
 // Helper function to increment element content length safely
 static void increment_element_content_length(Element* element) {
@@ -26,44 +26,44 @@ static void increment_element_content_length(Element* element) {
 }
 
 // Phase 2: Enhanced block element parsers
-static Item parse_header(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_list_item(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_blockquote(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_table_row(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_paragraph(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_divider(MarkupParser* parser, MarkBuilder* builder);
+static Item parse_header(MarkupParser* parser, const char* line);
+static Item parse_list_item(MarkupParser* parser, const char* line);
+static Item parse_code_block(MarkupParser* parser, const char* line);
+static Item parse_blockquote(MarkupParser* parser, const char* line);
+static Item parse_table_row(MarkupParser* parser, const char* line);
+static Item parse_math_block(MarkupParser* parser, const char* line);
+static Item parse_paragraph(MarkupParser* parser, const char* line);
+static Item parse_divider(MarkupParser* parser);
 
 // Phase 2: Enhanced inline element parsers
-static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const char* text);
-static Item parse_bold_italic(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_code_span(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_link(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_image(MarkupParser* parser, MarkBuilder* builder, const char** text);
+static Item parse_inline_spans(MarkupParser* parser, const char* text);
+static Item parse_bold_italic(MarkupParser* parser, const char** text);
+static Item parse_code_span(MarkupParser* parser, const char** text);
+static Item parse_link(MarkupParser* parser, const char** text);
+static Item parse_image(MarkupParser* parser, const char** text);
 
 // Phase 4: Advanced inline element parsers
-static Item parse_strikethrough(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_superscript(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_subscript(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_emoji_shortcode(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_small_caps(MarkupParser* parser, MarkBuilder* builder, const char** text);
+static Item parse_strikethrough(MarkupParser* parser, const char** text);
+static Item parse_superscript(MarkupParser* parser, const char** text);
+static Item parse_subscript(MarkupParser* parser, const char** text);
+static Item parse_emoji_shortcode(MarkupParser* parser, const char** text);
+static Item parse_inline_math(MarkupParser* parser, const char** text);
+static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text);
+static Item parse_small_caps(MarkupParser* parser, const char** text);
 
 // Math parser integration functions
 static Item parse_math_content(InputContext& ctx, const char* math_content, const char* flavor);
 static const char* detect_math_flavor(const char* content);
 
 // Phase 6: Advanced features - footnotes, citations, directives, metadata
-static Item parse_footnote_definition(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_footnote_reference(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_citation(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_org_block(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_yaml_frontmatter(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_org_properties(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_wiki_template(MarkupParser* parser, MarkBuilder* builder, const char** text);
+static Item parse_footnote_definition(MarkupParser* parser, const char* line);
+static Item parse_footnote_reference(MarkupParser* parser, const char** text);
+static Item parse_citation(MarkupParser* parser, const char** text);
+static Item parse_rst_directive(MarkupParser* parser, const char* line);
+static Item parse_org_block(MarkupParser* parser, const char* line);
+static Item parse_yaml_frontmatter(MarkupParser* parser);
+static Item parse_org_properties(MarkupParser* parser);
+static Item parse_wiki_template(MarkupParser* parser, const char** text);
 
 // MediaWiki-specific forward declarations
 static bool is_wiki_heading(const char* line, int* level);
@@ -72,27 +72,27 @@ static bool is_wiki_table_start(const char* line);
 static bool is_wiki_table_row(const char* line);
 static bool is_wiki_table_end(const char* line);
 static bool is_wiki_horizontal_rule(const char* line);
-static Item parse_wiki_table(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_wiki_bold_italic(MarkupParser* parser, MarkBuilder* builder, const char** text);
+static Item parse_wiki_table(MarkupParser* parser);
+static Item parse_wiki_list(MarkupParser* parser);
+static Item parse_wiki_link(MarkupParser* parser, const char** text);
+static Item parse_wiki_external_link(MarkupParser* parser, const char** text);
+static Item parse_wiki_bold_italic(MarkupParser* parser, const char** text);
 
 // RST-specific functions (from old input-rst.cpp)
 static bool is_rst_transition_line(const char* line);
-static Item parse_rst_transition(MarkupParser* parser, MarkBuilder* builder);
+static Item parse_rst_transition(MarkupParser* parser);
 static bool is_rst_definition_list_item(const char* line);
 static bool is_rst_definition_list_definition(const char* line);
-static Item parse_rst_definition_list(MarkupParser* parser, MarkBuilder* builder);
+static Item parse_rst_definition_list(MarkupParser* parser);
 static bool is_rst_literal_block_marker(const char* line);
 static bool line_ends_with_double_colon(const char* line);
-static Item parse_rst_literal_block(MarkupParser* parser, MarkBuilder* builder);
+static Item parse_rst_literal_block(MarkupParser* parser);
 static bool is_rst_comment_line(const char* line);
-static Item parse_rst_comment(MarkupParser* parser, MarkBuilder* builder);
+static Item parse_rst_comment(MarkupParser* parser);
 static bool is_rst_grid_table_line(const char* line);
-static Item parse_rst_grid_table(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_rst_double_backtick_literal(MarkupParser* parser, MarkBuilder* builder, const char** text);
-static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, MarkBuilder* builder, const char** text);
+static Item parse_rst_grid_table(MarkupParser* parser);
+static Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text);
+static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text);
 static bool is_footnote_definition(const char* line);
 static bool is_rst_directive(MarkupParser* parser, const char* line);
 static bool is_org_block(const char* line);
@@ -107,12 +107,12 @@ static bool is_textile_block_quote(const char* line);
 static bool is_textile_pre(const char* line);
 static bool is_textile_comment(const char* line);
 static bool is_textile_notextile(const char* line);
-static Item parse_textile_code_block(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_textile_block_quote(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_textile_pre_block(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_textile_comment(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_textile_notextile(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_textile_list_item(MarkupParser* parser, MarkBuilder* builder, const char* line);
+static Item parse_textile_code_block(MarkupParser* parser, const char* line);
+static Item parse_textile_block_quote(MarkupParser* parser, const char* line);
+static Item parse_textile_pre_block(MarkupParser* parser, const char* line);
+static Item parse_textile_comment(MarkupParser* parser, const char* line);
+static Item parse_textile_notextile(MarkupParser* parser, const char* line);
+static Item parse_textile_list_item(MarkupParser* parser, const char* line);
 static Item parse_textile_inline_content(MarkupParser* parser, const char* text);
 static char* parse_textile_modifiers(const char* line, int* start_pos);
 
@@ -122,21 +122,21 @@ static bool is_asciidoc_list_item(const char* line);
 static bool is_asciidoc_listing_block(const char* line);
 static bool is_asciidoc_admonition(const char* line);
 static bool is_asciidoc_table_start(const char* line);
-static Item parse_asciidoc_heading(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_asciidoc_list(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_asciidoc_listing_block(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_asciidoc_admonition(MarkupParser* parser, MarkBuilder* builder, const char* line);
-static Item parse_asciidoc_table(MarkupParser* parser, MarkBuilder* builder);
-static Item parse_asciidoc_inline(MarkupParser* parser, MarkBuilder* builder, const char* text);
+static Item parse_asciidoc_heading(MarkupParser* parser, const char* line);
+static Item parse_asciidoc_list(MarkupParser* parser);
+static Item parse_asciidoc_listing_block(MarkupParser* parser);
+static Item parse_asciidoc_admonition(MarkupParser* parser, const char* line);
+static Item parse_asciidoc_table(MarkupParser* parser);
+static Item parse_asciidoc_inline(MarkupParser* parser, const char* text);
 static Item parse_asciidoc_link(MarkupParser* parser, const char** text);
 
 // Phase 5: Forward declarations for enhanced table processing
-static Item parse_table_structure(MarkupParser* parser, MarkBuilder* builder);
+static Item parse_table_structure(MarkupParser* parser);
 static bool is_table_separator(const char* line);
 static char* parse_table_alignment(const char* line);
 static void apply_table_alignment(Element* table, const char* alignment_spec);
 static bool is_table_continuation(const char* line);
-static Item parse_table_cell_content(MarkupParser* parser, MarkBuilder* builder, const char* cell_text);
+static Item parse_table_cell_content(MarkupParser* parser, const char* cell_text);
 
 // Phase 2: Utility functions
 static BlockType detect_block_type(MarkupParser* parser, const char* line);
@@ -156,86 +156,99 @@ static bool is_table_row(const char* line);
 #define free_lines input_free_lines
 
 // Local helper functions to replace macros
-static inline String* create_string(Input* input, const char* str) {
-    MarkBuilder builder(input);
-    return builder.createString(str);
+static inline String* create_string(MarkupParser* parser, const char* str) {
+    return parser->builder().createString(str);
 }
 
-static inline Element* create_element(Input* input, const char* tag_name) {
-    MarkBuilder builder(input);
-    return builder.element(tag_name).final().element;
+static inline Element* create_element(MarkupParser* parser, const char* tag_name) {
+    return parser->builder().element(tag_name).final().element;
 }
 
-static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
-    MarkBuilder builder(input);
-    String* key = builder.createString(attr_name);
-    String* value = builder.createString(attr_value);
+static inline void add_attribute_to_element(MarkupParser* parser, Element* element, const char* attr_name, const char* attr_value) {
+    String* key = parser->builder().createString(attr_name);
+    String* value = parser->builder().createString(attr_value);
     if (!key || !value) return;
     Item lambda_value = {.item = s2it(value)};
-    builder.putToElement(element, key, lambda_value);
+    parser->builder().putToElement(element, key, lambda_value);
 }
 
-// Parser lifecycle management
-MarkupParser* parser_create(Input* input, ParseConfig config) {
-    if (!input) return NULL;
+// MarkupParser C++ implementation
+namespace lambda {
 
-    MarkupParser* parser = (MarkupParser*)calloc(1, sizeof(MarkupParser));
-    if (!parser) return NULL;
-
-    parser->input = input;
-    parser->config = config;
-    parser->lines = NULL;
-    parser->line_count = 0;
-    parser->current_line = 0;
-
-    // Initialize shared string buffer for parsing operations
-    parser->sb = stringbuf_new(input->pool);
-    if (!parser->sb) {
-        free(parser);
-        return NULL;
-    }
-
+MarkupParser::MarkupParser(Input* input, ParseConfig cfg)
+    : InputContext(input)
+    , config(cfg)
+    , lines(nullptr)
+    , line_count(0)
+    , current_line(0)
+{
     // Initialize state
-    parser_reset_state(parser);
-
-    return parser;
+    resetState();
 }
 
-void parser_destroy(MarkupParser* parser) {
-    if (!parser) return;
-
-    if (parser->lines) {
-        free_lines(parser->lines, parser->line_count);
+MarkupParser::~MarkupParser() {
+    if (lines) {
+        free_lines(lines, line_count);
+        lines = nullptr;
     }
-
-    // StringBuf is allocated from pool, so it will be freed with the pool
-    // No explicit cleanup needed for parser->sb
-
-    free(parser);
 }
 
-void parser_reset_state(MarkupParser* parser) {
-    if (!parser) return;
-
+void MarkupParser::resetState() {
     // Reset parsing state
-    memset(parser->state.list_markers, 0, sizeof(parser->state.list_markers));
-    memset(parser->state.list_levels, 0, sizeof(parser->state.list_levels));
-    parser->state.list_depth = 0;
+    memset(state.list_markers, 0, sizeof(state.list_markers));
+    memset(state.list_levels, 0, sizeof(state.list_levels));
+    state.list_depth = 0;
 
-    parser->state.table_state = 0;
-    parser->state.in_code_block = false;
-    parser->state.code_fence_char = 0;
-    parser->state.code_fence_length = 0;
+    state.table_state = 0;
+    state.in_code_block = false;
+    state.code_fence_char = 0;
+    state.code_fence_length = 0;
 
-    parser->state.in_math_block = false;
-    memset(parser->state.math_delimiter, 0, sizeof(parser->state.math_delimiter));
+    state.in_math_block = false;
+    memset(state.math_delimiter, 0, sizeof(state.math_delimiter));
 
     // Phase 2: Reset additional state
-    parser->state.header_level = 0;
-    parser->state.in_quote_block = false;
-    parser->state.quote_depth = 0;
-    parser->state.in_table = false;
-    parser->state.table_columns = 0;
+    state.header_level = 0;
+    state.in_quote_block = false;
+    state.quote_depth = 0;
+    state.in_table = false;
+    state.table_columns = 0;
+}
+
+Item MarkupParser::parseContent(const char* content) {
+    if (!content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // Split content into lines
+    lines = split_lines(content, &line_count);
+    if (!lines) {
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    current_line = 0;
+    resetState();
+
+    // Parse the document
+    return parse_document(this);
+}
+
+} // namespace lambda
+
+// C-compatible wrapper functions
+MarkupParser_t* parser_create(Input* input, ParseConfig config) {
+    if (!input) return NULL;
+    return new lambda::MarkupParser(input, config);
+}
+
+void parser_destroy(MarkupParser_t* parser) {
+    if (!parser) return;
+    delete parser;
+}
+
+void parser_reset_state(MarkupParser_t* parser) {
+    if (!parser) return;
+    parser->resetState();
 }
 
 // Format detection utilities
@@ -336,55 +349,41 @@ const char* detect_markup_flavor(MarkupFormat format, const char* content) {
 }
 
 // Main parsing function
-Item parse_markup_content(MarkupParser* parser, const char* content) {
+Item parse_markup_content(MarkupParser_t* parser, const char* content) {
     if (!parser || !content) {
         return (Item){.item = ITEM_ERROR};
     }
-
-    // Create MarkBuilder for string management
-    MarkBuilder builder(parser->input);
-
-    // Split content into lines
-    parser->lines = split_lines(content, &parser->line_count);
-    if (!parser->lines) {
-        return (Item){.item = ITEM_ERROR};
-    }
-
-    parser->current_line = 0;
-    parser_reset_state(parser);
-
-    // Parse the document
-    return parse_document(parser, &builder);
+    return parser->parseContent(content);
 }
 
 // Document parsing - creates proper structure according to Doc Schema
-static Item parse_document(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_document(MarkupParser* parser) {
     // Create root document element according to schema
-    Element* doc = create_element(parser->input, "doc");
+    Element* doc = create_element(parser, "doc");
     if (!doc) {
         return (Item){.item = ITEM_ERROR};
     }
 
     // Add version attribute as required by schema
-    add_attribute_to_element(parser->input, doc, "version", "1.0");
+    add_attribute_to_element(parser, doc, "version", "1.0");
 
     // Create meta element only if there's actual metadata content
     Element* meta = NULL;
 
     // Phase 6: Parse metadata first (YAML frontmatter, Org properties, or AsciiDoc defaults)
     if (has_yaml_frontmatter(parser)) {
-        meta = create_element(parser->input, "meta");
+        meta = create_element(parser, "meta");
         if (meta) {
-            Item metadata = parse_yaml_frontmatter(parser, builder);
+            Item metadata = parse_yaml_frontmatter(parser);
             if (metadata.item != ITEM_UNDEFINED && metadata.item != ITEM_ERROR) {
                 list_push((List*)meta, metadata);
                 increment_element_content_length(meta);
             }
         }
     } else if (has_org_properties(parser)) {
-        meta = create_element(parser->input, "meta");
+        meta = create_element(parser, "meta");
         if (meta) {
-            Item properties = parse_org_properties(parser, builder);
+            Item properties = parse_org_properties(parser);
             if (properties.item != ITEM_UNDEFINED && properties.item != ITEM_ERROR) {
                 list_push((List*)meta, properties);
                 increment_element_content_length(meta);
@@ -392,12 +391,12 @@ static Item parse_document(MarkupParser* parser, MarkBuilder* builder) {
         }
     } else if (parser->config.format == MARKUP_ASCIIDOC) {
         // For AsciiDoc: create default metadata like the old parser for compatibility
-        meta = create_element(parser->input, "meta");
+        meta = create_element(parser, "meta");
         if (meta) {
             // Add default title
-            add_attribute_to_element(parser->input, meta, "title", "AsciiDoc Document");
+            add_attribute_to_element(parser, meta, "title", "AsciiDoc Document");
             // Add default language
-            add_attribute_to_element(parser->input, meta, "language", "en");
+            add_attribute_to_element(parser, meta, "language", "en");
         }
     }
 
@@ -408,7 +407,7 @@ static Item parse_document(MarkupParser* parser, MarkBuilder* builder) {
     }
 
     // Create body element for document content
-    Element* body = create_element(parser->input, "body");
+    Element* body = create_element(parser, "body");
     if (!body) {
         return (Item){.item = ITEM_ERROR};
     }
@@ -416,7 +415,7 @@ static Item parse_document(MarkupParser* parser, MarkBuilder* builder) {
     // Parse content into the body element
     while (parser->current_line < parser->line_count) {
         int line_before = parser->current_line;
-        Item block = parse_block_element(parser, builder);
+        Item block = parse_block_element(parser);
         if (block.item != ITEM_UNDEFINED && block.item != ITEM_ERROR) {
             // Add block elements as children in the List structure
             list_push((List*)body, block);
@@ -438,7 +437,7 @@ static Item parse_document(MarkupParser* parser, MarkBuilder* builder) {
 }
 
 // Phase 2: Enhanced block element parsing
-static Item parse_block_element(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_block_element(MarkupParser* parser) {
     if (parser->current_line >= parser->line_count) {
         return (Item){.item = ITEM_UNDEFINED};
     }
@@ -453,15 +452,15 @@ static Item parse_block_element(MarkupParser* parser, MarkBuilder* builder) {
 
     // Phase 6: Check for advanced features first
     if (is_footnote_definition(line)) {
-        return parse_footnote_definition(parser, builder, line);
+        return parse_footnote_definition(parser, line);
     }
 
     if (is_rst_directive(parser, line)) {
-        return parse_rst_directive(parser, builder, line);
+        return parse_rst_directive(parser, line);
     }
 
     if (is_org_block(line)) {
-        return parse_org_block(parser, builder, line);
+        return parse_org_block(parser, line);
     }
 
     // Detect block type
@@ -469,113 +468,113 @@ static Item parse_block_element(MarkupParser* parser, MarkBuilder* builder) {
 
     switch (block_type) {
         case BLOCK_HEADER:
-            return parse_header(parser, builder, line);
+            return parse_header(parser, line);
         case BLOCK_LIST_ITEM:
             // Check if this is an RST definition list
             if (parser->config.format == MARKUP_RST &&
                 is_rst_definition_list_item(line) &&
                 parser->current_line + 1 < parser->line_count &&
                 is_rst_definition_list_definition(parser->lines[parser->current_line + 1])) {
-                return parse_rst_definition_list(parser, builder);
+                return parse_rst_definition_list(parser);
             }
             // Check if this is a Textile list item
             if (parser->config.format == MARKUP_TEXTILE) {
-                return parse_textile_list_item(parser, builder, line);
+                return parse_textile_list_item(parser, line);
             }
             // Check if this is a MediaWiki list item
             if (parser->config.format == MARKUP_WIKI) {
-                return parse_wiki_list(parser, builder);
+                return parse_wiki_list(parser);
             }
             // Check if this is an AsciiDoc list item
             if (parser->config.format == MARKUP_ASCIIDOC) {
-                return parse_asciidoc_list(parser, builder);
+                return parse_asciidoc_list(parser);
             }
-            return parse_list_item(parser, builder, line);
+            return parse_list_item(parser, line);
         case BLOCK_CODE_BLOCK:
             // Check for RST literal block
             if (parser->config.format == MARKUP_RST &&
                 (is_rst_literal_block_marker(line) || line_ends_with_double_colon(line))) {
-                return parse_rst_literal_block(parser, builder);
+                return parse_rst_literal_block(parser);
             }
             // Check for Textile block code or pre
             if (parser->config.format == MARKUP_TEXTILE) {
                 if (is_textile_block_code(line)) {
-                    return parse_textile_code_block(parser, builder, line);
+                    return parse_textile_code_block(parser, line);
                 } else if (is_textile_pre(line)) {
-                    return parse_textile_pre_block(parser, builder, line);
+                    return parse_textile_pre_block(parser, line);
                 }
             }
             // Check for AsciiDoc listing block
             if (parser->config.format == MARKUP_ASCIIDOC && is_asciidoc_listing_block(line)) {
-                return parse_asciidoc_listing_block(parser, builder);
+                return parse_asciidoc_listing_block(parser);
             }
-            return parse_code_block(parser, builder, line);
+            return parse_code_block(parser, line);
         case BLOCK_QUOTE:
             // Check for Textile block quote
             if (parser->config.format == MARKUP_TEXTILE && is_textile_block_quote(line)) {
-                return parse_textile_block_quote(parser, builder, line);
+                return parse_textile_block_quote(parser, line);
             }
             // Check for AsciiDoc admonition
             if (parser->config.format == MARKUP_ASCIIDOC && is_asciidoc_admonition(line)) {
-                return parse_asciidoc_admonition(parser, builder, line);
+                return parse_asciidoc_admonition(parser, line);
             }
-            return parse_blockquote(parser, builder, line);
+            return parse_blockquote(parser, line);
         case BLOCK_TABLE:
             // Check for RST grid table
             if (parser->config.format == MARKUP_RST && is_rst_grid_table_line(line)) {
-                return parse_rst_grid_table(parser, builder);
+                return parse_rst_grid_table(parser);
             }
             // Check for MediaWiki table
             if (parser->config.format == MARKUP_WIKI && is_wiki_table_start(line)) {
-                return parse_wiki_table(parser, builder);
+                return parse_wiki_table(parser);
             }
             // Check for AsciiDoc table
             if (parser->config.format == MARKUP_ASCIIDOC && is_asciidoc_table_start(line)) {
-                return parse_asciidoc_table(parser, builder);
+                return parse_asciidoc_table(parser);
             }
-            return parse_table_structure(parser, builder);
+            return parse_table_structure(parser);
         case BLOCK_MATH:
-            return parse_math_block(parser, builder, line);
+            return parse_math_block(parser, line);
         case BLOCK_DIVIDER:
             // Check for RST transition line
             if (parser->config.format == MARKUP_RST && is_rst_transition_line(line)) {
-                return parse_rst_transition(parser, builder);
+                return parse_rst_transition(parser);
             }
             // Check for MediaWiki horizontal rule
             if (parser->config.format == MARKUP_WIKI && is_wiki_horizontal_rule(line)) {
                 parser->current_line++;
-                return parse_divider(parser, builder);
+                return parse_divider(parser);
             }
             parser->current_line++;
-            return parse_divider(parser, builder);
+            return parse_divider(parser);
         case BLOCK_COMMENT:
             // Check for Textile comment or notextile
             if (parser->config.format == MARKUP_TEXTILE) {
                 if (is_textile_comment(line)) {
-                    return parse_textile_comment(parser, builder, line);
+                    return parse_textile_comment(parser, line);
                 } else if (is_textile_notextile(line)) {
-                    return parse_textile_notextile(parser, builder, line);
+                    return parse_textile_notextile(parser, line);
                 }
             }
-            return parse_rst_comment(parser, builder);
+            return parse_rst_comment(parser);
         case BLOCK_PARAGRAPH:
         default:
-            return parse_paragraph(parser, builder, line);
+            return parse_paragraph(parser, line);
     }
 }
 
 // Parse header elements (# Header, ## Header, etc.) - Creates HTML-like h1, h2, etc.
-static Item parse_header(MarkupParser* parser, MarkBuilder* builder, const char* line) {
+static Item parse_header(MarkupParser* parser, const char* line) {
     int level = get_header_level(parser, line);
     if (level == 0) {
         // Fallback to paragraph if not a valid header
-        return parse_paragraph(parser, builder, line);
+        return parse_paragraph(parser, line);
     }
 
     // Create appropriate header element (h1, h2, h3, h4, h5, h6)
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", level);
-    Element* header = create_element(parser->input, tag_name);
+    Element* header = create_element(parser, tag_name);
     if (!header) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -584,7 +583,7 @@ static Item parse_header(MarkupParser* parser, MarkBuilder* builder, const char*
     // Add level attribute for compatibility
     char level_str[8];
     snprintf(level_str, sizeof(level_str), "%d", level);
-    add_attribute_to_element(parser->input, header, "level", level_str);
+    add_attribute_to_element(parser, header, "level", level_str);
 
     // Extract header text (handle both Markdown and RST styles)
     const char* text = line;
@@ -603,7 +602,7 @@ static Item parse_header(MarkupParser* parser, MarkBuilder* builder, const char*
     }
 
     // Parse inline content for header text and add as children
-    Item content = parse_inline_spans(parser, builder, text);
+    Item content = parse_inline_spans(parser, text);
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
         list_push((List*)header, content);
         increment_element_content_length(header);
@@ -631,15 +630,15 @@ static Item parse_header(MarkupParser* parser, MarkBuilder* builder, const char*
 }
 
 // Parse paragraph with enhanced inline parsing - Creates HTML-like <p> element
-static Item parse_paragraph(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* para = create_element(parser->input, "p");
+static Item parse_paragraph(MarkupParser* parser, const char* line) {
+    Element* para = create_element(parser, "p");
     if (!para) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
     }
 
     // Use StrBuf to build content from potentially multiple lines
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
 
     // For the first line, always add it to the paragraph
@@ -681,8 +680,8 @@ static Item parse_paragraph(MarkupParser* parser, MarkBuilder* builder, const ch
     }
 
     // Parse inline content with enhancements and add as children
-    String* text_content = builder->createString(sb->str->chars, sb->length);
-    Item content = parse_inline_spans(parser, builder, text_content->chars);
+    String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+    Item content = parse_inline_spans(parser, text_content->chars);
 
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
         list_push((List*)para, content);
@@ -727,8 +726,8 @@ static bool is_ordered_marker(char marker) {
     return marker == '.';
 }
 
-static Item parse_nested_list_content(MarkupParser* parser, MarkBuilder* builder, int base_indent) {
-    Element* content_container = create_element(parser->input, "div");
+static Item parse_nested_list_content(MarkupParser* parser, int base_indent) {
+    Element* content_container = create_element(parser, "div");
     if (!content_container) return (Item){.item = ITEM_ERROR};
 
     while (parser->current_line < parser->line_count) {
@@ -753,7 +752,7 @@ static Item parse_nested_list_content(MarkupParser* parser, MarkBuilder* builder
 
         // Check if this starts a nested list
         if (is_list_item(line)) {
-            Item nested_list = parse_list_structure(parser, builder, line_indent);
+            Item nested_list = parse_list_structure(parser, line_indent);
             if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
                 list_push((List*)content_container, nested_list);
                 increment_element_content_length(content_container);
@@ -763,14 +762,14 @@ static Item parse_nested_list_content(MarkupParser* parser, MarkBuilder* builder
             BlockType block_type = detect_block_type(parser, line);
             if (block_type == BLOCK_CODE_BLOCK) {
                 // Parse as code block directly
-                Item code_content = parse_code_block(parser, builder, line);
+                Item code_content = parse_code_block(parser, line);
                 if (code_content.item != ITEM_ERROR && code_content.item != ITEM_UNDEFINED) {
                     list_push((List*)content_container, code_content);
                     increment_element_content_length(content_container);
                 }
             } else {
                 // Parse as paragraph content
-                Item para_content = parse_paragraph(parser, builder, line);
+                Item para_content = parse_paragraph(parser, line);
                 if (para_content.item != ITEM_ERROR && para_content.item != ITEM_UNDEFINED) {
                     list_push((List*)content_container, para_content);
                     increment_element_content_length(content_container);
@@ -786,7 +785,7 @@ static Item parse_nested_list_content(MarkupParser* parser, MarkBuilder* builder
 }
 
 // Phase 3: Enhanced list structure parsing with proper nesting
-static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int base_indent) {
+static Item parse_list_structure(MarkupParser* parser, int base_indent) {
     if (parser->current_line >= parser->line_count) {
         return (Item){.item = ITEM_UNDEFINED};
     }
@@ -796,7 +795,7 @@ static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int
     bool is_ordered = is_ordered_marker(marker);
 
     // Create the appropriate list container
-    Element* list = create_element(parser->input, is_ordered ? "ol" : "ul");
+    Element* list = create_element(parser, is_ordered ? "ol" : "ul");
     if (!list) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -848,7 +847,7 @@ static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int
             }
 
             // Create list item
-            Element* item = create_element(parser->input, "li");
+            Element* item = create_element(parser, "li");
             if (!item) break;
 
             // Extract content after marker
@@ -866,7 +865,7 @@ static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int
 
             // Parse immediate inline content
             if (*item_content) {
-                Item text_content = parse_inline_spans(parser, builder, item_content);
+                Item text_content = parse_inline_spans(parser, item_content);
                 if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
                     list_push((List*)item, text_content);
                     increment_element_content_length(item);
@@ -876,7 +875,7 @@ static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int
             parser->current_line++;
 
             // Look for continued content (nested lists, paragraphs)
-            Item nested_content = parse_nested_list_content(parser, builder, base_indent);
+            Item nested_content = parse_nested_list_content(parser, base_indent);
             if (nested_content.item != ITEM_ERROR && nested_content.item != ITEM_UNDEFINED) {
                 Element* content_div = (Element*)nested_content.item;
                 if (content_div && ((List*)content_div)->length > 0) {
@@ -895,7 +894,7 @@ static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int
 
         } else if (line_indent > base_indent && is_list_item(line)) {
             // This is a nested list - parse it recursively
-            Item nested_list = parse_list_structure(parser, builder, line_indent);
+            Item nested_list = parse_list_structure(parser, line_indent);
             if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
                 // Add nested list to the last list item if it exists
                 List* current_list = (List*)list;
@@ -922,20 +921,20 @@ static Item parse_list_structure(MarkupParser* parser, MarkBuilder* builder, int
 }
 
 // Parse list items (-, *, +, 1., 2., etc.) - Enhanced with nesting support
-static Item parse_list_item(MarkupParser* parser, MarkBuilder* builder, const char* line) {
+static Item parse_list_item(MarkupParser* parser, const char* line) {
     int base_indent = get_list_indentation(line);
-    return parse_list_structure(parser, builder, base_indent);
+    return parse_list_structure(parser, base_indent);
 }
 
 // Parse code blocks (```, ```, ~~~, etc.)
-static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* code = create_element(parser->input, "code");
+static Item parse_code_block(MarkupParser* parser, const char* line) {
+    Element* code = create_element(parser, "code");
     if (!code) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
     }
 
-    add_attribute_to_element(parser->input, code, "type", "block");
+    add_attribute_to_element(parser, code, "type", "block");
 
     // Extract language from fence line (```python, ~~~javascript, etc.)
     const char* fence = line;
@@ -958,19 +957,19 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
             // Check if this is an ASCII math block
             if (strcmp(lang, "asciimath") == 0 || strcmp(lang, "ascii-math") == 0) {
                 // Convert code block to math block
-                Element* math = create_element(parser->input, "math");
+                Element* math = create_element(parser, "math");
                 if (!math) {
                     parser->current_line++;
                     return (Item){.item = ITEM_ERROR};
                 }
 
-                add_attribute_to_element(parser->input, math, "type", "block");
-                add_attribute_to_element(parser->input, math, "flavor", "ascii");
+                add_attribute_to_element(parser, math, "type", "block");
+                add_attribute_to_element(parser, math, "flavor", "ascii");
 
                 parser->current_line++; // Skip opening fence
 
                 // Collect math content until closing fence
-                StringBuf* sb = parser->sb;
+                StringBuf* sb = parser->builder().stringBuf();
                 stringbuf_reset(sb);
 
                 while (parser->current_line < parser->line_count) {
@@ -991,8 +990,8 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
                 }
 
                 // Parse the math content using ASCII flavor
-                String* math_content_str = builder->createString(sb->str->chars, sb->length);
-                InputContext math_ctx(parser->input, math_content_str->chars, math_content_str->len);
+                String* math_content_str = parser->builder().createString(sb->str->chars, sb->length);
+                InputContext math_ctx(parser->input(), math_content_str->chars, math_content_str->len);
                 Item parsed_math = parse_math_content(math_ctx, math_content_str->chars, "ascii");
 
                 if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
@@ -1008,14 +1007,14 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
                 return (Item){.item = (uint64_t)math};
             }
 
-            add_attribute_to_element(parser->input, code, "language", lang);
+            add_attribute_to_element(parser, code, "language", lang);
         }
     }
 
     parser->current_line++; // Skip opening fence
 
     // Collect code content until closing fence
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -1036,7 +1035,7 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
     }
 
     // Create code content (no inline parsing for code blocks)
-    String* code_content = builder->createString(sb->str->chars, sb->length);
+    String* code_content = parser->builder().createString(sb->str->chars, sb->length);
     Item text_item = {.item = s2it(code_content)};
     list_push((List*)code, text_item);
     increment_element_content_length(code);
@@ -1045,8 +1044,8 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
 }
 
 // Parse horizontal divider/rule
-static Item parse_divider(MarkupParser* parser, MarkBuilder* builder) {
-    Element* hr = create_element(parser->input, "hr");
+static Item parse_divider(MarkupParser* parser) {
+    Element* hr = create_element(parser, "hr");
     if (!hr) {
         return (Item){.item = ITEM_ERROR};
     }
@@ -1055,8 +1054,8 @@ static Item parse_divider(MarkupParser* parser, MarkBuilder* builder) {
 }
 
 // Parse blockquote elements (> quoted text)
-static Item parse_blockquote(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* quote = create_element(parser->input, "blockquote");
+static Item parse_blockquote(MarkupParser* parser, const char* line) {
+    Element* quote = create_element(parser, "blockquote");
     if (!quote) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -1071,7 +1070,7 @@ static Item parse_blockquote(MarkupParser* parser, MarkBuilder* builder, const c
     }
 
     // Parse inline content for quote text
-    Item quote_content = parse_inline_spans(parser, builder, content);
+    Item quote_content = parse_inline_spans(parser, content);
     if (quote_content.item != ITEM_ERROR && quote_content.item != ITEM_UNDEFINED) {
         list_push((List*)quote, quote_content);
         increment_element_content_length(quote);
@@ -1082,14 +1081,14 @@ static Item parse_blockquote(MarkupParser* parser, MarkBuilder* builder, const c
 }
 
 // Parse math blocks ($$...$$)
-static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* math = create_element(parser->input, "math");
+static Item parse_math_block(MarkupParser* parser, const char* line) {
+    Element* math = create_element(parser, "math");
     if (!math) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
     }
 
-    add_attribute_to_element(parser->input, math, "type", "block");
+    add_attribute_to_element(parser, math, "type", "block");
 
     // Check if this is single-line block math ($$content$$)
     const char* pos = line;
@@ -1108,7 +1107,7 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
                 math_content[content_len] = '\0';
 
                 const char* math_flavor = detect_math_flavor(math_content);
-                InputContext math_ctx(parser->input, math_content, content_len);
+                InputContext math_ctx(parser->input(), math_content, content_len);
                 Item parsed_math = parse_math_content(math_ctx, math_content, math_flavor);
 
                 if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
@@ -1116,7 +1115,7 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
                     increment_element_content_length(math);
                 } else {
                     // Fallback to plain text if math parsing fails
-                    String* content_str = create_string(parser->input, math_content);
+                    String* content_str = create_string(parser, math_content);
                     Item text_item = {.item = s2it(content_str)};
                     list_push((List*)math, text_item);
                     increment_element_content_length(math);
@@ -1133,7 +1132,7 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
     parser->current_line++; // Skip opening $$
 
     // Collect math content until closing $$
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -1156,10 +1155,10 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
     }
 
     // Parse the math content using the math parser
-    String* math_content_str = builder->createString(sb->str->chars, sb->length);
+    String* math_content_str = parser->builder().createString(sb->str->chars, sb->length);
     const char* math_flavor = detect_math_flavor(math_content_str->chars);
 
-    InputContext math_ctx(parser->input, math_content_str->chars, math_content_str->len);
+    InputContext math_ctx(parser->input(), math_content_str->chars, math_content_str->len);
     Item parsed_math = parse_math_content(math_ctx, math_content_str->chars, math_flavor);
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
         list_push((List*)math, parsed_math);
@@ -1176,13 +1175,13 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
 
 // Phase 5: Enhanced table parsing with alignment and multi-line support
 // Phase 5: Enhanced table parsing with alignment and multi-line support
-static Item parse_table_structure(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_table_structure(MarkupParser* parser) {
     if (parser->current_line >= parser->line_count) {
         return (Item){.item = ITEM_ERROR};
     }
 
     // Create table element
-    Element* table = create_element(parser->input, "table");
+    Element* table = create_element(parser, "table");
     if (!table) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -1204,18 +1203,18 @@ static Item parse_table_structure(MarkupParser* parser, MarkBuilder* builder) {
 
     // Apply alignment to table if available
     if (alignment_spec) {
-        add_attribute_to_element(parser->input, table, "align", alignment_spec);
+        add_attribute_to_element(parser, table, "align", alignment_spec);
         free(alignment_spec);
         alignment_spec = NULL;
     }
 
     // Parse header row if present
     if (has_header) {
-        Element* thead = create_element(parser->input, "thead");
+        Element* thead = create_element(parser, "thead");
         if (thead) {
             // Parse the header row and convert cells to th elements
             const char* header_line = parser->lines[parser->current_line];
-            Element* header_row = create_element(parser->input, "tr");
+            Element* header_row = create_element(parser, "tr");
             if (header_row) {
                 // Parse header row cells manually and create th elements
                 const char* pos = header_line;
@@ -1242,10 +1241,10 @@ static Item parse_table_structure(MarkupParser* parser, MarkBuilder* builder) {
                     cell_text[cell_len] = '\0';
 
                     // Create table header cell
-                    Element* th_cell = create_element(parser->input, "th");
+                    Element* th_cell = create_element(parser, "th");
                     if (th_cell) {
                         // Parse cell content with enhanced formatting
-                        Item cell_content = parse_table_cell_content(parser, builder, cell_text);
+                        Item cell_content = parse_table_cell_content(parser, cell_text);
                         if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
                             list_push((List*)th_cell, cell_content);
                             increment_element_content_length(th_cell);
@@ -1280,7 +1279,7 @@ static Item parse_table_structure(MarkupParser* parser, MarkBuilder* builder) {
     }
 
     // Create tbody for data rows
-    Element* tbody = create_element(parser->input, "tbody");
+    Element* tbody = create_element(parser, "tbody");
     if (!tbody) {
         parser->current_line++;
         return (Item){.item = (uint64_t)table};
@@ -1294,7 +1293,7 @@ static Item parse_table_structure(MarkupParser* parser, MarkBuilder* builder) {
             break;
         }
 
-        Item row = parse_table_row(parser, builder, line);
+        Item row = parse_table_row(parser, line);
         if (row.item != ITEM_ERROR && row.item != ITEM_UNDEFINED) {
             list_push((List*)tbody, row);
             increment_element_content_length(tbody);
@@ -1405,7 +1404,7 @@ static char* parse_table_alignment(const char* line) {
 
 // Apply table alignment to table element
 static void apply_table_alignment(Element* table, const char* alignment_spec) {
-    // Note: We need parser->input to add attributes, so we'll handle this in the calling function
+    // Note: We need parser->input() to add attributes, so we'll handle this in the calling function
     // This function serves as a placeholder for potential future alignment processing
     (void)table;
     (void)alignment_spec;
@@ -1426,9 +1425,9 @@ static bool is_table_continuation(const char* line) {
 }
 
 // Parse table cell content with enhanced formatting support
-static Item parse_table_cell_content(MarkupParser* parser, MarkBuilder* builder, const char* cell_text) {
+static Item parse_table_cell_content(MarkupParser* parser, const char* cell_text) {
     if (!cell_text || !*cell_text) {
-        String* empty = create_string(parser->input, "");
+        String* empty = create_string(parser, "");
         return (Item){.item = s2it(empty)};
     }
 
@@ -1441,7 +1440,7 @@ static Item parse_table_cell_content(MarkupParser* parser, MarkBuilder* builder,
     size_t len = end - cell_text + 1;
     char* trimmed = (char*)malloc(len + 1);
     if (!trimmed) {
-        String* empty = create_string(parser->input, "");
+        String* empty = create_string(parser, "");
         return (Item){.item = s2it(empty)};
     }
 
@@ -1449,15 +1448,15 @@ static Item parse_table_cell_content(MarkupParser* parser, MarkBuilder* builder,
     trimmed[len] = '\0';
 
     // Parse inline content
-    Item result = parse_inline_spans(parser, builder, trimmed);
+    Item result = parse_inline_spans(parser, trimmed);
     free(trimmed);
 
     return result;
 }
 
 // Enhanced table row parsing (keep original function name for compatibility)
-static Item parse_table_row(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* row = create_element(parser->input, "tr");
+static Item parse_table_row(MarkupParser* parser, const char* line) {
+    Element* row = create_element(parser, "tr");
     if (!row) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -1488,10 +1487,10 @@ static Item parse_table_row(MarkupParser* parser, MarkBuilder* builder, const ch
         cell_text[cell_len] = '\0';
 
         // Create table cell
-        Element* cell = create_element(parser->input, "td");
+        Element* cell = create_element(parser, "td");
         if (cell) {
             // Parse cell content with enhanced formatting
-            Item cell_content = parse_table_cell_content(parser, builder, cell_text);
+            Item cell_content = parse_table_cell_content(parser, cell_text);
             if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
                 list_push((List*)cell, cell_content);
                 increment_element_content_length(cell);
@@ -1516,34 +1515,34 @@ static Item parse_table_row(MarkupParser* parser, MarkBuilder* builder, const ch
 }
 
 // Phase 2: Enhanced inline content parsing with spans
-static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const char* text) {
+static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     if (!text || !*text) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
     // For simple text without markup, return as string
     if (!strpbrk(text, "*_`[!~\\$:^{@'")) {
-        String* content = create_string(parser->input, text);
+        String* content = create_string(parser, text);
         return (Item){.item = s2it(content)};
     }
 
     // Create span container for mixed inline content
-    Element* span = create_element(parser->input, "span");
+    Element* span = create_element(parser, "span");
     if (!span) {
-        String* content = create_string(parser->input, text);
+        String* content = create_string(parser, text);
         return (Item){.item = s2it(content)};
     }
 
     // Parse inline elements
     const char* pos = text;
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
 
     while (*pos) {
         if (*pos == '*' || *pos == '_') {
             // Flush any accumulated text
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1551,7 +1550,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
 
             // Parse bold/italic
-            Item inline_item = parse_bold_italic(parser, builder, &pos);
+            Item inline_item = parse_bold_italic(parser, &pos);
             if (inline_item.item != ITEM_ERROR && inline_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, inline_item);
                 increment_element_content_length(span);
@@ -1560,14 +1559,14 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '`') {
             // Flush text and parse code span
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
                 stringbuf_reset(sb);
             }
 
-            Item code_item = parse_code_span(parser, builder, &pos);
+            Item code_item = parse_code_span(parser, &pos);
             if (code_item.item != ITEM_ERROR && code_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, code_item);
                 increment_element_content_length(span);
@@ -1576,7 +1575,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '[') {
             // Flush text first
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1585,7 +1584,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
 
             // MediaWiki-specific link parsing
             if (parser->config.format == MARKUP_WIKI && *(pos+1) == '[') {
-                Item wiki_link_item = parse_wiki_link(parser, builder, &pos);
+                Item wiki_link_item = parse_wiki_link(parser, &pos);
                 if (wiki_link_item.item != ITEM_ERROR && wiki_link_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, wiki_link_item);
                     increment_element_content_length(span);
@@ -1594,7 +1593,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
             // MediaWiki external link parsing
             if (parser->config.format == MARKUP_WIKI) {
-                Item wiki_external_item = parse_wiki_external_link(parser, builder, &pos);
+                Item wiki_external_item = parse_wiki_external_link(parser, &pos);
                 if (wiki_external_item.item != ITEM_ERROR && wiki_external_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, wiki_external_item);
                     increment_element_content_length(span);
@@ -1604,7 +1603,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
 
             // Phase 6: Check for footnote reference [^1] first
             if (*(pos+1) == '^') {
-                Item footnote_ref = parse_footnote_reference(parser, builder, &pos);
+                Item footnote_ref = parse_footnote_reference(parser, &pos);
                 if (footnote_ref.item != ITEM_ERROR && footnote_ref.item != ITEM_UNDEFINED) {
                     list_push((List*)span, footnote_ref);
                     increment_element_content_length(span);
@@ -1612,7 +1611,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
             // Phase 6: Check for citation [@key]
             else if (*(pos+1) == '@') {
-                Item citation = parse_citation(parser, builder, &pos);
+                Item citation = parse_citation(parser, &pos);
                 if (citation.item != ITEM_ERROR && citation.item != ITEM_UNDEFINED) {
                     list_push((List*)span, citation);
                     increment_element_content_length(span);
@@ -1620,7 +1619,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
             // Regular link parsing
             else {
-                Item link_item = parse_link(parser, builder, &pos);
+                Item link_item = parse_link(parser, &pos);
                 if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, link_item);
                     increment_element_content_length(span);
@@ -1630,7 +1629,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '\'' && parser->config.format == MARKUP_WIKI) {
             // Flush text and parse MediaWiki bold/italic
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1638,7 +1637,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
 
             const char* old_pos = pos;
-            Item wiki_format_item = parse_wiki_bold_italic(parser, builder, &pos);
+            Item wiki_format_item = parse_wiki_bold_italic(parser, &pos);
             if (wiki_format_item.item != ITEM_ERROR && wiki_format_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, wiki_format_item);
                 increment_element_content_length(span);
@@ -1650,15 +1649,15 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '!' && *(pos+1) == '[') {
             // Flush text and parse image
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
-                String* key = create_string(parser->input, "content");
+                String* key = create_string(parser, "content");
                 // Use builder to add attribute to existing element
-                builder->putToElement(span, key, text_item);
+                parser->builder().putToElement(span, key, text_item);
                 stringbuf_reset(sb);
             }
 
-            Item image_item = parse_image(parser, builder, &pos);
+            Item image_item = parse_image(parser, &pos);
             if (image_item.item != ITEM_ERROR && image_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, image_item);
                 increment_element_content_length(span);
@@ -1668,7 +1667,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '~' && *(pos+1) == '~') {
             // Flush text and parse strikethrough
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1676,7 +1675,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
 
             const char* old_pos = pos;
-            Item strikethrough_item = parse_strikethrough(parser, builder, &pos);
+            Item strikethrough_item = parse_strikethrough(parser, &pos);
             if (strikethrough_item.item != ITEM_ERROR && strikethrough_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, strikethrough_item);
                 increment_element_content_length(span);
@@ -1688,7 +1687,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '^') {
             // Flush text and parse superscript
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1696,7 +1695,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
 
             const char* old_pos = pos;
-            Item superscript_item = parse_superscript(parser, builder, &pos);
+            Item superscript_item = parse_superscript(parser, &pos);
             if (superscript_item.item != ITEM_ERROR && superscript_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, superscript_item);
                 increment_element_content_length(span);
@@ -1708,7 +1707,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '~' && *(pos+1) != '~') {
             // Flush text and parse subscript
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1716,7 +1715,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
 
             const char* old_pos = pos;
-            Item subscript_item = parse_subscript(parser, builder, &pos);
+            Item subscript_item = parse_subscript(parser, &pos);
             if (subscript_item.item != ITEM_ERROR && subscript_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, subscript_item);
                 increment_element_content_length(span);
@@ -1757,7 +1756,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
                         strncpy(before_prefix, sb->str->chars, before_prefix_len);
                         before_prefix[before_prefix_len] = '\0';
 
-                        String* text_content = create_string(parser->input, before_prefix);
+                        String* text_content = create_string(parser, before_prefix);
                         if (text_content) {
                             Item text_item = {.item = s2it(text_content)};
                             list_push((List*)span, text_item);
@@ -1778,7 +1777,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
                 const char* parse_pos = prefix_start;
 
                 // Try to parse ASCII math prefix
-                Item ascii_math_item = parse_ascii_math_prefix(parser, builder, &parse_pos);
+                Item ascii_math_item = parse_ascii_math_prefix(parser, &parse_pos);
                 if (ascii_math_item.item != ITEM_ERROR && ascii_math_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, ascii_math_item);
                     increment_element_content_length(span);
@@ -1792,7 +1791,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             } else {
                 // Regular colon handling - flush text and try emoji shortcode
                 if (sb->length > 0) {
-                    String* text_content = builder->createString(sb->str->chars, sb->length);
+                    String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                     Item text_item = {.item = s2it(text_content)};
                     list_push((List*)span, text_item);
                     increment_element_content_length(span);
@@ -1802,7 +1801,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
                 const char* old_pos = pos;
 
                 // Try emoji shortcode
-                Item emoji_item = parse_emoji_shortcode(parser, builder, &pos);
+                Item emoji_item = parse_emoji_shortcode(parser, &pos);
                 if (emoji_item.item != ITEM_ERROR && emoji_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, emoji_item);
                     increment_element_content_length(span);
@@ -1817,14 +1816,14 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '{' && *(pos+1) == '{') {
             // Flush text and parse wiki template
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
                 stringbuf_reset(sb);
             }
 
-            Item template_item = parse_wiki_template(parser, builder, &pos);
+            Item template_item = parse_wiki_template(parser, &pos);
             if (template_item.item != ITEM_ERROR && template_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, template_item);
                 increment_element_content_length(span);
@@ -1833,7 +1832,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
         else if (*pos == '$') {
             // Flush text and parse inline math
             if (sb->length > 0) {
-                String* text_content = builder->createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1841,7 +1840,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             }
 
             const char* old_pos = pos;
-            Item math_item = parse_inline_math(parser, builder, &pos);
+            Item math_item = parse_inline_math(parser, &pos);
             if (math_item.item != ITEM_ERROR && math_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, math_item);
                 increment_element_content_length(span);
@@ -1859,7 +1858,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
 
     // Flush any remaining text
     if (sb->length > 0) {
-        String* text_content = builder->createString(sb->str->chars, sb->length);
+        String* text_content = parser->builder().createString(sb->str->chars, sb->length);
         Item text_item = {.item = s2it(text_content)};
         list_push((List*)span, text_item);
         increment_element_content_length(span);
@@ -1867,7 +1866,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
 
     return (Item){.item = (uint64_t)span};
 }// Parse inline content with format-specific enhancements
-static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, const char* text) {
+static Item parse_inline_content(MarkupParser* parser, const char* text) {
     if (!text || !*text) {
         return (Item){.item = ITEM_UNDEFINED};
     }
@@ -1877,16 +1876,16 @@ static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, con
         // Check for double backticks literal text
         if (text[0] == '`' && text[1] == '`') {
             const char* pos = text;
-            Item rst_literal = parse_rst_double_backtick_literal(parser, builder, &pos);
+            Item rst_literal = parse_rst_double_backtick_literal(parser, &pos);
             if (rst_literal.item != ITEM_UNDEFINED) {
                 // If there's more text after the literal, create a span
                 if (*pos) {
-                    Element* span = create_element(parser->input, "span");
+                    Element* span = create_element(parser, "span");
                     if (span) {
                         list_push((List*)span, rst_literal);
                         increment_element_content_length(span);
 
-                        Item remaining = parse_inline_content(parser, builder, pos);
+                        Item remaining = parse_inline_content(parser, pos);
                         if (remaining.item != ITEM_UNDEFINED) {
                             list_push((List*)span, remaining);
                             increment_element_content_length(span);
@@ -1909,11 +1908,11 @@ static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, con
                 strncpy(prefix, text, prefix_len);
                 prefix[prefix_len] = '\0';
 
-                Element* span = create_element(parser->input, "span");
+                Element* span = create_element(parser, "span");
                 if (span) {
                     // Parse prefix normally
                     if (strlen(prefix) > 0) {
-                        Item prefix_item = parse_inline_spans(parser, builder, prefix);
+                        Item prefix_item = parse_inline_spans(parser, prefix);
                         if (prefix_item.item != ITEM_UNDEFINED) {
                             list_push((List*)span, prefix_item);
                             increment_element_content_length(span);
@@ -1922,7 +1921,7 @@ static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, con
 
                     // Parse the reference
                     const char* ref_pos = underscore_pos;
-                    Item ref_item = parse_rst_trailing_underscore_reference(parser, builder, &ref_pos);
+                    Item ref_item = parse_rst_trailing_underscore_reference(parser, &ref_pos);
                     if (ref_item.item != ITEM_UNDEFINED) {
                         list_push((List*)span, ref_item);
                         increment_element_content_length(span);
@@ -1930,7 +1929,7 @@ static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, con
 
                     // Parse any remaining text
                     if (*ref_pos) {
-                        Item remaining = parse_inline_content(parser, builder, ref_pos);
+                        Item remaining = parse_inline_content(parser, ref_pos);
                         if (remaining.item != ITEM_UNDEFINED) {
                             list_push((List*)span, remaining);
                             increment_element_content_length(span);
@@ -1947,15 +1946,15 @@ static Item parse_inline_content(MarkupParser* parser, MarkBuilder* builder, con
 
     // For AsciiDoc format, handle AsciiDoc-specific inline elements
     if (parser->config.format == MARKUP_ASCIIDOC) {
-        return parse_asciidoc_inline(parser, builder, text);
+        return parse_asciidoc_inline(parser, text);
     }
 
     // Default to standard inline spans parsing
-    return parse_inline_spans(parser, builder, text);
+    return parse_inline_spans(parser, text);
 }
 
 // Parse bold and italic text (**bold**, *italic*, __bold__, _italic_)
-static Item parse_bold_italic(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_bold_italic(MarkupParser* parser, const char** text) {
     const char* start = *text;
     char marker = *start;  // * or _
     int count = 0;
@@ -2004,9 +2003,9 @@ static Item parse_bold_italic(MarkupParser* parser, MarkBuilder* builder, const 
     // Create appropriate element
     Element* elem;
     if (count >= 2) {
-        elem = create_element(parser->input, "strong");
+        elem = create_element(parser, "strong");
     } else {
-        elem = create_element(parser->input, "em");
+        elem = create_element(parser, "em");
     }
 
     if (!elem) {
@@ -2022,7 +2021,7 @@ static Item parse_bold_italic(MarkupParser* parser, MarkBuilder* builder, const 
         content[content_len] = '\0';
 
         // Recursively parse inline content
-        Item inner_content = parse_inline_spans(parser, builder, content);
+        Item inner_content = parse_inline_spans(parser, content);
         if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
             list_push((List*)elem, inner_content);
             increment_element_content_length(elem);
@@ -2036,7 +2035,7 @@ static Item parse_bold_italic(MarkupParser* parser, MarkBuilder* builder, const 
 }
 
 // Parse code spans (`code`, ``code``)
-static Item parse_code_span(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_code_span(MarkupParser* parser, const char** text) {
     const char* start = *text;
     int backticks = 0;
 
@@ -2073,13 +2072,13 @@ static Item parse_code_span(MarkupParser* parser, MarkBuilder* builder, const ch
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* code = create_element(parser->input, "code");
+    Element* code = create_element(parser, "code");
     if (!code) {
         *text = end + backticks;
         return (Item){.item = ITEM_ERROR};
     }
 
-    add_attribute_to_element(parser->input, code, "type", "inline");
+    add_attribute_to_element(parser, code, "type", "inline");
 
     // Extract and add code content (no further inline parsing)
     size_t content_len = end - start;
@@ -2088,7 +2087,7 @@ static Item parse_code_span(MarkupParser* parser, MarkBuilder* builder, const ch
         strncpy(content, start, content_len);
         content[content_len] = '\0';
 
-        String* code_text = create_string(parser->input, content);
+        String* code_text = create_string(parser, content);
         Item code_item = {.item = s2it(code_text)};
         list_push((List*)code, code_item);
         increment_element_content_length(code);
@@ -2101,7 +2100,7 @@ static Item parse_code_span(MarkupParser* parser, MarkBuilder* builder, const ch
 }
 
 // Parse links ([text](url))
-static Item parse_link(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_link(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (*pos != '[') {
         (*text)++;
@@ -2152,7 +2151,7 @@ static Item parse_link(MarkupParser* parser, MarkBuilder* builder, const char** 
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* link = create_element(parser->input, "a");
+    Element* link = create_element(parser, "a");
     if (!link) {
         *text = pos;
         return (Item){.item = ITEM_ERROR};
@@ -2164,7 +2163,7 @@ static Item parse_link(MarkupParser* parser, MarkBuilder* builder, const char** 
     if (url) {
         strncpy(url, url_start, url_len);
         url[url_len] = '\0';
-        add_attribute_to_element(parser->input, link, "href", url);
+        add_attribute_to_element(parser, link, "href", url);
         free(url);
     }
 
@@ -2176,7 +2175,7 @@ static Item parse_link(MarkupParser* parser, MarkBuilder* builder, const char** 
         link_text[text_len] = '\0';
 
         // Parse inline content recursively
-        Item inner_content = parse_inline_spans(parser, builder, link_text);
+        Item inner_content = parse_inline_spans(parser, link_text);
         if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
             list_push((List*)link, inner_content);
             increment_element_content_length(link);
@@ -2190,7 +2189,7 @@ static Item parse_link(MarkupParser* parser, MarkBuilder* builder, const char** 
 }
 
 // Parse images (![alt](src))
-static Item parse_image(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_image(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (*pos != '!' || *(pos+1) != '[') {
         (*text)++;
@@ -2231,7 +2230,7 @@ static Item parse_image(MarkupParser* parser, MarkBuilder* builder, const char**
     src_end = pos;
     pos++; // Skip )
 
-    Element* img = create_element(parser->input, "img");
+    Element* img = create_element(parser, "img");
     if (!img) {
         *text = pos;
         return (Item){.item = ITEM_ERROR};
@@ -2243,7 +2242,7 @@ static Item parse_image(MarkupParser* parser, MarkBuilder* builder, const char**
     if (src) {
         strncpy(src, src_start, src_len);
         src[src_len] = '\0';
-        add_attribute_to_element(parser->input, img, "src", src);
+        add_attribute_to_element(parser, img, "src", src);
         free(src);
     }
 
@@ -2253,7 +2252,7 @@ static Item parse_image(MarkupParser* parser, MarkBuilder* builder, const char**
     if (alt) {
         strncpy(alt, alt_start, alt_len);
         alt[alt_len] = '\0';
-        add_attribute_to_element(parser->input, img, "alt", alt);
+        add_attribute_to_element(parser, img, "alt", alt);
         free(alt);
     }
 
@@ -2755,7 +2754,7 @@ static bool is_table_row(const char* line) {
 // Phase 4: Advanced inline element parsers
 
 // Parse strikethrough text (~~text~~)
-static Item parse_strikethrough(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_strikethrough(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
     // Check for opening ~~
@@ -2784,7 +2783,7 @@ static Item parse_strikethrough(MarkupParser* parser, MarkBuilder* builder, cons
     }
 
     // Create strikethrough element
-    Element* s_elem = create_element(parser->input, "s");
+    Element* s_elem = create_element(parser, "s");
     if (!s_elem) {
         return (Item){.item = ITEM_ERROR};
     }
@@ -2798,7 +2797,7 @@ static Item parse_strikethrough(MarkupParser* parser, MarkBuilder* builder, cons
     content[content_len] = '\0';
 
     // Add content as simple string (avoid recursive parsing for now to prevent crashes)
-    String* content_str = create_string(parser->input, content);
+    String* content_str = create_string(parser, content);
     if (content_str) {
         Item content_item = {.item = s2it(content_str)};
         list_push((List*)s_elem, content_item);
@@ -2812,7 +2811,7 @@ static Item parse_strikethrough(MarkupParser* parser, MarkBuilder* builder, cons
 }
 
 // Parse superscript (^text^)
-static Item parse_superscript(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_superscript(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
     // Check for opening ^
@@ -2837,7 +2836,7 @@ static Item parse_superscript(MarkupParser* parser, MarkBuilder* builder, const 
     size_t content_len = pos - content_start;
 
     // Create superscript element
-    Element* sup_elem = create_element(parser->input, "sup");
+    Element* sup_elem = create_element(parser, "sup");
     if (!sup_elem) {
         return (Item){.item = ITEM_ERROR};
     }
@@ -2851,7 +2850,7 @@ static Item parse_superscript(MarkupParser* parser, MarkBuilder* builder, const 
     content[content_len] = '\0';
 
     // Add content as string (superscripts are usually simple)
-    String* content_str = create_string(parser->input, content);
+    String* content_str = create_string(parser, content);
     if (content_str) {
         Item text_item = {.item = s2it(content_str)};
         list_push((List*)sup_elem, text_item);
@@ -2865,7 +2864,7 @@ static Item parse_superscript(MarkupParser* parser, MarkBuilder* builder, const 
 }
 
 // Parse subscript (~text~)
-static Item parse_subscript(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_subscript(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
     // Check for opening ~
@@ -2890,7 +2889,7 @@ static Item parse_subscript(MarkupParser* parser, MarkBuilder* builder, const ch
     size_t content_len = pos - content_start;
 
     // Create subscript element
-    Element* sub_elem = create_element(parser->input, "sub");
+    Element* sub_elem = create_element(parser, "sub");
     if (!sub_elem) {
         return (Item){.item = ITEM_ERROR};
     }
@@ -2904,7 +2903,7 @@ static Item parse_subscript(MarkupParser* parser, MarkBuilder* builder, const ch
     content[content_len] = '\0';
 
     // Add content as string (subscripts are usually simple)
-    String* content_str = create_string(parser->input, content);
+    String* content_str = create_string(parser, content);
     if (content_str) {
         Item text_item = {.item = s2it(content_str)};
         list_push((List*)sub_elem, text_item);
@@ -3474,7 +3473,7 @@ static const struct {
 };
 
 // Parse emoji shortcode (:emoji:)
-static Item parse_emoji_shortcode(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
     // Check for opening :
@@ -3521,13 +3520,13 @@ static Item parse_emoji_shortcode(MarkupParser* parser, MarkBuilder* builder, co
     }
 
     // Create emoji element
-    Element* emoji_elem = create_element(parser->input, "emoji");
+    Element* emoji_elem = create_element(parser, "emoji");
     if (!emoji_elem) {
         return (Item){.item = ITEM_ERROR};
     }
 
     // Add emoji character as content
-    String* emoji_str = create_string(parser->input, emoji_char);
+    String* emoji_str = create_string(parser, emoji_char);
     if (emoji_str) {
         Item emoji_item = {.item = s2it(emoji_str)};
         list_push((List*)emoji_elem, emoji_item);
@@ -3540,7 +3539,7 @@ static Item parse_emoji_shortcode(MarkupParser* parser, MarkBuilder* builder, co
 }
 
 // Parse inline math ($expression$)
-static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_inline_math(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
     // Check for opening $
@@ -3565,13 +3564,13 @@ static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const 
     size_t content_len = pos - content_start;
 
     // Create math element
-    Element* math_elem = create_element(parser->input, "math");
+    Element* math_elem = create_element(parser, "math");
     if (!math_elem) {
         return (Item){.item = ITEM_ERROR};
     }
 
     // Add type attribute for inline math
-    add_attribute_to_element(parser->input, math_elem, "type", "inline");
+    add_attribute_to_element(parser, math_elem, "type", "inline");
 
     // Create content string with extra padding to prevent buffer overflow
     char* content = (char*)malloc(content_len + 16);  // Add 16 bytes padding
@@ -3585,7 +3584,7 @@ static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const 
 
     // Parse the math content using the math parser
     const char* math_flavor = detect_math_flavor(content);
-    InputContext math_ctx(parser->input, content, content_len);
+    InputContext math_ctx(parser->input(), content, content_len);
     Item parsed_math = parse_math_content(math_ctx, content, math_flavor);
 
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
@@ -3596,7 +3595,7 @@ static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const 
     } else {
         // Fallback to plain text if math parsing fails
         // This preserves the original LaTeX content
-        String* math_str = create_string(parser->input, content);
+        String* math_str = create_string(parser, content);
         if (math_str) {
             Item math_item = {.item = s2it(math_str)};
             list_push((List*)math_elem, math_item);
@@ -3611,7 +3610,7 @@ static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const 
 }
 
 // Parse ASCII math with prefix (asciimath:: or AM::)
-static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     const char* start = *text;
     printf("*** DEBUG: ENTERING parse_ascii_math_prefix with text: '%.20s' ***\n", start);
 
@@ -3661,20 +3660,20 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, 
     printf("DEBUG: Content length: %zu\n", content_len);
 
     // Create math element
-    Element* math_elem = create_element(parser->input, "math");
+    Element* math_elem = create_element(parser, "math");
     if (!math_elem) {
         return (Item){.item = ITEM_ERROR};
     }
 
     // Add type attribute for ASCII math
-    add_attribute_to_element(parser->input, math_elem, "type", "ascii");
+    add_attribute_to_element(parser, math_elem, "type", "ascii");
     // Set flavor based on the prefix used
     if (is_am_prefix) {
         printf("DEBUG: Setting flavor to 'AM' for AM:: prefix\n");
-        add_attribute_to_element(parser->input, math_elem, "flavor", "AM");
+        add_attribute_to_element(parser, math_elem, "flavor", "AM");
     } else {
         printf("DEBUG: Setting flavor to 'ascii' for asciimath:: prefix\n");
-        add_attribute_to_element(parser->input, math_elem, "flavor", "ascii");
+        add_attribute_to_element(parser, math_elem, "flavor", "ascii");
     }
 
     // Create content string
@@ -3688,7 +3687,7 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, 
     printf("DEBUG: Extracted content: '%s'\n", content);
 
     // Parse the math content using ASCII flavor
-    InputContext math_ctx(parser->input, content, content_len);
+    InputContext math_ctx(parser->input(), content, content_len);
     Item parsed_math = parse_math_content(math_ctx, content, "ascii");
     printf("DEBUG: Math parsing result: %s\n",
            (parsed_math.item == ITEM_ERROR) ? "ERROR" :
@@ -3699,7 +3698,7 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, 
         increment_element_content_length(math_elem);
     } else {
         // Fallback to plain text if math parsing fails
-        String* math_str = create_string(parser->input, content);
+        String* math_str = create_string(parser, content);
         if (math_str) {
             Item math_item = {.item = s2it(math_str)};
             list_push((List*)math_elem, math_item);
@@ -3744,8 +3743,8 @@ static bool is_footnote_definition(const char* line) {
 }
 
 // Parse footnote definition ([^1]: This is a footnote)
-static Item parse_footnote_definition(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* footnote = create_element(parser->input, "footnote");
+static Item parse_footnote_definition(MarkupParser* parser, const char* line) {
+    Element* footnote = create_element(parser, "footnote");
     if (!footnote) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -3764,7 +3763,7 @@ static Item parse_footnote_definition(MarkupParser* parser, MarkBuilder* builder
     if (id) {
         strncpy(id, id_start, id_len);
         id[id_len] = '\0';
-        add_attribute_to_element(parser->input, footnote, "id", id);
+        add_attribute_to_element(parser, footnote, "id", id);
         free(id);
     }
 
@@ -3773,7 +3772,7 @@ static Item parse_footnote_definition(MarkupParser* parser, MarkBuilder* builder
     skip_whitespace(&pos);
 
     if (*pos) {
-        Item content = parse_inline_spans(parser, builder, pos);
+        Item content = parse_inline_spans(parser, pos);
         if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
             list_push((List*)footnote, content);
             increment_element_content_length(footnote);
@@ -3785,7 +3784,7 @@ static Item parse_footnote_definition(MarkupParser* parser, MarkBuilder* builder
 }
 
 // Parse footnote reference ([^1])
-static Item parse_footnote_reference(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_footnote_reference(MarkupParser* parser, const char** text) {
     const char* pos = *text;
 
     // Check for [^
@@ -3803,7 +3802,7 @@ static Item parse_footnote_reference(MarkupParser* parser, MarkBuilder* builder,
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* ref = create_element(parser->input, "footnote-ref");
+    Element* ref = create_element(parser, "footnote-ref");
     if (!ref) {
         *text = pos + 1;
         return (Item){.item = ITEM_ERROR};
@@ -3815,7 +3814,7 @@ static Item parse_footnote_reference(MarkupParser* parser, MarkBuilder* builder,
     if (id) {
         strncpy(id, id_start, id_len);
         id[id_len] = '\0';
-        add_attribute_to_element(parser->input, ref, "ref", id);
+        add_attribute_to_element(parser, ref, "ref", id);
         free(id);
     }
 
@@ -3824,7 +3823,7 @@ static Item parse_footnote_reference(MarkupParser* parser, MarkBuilder* builder,
 }
 
 // Parse citations [@key] or [@key, p. 123]
-static Item parse_citation(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_citation(MarkupParser* parser, const char** text) {
     const char* pos = *text;
 
     // Check for [@
@@ -3842,7 +3841,7 @@ static Item parse_citation(MarkupParser* parser, MarkBuilder* builder, const cha
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* citation = create_element(parser->input, "citation");
+    Element* citation = create_element(parser, "citation");
     if (!citation) {
         *text = pos;
         return (Item){.item = ITEM_ERROR};
@@ -3854,7 +3853,7 @@ static Item parse_citation(MarkupParser* parser, MarkBuilder* builder, const cha
     if (key) {
         strncpy(key, key_start, key_len);
         key[key_len] = '\0';
-        add_attribute_to_element(parser->input, citation, "key", key);
+        add_attribute_to_element(parser, citation, "key", key);
         free(key);
     }
 
@@ -3875,7 +3874,7 @@ static Item parse_citation(MarkupParser* parser, MarkBuilder* builder, const cha
             if (info) {
                 strncpy(info, info_start, info_len);
                 info[info_len] = '\0';
-                add_attribute_to_element(parser->input, citation, "info", info);
+                add_attribute_to_element(parser, citation, "info", info);
                 free(info);
             }
         }
@@ -3909,8 +3908,8 @@ static bool is_rst_directive(MarkupParser* parser, const char* line) {
 }
 
 // Parse RST directive (.. code-block:: python) - Enhanced for RST format
-static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* directive = create_element(parser->input, "directive");
+static Item parse_rst_directive(MarkupParser* parser, const char* line) {
+    Element* directive = create_element(parser, "directive");
     if (!directive) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -3929,23 +3928,23 @@ static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, cons
     if (name) {
         strncpy(name, name_start, name_len);
         name[name_len] = '\0';
-        add_attribute_to_element(parser->input, directive, "type", name);
+        add_attribute_to_element(parser, directive, "type", name);
 
         // Add RST-specific attributes based on directive type
         if (strcmp(name, "code-block") == 0 || strcmp(name, "code") == 0) {
-            add_attribute_to_element(parser->input, directive, "category", "code");
+            add_attribute_to_element(parser, directive, "category", "code");
         } else if (strcmp(name, "note") == 0 || strcmp(name, "warning") == 0 ||
                    strcmp(name, "danger") == 0 || strcmp(name, "attention") == 0 ||
                    strcmp(name, "caution") == 0 || strcmp(name, "error") == 0 ||
                    strcmp(name, "hint") == 0 || strcmp(name, "important") == 0 ||
                    strcmp(name, "tip") == 0) {
-            add_attribute_to_element(parser->input, directive, "category", "admonition");
+            add_attribute_to_element(parser, directive, "category", "admonition");
         } else if (strcmp(name, "figure") == 0 || strcmp(name, "image") == 0) {
-            add_attribute_to_element(parser->input, directive, "category", "media");
+            add_attribute_to_element(parser, directive, "category", "media");
         } else if (strcmp(name, "toctree") == 0 || strcmp(name, "contents") == 0) {
-            add_attribute_to_element(parser->input, directive, "category", "structure");
+            add_attribute_to_element(parser, directive, "category", "structure");
         } else {
-            add_attribute_to_element(parser->input, directive, "category", "generic");
+            add_attribute_to_element(parser, directive, "category", "generic");
         }
 
         free(name);
@@ -3957,7 +3956,7 @@ static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, cons
         skip_whitespace(&pos);
 
         if (*pos) {
-            add_attribute_to_element(parser->input, directive, "args", pos);
+            add_attribute_to_element(parser, directive, "args", pos);
         }
     }
 
@@ -3982,7 +3981,7 @@ static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, cons
                     const char* option_value = option_end + 1;
                     skip_whitespace(&option_value);
 
-                    add_attribute_to_element(parser->input, directive, option_name,
+                    add_attribute_to_element(parser, directive, option_name,
                                            *option_value ? option_value : "true");
                     free(option_name);
                 }
@@ -3994,7 +3993,7 @@ static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, cons
     }
 
     // Parse directive content (indented lines)
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -4039,8 +4038,8 @@ static bool is_org_block(const char* line) {
 }
 
 // Parse Org block (#+BEGIN_SRC python ... #+END_SRC)
-static Item parse_org_block(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* org_block = create_element(parser->input, "org-block");
+static Item parse_org_block(MarkupParser* parser, const char* line) {
+    Element* org_block = create_element(parser, "org-block");
     if (!org_block) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -4059,14 +4058,14 @@ static Item parse_org_block(MarkupParser* parser, MarkBuilder* builder, const ch
     if (type) {
         strncpy(type, type_start, type_len);
         type[type_len] = '\0';
-        add_attribute_to_element(parser->input, org_block, "type", type);
+        add_attribute_to_element(parser, org_block, "type", type);
         free(type);
     }
 
     // Parse block arguments
     skip_whitespace(&pos);
     if (*pos) {
-        add_attribute_to_element(parser->input, org_block, "args", pos);
+        add_attribute_to_element(parser, org_block, "args", pos);
     }
 
     parser->current_line++;
@@ -4076,7 +4075,7 @@ static Item parse_org_block(MarkupParser* parser, MarkBuilder* builder, const ch
     sprintf(end_marker, "#+END_%.*s", (int)type_len, type_start);
 
     // Collect block content until end marker
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -4141,7 +4140,7 @@ static void parse_yaml_line(MarkupParser* parser, const char* line, Element* met
     }
 
     // Extract key
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
     const char* key_start = line;
     while (key_start < colon) {
@@ -4190,22 +4189,22 @@ static void parse_yaml_line(MarkupParser* parser, const char* line, Element* met
 
     // Add as attribute to metadata element
     if (key && key->len > 0 && value && value->len > 0) {
-        add_attribute_to_element(parser->input, metadata, key->chars, value->chars);
+        add_attribute_to_element(parser, metadata, key->chars, value->chars);
     }
 }
 
 // Parse YAML frontmatter (---)
-static Item parse_yaml_frontmatter(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_yaml_frontmatter(MarkupParser* parser) {
     if (!has_yaml_frontmatter(parser)) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* metadata = create_element(parser->input, "metadata");
+    Element* metadata = create_element(parser, "metadata");
     if (!metadata) {
         return (Item){.item = ITEM_ERROR};
     }
 
-    add_attribute_to_element(parser->input, metadata, "type", "yaml");
+    add_attribute_to_element(parser, metadata, "type", "yaml");
 
     parser->current_line++; // Skip opening ---
 
@@ -4246,17 +4245,17 @@ static bool has_org_properties(MarkupParser* parser) {
 }
 
 // Parse Org document properties (#+TITLE:, #+AUTHOR:, etc.)
-static Item parse_org_properties(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_org_properties(MarkupParser* parser) {
     if (!has_org_properties(parser)) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* properties = create_element(parser->input, "metadata");
+    Element* properties = create_element(parser, "metadata");
     if (!properties) {
         return (Item){.item = ITEM_ERROR};
     }
 
-    add_attribute_to_element(parser->input, properties, "type", "org");
+    add_attribute_to_element(parser, properties, "type", "org");
 
     // Parse property lines
     while (parser->current_line < parser->line_count) {
@@ -4295,7 +4294,7 @@ static Item parse_org_properties(MarkupParser* parser, MarkBuilder* builder) {
 
             // Add property as attribute
             if (*pos) {
-                add_attribute_to_element(parser->input, properties, key, pos);
+                add_attribute_to_element(parser, properties, key, pos);
             }
 
             free(key);
@@ -4383,17 +4382,17 @@ static bool is_wiki_horizontal_rule(const char* line) {
 }
 
 // MediaWiki-specific block parsers
-static Item parse_wiki_table(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_wiki_table(MarkupParser* parser) {
     const char* line = parser->lines[parser->current_line];
     if (!is_wiki_table_start(line)) return (Item){.item = ITEM_UNDEFINED};
 
     // Create table element
-    Element* table = create_element(parser->input, "table");
+    Element* table = create_element(parser, "table");
     if (!table) return (Item){.item = ITEM_ERROR};
 
     parser->current_line++; // Skip {|
 
-    Element* tbody = create_element(parser->input, "tbody");
+    Element* tbody = create_element(parser, "tbody");
     if (!tbody) return (Item){.item = (uint64_t)table};
 
     Element* current_row = NULL;
@@ -4415,11 +4414,11 @@ static Item parse_wiki_table(MarkupParser* parser, MarkBuilder* builder) {
                 list_push((List*)tbody, (Item){.item = (uint64_t)current_row});
                 increment_element_content_length(tbody);
             }
-            current_row = create_element(parser->input, "tr");
+            current_row = create_element(parser, "tr");
         } else if (is_wiki_table_row(line)) {
             // Table cell
             if (!current_row) {
-                current_row = create_element(parser->input, "tr");
+                current_row = create_element(parser, "tr");
             }
 
             if (current_row) {
@@ -4427,13 +4426,13 @@ static Item parse_wiki_table(MarkupParser* parser, MarkBuilder* builder) {
                 const char* cell_content = trimmed + 1;
                 while (*cell_content == ' ') cell_content++;
 
-                Element* cell = create_element(parser->input, "td");
+                Element* cell = create_element(parser, "td");
                 if (cell) {
                     if (strlen(cell_content) > 0) {
                         // Wrap cell content in paragraph for proper block structure
-                        Element* paragraph = create_element(parser->input, "p");
+                        Element* paragraph = create_element(parser, "p");
                         if (paragraph) {
-                            Item content = parse_inline_spans(parser, builder, cell_content);
+                            Item content = parse_inline_spans(parser, cell_content);
                             if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
                                 list_push((List*)paragraph, content);
                                 increment_element_content_length(paragraph);
@@ -4471,7 +4470,7 @@ static Item parse_wiki_table(MarkupParser* parser, MarkBuilder* builder) {
     return (Item){.item = (uint64_t)table};
 }
 
-static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_wiki_list(MarkupParser* parser) {
     const char* line = parser->lines[parser->current_line];
     char marker;
     int level;
@@ -4490,7 +4489,7 @@ static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder) {
         default: return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* list = create_element(parser->input, list_tag);
+    Element* list = create_element(parser, list_tag);
     if (!list) return (Item){.item = ITEM_ERROR};
 
     while (parser->current_line < parser->line_count) {
@@ -4512,7 +4511,7 @@ static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder) {
         const char* item_tag = (marker == ':' || marker == ';') ? "dd" : "li";
         if (marker == ';') item_tag = "dt"; // Definition term
 
-        Element* list_item = create_element(parser->input, item_tag);
+        Element* list_item = create_element(parser, item_tag);
         if (!list_item) break;
 
         // Extract item content (skip markers and space)
@@ -4523,9 +4522,9 @@ static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder) {
         if (content && strlen(content) > 0) {
             if (marker == '*' || marker == '#') {
                 // Regular lists need paragraph wrapper
-                Element* paragraph = create_element(parser->input, "p");
+                Element* paragraph = create_element(parser, "p");
                 if (paragraph) {
-                    Item text_content = parse_inline_spans(parser, builder, content);
+                    Item text_content = parse_inline_spans(parser, content);
                     if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
                         list_push((List*)paragraph, text_content);
                         increment_element_content_length(paragraph);
@@ -4535,7 +4534,7 @@ static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder) {
                 }
             } else {
                 // Definition lists can have direct content
-                Item text_content = parse_inline_spans(parser, builder, content);
+                Item text_content = parse_inline_spans(parser, content);
                 if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
                     list_push((List*)list_item, text_content);
                     increment_element_content_length(list_item);
@@ -4554,7 +4553,7 @@ static Item parse_wiki_list(MarkupParser* parser, MarkBuilder* builder) {
 }
 
 // MediaWiki-specific inline parsers
-static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_wiki_link(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (pos[0] != '[' || pos[1] != '[') return (Item){.item = ITEM_UNDEFINED};
 
@@ -4588,7 +4587,7 @@ static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const ch
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* link_elem = create_element(parser->input, "a");
+    Element* link_elem = create_element(parser, "a");
     if (!link_elem) return (Item){.item = ITEM_ERROR};
 
     // Extract link target
@@ -4596,7 +4595,7 @@ static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const ch
     char* link_target = (char*)malloc(link_len + 1);
     strncpy(link_target, link_start, link_len);
     link_target[link_len] = '\0';
-    add_attribute_to_element(parser->input, link_elem, "href", link_target);
+    add_attribute_to_element(parser, link_elem, "href", link_target);
 
     // Extract display text (or use link target)
     char* display_text;
@@ -4610,7 +4609,7 @@ static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const ch
     }
 
     if (strlen(display_text) > 0) {
-        String* text_str = create_string(parser->input, display_text);
+        String* text_str = create_string(parser, display_text);
         if (text_str) {
             list_push((List*)link_elem, (Item){.item = s2it(text_str)});
             increment_element_content_length(link_elem);
@@ -4623,7 +4622,7 @@ static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const ch
     return (Item){.item = (uint64_t)link_elem};
 }
 
-static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_wiki_external_link(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (*pos != '[') return (Item){.item = ITEM_UNDEFINED};
 
@@ -4657,7 +4656,7 @@ static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder,
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* link_elem = create_element(parser->input, "a");
+    Element* link_elem = create_element(parser, "a");
     if (!link_elem) return (Item){.item = ITEM_ERROR};
 
     // Extract URL
@@ -4665,7 +4664,7 @@ static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder,
     char* url = (char*)malloc(url_len + 1);
     strncpy(url, url_start, url_len);
     url[url_len] = '\0';
-    add_attribute_to_element(parser->input, link_elem, "href", url);
+    add_attribute_to_element(parser, link_elem, "href", url);
 
     // Extract display text (or use URL)
     char* display_text;
@@ -4679,7 +4678,7 @@ static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder,
     }
 
     if (strlen(display_text) > 0) {
-        String* text_str = create_string(parser->input, display_text);
+        String* text_str = create_string(parser, display_text);
         if (text_str) {
             list_push((List*)link_elem, (Item){.item = s2it(text_str)});
             increment_element_content_length(link_elem);
@@ -4692,7 +4691,7 @@ static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder,
     return (Item){.item = (uint64_t)link_elem};
 }
 
-static Item parse_wiki_bold_italic(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
     const char* pos = *text;
     if (*pos != '\'') return (Item){.item = ITEM_UNDEFINED};
 
@@ -4750,7 +4749,7 @@ static Item parse_wiki_bold_italic(MarkupParser* parser, MarkBuilder* builder, c
         tag_name = "em"; // Italic
     }
 
-    Element* format_elem = create_element(parser->input, tag_name);
+    Element* format_elem = create_element(parser, tag_name);
     if (!format_elem) return (Item){.item = ITEM_ERROR};
 
     // Extract content
@@ -4764,7 +4763,7 @@ static Item parse_wiki_bold_italic(MarkupParser* parser, MarkBuilder* builder, c
     content[content_len] = '\0';
 
     if (strlen(content) > 0) {
-        String* text_str = create_string(parser->input, content);
+        String* text_str = create_string(parser, content);
         if (text_str) {
             list_push((List*)format_elem, (Item){.item = s2it(text_str)});
             increment_element_content_length(format_elem);
@@ -4777,7 +4776,7 @@ static Item parse_wiki_bold_italic(MarkupParser* parser, MarkBuilder* builder, c
 }
 
 // Parse wiki template ({{template|arg1|arg2}})
-static Item parse_wiki_template(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_wiki_template(MarkupParser* parser, const char** text) {
     const char* pos = *text;
 
     // Check for {{
@@ -4823,7 +4822,7 @@ static Item parse_wiki_template(MarkupParser* parser, MarkBuilder* builder, cons
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* template_elem = create_element(parser->input, "wiki-template");
+    Element* template_elem = create_element(parser, "wiki-template");
     if (!template_elem) {
         *text = pos;
         return (Item){.item = ITEM_ERROR};
@@ -4840,10 +4839,10 @@ static Item parse_wiki_template(MarkupParser* parser, MarkBuilder* builder, cons
         char* pipe_pos = strchr(content, '|');
         if (pipe_pos) {
             *pipe_pos = '\0';
-            add_attribute_to_element(parser->input, template_elem, "name", content);
-            add_attribute_to_element(parser->input, template_elem, "args", pipe_pos + 1);
+            add_attribute_to_element(parser, template_elem, "name", content);
+            add_attribute_to_element(parser, template_elem, "args", pipe_pos + 1);
         } else {
-            add_attribute_to_element(parser->input, template_elem, "name", content);
+            add_attribute_to_element(parser, template_elem, "name", content);
         }
 
         free(content);
@@ -4873,8 +4872,8 @@ static bool is_rst_transition_line(const char* line) {
     return dash_count >= 4;
 }
 
-static Item parse_rst_transition(MarkupParser* parser, MarkBuilder* builder) {
-    Element* hr = create_element(parser->input, "hr");
+static Item parse_rst_transition(MarkupParser* parser) {
+    Element* hr = create_element(parser, "hr");
     parser->current_line++;
     return (Item){.item = (uint64_t)hr};
 }
@@ -4901,8 +4900,8 @@ static bool is_rst_definition_list_definition(const char* line) {
     return isspace(line[0]) && !is_empty_line(line);
 }
 
-static Item parse_rst_definition_list(MarkupParser* parser, MarkBuilder* builder) {
-    Element* def_list = create_element(parser->input, "dl");
+static Item parse_rst_definition_list(MarkupParser* parser) {
+    Element* def_list = create_element(parser, "dl");
     if (!def_list) return (Item){.item = ITEM_ERROR};
 
     while (parser->current_line < parser->line_count &&
@@ -4910,12 +4909,12 @@ static Item parse_rst_definition_list(MarkupParser* parser, MarkBuilder* builder
         const char* term_line = parser->lines[parser->current_line];
 
         // create definition term
-        Element* dt = create_element(parser->input, "dt");
+        Element* dt = create_element(parser, "dt");
         if (!dt) break;
 
         char* term_content = trim_whitespace(term_line);
         if (term_content && strlen(term_content) > 0) {
-            Item term_text = parse_inline_content(parser, builder, term_content);
+            Item term_text = parse_inline_content(parser, term_content);
             if (term_text.item != ITEM_UNDEFINED) {
                 list_push((List*)dt, term_text);
                 increment_element_content_length(dt);
@@ -4933,12 +4932,12 @@ static Item parse_rst_definition_list(MarkupParser* parser, MarkBuilder* builder
                is_rst_definition_list_definition(parser->lines[parser->current_line])) {
             const char* def_line = parser->lines[parser->current_line];
 
-            Element* dd = create_element(parser->input, "dd");
+            Element* dd = create_element(parser, "dd");
             if (!dd) break;
 
             char* def_content = trim_whitespace(def_line);
             if (def_content && strlen(def_content) > 0) {
-                Item def_text = parse_inline_content(parser, builder, def_content);
+                Item def_text = parse_inline_content(parser, def_content);
                 if (def_text.item != ITEM_UNDEFINED) {
                     list_push((List*)dd, def_text);
                     increment_element_content_length(dd);
@@ -4982,7 +4981,7 @@ static int count_leading_spaces(const char* str) {
     return count;
 }
 
-static Item parse_rst_literal_block(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_rst_literal_block(MarkupParser* parser) {
     // literal block starts with :: on its own line or at end of paragraph
     const char* line = parser->lines[parser->current_line];
 
@@ -4994,13 +4993,13 @@ static Item parse_rst_literal_block(MarkupParser* parser, MarkBuilder* builder) 
     }
 
     // Create code element directly (following updated schema - no pre wrapper)
-    Element* code_block = create_element(parser->input, "code");
+    Element* code_block = create_element(parser, "code");
     if (!code_block) return (Item){.item = ITEM_ERROR};
 
     parser->current_line++;
 
     // collect literal content
-    StringBuf* sb = parser->sb;
+    StringBuf* sb = parser->builder().stringBuf();
     stringbuf_reset(sb);
     bool first_line = true;
     int base_indent = -1;
@@ -5063,12 +5062,12 @@ static bool is_rst_comment_line(const char* line) {
            (pos[2] == ' ' || pos[2] == '\t' || pos[2] == '\0');
 }
 
-static Item parse_rst_comment(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_rst_comment(MarkupParser* parser) {
     if (!is_rst_comment_line(parser->lines[parser->current_line])) {
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* comment = create_element(parser->input, "comment");
+    Element* comment = create_element(parser, "comment");
     if (!comment) return (Item){.item = ITEM_ERROR};
 
     const char* line = parser->lines[parser->current_line];
@@ -5079,7 +5078,7 @@ static Item parse_rst_comment(MarkupParser* parser, MarkBuilder* builder) {
 
     char* content = trim_whitespace(pos);
     if (content && strlen(content) > 0) {
-        String* comment_text = create_string(parser->input, content);
+        String* comment_text = create_string(parser, content);
         if (comment_text) {
             list_push((List*)comment, (Item){.item = s2it(comment_text)});
             increment_element_content_length(comment);
@@ -5112,12 +5111,12 @@ static bool is_rst_grid_table_line(const char* line) {
     return has_plus && has_dash_or_pipe;
 }
 
-static Item parse_rst_grid_table(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_rst_grid_table(MarkupParser* parser) {
     // Grid table parsing would be complex, for now create a basic table
-    Element* table = create_element(parser->input, "table");
+    Element* table = create_element(parser, "table");
     if (!table) return (Item){.item = ITEM_ERROR};
 
-    add_attribute_to_element(parser->input, table, "type", "grid");
+    add_attribute_to_element(parser, table, "type", "grid");
 
     // Skip grid table lines for now (basic implementation)
     while (parser->current_line < parser->line_count) {
@@ -5133,7 +5132,7 @@ static Item parse_rst_grid_table(MarkupParser* parser, MarkBuilder* builder) {
 }
 
 // Enhanced RST inline parsing for double backticks and trailing underscores
-static Item parse_rst_double_backtick_literal(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text) {
     if (**text != '`' || *(*text + 1) != '`') {
         return (Item){.item = ITEM_UNDEFINED};
     }
@@ -5155,7 +5154,7 @@ static Item parse_rst_double_backtick_literal(MarkupParser* parser, MarkBuilder*
         return (Item){.item = ITEM_UNDEFINED};
     }
 
-    Element* code_elem = create_element(parser->input, "code");
+    Element* code_elem = create_element(parser, "code");
     if (!code_elem) {
         *text = pos + 2;
         return (Item){.item = ITEM_ERROR};
@@ -5168,7 +5167,7 @@ static Item parse_rst_double_backtick_literal(MarkupParser* parser, MarkBuilder*
         strncpy(content, start, content_len);
         content[content_len] = '\0';
 
-        String* code_str = create_string(parser->input, content);
+        String* code_str = create_string(parser, content);
         if (code_str) {
             list_push((List*)code_elem, (Item){.item = s2it(code_str)});
             increment_element_content_length(code_elem);
@@ -5180,7 +5179,7 @@ static Item parse_rst_double_backtick_literal(MarkupParser* parser, MarkBuilder*
     return (Item){.item = (uint64_t)code_elem};
 }
 
-static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, MarkBuilder* builder, const char** text) {
+static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text) {
     if (**text != '_') return (Item){.item = ITEM_UNDEFINED};
 
     // work backwards to find start of reference
@@ -5206,16 +5205,16 @@ static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, MarkBu
     strncpy(ref_text, ref_start, ref_len);
     ref_text[ref_len] = '\0';
 
-    Element* ref_elem = create_element(parser->input, "a");
+    Element* ref_elem = create_element(parser, "a");
     if (!ref_elem) {
         free(ref_text);
         (*text)++;
         return (Item){.item = ITEM_ERROR};
     }
 
-    add_attribute_to_element(parser->input, ref_elem, "href", ref_text);
+    add_attribute_to_element(parser, ref_elem, "href", ref_text);
 
-    String* link_text = create_string(parser->input, ref_text);
+    String* link_text = create_string(parser, ref_text);
     if (link_text) {
         list_push((List*)ref_elem, (Item){.item = s2it(link_text)});
         increment_element_content_length(ref_elem);
@@ -5330,11 +5329,11 @@ static char* parse_textile_modifiers(const char* line, int* start_pos) {
 // Parse Textile inline content (emphasis, strong, code, etc.)
 static Item parse_textile_inline_content(MarkupParser* parser, const char* text) {
     if (!text || strlen(text) == 0) {
-        return (Item){.item = s2it(create_string(parser->input, ""))};
+        return (Item){.item = s2it(create_string(parser, ""))};
     }
 
     // Create a container element for mixed content
-    Element* container = create_element(parser->input, "span");
+    Element* container = create_element(parser, "span");
     if (!container) return (Item){.item = ITEM_NULL};
 
     const char* ptr = text;
@@ -5353,18 +5352,18 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = create_string(parser->input, before);
+                    String* before_str = create_string(parser, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
                 }
 
                 // Add bold element
-                Element* bold = create_element(parser->input, "strong");
+                Element* bold = create_element(parser, "strong");
                 char* bold_text = (char*)malloc(end - (ptr + 2) + 1);
                 strncpy(bold_text, ptr + 2, end - (ptr + 2));
                 bold_text[end - (ptr + 2)] = '\0';
-                String* bold_str = create_string(parser->input, bold_text);
+                String* bold_str = create_string(parser, bold_text);
                 list_push((List*)bold, (Item){.item = s2it(bold_str)});
                 increment_element_content_length(bold);
                 list_push((List*)container, (Item){.item = (uint64_t)bold});
@@ -5384,18 +5383,18 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = create_string(parser->input, before);
+                    String* before_str = create_string(parser, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
                 }
 
                 // Add strong element
-                Element* strong = create_element(parser->input, "strong");
+                Element* strong = create_element(parser, "strong");
                 char* strong_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(strong_text, ptr + 1, end - (ptr + 1));
                 strong_text[end - (ptr + 1)] = '\0';
-                String* strong_str = create_string(parser->input, strong_text);
+                String* strong_str = create_string(parser, strong_text);
                 list_push((List*)strong, (Item){.item = s2it(strong_str)});
                 increment_element_content_length(strong);
                 list_push((List*)container, (Item){.item = (uint64_t)strong});
@@ -5415,18 +5414,18 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = create_string(parser->input, before);
+                    String* before_str = create_string(parser, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
                 }
 
                 // Add emphasis element
-                Element* em = create_element(parser->input, "em");
+                Element* em = create_element(parser, "em");
                 char* em_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(em_text, ptr + 1, end - (ptr + 1));
                 em_text[end - (ptr + 1)] = '\0';
-                String* em_str = create_string(parser->input, em_text);
+                String* em_str = create_string(parser, em_text);
                 list_push((List*)em, (Item){.item = s2it(em_str)});
                 increment_element_content_length(em);
                 list_push((List*)container, (Item){.item = (uint64_t)em});
@@ -5446,18 +5445,18 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = create_string(parser->input, before);
+                    String* before_str = create_string(parser, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
                 }
 
                 // Add code element
-                Element* code = create_element(parser->input, "code");
+                Element* code = create_element(parser, "code");
                 char* code_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(code_text, ptr + 1, end - (ptr + 1));
                 code_text[end - (ptr + 1)] = '\0';
-                String* code_str = create_string(parser->input, code_text);
+                String* code_str = create_string(parser, code_text);
                 list_push((List*)code, (Item){.item = s2it(code_str)});
                 increment_element_content_length(code);
                 list_push((List*)container, (Item){.item = (uint64_t)code});
@@ -5477,18 +5476,18 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = create_string(parser->input, before);
+                    String* before_str = create_string(parser, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
                 }
 
                 // Add superscript element
-                Element* sup = create_element(parser->input, "sup");
+                Element* sup = create_element(parser, "sup");
                 char* sup_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(sup_text, ptr + 1, end - (ptr + 1));
                 sup_text[end - (ptr + 1)] = '\0';
-                String* sup_str = create_string(parser->input, sup_text);
+                String* sup_str = create_string(parser, sup_text);
                 list_push((List*)sup, (Item){.item = s2it(sup_str)});
                 increment_element_content_length(sup);
                 list_push((List*)container, (Item){.item = (uint64_t)sup});
@@ -5508,18 +5507,18 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = create_string(parser->input, before);
+                    String* before_str = create_string(parser, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
                 }
 
                 // Add subscript element
-                Element* sub = create_element(parser->input, "sub");
+                Element* sub = create_element(parser, "sub");
                 char* sub_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(sub_text, ptr + 1, end - (ptr + 1));
                 sub_text[end - (ptr + 1)] = '\0';
-                String* sub_str = create_string(parser->input, sub_text);
+                String* sub_str = create_string(parser, sub_text);
                 list_push((List*)sub, (Item){.item = s2it(sub_str)});
                 increment_element_content_length(sub);
                 list_push((List*)container, (Item){.item = (uint64_t)sub});
@@ -5542,7 +5541,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
         char* remaining = (char*)malloc(ptr - start + 1);
         strncpy(remaining, start, ptr - start);
         remaining[ptr - start] = '\0';
-        String* remaining_str = create_string(parser->input, remaining);
+        String* remaining_str = create_string(parser, remaining);
         list_push((List*)container, (Item){.item = s2it(remaining_str)});
         increment_element_content_length(container);
         free(remaining);
@@ -5552,26 +5551,26 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
 }
 
 // Parse Textile code block (bc. or bc..)
-static Item parse_textile_code_block(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* code_block = create_element(parser->input, "pre");
+static Item parse_textile_code_block(MarkupParser* parser, const char* line) {
+    Element* code_block = create_element(parser, "pre");
     if (!code_block) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
     }
 
     bool extended = strncmp(line, "bc..", 4) == 0;
-    add_attribute_to_element(parser->input, code_block, "extended", extended ? "true" : "false");
+    add_attribute_to_element(parser, code_block, "extended", extended ? "true" : "false");
 
     // Parse modifiers and extract content
     int start_pos = 0;
     char* modifiers = parse_textile_modifiers(line, &start_pos);
     if (modifiers) {
-        add_attribute_to_element(parser->input, code_block, "modifiers", modifiers);
+        add_attribute_to_element(parser, code_block, "modifiers", modifiers);
         free(modifiers);
     }
 
     const char* content = line + start_pos;
-    String* code_content = create_string(parser->input, content);
+    String* code_content = create_string(parser, content);
     list_push((List*)code_block, (Item){.item = s2it(code_content)});
     increment_element_content_length(code_block);
 
@@ -5589,7 +5588,7 @@ static Item parse_textile_code_block(MarkupParser* parser, MarkBuilder* builder,
                 break;
             }
 
-            String* line_content = create_string(parser->input, next_line);
+            String* line_content = create_string(parser, next_line);
             list_push((List*)code_block, (Item){.item = s2it(line_content)});
             increment_element_content_length(code_block);
             parser->current_line++;
@@ -5600,21 +5599,21 @@ static Item parse_textile_code_block(MarkupParser* parser, MarkBuilder* builder,
 }
 
 // Parse Textile block quote (bq. or bq..)
-static Item parse_textile_block_quote(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* quote_block = create_element(parser->input, "blockquote");
+static Item parse_textile_block_quote(MarkupParser* parser, const char* line) {
+    Element* quote_block = create_element(parser, "blockquote");
     if (!quote_block) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
     }
 
     bool extended = strncmp(line, "bq..", 4) == 0;
-    add_attribute_to_element(parser->input, quote_block, "extended", extended ? "true" : "false");
+    add_attribute_to_element(parser, quote_block, "extended", extended ? "true" : "false");
 
     // Parse modifiers and extract content
     int start_pos = 0;
     char* modifiers = parse_textile_modifiers(line, &start_pos);
     if (modifiers) {
-        add_attribute_to_element(parser->input, quote_block, "modifiers", modifiers);
+        add_attribute_to_element(parser, quote_block, "modifiers", modifiers);
         free(modifiers);
     }
 
@@ -5648,8 +5647,8 @@ static Item parse_textile_block_quote(MarkupParser* parser, MarkBuilder* builder
 }
 
 // Parse Textile pre-formatted block (pre. or pre..)
-static Item parse_textile_pre_block(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* pre_block = create_element(parser->input, "pre");
+static Item parse_textile_pre_block(MarkupParser* parser, const char* line) {
+    Element* pre_block = create_element(parser, "pre");
     if (!pre_block) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
@@ -5659,12 +5658,12 @@ static Item parse_textile_pre_block(MarkupParser* parser, MarkBuilder* builder, 
     int start_pos = 0;
     char* modifiers = parse_textile_modifiers(line, &start_pos);
     if (modifiers) {
-        add_attribute_to_element(parser->input, pre_block, "modifiers", modifiers);
+        add_attribute_to_element(parser, pre_block, "modifiers", modifiers);
         free(modifiers);
     }
 
     const char* content = line + start_pos;
-    String* pre_content = create_string(parser->input, content);
+    String* pre_content = create_string(parser, content);
     list_push((List*)pre_block, (Item){.item = s2it(pre_content)});
     increment_element_content_length(pre_block);
 
@@ -5673,15 +5672,15 @@ static Item parse_textile_pre_block(MarkupParser* parser, MarkBuilder* builder, 
 }
 
 // Parse Textile comment (###.)
-static Item parse_textile_comment(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* comment = create_element(parser->input, "!--");  // HTML comment style
+static Item parse_textile_comment(MarkupParser* parser, const char* line) {
+    Element* comment = create_element(parser, "!--");  // HTML comment style
     if (!comment) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
     }
 
     const char* content = line + 4; // Skip "###."
-    String* comment_content = create_string(parser->input, content);
+    String* comment_content = create_string(parser, content);
     list_push((List*)comment, (Item){.item = s2it(comment_content)});
     increment_element_content_length(comment);
 
@@ -5690,8 +5689,8 @@ static Item parse_textile_comment(MarkupParser* parser, MarkBuilder* builder, co
 }
 
 // Parse Textile notextile block
-static Item parse_textile_notextile(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* notextile = create_element(parser->input, "notextile");
+static Item parse_textile_notextile(MarkupParser* parser, const char* line) {
+    Element* notextile = create_element(parser, "notextile");
     if (!notextile) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
@@ -5701,24 +5700,24 @@ static Item parse_textile_notextile(MarkupParser* parser, MarkBuilder* builder, 
     const char* content = extended ? line + 11 : line + 10;
     while (*content && isspace(*content)) content++;
 
-    String* raw_content = create_string(parser->input, content);
+    String* raw_content = create_string(parser, content);
     list_push((List*)notextile, (Item){.item = s2it(raw_content)});
     increment_element_content_length(notextile);
-    add_attribute_to_element(parser->input, notextile, "extended", extended ? "true" : "false");
+    add_attribute_to_element(parser, notextile, "extended", extended ? "true" : "false");
 
     parser->current_line++;
     return (Item){.item = (uint64_t)notextile};
 }
 
 // Parse Textile list item
-static Item parse_textile_list_item(MarkupParser* parser, MarkBuilder* builder, const char* line) {
+static Item parse_textile_list_item(MarkupParser* parser, const char* line) {
     char list_type = 0;
     if (!is_textile_list_item(line, &list_type)) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
     }
 
-    Element* list_item = create_element(parser->input, "li");
+    Element* list_item = create_element(parser, "li");
     if (!list_item) {
         parser->current_line++;
         return (Item){.item = ITEM_NULL};
@@ -5727,7 +5726,7 @@ static Item parse_textile_list_item(MarkupParser* parser, MarkBuilder* builder, 
     const char* type_str = (list_type == '*') ? "bulleted" :
                           (list_type == '#') ? "numbered" :
                           (list_type == '-') ? "definition" : "unknown";
-    add_attribute_to_element(parser->input, list_item, "type", type_str);
+    add_attribute_to_element(parser, list_item, "type", type_str);
 
     // Find the content after the list marker
     const char* content = line;
@@ -5744,9 +5743,9 @@ static Item parse_textile_list_item(MarkupParser* parser, MarkBuilder* builder, 
             strncpy(term, content, def_sep - content);
             term[def_sep - content] = '\0';
             char* trimmed_term = trim_whitespace(term);
-            String* term_str = create_string(parser->input, trimmed_term);
+            String* term_str = create_string(parser, trimmed_term);
 
-            Element* term_elem = create_element(parser->input, "dt");
+            Element* term_elem = create_element(parser, "dt");
             list_push((List*)term_elem, (Item){.item = s2it(term_str)});
             increment_element_content_length(term_elem);
             list_push((List*)list_item, (Item){.item = (uint64_t)term_elem});
@@ -5759,7 +5758,7 @@ static Item parse_textile_list_item(MarkupParser* parser, MarkBuilder* builder, 
             const char* definition = def_sep + 2;
             while (*definition && isspace(*definition)) definition++;
 
-            Element* def_elem = create_element(parser->input, "dd");
+            Element* def_elem = create_element(parser, "dd");
             Item def_content = parse_textile_inline_content(parser, definition);
             list_push((List*)def_elem, def_content);
             increment_element_content_length(def_elem);
@@ -5843,16 +5842,16 @@ static bool is_asciidoc_table_start(const char* line) {
 }
 
 // Parse AsciiDoc heading
-static Item parse_asciidoc_heading(MarkupParser* parser, MarkBuilder* builder, const char* line) {
+static Item parse_asciidoc_heading(MarkupParser* parser, const char* line) {
     int level;
     if (!is_asciidoc_heading(line, &level)) {
-        return parse_paragraph(parser, builder, line);
+        return parse_paragraph(parser, line);
     }
 
     // Create header element
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", level);
-    Element* header = create_element(parser->input, tag_name);
+    Element* header = create_element(parser, tag_name);
     if (!header) {
         parser->current_line++;
         return (Item){.item = ITEM_ERROR};
@@ -5861,7 +5860,7 @@ static Item parse_asciidoc_heading(MarkupParser* parser, MarkBuilder* builder, c
     // Add level attribute (required by schema)
     char level_str[10];
     snprintf(level_str, sizeof(level_str), "%d", level);
-    add_attribute_to_element(parser->input, header, "level", level_str);
+    add_attribute_to_element(parser, header, "level", level_str);
 
     // Parse content after equals signs
     const char* pos = line;
@@ -5870,7 +5869,7 @@ static Item parse_asciidoc_heading(MarkupParser* parser, MarkBuilder* builder, c
     skip_whitespace(&pos);
 
     if (*pos) {
-        String* content = create_string(parser->input, pos);
+        String* content = create_string(parser, pos);
         list_push((List*)header, (Item){.item = s2it(content)});
         increment_element_content_length(header);
     }
@@ -5880,8 +5879,8 @@ static Item parse_asciidoc_heading(MarkupParser* parser, MarkBuilder* builder, c
 }
 
 // Parse AsciiDoc list
-static Item parse_asciidoc_list(MarkupParser* parser, MarkBuilder* builder) {
-    Element* list = create_element(parser->input, "ul");
+static Item parse_asciidoc_list(MarkupParser* parser) {
+    Element* list = create_element(parser, "ul");
     if (!list) return (Item){.item = ITEM_ERROR};
 
     while (parser->current_line < parser->line_count) {
@@ -5892,7 +5891,7 @@ static Item parse_asciidoc_list(MarkupParser* parser, MarkBuilder* builder) {
         }
 
         // Create list item
-        Element* list_item = create_element(parser->input, "li");
+        Element* list_item = create_element(parser, "li");
         if (!list_item) {
             parser->current_line++;
             continue;
@@ -5905,9 +5904,9 @@ static Item parse_asciidoc_list(MarkupParser* parser, MarkBuilder* builder) {
         skip_whitespace(&pos);
 
         if (*pos) {
-            Element* paragraph = create_element(parser->input, "p");
+            Element* paragraph = create_element(parser, "p");
             if (paragraph) {
-                Item content = parse_asciidoc_inline(parser, builder, pos);
+                Item content = parse_asciidoc_inline(parser, pos);
                 if (content.item != ITEM_UNDEFINED) {
                     list_push((List*)paragraph, content);
                     increment_element_content_length(paragraph);
@@ -5926,7 +5925,7 @@ static Item parse_asciidoc_list(MarkupParser* parser, MarkBuilder* builder) {
 }
 
 // Parse AsciiDoc listing block (----)
-static Item parse_asciidoc_listing_block(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_asciidoc_listing_block(MarkupParser* parser) {
     parser->current_line++; // Skip opening ----
 
     // Find closing ----
@@ -5941,14 +5940,14 @@ static Item parse_asciidoc_listing_block(MarkupParser* parser, MarkBuilder* buil
     if (end_line == -1) {
         // No closing delimiter, treat as regular paragraph
         parser->current_line--;
-        return parse_paragraph(parser, builder, parser->lines[parser->current_line]);
+        return parse_paragraph(parser, parser->lines[parser->current_line]);
     }
 
     // Create pre and code blocks
-    Element* pre_block = create_element(parser->input, "pre");
+    Element* pre_block = create_element(parser, "pre");
     if (!pre_block) return (Item){.item = ITEM_ERROR};
 
-    Element* code_block = create_element(parser->input, "code");
+    Element* code_block = create_element(parser, "code");
     if (!code_block) return (Item){.item = ITEM_ERROR};
 
     // Concatenate content lines
@@ -5966,7 +5965,7 @@ static Item parse_asciidoc_listing_block(MarkupParser* parser, MarkBuilder* buil
             if (i < end_line - 1) strcat(content, "\n");
         }
 
-        String* content_str = create_string(parser->input, content);
+        String* content_str = create_string(parser, content);
         if (content_str) {
             list_push((List*)code_block, (Item){.item = s2it(content_str)});
             increment_element_content_length(code_block);
@@ -5984,8 +5983,8 @@ static Item parse_asciidoc_listing_block(MarkupParser* parser, MarkBuilder* buil
 }
 
 // Parse AsciiDoc admonition
-static Item parse_asciidoc_admonition(MarkupParser* parser, MarkBuilder* builder, const char* line) {
-    Element* admonition = create_element(parser->input, "div");
+static Item parse_asciidoc_admonition(MarkupParser* parser, const char* line) {
+    Element* admonition = create_element(parser, "div");
     if (!admonition) return (Item){.item = ITEM_ERROR};
 
     const char* pos = line;
@@ -6012,13 +6011,13 @@ static Item parse_asciidoc_admonition(MarkupParser* parser, MarkBuilder* builder
     }
 
     if (type) {
-        add_attribute_to_element(parser->input, admonition, "class", type);
+        add_attribute_to_element(parser, admonition, "class", type);
 
         // Skip whitespace after colon
         skip_whitespace(&content);
 
         if (*content) {
-            Item inline_content = parse_asciidoc_inline(parser, builder, content);
+            Item inline_content = parse_asciidoc_inline(parser, content);
             if (inline_content.item != ITEM_UNDEFINED) {
                 list_push((List*)admonition, inline_content);
                 increment_element_content_length(admonition);
@@ -6031,13 +6030,13 @@ static Item parse_asciidoc_admonition(MarkupParser* parser, MarkBuilder* builder
 }
 
 // Parse AsciiDoc table
-static Item parse_asciidoc_table(MarkupParser* parser, MarkBuilder* builder) {
+static Item parse_asciidoc_table(MarkupParser* parser) {
     parser->current_line++; // Skip opening |===
 
-    Element* table = create_element(parser->input, "table");
+    Element* table = create_element(parser, "table");
     if (!table) return (Item){.item = ITEM_ERROR};
 
-    Element* tbody = create_element(parser->input, "tbody");
+    Element* tbody = create_element(parser, "tbody");
     if (!tbody) return (Item){.item = ITEM_ERROR};
 
     bool header_parsed = false;
@@ -6066,7 +6065,7 @@ static Item parse_asciidoc_table(MarkupParser* parser, MarkBuilder* builder) {
 
         // Parse table row (must start with |)
         if (line[0] == '|') {
-            Element* row = create_element(parser->input, "tr");
+            Element* row = create_element(parser, "tr");
             if (!row) {
                 parser->current_line++;
                 continue;
@@ -6097,9 +6096,9 @@ static Item parse_asciidoc_table(MarkupParser* parser, MarkBuilder* builder) {
 
                     // Create cell element
                     const char* cell_tag = (!header_parsed) ? "th" : "td";
-                    Element* cell = create_element(parser->input, cell_tag);
+                    Element* cell = create_element(parser, cell_tag);
                     if (cell && trimmed_cell && strlen(trimmed_cell) > 0) {
-                        Item cell_content = parse_asciidoc_inline(parser, builder, trimmed_cell);
+                        Item cell_content = parse_asciidoc_inline(parser, trimmed_cell);
                         if (cell_content.item != ITEM_UNDEFINED) {
                             list_push((List*)cell, cell_content);
                             increment_element_content_length(cell);
@@ -6125,7 +6124,7 @@ static Item parse_asciidoc_table(MarkupParser* parser, MarkBuilder* builder) {
             // Add row to appropriate section
             if (!header_parsed) {
                 if (!thead) {
-                    thead = create_element(parser->input, "thead");
+                    thead = create_element(parser, "thead");
                 }
                 if (thead) {
                     list_push((List*)thead, (Item){.item = (uint64_t)row});
@@ -6161,7 +6160,7 @@ static Item parse_asciidoc_table(MarkupParser* parser, MarkBuilder* builder) {
 }
 
 // Parse AsciiDoc inline content with formatting
-static Item parse_asciidoc_inline(MarkupParser* parser, MarkBuilder* builder, const char* text) {
+static Item parse_asciidoc_inline(MarkupParser* parser, const char* text) {
     if (!text || strlen(text) == 0) {
         return (Item){.item = ITEM_UNDEFINED};
     }
@@ -6170,11 +6169,11 @@ static Item parse_asciidoc_inline(MarkupParser* parser, MarkBuilder* builder, co
     size_t text_len = strlen(text);
     if (text_len > 10000) {
         // For very long content, just return as plain text to avoid parsing issues
-        return (Item){.item = s2it(create_string(parser->input, text))};
+        return (Item){.item = s2it(create_string(parser, text))};
     }
 
     // Return simple text for now - inline formatting can be added later
-    return (Item){.item = s2it(create_string(parser->input, text))};
+    return (Item){.item = s2it(create_string(parser, text))};
 }
 
 // Parse AsciiDoc links (placeholder for more complex link parsing)
