@@ -169,8 +169,25 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     , elmt_(nullptr)
     , parent_(nullptr)
 {
-    // allocate Array directly from pool for children
-    elmt_ = input_create_element_internal(builder_->input(), tag_name);
+    Input* input = builder_->input();
+    Element* element = elmt_pooled(input->pool);
+    if (element) {
+        TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+        if (element_type) {
+            element->type = element_type;
+            arraylist_append(input->type_list, element_type);
+            element_type->type_index = input->type_list->length - 1;
+            // initialize with no attributes
+
+            // Set element name
+            String* name_str = builder->createString(tag_name);
+            if (name_str) {
+                element_type->name.str = name_str->chars;
+                element_type->name.length = name_str->len;
+            }
+            elmt_ = (element);
+        }
+    }
 }
 
 ElementBuilder::~ElementBuilder() {
