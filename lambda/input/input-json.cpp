@@ -5,7 +5,7 @@
 
 using namespace lambda;
 
-static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **json);
+static Item parse_value(InputContext& ctx, const char **json);
 
 static void skip_whitespace(const char **json) {
     while (**json && (**json == ' ' || **json == '\n' || **json == '\r' || **json == '\t')) {
@@ -13,7 +13,9 @@ static void skip_whitespace(const char **json) {
     }
 }
 
-static String* parse_string(InputContext& ctx, SourceTracker& tracker, const char **json) {
+static String* parse_string(InputContext& ctx, const char **json) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**json != '"') {
         ctx.addError(tracker.location(), "Expected '\"' to start string");
         return nullptr;
@@ -95,7 +97,9 @@ static String* parse_string(InputContext& ctx, SourceTracker& tracker, const cha
     return builder.createString(sb->str->chars, sb->length);
 }
 
-static Item parse_number(InputContext& ctx, SourceTracker& tracker, const char **json) {
+static Item parse_number(InputContext& ctx, const char **json) {
+    SourceTracker& tracker = *ctx.tracker();
+
     const char* start = *json;
     char* end;
     double value = strtod(*json, &end);
@@ -117,7 +121,9 @@ static Item parse_number(InputContext& ctx, SourceTracker& tracker, const char *
     }
 }
 
-static Item parse_array(InputContext& ctx, SourceTracker& tracker, const char **json) {
+static Item parse_array(InputContext& ctx, const char **json) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**json != '[') {
         ctx.addError(tracker.location(), "Expected '[' to start array");
         return ctx.builder().createNull();
@@ -136,7 +142,7 @@ static Item parse_array(InputContext& ctx, SourceTracker& tracker, const char **
     }
 
     while (**json && !ctx.shouldStopParsing()) {
-        Item item = parse_value(ctx, tracker, json);
+        Item item = parse_value(ctx, json);
         arr_builder.append(item);
 
         skip_whitespace(json);
@@ -168,7 +174,9 @@ static Item parse_array(InputContext& ctx, SourceTracker& tracker, const char **
     return arr_builder.final();
 }
 
-static Item parse_object(InputContext& ctx, SourceTracker& tracker, const char **json) {
+static Item parse_object(InputContext& ctx, const char **json) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**json != '{') {
         ctx.addError(tracker.location(), "Expected '{' to start object");
         return ctx.builder().createNull();
@@ -187,7 +195,7 @@ static Item parse_object(InputContext& ctx, SourceTracker& tracker, const char *
     }
 
     while (**json && !ctx.shouldStopParsing()) {
-        String* key = parse_string(ctx, tracker, json);
+        String* key = parse_string(ctx, json);
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             while (**json && **json != ',' && **json != '}') {
@@ -224,7 +232,7 @@ static Item parse_object(InputContext& ctx, SourceTracker& tracker, const char *
         tracker.advance(1);
         skip_whitespace(json);
 
-        Item value = parse_value(ctx, tracker, json);
+        Item value = parse_value(ctx, json);
         map_builder.put(key, value);
 
         skip_whitespace(json);
@@ -256,7 +264,9 @@ static Item parse_object(InputContext& ctx, SourceTracker& tracker, const char *
     return map_builder.final();
 }
 
-static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **json) {
+static Item parse_value(InputContext& ctx, const char **json) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace(json);
 
     if (!**json) {
@@ -266,11 +276,11 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
 
     switch (**json) {
         case '{':
-            return parse_object(ctx, tracker, json);
+            return parse_object(ctx, json);
         case '[':
-            return parse_array(ctx, tracker, json);
+            return parse_array(ctx, json);
         case '"': {
-            String* str = parse_string(ctx, tracker, json);
+            String* str = parse_string(ctx, json);
             if (!str) return ctx.builder().createNull();
             if (str == &EMPTY_STRING) return ctx.builder().createNull();
             return (Item){.item = s2it(str)};
@@ -301,7 +311,7 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
             return ctx.builder().createNull();
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {
-                return parse_number(ctx, tracker, json);
+                return parse_number(ctx, json);
             }
             ctx.addError(tracker.location(),
                         std::string("Unexpected character: '") + **json + "'");
@@ -312,7 +322,7 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
 void parse_json(Input* input, const char* json_string) {
     InputContext ctx(input, json_string, strlen(json_string));
 
-    input->root = parse_value(ctx, *ctx.tracker(), &json_string);
+    input->root = parse_value(ctx, &json_string);
 
     // Log any errors that occurred during parsing
     if (ctx.hasErrors()) {

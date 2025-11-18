@@ -6,23 +6,25 @@
 using namespace lambda;
 
 // Forward declarations
-static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num);
-static Array* parse_array(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num);
-static Map* parse_inline_table(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num);
-static String* parse_bare_key(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static String* parse_quoted_key(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static String* parse_literal_key(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static String* parse_key(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static String* parse_basic_string(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static String* parse_literal_string(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static String* parse_multiline_basic_string(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num);
-static String* parse_multiline_literal_string(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num);
-static Item parse_number(InputContext& ctx, SourceTracker& tracker, const char **toml);
-static bool handle_escape_sequence(InputContext& ctx, SourceTracker& tracker, StringBuf* sb, const char **toml, bool is_multiline, int *line_num);
+static Item parse_value(InputContext& ctx, const char **toml, int *line_num);
+static Array* parse_array(InputContext& ctx, const char **toml, int *line_num);
+static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num);
+static String* parse_bare_key(InputContext& ctx, const char **toml);
+static String* parse_quoted_key(InputContext& ctx, const char **toml);
+static String* parse_literal_key(InputContext& ctx, const char **toml);
+static String* parse_key(InputContext& ctx, const char **toml);
+static String* parse_basic_string(InputContext& ctx, const char **toml);
+static String* parse_literal_string(InputContext& ctx, const char **toml);
+static String* parse_multiline_basic_string(InputContext& ctx, const char **toml, int *line_num);
+static String* parse_multiline_literal_string(InputContext& ctx, const char **toml, int *line_num);
+static Item parse_number(InputContext& ctx, const char **toml);
+static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char **toml, bool is_multiline, int *line_num);
 
 // Common function to handle escape sequences in strings
 // is_multiline: true for multiline basic strings, false for regular strings
-static bool handle_escape_sequence(InputContext& ctx, SourceTracker& tracker, StringBuf* sb, const char **toml, bool is_multiline, int *line_num) {
+static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char **toml, bool is_multiline, int *line_num) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**toml != '\\') return false;
 
     SourceLocation esc_loc = tracker.location();
@@ -176,7 +178,9 @@ static void skip_whitespace_and_comments(const char **toml, int *line_num) {
     }
 }
 
-static String* parse_bare_key(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static String* parse_bare_key(InputContext& ctx, const char **toml) {
+    SourceTracker& tracker = *ctx.tracker();
+
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
     stringbuf_reset(sb);
@@ -200,7 +204,9 @@ static String* parse_bare_key(InputContext& ctx, SourceTracker& tracker, const c
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_quoted_key(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static String* parse_quoted_key(InputContext& ctx, const char **toml) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**toml != '"') return NULL;
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
@@ -212,7 +218,7 @@ static String* parse_quoted_key(InputContext& ctx, SourceTracker& tracker, const
 
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
-            if (!handle_escape_sequence(ctx, tracker, sb, toml, false, NULL)) {
+            if (!handle_escape_sequence(ctx, sb, toml, false, NULL)) {
                 return NULL;
             }
         } else {
@@ -236,7 +242,9 @@ static String* parse_quoted_key(InputContext& ctx, SourceTracker& tracker, const
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_literal_key(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static String* parse_literal_key(InputContext& ctx, const char **toml) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**toml != '\'') return NULL;
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
@@ -266,7 +274,9 @@ static String* parse_literal_key(InputContext& ctx, SourceTracker& tracker, cons
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_basic_string(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static String* parse_basic_string(InputContext& ctx, const char **toml) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**toml != '"') return NULL;
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
@@ -278,7 +288,7 @@ static String* parse_basic_string(InputContext& ctx, SourceTracker& tracker, con
 
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
-            if (!handle_escape_sequence(ctx, tracker, sb, toml, false, NULL)) {
+            if (!handle_escape_sequence(ctx, sb, toml, false, NULL)) {
                 return NULL;
             }
         } else {
@@ -302,7 +312,9 @@ static String* parse_basic_string(InputContext& ctx, SourceTracker& tracker, con
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_literal_string(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static String* parse_literal_string(InputContext& ctx, const char **toml) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (**toml != '\'') return NULL;
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
@@ -332,7 +344,9 @@ static String* parse_literal_string(InputContext& ctx, SourceTracker& tracker, c
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_multiline_basic_string(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num) {
+static String* parse_multiline_basic_string(InputContext& ctx, const char **toml, int *line_num) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
@@ -362,7 +376,7 @@ static String* parse_multiline_basic_string(InputContext& ctx, SourceTracker& tr
         }
 
         if (**toml == '\\') {
-            if (!handle_escape_sequence(ctx, tracker, sb, toml, true, line_num)) {
+            if (!handle_escape_sequence(ctx, sb, toml, true, line_num)) {
                 return NULL;
             }
         } else {
@@ -383,7 +397,9 @@ static String* parse_multiline_basic_string(InputContext& ctx, SourceTracker& tr
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_multiline_literal_string(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num) {
+static String* parse_multiline_literal_string(InputContext& ctx, const char **toml, int *line_num) {
+    SourceTracker& tracker = *ctx.tracker();
+
     if (strncmp(*toml, "'''", 3) != 0) return NULL;
     MarkBuilder* builder = &ctx.builder();
     StringBuf* sb = builder->stringBuf();
@@ -428,17 +444,19 @@ static String* parse_multiline_literal_string(InputContext& ctx, SourceTracker& 
     return builder->createString(sb->str->chars, sb->length);
 }
 
-static String* parse_key(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static String* parse_key(InputContext& ctx, const char **toml) {
     if (**toml == '"') {
-        return parse_quoted_key(ctx, tracker, toml);
+        return parse_quoted_key(ctx, toml);
     } else if (**toml == '\'') {
-        return parse_literal_key(ctx, tracker, toml);
+        return parse_literal_key(ctx, toml);
     } else {
-        return parse_bare_key(ctx, tracker, toml);
+        return parse_bare_key(ctx, toml);
     }
 }
 
-static Item parse_number(InputContext& ctx, SourceTracker& tracker, const char **toml) {
+static Item parse_number(InputContext& ctx, const char **toml) {
+    SourceTracker& tracker = *ctx.tracker();
+
     Input* input = ctx.input();
     char* end;
     const char *start = *toml;
@@ -603,7 +621,9 @@ static Item parse_number(InputContext& ctx, SourceTracker& tracker, const char *
     }
 }
 
-static Array* parse_array(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num) {
+static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
+    SourceTracker& tracker = *ctx.tracker();
+
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder();
 
@@ -620,7 +640,7 @@ static Array* parse_array(InputContext& ctx, SourceTracker& tracker, const char 
     }
 
     while (**toml) {
-        Item value = parse_value(ctx, tracker, toml, line_num);
+        Item value = parse_value(ctx, toml, line_num);
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
@@ -648,7 +668,9 @@ static Array* parse_array(InputContext& ctx, SourceTracker& tracker, const char 
     return arr;
 }
 
-static Map* parse_inline_table(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num) {
+static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num) {
+    SourceTracker& tracker = *ctx.tracker();
+
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder();
 
@@ -667,7 +689,7 @@ static Map* parse_inline_table(InputContext& ctx, SourceTracker& tracker, const 
     }
 
     while (**toml) {
-        String* key = parse_key(ctx, tracker, toml);
+        String* key = parse_key(ctx, toml);
         if (!key) {
             return NULL;
         }
@@ -680,7 +702,7 @@ static Map* parse_inline_table(InputContext& ctx, SourceTracker& tracker, const 
         tracker.advance(1);
         skip_whitespace(toml);
 
-        Item value = parse_value(ctx, tracker, toml, line_num);
+        Item value = parse_value(ctx, toml, line_num);
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
@@ -703,7 +725,9 @@ static Map* parse_inline_table(InputContext& ctx, SourceTracker& tracker, const 
     return mp;
 }
 
-static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **toml, int *line_num) {
+static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
+    SourceTracker& tracker = *ctx.tracker();
+
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder();
 
@@ -712,14 +736,14 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
     SourceLocation value_loc = tracker.location();
     switch (**toml) {
         case '{': {
-            Map* table = parse_inline_table(ctx, tracker, toml, line_num);
+            Map* table = parse_inline_table(ctx, toml, line_num);
             if (!table) {
                 ctx.addError(value_loc, "Invalid inline table");
             }
             return table ? (Item){.item = (uint64_t)table} : (Item){.item = ITEM_ERROR};
         }
         case '[': {
-            Array* array = parse_array(ctx, tracker, toml, line_num);
+            Array* array = parse_array(ctx, toml, line_num);
             if (!array) {
                 ctx.addError(value_loc, "Invalid array");
             }
@@ -728,9 +752,9 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
         case '"': {
             String* str = NULL;
             if (strncmp(*toml, "\"\"\"", 3) == 0) {
-                str = parse_multiline_basic_string(ctx, tracker, toml, line_num);
+                str = parse_multiline_basic_string(ctx, toml, line_num);
             } else {
-                str = parse_basic_string(ctx, tracker, toml);
+                str = parse_basic_string(ctx, toml);
             }
             if (!str) {
                 ctx.addError(value_loc, "Invalid string value");
@@ -740,9 +764,9 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
         case '\'': {
             String* str = NULL;
             if (strncmp(*toml, "'''", 3) == 0) {
-                str = parse_multiline_literal_string(ctx, tracker, toml, line_num);
+                str = parse_multiline_literal_string(ctx, toml, line_num);
             } else {
-                str = parse_literal_string(ctx, tracker, toml);
+                str = parse_literal_string(ctx, toml);
             }
             if (!str) {
                 ctx.addError(value_loc, "Invalid literal string");
@@ -767,31 +791,31 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
             return {.item = ITEM_ERROR};
         case 'i':
             if (strncmp(*toml, "inf", 3) == 0) {
-                return parse_number(ctx, tracker, toml);
+                return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid value starting with 'i'");
             return {.item = ITEM_ERROR};
         case 'n':
             if (strncmp(*toml, "nan", 3) == 0) {
-                return parse_number(ctx, tracker, toml);
+                return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid value starting with 'n'");
             return {.item = ITEM_ERROR};
         case '-':
             if (*((*toml) + 1) == 'i' || *((*toml) + 1) == 'n' || isdigit(*((*toml) + 1))) {
-                return parse_number(ctx, tracker, toml);
+                return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid negative number");
             return {.item = ITEM_ERROR};
         case '+':
             if (isdigit(*((*toml) + 1))) {
-                return parse_number(ctx, tracker, toml);
+                return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Invalid positive number");
             return {.item = ITEM_ERROR};
         default:
             if ((**toml >= '0' && **toml <= '9')) {
-                return parse_number(ctx, tracker, toml);
+                return parse_number(ctx, toml);
             }
             ctx.addError(value_loc, "Unexpected character '%c' (0x%02X)", **toml, (unsigned char)**toml);
             return {.item = ITEM_ERROR};
@@ -982,7 +1006,7 @@ void parse_toml(Input* input, const char* toml_string) {
 
         // Parse key-value pair
         SourceLocation key_loc = ctx.tracker()->location();
-        String* key = parse_key(ctx, *ctx.tracker(), &toml);
+        String* key = parse_key(ctx, &toml);
         if (!key) {
             ctx.addError(key_loc, "Invalid or empty key");
             skip_line(&toml, &line_num);
@@ -997,7 +1021,7 @@ void parse_toml(Input* input, const char* toml_string) {
         }
         toml++; // skip '='
 
-        Item value = parse_value(ctx, *ctx.tracker(), &toml, &line_num);
+        Item value = parse_value(ctx, &toml, &line_num);
         if (value.item == ITEM_ERROR) {
             ctx.addError(ctx.tracker()->location(), "Failed to parse value for key '%.*s'", (int)key->len, key->chars);
             skip_line(&toml, &line_num);
