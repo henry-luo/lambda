@@ -101,7 +101,7 @@ static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* 
 
         if (param_value) {
             Item value = {.item = s2it(param_value)};
-            map_put(params_map, param_name, value, input);
+            ctx.builder().putToMap(params_map, param_name, value);
         }
     }
 }
@@ -188,7 +188,7 @@ static Map* parse_structured_name(InputContext& ctx, const char* value) {
             if (field_value && field_value->len > 0) {
                 String* field_key = builder.createString(field_names[i]);
                 Item value_item = {.item = s2it(field_value)};
-                map_put(name_map, field_key, value_item, input);
+                ctx.builder().putToMap(name_map, field_key, value_item);
             }
         }
 
@@ -226,7 +226,7 @@ static Map* parse_address(InputContext& ctx, const char* value) {
             if (field_value && field_value->len > 0) {
                 String* field_key = builder.createString(field_names[i]);
                 Item value_item = {.item = s2it(field_value)};
-                map_put(addr_map, field_key, value_item, input);
+                ctx.builder().putToMap(addr_map, field_key, value_item);
             }
         }
 
@@ -317,14 +317,14 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
         // Store raw property in properties map
         Item prop_value = {.item = s2it(property_value)};
-        map_put(properties_map, property_name, prop_value, input);
+        ctx.builder().putToMap(properties_map, property_name, prop_value);
 
         // Handle common properties with special processing
         if (strcmp(property_name->chars, "fn") == 0) {
             // Full Name - store as top-level field
             String* fn_key = builder.createString("full_name");
             Item fn_value = {.item = s2it(property_value)};
-            map_put(contact_map, fn_key, fn_value, input);
+            ctx.builder().putToMap(contact_map, fn_key, fn_value);
         }
         else if (strcmp(property_name->chars, "n") == 0) {
             // Structured Name
@@ -332,20 +332,20 @@ void parse_vcf(Input* input, const char* vcf_string) {
             if (name_struct) {
                 String* name_key = builder.createString("name");
                 Item name_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(name_struct))};
-                map_put(contact_map, name_key, name_value, input);
+                ctx.builder().putToMap(contact_map, name_key, name_value);
             }
         }
         else if (strcmp(property_name->chars, "email") == 0) {
             // Email - store as top-level field
             String* email_key = builder.createString("email");
             Item email_value = {.item = s2it(property_value)};
-            map_put(contact_map, email_key, email_value, input);
+            ctx.builder().putToMap(contact_map, email_key, email_value);
         }
         else if (strcmp(property_name->chars, "tel") == 0) {
             // Phone - store as top-level field
             String* phone_key = builder.createString("phone");
             Item phone_value = {.item = s2it(property_value)};
-            map_put(contact_map, phone_key, phone_value, input);
+            ctx.builder().putToMap(contact_map, phone_key, phone_value);
         }
         else if (strcmp(property_name->chars, "adr") == 0) {
             // Address
@@ -353,51 +353,51 @@ void parse_vcf(Input* input, const char* vcf_string) {
             if (addr_struct) {
                 String* addr_key = builder.createString("address");
                 Item addr_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(addr_struct))};
-                map_put(contact_map, addr_key, addr_value, input);
+                ctx.builder().putToMap(contact_map, addr_key, addr_value);
             }
         }
         else if (strcmp(property_name->chars, "org") == 0) {
             // Organization - store as top-level field
             String* org_key = builder.createString("organization");
             Item org_value = {.item = s2it(property_value)};
-            map_put(contact_map, org_key, org_value, input);
+            ctx.builder().putToMap(contact_map, org_key, org_value);
         }
         else if (strcmp(property_name->chars, "title") == 0) {
             // Job Title - store as top-level field
             String* title_key = builder.createString("title");
             Item title_value = {.item = s2it(property_value)};
-            map_put(contact_map, title_key, title_value, input);
+            ctx.builder().putToMap(contact_map, title_key, title_value);
         }
         else if (strcmp(property_name->chars, "note") == 0) {
             // Note - store as top-level field
             String* note_key = builder.createString("note");
             Item note_value = {.item = s2it(property_value)};
-            map_put(contact_map, note_key, note_value, input);
+            ctx.builder().putToMap(contact_map, note_key, note_value);
         }
         else if (strcmp(property_name->chars, "url") == 0) {
             // URL - store as top-level field
             String* url_key = builder.createString("url");
             Item url_value = {.item = s2it(property_value)};
-            map_put(contact_map, url_key, url_value, input);
+            ctx.builder().putToMap(contact_map, url_key, url_value);
         }
         else if (strcmp(property_name->chars, "bday") == 0) {
             // Birthday - store as top-level field
             String* bday_key = builder.createString("birthday");
             Item bday_value = {.item = s2it(property_value)};
-            map_put(contact_map, bday_key, bday_value, input);
+            ctx.builder().putToMap(contact_map, bday_key, bday_value);
         }
         else if (strcmp(property_name->chars, "version") == 0) {
             // vCard Version - store as top-level field
             String* version_key = builder.createString("version");
             Item version_value = {.item = s2it(property_value)};
-            map_put(contact_map, version_key, version_value, input);
+            ctx.builder().putToMap(contact_map, version_key, version_value);
         }
     }
 
     // Store properties map in contact
     String* properties_key = builder.createString("properties");
     Item properties_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map))};
-    map_put(contact_map, properties_key, properties_value, input);
+    ctx.builder().putToMap(contact_map, properties_key, properties_value);
 
     // Set the contact map as the root of the input
     input->root = {.item = ((uint64_t)LMD_TYPE_MAP << 56) | (uint64_t)contact_map};

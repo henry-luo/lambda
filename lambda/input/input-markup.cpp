@@ -1,7 +1,7 @@
 #include "input.hpp"
 #include "markup-parser.h"
 #include "../mark_builder.hpp"
-#include "input_context.hpp"
+#include "markup_input_context.hpp"
 #include "source_tracker.hpp"
 #include <string.h>
 #include <ctype.h>
@@ -1625,8 +1625,8 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
                 String* text_content = builder->createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 String* key = input_create_string(parser->input, "content");
-                // Use elmt_put to add attribute to existing element
-                elmt_put(span, key, text_item, parser->input->pool);
+                // Use builder to add attribute to existing element
+                builder->putToElement(span, key, text_item);
                 stringbuf_reset(sb);
             }
 
@@ -2239,9 +2239,6 @@ Item input_markup(Input *input, const char* content) {
         return (Item){.item = ITEM_ERROR};
     }
 
-    // create unified InputContext with source tracking
-    InputContext ctx(input, content, strlen(content));
-
     // Extract filename from URL if available for format detection
     const char* filename = NULL;
     if (input->url) {
@@ -2271,22 +2268,17 @@ Item input_markup(Input *input, const char* content) {
         .strict_mode = false
     };
 
-    // Create parser
-    MarkupParser* parser = parser_create(input, config);
-    if (!parser) {
-        ctx.addError(ctx.tracker()->location(), "Failed to create markup parser");
-        return (Item){.item = ITEM_ERROR};
-    }
+    // Create markup input context with source tracking and parser configuration
+    MarkupInputContext ctx(input, content, strlen(content), config);
 
     // Parse content
-    Item result = parse_markup_content(parser, content);
+    Item result = parse_markup_content(ctx.markupParser(), content);
 
     if (result.item == ITEM_ERROR) {
         ctx.addWarning(ctx.tracker()->location(), "Markup parsing returned error");
     }
 
-    // Cleanup
-    parser_destroy(parser);
+    // MarkupInputContext destructor will automatically clean up MarkupParser
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing
@@ -2301,9 +2293,6 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
         return (Item){.item = ITEM_ERROR};
     }
 
-    // create unified InputContext with source tracking
-    InputContext ctx(input, content, strlen(content));
-
     const char* flavor = detect_markup_flavor(format, content);
 
     // Create parser configuration
@@ -2313,22 +2302,17 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
         .strict_mode = false
     };
 
-    // Create parser
-    MarkupParser* parser = parser_create(input, config);
-    if (!parser) {
-        ctx.addError(ctx.tracker()->location(), "Failed to create markup parser with explicit format");
-        return (Item){.item = ITEM_ERROR};
-    }
+    // Create markup input context with source tracking and parser configuration
+    MarkupInputContext ctx(input, content, strlen(content), config);
 
     // Parse content
-    Item result = parse_markup_content(parser, content);
+    Item result = parse_markup_content(ctx.markupParser(), content);
 
     if (result.item == ITEM_ERROR) {
         ctx.addWarning(ctx.tracker()->location(), "Markup parsing with explicit format returned error");
     }
 
-    // Cleanup
-    parser_destroy(parser);
+    // MarkupInputContext destructor will automatically clean up MarkupParser
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing
