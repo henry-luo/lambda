@@ -154,8 +154,26 @@ static bool is_table_row(const char* line);
 #define trim_whitespace input_trim_whitespace
 #define split_lines input_split_lines
 #define free_lines input_free_lines
-#define create_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
+
+// Local helper functions to replace macros
+static inline String* create_string(Input* input, const char* str) {
+    MarkBuilder builder(input);
+    return builder.createString(str);
+}
+
+static inline Element* create_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
+
+static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
 
 // Parser lifecycle management
 MarkupParser* parser_create(Input* input, ParseConfig config) {
@@ -1400,7 +1418,7 @@ static bool is_table_continuation(const char* line) {
 // Parse table cell content with enhanced formatting support
 static Item parse_table_cell_content(MarkupParser* parser, MarkBuilder* builder, const char* cell_text) {
     if (!cell_text || !*cell_text) {
-        String* empty = input_create_string(parser->input, "");
+        String* empty = create_string(parser->input, "");
         return (Item){.item = s2it(empty)};
     }
 
@@ -1413,7 +1431,7 @@ static Item parse_table_cell_content(MarkupParser* parser, MarkBuilder* builder,
     size_t len = end - cell_text + 1;
     char* trimmed = (char*)malloc(len + 1);
     if (!trimmed) {
-        String* empty = input_create_string(parser->input, "");
+        String* empty = create_string(parser->input, "");
         return (Item){.item = s2it(empty)};
     }
 
@@ -1495,14 +1513,14 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
 
     // For simple text without markup, return as string
     if (!strpbrk(text, "*_`[!~\\$:^{@'")) {
-        String* content = input_create_string(parser->input, text);
+        String* content = create_string(parser->input, text);
         return (Item){.item = s2it(content)};
     }
 
     // Create span container for mixed inline content
     Element* span = create_element(parser->input, "span");
     if (!span) {
-        String* content = input_create_string(parser->input, text);
+        String* content = create_string(parser->input, text);
         return (Item){.item = s2it(content)};
     }
 
@@ -1624,7 +1642,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
             if (sb->length > 0) {
                 String* text_content = builder->createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
-                String* key = input_create_string(parser->input, "content");
+                String* key = create_string(parser->input, "content");
                 // Use builder to add attribute to existing element
                 builder->putToElement(span, key, text_item);
                 stringbuf_reset(sb);
@@ -1729,7 +1747,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
                         strncpy(before_prefix, sb->str->chars, before_prefix_len);
                         before_prefix[before_prefix_len] = '\0';
 
-                        String* text_content = input_create_string(parser->input, before_prefix);
+                        String* text_content = create_string(parser->input, before_prefix);
                         if (text_content) {
                             Item text_item = {.item = s2it(text_content)};
                             list_push((List*)span, text_item);
@@ -2060,7 +2078,7 @@ static Item parse_code_span(MarkupParser* parser, MarkBuilder* builder, const ch
         strncpy(content, start, content_len);
         content[content_len] = '\0';
 
-        String* code_text = input_create_string(parser->input, content);
+        String* code_text = create_string(parser->input, content);
         Item code_item = {.item = s2it(code_text)};
         list_push((List*)code, code_item);
         increment_element_content_length(code);
@@ -2772,7 +2790,7 @@ static Item parse_strikethrough(MarkupParser* parser, MarkBuilder* builder, cons
     content[content_len] = '\0';
 
     // Add content as simple string (avoid recursive parsing for now to prevent crashes)
-    String* content_str = input_create_string(parser->input, content);
+    String* content_str = create_string(parser->input, content);
     if (content_str) {
         Item content_item = {.item = s2it(content_str)};
         list_push((List*)s_elem, content_item);
@@ -2825,7 +2843,7 @@ static Item parse_superscript(MarkupParser* parser, MarkBuilder* builder, const 
     content[content_len] = '\0';
 
     // Add content as string (superscripts are usually simple)
-    String* content_str = input_create_string(parser->input, content);
+    String* content_str = create_string(parser->input, content);
     if (content_str) {
         Item text_item = {.item = s2it(content_str)};
         list_push((List*)sup_elem, text_item);
@@ -2878,7 +2896,7 @@ static Item parse_subscript(MarkupParser* parser, MarkBuilder* builder, const ch
     content[content_len] = '\0';
 
     // Add content as string (subscripts are usually simple)
-    String* content_str = input_create_string(parser->input, content);
+    String* content_str = create_string(parser->input, content);
     if (content_str) {
         Item text_item = {.item = s2it(content_str)};
         list_push((List*)sub_elem, text_item);
@@ -3501,7 +3519,7 @@ static Item parse_emoji_shortcode(MarkupParser* parser, MarkBuilder* builder, co
     }
 
     // Add emoji character as content
-    String* emoji_str = input_create_string(parser->input, emoji_char);
+    String* emoji_str = create_string(parser->input, emoji_char);
     if (emoji_str) {
         Item emoji_item = {.item = s2it(emoji_str)};
         list_push((List*)emoji_elem, emoji_item);
@@ -3570,7 +3588,7 @@ static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const 
     } else {
         // Fallback to plain text if math parsing fails
         // This preserves the original LaTeX content
-        String* math_str = input_create_string(parser->input, content);
+        String* math_str = create_string(parser->input, content);
         if (math_str) {
             Item math_item = {.item = s2it(math_str)};
             list_push((List*)math_elem, math_item);
@@ -3673,7 +3691,7 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, 
         increment_element_content_length(math_elem);
     } else {
         // Fallback to plain text if math parsing fails
-        String* math_str = input_create_string(parser->input, content);
+        String* math_str = create_string(parser->input, content);
         if (math_str) {
             Item math_item = {.item = s2it(math_str)};
             list_push((List*)math_elem, math_item);
@@ -4584,7 +4602,7 @@ static Item parse_wiki_link(MarkupParser* parser, MarkBuilder* builder, const ch
     }
 
     if (strlen(display_text) > 0) {
-        String* text_str = input_create_string(parser->input, display_text);
+        String* text_str = create_string(parser->input, display_text);
         if (text_str) {
             list_push((List*)link_elem, (Item){.item = s2it(text_str)});
             increment_element_content_length(link_elem);
@@ -4653,7 +4671,7 @@ static Item parse_wiki_external_link(MarkupParser* parser, MarkBuilder* builder,
     }
 
     if (strlen(display_text) > 0) {
-        String* text_str = input_create_string(parser->input, display_text);
+        String* text_str = create_string(parser->input, display_text);
         if (text_str) {
             list_push((List*)link_elem, (Item){.item = s2it(text_str)});
             increment_element_content_length(link_elem);
@@ -4738,7 +4756,7 @@ static Item parse_wiki_bold_italic(MarkupParser* parser, MarkBuilder* builder, c
     content[content_len] = '\0';
 
     if (strlen(content) > 0) {
-        String* text_str = input_create_string(parser->input, content);
+        String* text_str = create_string(parser->input, content);
         if (text_str) {
             list_push((List*)format_elem, (Item){.item = s2it(text_str)});
             increment_element_content_length(format_elem);
@@ -5053,7 +5071,7 @@ static Item parse_rst_comment(MarkupParser* parser, MarkBuilder* builder) {
 
     char* content = trim_whitespace(pos);
     if (content && strlen(content) > 0) {
-        String* comment_text = input_create_string(parser->input, content);
+        String* comment_text = create_string(parser->input, content);
         if (comment_text) {
             list_push((List*)comment, (Item){.item = s2it(comment_text)});
             increment_element_content_length(comment);
@@ -5142,7 +5160,7 @@ static Item parse_rst_double_backtick_literal(MarkupParser* parser, MarkBuilder*
         strncpy(content, start, content_len);
         content[content_len] = '\0';
 
-        String* code_str = input_create_string(parser->input, content);
+        String* code_str = create_string(parser->input, content);
         if (code_str) {
             list_push((List*)code_elem, (Item){.item = s2it(code_str)});
             increment_element_content_length(code_elem);
@@ -5189,7 +5207,7 @@ static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, MarkBu
 
     add_attribute_to_element(parser->input, ref_elem, "href", ref_text);
 
-    String* link_text = input_create_string(parser->input, ref_text);
+    String* link_text = create_string(parser->input, ref_text);
     if (link_text) {
         list_push((List*)ref_elem, (Item){.item = s2it(link_text)});
         increment_element_content_length(ref_elem);
@@ -5304,7 +5322,7 @@ static char* parse_textile_modifiers(const char* line, int* start_pos) {
 // Parse Textile inline content (emphasis, strong, code, etc.)
 static Item parse_textile_inline_content(MarkupParser* parser, const char* text) {
     if (!text || strlen(text) == 0) {
-        return (Item){.item = s2it(input_create_string(parser->input, ""))};
+        return (Item){.item = s2it(create_string(parser->input, ""))};
     }
 
     // Create a container element for mixed content
@@ -5327,7 +5345,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = input_create_string(parser->input, before);
+                    String* before_str = create_string(parser->input, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
@@ -5338,7 +5356,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                 char* bold_text = (char*)malloc(end - (ptr + 2) + 1);
                 strncpy(bold_text, ptr + 2, end - (ptr + 2));
                 bold_text[end - (ptr + 2)] = '\0';
-                String* bold_str = input_create_string(parser->input, bold_text);
+                String* bold_str = create_string(parser->input, bold_text);
                 list_push((List*)bold, (Item){.item = s2it(bold_str)});
                 increment_element_content_length(bold);
                 list_push((List*)container, (Item){.item = (uint64_t)bold});
@@ -5358,7 +5376,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = input_create_string(parser->input, before);
+                    String* before_str = create_string(parser->input, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
@@ -5369,7 +5387,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                 char* strong_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(strong_text, ptr + 1, end - (ptr + 1));
                 strong_text[end - (ptr + 1)] = '\0';
-                String* strong_str = input_create_string(parser->input, strong_text);
+                String* strong_str = create_string(parser->input, strong_text);
                 list_push((List*)strong, (Item){.item = s2it(strong_str)});
                 increment_element_content_length(strong);
                 list_push((List*)container, (Item){.item = (uint64_t)strong});
@@ -5389,7 +5407,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = input_create_string(parser->input, before);
+                    String* before_str = create_string(parser->input, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
@@ -5400,7 +5418,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                 char* em_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(em_text, ptr + 1, end - (ptr + 1));
                 em_text[end - (ptr + 1)] = '\0';
-                String* em_str = input_create_string(parser->input, em_text);
+                String* em_str = create_string(parser->input, em_text);
                 list_push((List*)em, (Item){.item = s2it(em_str)});
                 increment_element_content_length(em);
                 list_push((List*)container, (Item){.item = (uint64_t)em});
@@ -5420,7 +5438,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = input_create_string(parser->input, before);
+                    String* before_str = create_string(parser->input, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
@@ -5431,7 +5449,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                 char* code_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(code_text, ptr + 1, end - (ptr + 1));
                 code_text[end - (ptr + 1)] = '\0';
-                String* code_str = input_create_string(parser->input, code_text);
+                String* code_str = create_string(parser->input, code_text);
                 list_push((List*)code, (Item){.item = s2it(code_str)});
                 increment_element_content_length(code);
                 list_push((List*)container, (Item){.item = (uint64_t)code});
@@ -5451,7 +5469,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = input_create_string(parser->input, before);
+                    String* before_str = create_string(parser->input, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
@@ -5462,7 +5480,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                 char* sup_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(sup_text, ptr + 1, end - (ptr + 1));
                 sup_text[end - (ptr + 1)] = '\0';
-                String* sup_str = input_create_string(parser->input, sup_text);
+                String* sup_str = create_string(parser->input, sup_text);
                 list_push((List*)sup, (Item){.item = s2it(sup_str)});
                 increment_element_content_length(sup);
                 list_push((List*)container, (Item){.item = (uint64_t)sup});
@@ -5482,7 +5500,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                     char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
-                    String* before_str = input_create_string(parser->input, before);
+                    String* before_str = create_string(parser->input, before);
                     list_push((List*)container, (Item){.item = s2it(before_str)});
                     increment_element_content_length(container);
                     free(before);
@@ -5493,7 +5511,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
                 char* sub_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(sub_text, ptr + 1, end - (ptr + 1));
                 sub_text[end - (ptr + 1)] = '\0';
-                String* sub_str = input_create_string(parser->input, sub_text);
+                String* sub_str = create_string(parser->input, sub_text);
                 list_push((List*)sub, (Item){.item = s2it(sub_str)});
                 increment_element_content_length(sub);
                 list_push((List*)container, (Item){.item = (uint64_t)sub});
@@ -5516,7 +5534,7 @@ static Item parse_textile_inline_content(MarkupParser* parser, const char* text)
         char* remaining = (char*)malloc(ptr - start + 1);
         strncpy(remaining, start, ptr - start);
         remaining[ptr - start] = '\0';
-        String* remaining_str = input_create_string(parser->input, remaining);
+        String* remaining_str = create_string(parser->input, remaining);
         list_push((List*)container, (Item){.item = s2it(remaining_str)});
         increment_element_content_length(container);
         free(remaining);
@@ -5545,7 +5563,7 @@ static Item parse_textile_code_block(MarkupParser* parser, MarkBuilder* builder,
     }
 
     const char* content = line + start_pos;
-    String* code_content = input_create_string(parser->input, content);
+    String* code_content = create_string(parser->input, content);
     list_push((List*)code_block, (Item){.item = s2it(code_content)});
     increment_element_content_length(code_block);
 
@@ -5563,7 +5581,7 @@ static Item parse_textile_code_block(MarkupParser* parser, MarkBuilder* builder,
                 break;
             }
 
-            String* line_content = input_create_string(parser->input, next_line);
+            String* line_content = create_string(parser->input, next_line);
             list_push((List*)code_block, (Item){.item = s2it(line_content)});
             increment_element_content_length(code_block);
             parser->current_line++;
@@ -5638,7 +5656,7 @@ static Item parse_textile_pre_block(MarkupParser* parser, MarkBuilder* builder, 
     }
 
     const char* content = line + start_pos;
-    String* pre_content = input_create_string(parser->input, content);
+    String* pre_content = create_string(parser->input, content);
     list_push((List*)pre_block, (Item){.item = s2it(pre_content)});
     increment_element_content_length(pre_block);
 
@@ -5655,7 +5673,7 @@ static Item parse_textile_comment(MarkupParser* parser, MarkBuilder* builder, co
     }
 
     const char* content = line + 4; // Skip "###."
-    String* comment_content = input_create_string(parser->input, content);
+    String* comment_content = create_string(parser->input, content);
     list_push((List*)comment, (Item){.item = s2it(comment_content)});
     increment_element_content_length(comment);
 
@@ -5675,7 +5693,7 @@ static Item parse_textile_notextile(MarkupParser* parser, MarkBuilder* builder, 
     const char* content = extended ? line + 11 : line + 10;
     while (*content && isspace(*content)) content++;
 
-    String* raw_content = input_create_string(parser->input, content);
+    String* raw_content = create_string(parser->input, content);
     list_push((List*)notextile, (Item){.item = s2it(raw_content)});
     increment_element_content_length(notextile);
     add_attribute_to_element(parser->input, notextile, "extended", extended ? "true" : "false");
@@ -5718,7 +5736,7 @@ static Item parse_textile_list_item(MarkupParser* parser, MarkBuilder* builder, 
             strncpy(term, content, def_sep - content);
             term[def_sep - content] = '\0';
             char* trimmed_term = trim_whitespace(term);
-            String* term_str = input_create_string(parser->input, trimmed_term);
+            String* term_str = create_string(parser->input, trimmed_term);
 
             Element* term_elem = create_element(parser->input, "dt");
             list_push((List*)term_elem, (Item){.item = s2it(term_str)});
@@ -5844,7 +5862,7 @@ static Item parse_asciidoc_heading(MarkupParser* parser, MarkBuilder* builder, c
     skip_whitespace(&pos);
 
     if (*pos) {
-        String* content = input_create_string(parser->input, pos);
+        String* content = create_string(parser->input, pos);
         list_push((List*)header, (Item){.item = s2it(content)});
         increment_element_content_length(header);
     }
@@ -5940,7 +5958,7 @@ static Item parse_asciidoc_listing_block(MarkupParser* parser, MarkBuilder* buil
             if (i < end_line - 1) strcat(content, "\n");
         }
 
-        String* content_str = input_create_string(parser->input, content);
+        String* content_str = create_string(parser->input, content);
         if (content_str) {
             list_push((List*)code_block, (Item){.item = s2it(content_str)});
             increment_element_content_length(code_block);
@@ -6144,11 +6162,11 @@ static Item parse_asciidoc_inline(MarkupParser* parser, MarkBuilder* builder, co
     size_t text_len = strlen(text);
     if (text_len > 10000) {
         // For very long content, just return as plain text to avoid parsing issues
-        return (Item){.item = s2it(input_create_string(parser->input, text))};
+        return (Item){.item = s2it(create_string(parser->input, text))};
     }
 
     // Return simple text for now - inline formatting can be added later
-    return (Item){.item = s2it(input_create_string(parser->input, text))};
+    return (Item){.item = s2it(create_string(parser->input, text))};
 }
 
 // Parse AsciiDoc links (placeholder for more complex link parsing)

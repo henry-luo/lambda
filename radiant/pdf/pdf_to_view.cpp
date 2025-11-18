@@ -6,12 +6,19 @@
 #include "pages.hpp"
 #include "../../lib/log.h"
 #include "../../lambda/input/input.hpp"
+#include "../../lambda/mark_builder.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include <string.h>
 
 // PDF stream decompression
 extern "C" {
     #include "../../lambda/input/pdf_decompress.h"
+}
+
+// Local helper function
+static inline String* input_create_string(Input* input, const char* str) {
+    MarkBuilder builder(input);
+    return builder.createString(str);
 }
 
 // Forward declarations

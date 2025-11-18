@@ -2,6 +2,7 @@
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
 #include "input_context.hpp"
 #include "source_tracker.hpp"
+#include "../mark_builder.hpp"
 #include <string.h>
 #include <ctype.h>
 
@@ -10,9 +11,16 @@ using namespace lambda;
 // Forward declarations
 static Element* parse_inline_text(Input* input, const char* text);
 
-// Use common utility functions from input.h
-#define create_string input_create_string
-#define create_org_element input_create_element
+// Local helper functions to replace macros
+static inline String* create_string(Input* input, const char* str) {
+    MarkBuilder builder(input);
+    return builder.createString(str);
+}
+
+static inline Element* create_org_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
 
 // Helper: add plain text to container
 static void add_plain_text(Input* input, Element* container, const char* start, const char* end) {

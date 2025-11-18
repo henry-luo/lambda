@@ -425,7 +425,11 @@ static Element* parse_element(InputContext& ctx, const char **mark) {
 
         // Parse attribute value
         Item attr_value = parse_value(ctx, mark);
-        input_add_attribute_item_to_element(input, element, attr_name->chars, attr_value);
+        MarkBuilder builder(input);
+        String* key = builder.createString(attr_name->chars);
+        if (key) {
+            builder.putToElement(element, key, attr_value);
+        }
 
         skip_comments(mark);
         if (**mark == ',') {

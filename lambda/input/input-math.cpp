@@ -4,11 +4,27 @@
 #include "../../lib/log.h"
 #include "input_context.hpp"
 #include "source_tracker.hpp"
+#include "../mark_builder.hpp"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 
 using namespace lambda;
+
+// Local helper functions to replace macros
+static inline Element* create_math_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
+
+static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
 
 // math parser for latex math, typst math, and ascii math
 // produces syntax tree of nested <expr op:...> elements
@@ -660,10 +676,6 @@ static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavo
 static Item create_math_element_with_attributes(Input *input, const char* element_name, const char* symbol, const char* description);
 static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name);
 
-// use common utility functions from input.c and input-common.c
-#define create_math_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
-
 // Forward declarations for helper functions from input-common.cpp
 extern bool is_trig_function(const char* func_name);
 extern bool is_log_function(const char* func_name);
@@ -809,7 +821,8 @@ static Item parse_math_identifier(Input *input, const char **math) {
     temp_buffer[sb->length] = '\0';
 
     // Create proper string using input pool allocation
-    String *id_string = input_create_string(input, temp_buffer);
+    MarkBuilder builder(input);
+    String *id_string = builder.createString(temp_buffer);
     stringbuf_reset(sb);
 
     if (!id_string) {
@@ -1453,7 +1466,8 @@ static Item parse_latex_command(Input *input, const char **math) {
             return parse_latex_abs(input, math);
         }
         // For other \left delimiters, treat as symbol for now
-        String* left_symbol = input_create_string(input, "left");
+        MarkBuilder builder(input);
+        String* left_symbol = builder.createString("left");
         return left_symbol ? (Item){.item = y2it(left_symbol)} : (Item){.item = ITEM_ERROR};
     } else if (strcmp(cmd_string->chars, "quad") == 0 || strcmp(cmd_string->chars, "qquad") == 0 ||
                strcmp(cmd_string->chars, "!") == 0 || strcmp(cmd_string->chars, ",") == 0 ||
@@ -1508,7 +1522,8 @@ static Item parse_latex_command(Input *input, const char **math) {
         // Fallback for unrecognized commands - treat as symbol
         printf("DEBUG: Command '%s' not found, falling back to symbol\n", cmd_string->chars);
         stringbuf_reset(sb);
-        String* symbol_string = input_create_string(input, cmd_string->chars);
+        MarkBuilder builder(input);
+        String* symbol_string = builder.createString(cmd_string->chars);
         return symbol_string ? (Item){.item = y2it(symbol_string)} : (Item){.item = ITEM_ERROR};
     }
 
@@ -3237,7 +3252,8 @@ static Item parse_latex_cases(Input *input, const char **math) {
         content_text[--content_len] = '\0';
     }
 
-    String* content_string = input_create_string(input, content_text);
+    MarkBuilder builder(input);
+    String* content_string = builder.createString(content_text);
     if (content_string) {
         list_push((List*)cases_element, {.item = y2it(content_string)});
     }
@@ -4237,7 +4253,8 @@ static Item parse_special_symbol(Input *input, const char **math, MathFlavor fla
 
     // Add the Unicode symbol as content if available
     if (def->unicode_symbol && strlen(def->unicode_symbol) > 0) {
-        String* unicode_string = input_create_string(input, def->unicode_symbol);
+        MarkBuilder builder(input);
+        String* unicode_string = builder.createString(def->unicode_symbol);
         if (unicode_string) {
             list_push((List*)symbol_element, {.item = y2it(unicode_string)});
         }

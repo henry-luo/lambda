@@ -160,9 +160,20 @@ static Item parse_ascii_simple_expression(InputContext& ctx, ASCIIToken* tokens,
 static const ASCIIConstant* find_ascii_constant(const char* text, size_t length);
 static void skip_ascii_whitespace(const char** text);
 
-// Helper macros
-#define create_math_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
+// Local helper functions to replace macros
+static inline Element* create_math_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
+
+static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
 
 // Skip whitespace in ASCII math input
 static void skip_ascii_whitespace(const char** text) {

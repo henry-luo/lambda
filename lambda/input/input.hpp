@@ -33,37 +33,7 @@ public:
     Pool* get_pool() const { return global_pool; }
 };
 
-// Temporary compatibility function for legacy code
-// TODO: Remove this once all parsers are refactored to use MarkBuilder directly
 #include "../mark_builder.hpp"
-
-inline String* input_create_string(Input* input, const char* str) {
-    MarkBuilder builder(input);
-    return builder.createString(str);
-}
-
-// Temporary compatibility functions for parsers during migration
-// These create elements using ElementBuilder but return the raw Element*
-inline Element* input_create_element(Input* input, const char* tag_name) {
-    MarkBuilder builder(input);
-    return builder.element(tag_name).final().element;
-}
-
-inline void input_add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
-    MarkBuilder builder(input);
-    String* key = builder.createString(attr_name);
-    String* value = builder.createString(attr_value);
-    if (!key || !value) return;
-    Item lambda_value = {.item = s2it(value)};
-    builder.putToElement(element, key, lambda_value);
-}
-
-inline void input_add_attribute_item_to_element(Input* input, Element* element, const char* attr_name, Item attr_value) {
-    MarkBuilder builder(input);
-    String* key = builder.createString(attr_name);
-    if (!key) return;
-    builder.putToElement(element, key, attr_value);
-}
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,11 +55,6 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str);
 
 // ASCII Math parsing functions (from input-math-ascii.cpp)
 Item input_ascii_math(Input* input, const char* ascii_math);
-
-// YAML parsing utility functions (from input-yaml.c)
-void trim_string_inplace(char* str);
-Item parse_scalar_value(Input *input, const char* str);
-Array* parse_flow_array(Input *input, const char* str);
 
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
