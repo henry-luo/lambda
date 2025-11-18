@@ -16,51 +16,50 @@ namespace lambda {
 class InputContext {
 private:
     Input* input_;                   // The Input being parsed (not owned)
-    MarkBuilder builder_;            // MarkBuilder for creating Items
     ParseErrorList errors_;          // Error collection
     std::string owned_source_;       // Owned copy of source - MUST be before tracker_!
-    SourceTracker tracker_;          // Source position tracker (always owned)
-
 public:
+    MarkBuilder builder;             // MarkBuilder for creating Items
+    SourceTracker tracker;          // Source position tracker (always owned)
     StringBuf* sb;                   // shared string buffer for temp work
 
     // Constructor without source text (empty tracker)
     explicit InputContext(Input* input)
         : input_(input)
-        , builder_(input)
+        , builder(input)
         , errors_(100)  // Default max 100 errors
         , owned_source_()
-        , tracker_("", 0)
+        , tracker("", 0)
         , sb(stringbuf_new(input->pool))
     {}
 
     // Constructor with source text and explicit length
     InputContext(Input* input, const char* source, size_t len)
         : input_(input)
-        , builder_(input)
+        , builder(input)
         , errors_(100)
         , owned_source_(source, len)  // Make a copy
-        , tracker_(owned_source_.c_str(), owned_source_.length())
+        , tracker(owned_source_.c_str(), owned_source_.length())
         , sb(stringbuf_new(input->pool))
     {}
 
     // Constructor with source text from std::string
     InputContext(Input* input, const std::string& source)
         : input_(input)
-        , builder_(input)
+        , builder(input)
         , errors_(100)
         , owned_source_(source)  // Make a copy
-        , tracker_(owned_source_.c_str(), owned_source_.length())
+        , tracker(owned_source_.c_str(), owned_source_.length())
         , sb(stringbuf_new(input->pool))
     {}
 
     // Constructor with source text from C string (calculates length)
     InputContext(Input* input, const char* source)
         : input_(input)
-        , builder_(input)
+        , builder(input)
         , errors_(100)
         , owned_source_(source ? source : "")  // Make a copy
-        , tracker_(owned_source_.c_str(), owned_source_.length())
+        , tracker(owned_source_.c_str(), owned_source_.length())
         , sb(stringbuf_new(input->pool))
     {}
 
@@ -74,16 +73,13 @@ public:
     // Accessors
     Input* input() { return input_; }
     const Input* input() const { return input_; }
-    MarkBuilder& builder() { return builder_; }
-    const MarkBuilder& builder() const { return builder_; }
     ParseErrorList& errors() { return errors_; }
     const ParseErrorList& errors() const { return errors_; }
-    SourceTracker& tracker() { return tracker_; }
-    const SourceTracker& tracker() const { return tracker_; }
+
 
     // Get current location
     SourceLocation location() const {
-        return tracker_.location();
+        return tracker.location();
     }
 
     // Error handling - with location

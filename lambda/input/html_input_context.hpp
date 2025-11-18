@@ -16,7 +16,7 @@ namespace lambda {
  *   HtmlInputContext ctx(input, source, len);
  *   ctx.ensureHtml();
  *   Element* body = ctx.ensureBody();
- *   ctx.builder().putToElement(body, "class", ctx.builder().createString("main"));
+ *   ctx.builder.putToElement(body, "class", ctx.builder.createString("main"));
  */
 class HtmlInputContext : public InputContext {
 public:

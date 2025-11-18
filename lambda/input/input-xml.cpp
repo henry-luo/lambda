@@ -26,7 +26,7 @@ static const char* resolve_entity(const char* entity_name, size_t length) {
 }
 
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -135,7 +135,7 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
 }
 
 static String* parse_tag_name(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -180,7 +180,7 @@ static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const c
 }
 
 static Item parse_comment(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     // Skip past the "!--" part (already consumed by caller)
 
     // Find comment content
@@ -218,7 +218,7 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
 }
 
 static Item parse_cdata(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     // Skip past the "![CDATA[" part (already consumed by caller)
 
     const char* cdata_start = *xml;
@@ -245,7 +245,7 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
 }
 
 static Item parse_entity(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     Input* input = ctx.input();
     // Skip past the "!ENTITY" part (already consumed by caller)
     skip_whitespace(xml);
@@ -332,7 +332,7 @@ static Item parse_entity(InputContext& ctx, const char **xml) {
 }
 
 static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     // Parse DTD declarations like ELEMENT, ATTLIST, NOTATION
     const char* decl_start = *xml;
     const char* decl_name_end = decl_start;
@@ -394,7 +394,7 @@ static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
 }
 
 static Item parse_doctype(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     // Skip past the "!DOCTYPE" part (already consumed by caller)
     skip_whitespace(xml);
 
@@ -477,7 +477,7 @@ static Item parse_doctype(InputContext& ctx, const char **xml) {
 }
 
 static Item parse_element(InputContext& ctx, const char **xml) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     skip_whitespace(xml);
 
     if (**xml != '<') return {.item = ITEM_ERROR};
@@ -688,7 +688,7 @@ static Item parse_element(InputContext& ctx, const char **xml) {
 
 void parse_xml(Input* input, const char* xml_string) {
     InputContext ctx(input, xml_string, strlen(xml_string));
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     const char* xml = xml_string;
     skip_whitespace(&xml);
@@ -734,7 +734,7 @@ void parse_xml(Input* input, const char* xml_string) {
 
         // Safety check: ensure we always advance to prevent infinite loops
         if (xml == old_xml) {
-            ctx.addWarning(ctx.tracker().location(), "Possible infinite loop detected in XML parsing, forcing advance");
+            ctx.addWarning(ctx.tracker.location(), "Possible infinite loop detected in XML parsing, forcing advance");
             xml++; // Force advance by at least one character
         }
     }

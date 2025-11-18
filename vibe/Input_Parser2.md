@@ -556,7 +556,7 @@ void parse_ini(Input* input, const char* ini_string) {
 ```cpp
 void parse_ini(Input* input, const char* ini_string) {
     InputContext ctx(input);
-    MarkBuilder& b = ctx.builder();
+    MarkBuilder& b = ctx.builder;
 
     MapBuilder section = b.map();
     section.put("key_name", "value");  // ✅ NEW - direct string
@@ -577,7 +577,7 @@ input_add_attribute_item_to_element(ctx.input(), stylesheet, "rules", rules_item
 
 **After**:
 ```cpp
-Item stylesheet = ctx.builder().element("stylesheet")  // ✅ NEW
+Item stylesheet = ctx.builder.element("stylesheet")  // ✅ NEW
     .attr("rules", rules_item)  // ✅ NEW
     .final();
 ```
@@ -653,7 +653,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 void parse_html_impl(Input* input, const char* html_string) {
     HtmlInputContext ctx(input, html_string, strlen(html_string));
     // Single unified context with both features!
-    // Use ctx.builder() for creating elements
+    // Use ctx.builder for creating elements
     // Use ctx.ensureBody() for HTML5 state machine
     // Use ctx.addError() for error reporting
 }
@@ -747,7 +747,7 @@ TEST(ParserContext, InputContextBasic) {
     Input* input = Input::create(pool);
     InputContext ctx(input);
 
-    Item map = ctx.builder().map()
+    Item map = ctx.builder.map()
         .put("key", "value")
         .final();
 
@@ -768,7 +768,7 @@ TEST(ParserContext, MarkupContextLineManagement) {
     ParseConfig config = {.format_name = "markdown"};
     MarkupInputContext ctx(input, config, "# Header\nText");
 
-    ctx.splitLines(ctx.tracker()->content());
+    ctx.splitLines(ctx.tracker->content());
     EXPECT_EQ(ctx.line_count, 2);
     EXPECT_STREQ(ctx.currentLine(), "# Header");
 }
@@ -826,7 +826,7 @@ Item e3 = builder.element("div").final();
 **After** (1 consistent way):
 ```cpp
 // Single fluent API
-Item e = ctx.builder().element("div")
+Item e = ctx.builder.element("div")
     .attr("class", "content")
     .child(text_item)
     .final();

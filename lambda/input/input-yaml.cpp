@@ -44,7 +44,7 @@ static char* strip_yaml_comments(const char* line) {
 // Helper function to create String* from char*
 static String* create_string_from_cstr(InputContext* ctx, const char* str) {
     if (!str) return NULL;
-    return ctx->builder().createString(str);
+    return ctx->builder.createString(str);
 }
 
 // Utility functions
@@ -65,30 +65,30 @@ void trim_string_inplace(char* str) {
 }
 
 Item parse_scalar_value(InputContext* ctx, const char* str) {
-    if (!str) return ctx->builder().createNull();
+    if (!str) return ctx->builder.createNull();
 
     char* copy = strdup(str);
     trim_string_inplace(copy);
 
     if (strlen(copy) == 0) {
         free(copy);
-        return ctx->builder().createNull();
+        return ctx->builder.createNull();
     }
 
     // Check for null
     if (strcmp(copy, "null") == 0 || strcmp(copy, "~") == 0) {
         free(copy);
-        return ctx->builder().createNull();
+        return ctx->builder.createNull();
     }
 
     // Check for boolean
     if (strcmp(copy, "true") == 0 || strcmp(copy, "yes") == 0) {
         free(copy);
-        return ctx->builder().createBool(true);
+        return ctx->builder.createBool(true);
     }
     if (strcmp(copy, "false") == 0 || strcmp(copy, "no") == 0) {
         free(copy);
-        return ctx->builder().createBool(false);
+        return ctx->builder.createBool(false);
     }
 
     // Check for number
@@ -96,32 +96,32 @@ Item parse_scalar_value(InputContext* ctx, const char* str) {
     int64_t int_val = strtol(copy, &end, 10);
     if (*end == '\0') {
         free(copy);
-        return ctx->builder().createInt(int_val);
+        return ctx->builder.createInt(int_val);
     }
 
     double float_val = strtod(copy, &end);
     if (*end == '\0') {
         free(copy);
-        return ctx->builder().createFloat(float_val);
+        return ctx->builder.createFloat(float_val);
     }
 
     // Handle quoted strings
     if (copy[0] == '"' && copy[strlen(copy) - 1] == '"') {
         copy[strlen(copy) - 1] = '\0';
-        String* str_result = ctx->builder().createString(copy + 1);
+        String* str_result = ctx->builder.createString(copy + 1);
         free(copy);
         return (Item){.item = s2it(str_result)};
     }
 
     // Default to string
-    String* str_result = ctx->builder().createString(copy);
+    String* str_result = ctx->builder.createString(copy);
     free(copy);
     return (Item){.item = s2it(str_result)};
 }
 
 // Parse flow array like [item1, item2, item3]
 Array* parse_flow_array(InputContext* ctx, const char* str) {
-    ArrayBuilder array_builder = ctx->builder().array();
+    ArrayBuilder array_builder = ctx->builder.array();
 
     if (!str || strlen(str) < 2) {
         return array_builder.final().array;
@@ -166,7 +166,7 @@ Array* parse_flow_array(InputContext* ctx, const char* str) {
 // Parse YAML content
 static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_line, int total_lines, int target_indent) {
     if (*current_line >= total_lines) {
-        return ctx->builder().createNull();
+        return ctx->builder.createNull();
     }
 
     char* line = lines[*current_line];
@@ -186,7 +186,7 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
 
     // If we've dedented, return
     if (indent < target_indent) {
-        return ctx->builder().createNull();
+        return ctx->builder.createNull();
     }
 
     // Warn about inconsistent indentation
@@ -198,7 +198,7 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
 
     // Check for array item
     if (content[0] == '-' && (content[1] == ' ' || content[1] == '\0')) {
-        ArrayBuilder array_builder = ctx->builder().array();
+        ArrayBuilder array_builder = ctx->builder.array();
 
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -238,7 +238,7 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
     // Check for object (key: value)
     char* colon_pos = strstr(content, ":");
     if (colon_pos && (colon_pos[1] == ' ' || colon_pos[1] == '\0')) {
-        MapBuilder map_builder = ctx->builder().map();
+        MapBuilder map_builder = ctx->builder.map();
 
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -375,8 +375,8 @@ void parse_yaml(Input *input, const char* yaml_str) {
     }
 
     // Parse each document
-    ArrayBuilder documents_builder = ctx.builder().array();
-    Item final_result = ctx.builder().createNull();
+    ArrayBuilder documents_builder = ctx.builder.array();
+    Item final_result = ctx.builder.createNull();
     int parsed_doc_count = 0;
 
     for (int doc_idx = 0; doc_idx < doc_count; doc_idx++) {

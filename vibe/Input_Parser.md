@@ -473,7 +473,7 @@ public:
  *   void parse_json(Input* input, const char* json) {
  *       InputContext ctx(input, json);
  *
- *       while (!ctx.tracker().atEnd()) {
+ *       while (!ctx.tracker.atEnd()) {
  *           if (parse_error) {
  *               ctx.addError(ctx.location(), "Unexpected token");
  *               // Try to recover...
@@ -1483,7 +1483,7 @@ void parse_json(Input* input, const char* json_string) {
 ```cpp
 void parse_json(Input* input, const char* json_string) {
     InputContext ctx(input, json_string);  // Enable position tracking
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = *ctx.tracker;
 
     MapBuilder map_builder = ctx.map();
 
@@ -1545,7 +1545,7 @@ void parse_<format>(Input* input, const char* content) {
     InputContext ctx(input, content);  // Enable tracking
 
     // ... parsing logic with error recovery
-    while (!ctx.tracker()->atEnd()) {
+    while (!ctx.tracker->atEnd()) {
         if (error) {
             ctx.addError("Error message");
             recover_from_error(ctx);
@@ -1599,7 +1599,7 @@ map_put(map, key, value, input);
 
 **With**:
 ```cpp
-ctx.builder().map()
+ctx.builder.map()
     .put(key, value)
     .final();
 ```
@@ -1656,7 +1656,7 @@ Item item = {.pointer = dval};
 
 **With**:
 ```cpp
-Item item = ctx.builder().createFloat(3.14);
+Item item = ctx.builder.createFloat(3.14);
 ```
 
 #### 3.3 Use C++ Features
@@ -1793,8 +1793,8 @@ public:
 __attribute__((deprecated("Use InputContext::createString() instead")))
 String* input_create_string(Input* input, const char* str);
 
-// DEPRECATED: Use ctx.builder().element() instead
-__attribute__((deprecated("Use ctx.builder().element() instead")))
+// DEPRECATED: Use ctx.builder.element() instead
+__attribute__((deprecated("Use ctx.builder.element() instead")))
 Element* input_create_element(Input* input, const char* tag_name);
 
 // DEPRECATED: Use MapBuilder::put() instead
@@ -2198,7 +2198,7 @@ The document previously indicated 3 graph parsers were incomplete, but verificat
 // New parser using modern API with error recovery (< 150 LOC for simple format)
 void parse_my_format(Input* input, const char* content) {
     InputContext ctx(input, content);  // Enable tracking
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = *ctx.tracker;
 
     while (!tracker.atEnd()) {
         if (error_condition) {
@@ -2659,7 +2659,7 @@ void recover_xml_error(SourceTracker& tracker) {
    ```cpp
    void parse_format(Input* input, const char* content) {
        InputContext ctx(input, content);  // Enable tracking
-       SourceTracker& tracker = *ctx.tracker();
+       SourceTracker& tracker = *ctx.tracker;
        // ... parsing with error recovery
        if (ctx.hasErrors()) {
            ctx.setErrorResult();

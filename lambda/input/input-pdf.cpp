@@ -150,7 +150,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
         // parse value
         Item value = parse_pdf_object(ctx, pdf);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
-            ctx.builder().putToMap(dict, key, value);
+            ctx.builder.putToMap(dict, key, value);
             pair_count++;
         }
 
@@ -195,7 +195,7 @@ static String* parse_pdf_name(InputContext& ctx, const char **pdf) {
         char_count++;
     }
 
-    return ctx.builder().createStringFromBuf(sb);
+    return ctx.builder.createStringFromBuf(sb);
 }
 
 static Array* parse_pdf_array(InputContext& ctx, const char **pdf);
@@ -283,7 +283,7 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
         }
     }
 
-    return ctx.builder().createStringFromBuf(sb);
+    return ctx.builder.createStringFromBuf(sb);
 }
 
 static bool is_digit_or_space_ahead(const char *pdf, int max_lookahead) {
@@ -435,34 +435,34 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     if (!ref_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key = ctx.builder().createString("type");
+    String* type_key = ctx.builder.createString("type");
     if (type_key) {
-        String* type_value = ctx.builder().createString("indirect_ref");
+        String* type_value = ctx.builder.createString("indirect_ref");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder().putToMap(ref_map, type_key, type_item);
+            ctx.builder.putToMap(ref_map, type_key, type_item);
         }
     }
 
     // Store object number
-    String* obj_key = ctx.builder().createString("object_num");
+    String* obj_key = ctx.builder.createString("object_num");
     if (obj_key) {
         double* obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
-            ctx.builder().putToMap(ref_map, obj_key, obj_item);
+            ctx.builder.putToMap(ref_map, obj_key, obj_item);
         }
     }
 
     // Store generation number
-    String* gen_key = ctx.builder().createString("gen_num");
+    String* gen_key = ctx.builder.createString("gen_num");
     if (gen_key) {
         double* gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
-            ctx.builder().putToMap(ref_map, gen_key, gen_item);
+            ctx.builder.putToMap(ref_map, gen_key, gen_item);
         }
     }
     return {.item = (uint64_t)ref_map};
@@ -506,45 +506,45 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     if (!obj_map) return content; // return content if we can't create wrapper
 
     // Store type identifier
-    String* type_key = ctx.builder().createString("type");
+    String* type_key = ctx.builder.createString("type");
     if (type_key) {
-        String* type_value = ctx.builder().createString("indirect_object");
+        String* type_value = ctx.builder.createString("indirect_object");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder().putToMap(obj_map, type_key, type_item);
+            ctx.builder.putToMap(obj_map, type_key, type_item);
         }
     }
 
     // Store object number
-    String* obj_key = ctx.builder().createString("object_num");
+    String* obj_key = ctx.builder.createString("object_num");
     if (obj_key) {
         double* obj_val;
         obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
-            ctx.builder().putToMap(obj_map, obj_key, obj_item);
+            ctx.builder.putToMap(obj_map, obj_key, obj_item);
         }
     }
 
     // Store generation number
-    String* gen_key = ctx.builder().createString("gen_num");
+    String* gen_key = ctx.builder.createString("gen_num");
     if (gen_key) {
         double* gen_val;
         gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
-            ctx.builder().putToMap(obj_map, gen_key, gen_item);
+            ctx.builder.putToMap(obj_map, gen_key, gen_item);
         }
     }
 
     // Store content
     if (content .item != ITEM_ERROR && content .item != ITEM_NULL) {
-        String* content_key = ctx.builder().createString("content");
+        String* content_key = ctx.builder.createString("content");
         if (content_key) {
             Item content_item = {.item = content.item};
-            ctx.builder().putToMap(obj_map, content_key, content_item);
+            ctx.builder.putToMap(obj_map, content_key, content_item);
         }
     }
     return {.item = (uint64_t)obj_map};
@@ -572,38 +572,38 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
     if (!stream_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key = ctx.builder().createString("type");
+    String* type_key = ctx.builder.createString("type");
     if (type_key) {
-        String* type_value = ctx.builder().createString("stream");
+        String* type_value = ctx.builder.createString("stream");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder().putToMap(stream_map, type_key, type_item);
+            ctx.builder.putToMap(stream_map, type_key, type_item);
         }
     }
 
     // Store dictionary if provided
     if (dict) {
-        String* dict_key = ctx.builder().createString("dictionary");
+        String* dict_key = ctx.builder.createString("dictionary");
         if (dict_key) {
             Item dict_item = {.item = (uint64_t)dict};
-            ctx.builder().putToMap(stream_map, dict_key, dict_item);
+            ctx.builder.putToMap(stream_map, dict_key, dict_item);
         }
     }
 
     // Store data length
-    String* length_key = ctx.builder().createString("length");
+    String* length_key = ctx.builder.createString("length");
     if (length_key) {
         double* length_val;
         length_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (length_val) {
             *length_val = (double)data_length;
             Item length_item = {.item = d2it(length_val)};
-            ctx.builder().putToMap(stream_map, length_key, length_item);
+            ctx.builder.putToMap(stream_map, length_key, length_item);
         }
     }
 
     // Store stream data as a string (truncated for safety)
-    String* data_key = ctx.builder().createString("data");
+    String* data_key = ctx.builder.createString("data");
     if (data_key) {
         String* stream_data;
         stream_data = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + data_length + 1);
@@ -614,16 +614,16 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
             stream_data->ref_cnt = 0;
 
             Item data_item = {.item = s2it(stream_data)};
-            ctx.builder().putToMap(stream_map, data_key, data_item);
+            ctx.builder.putToMap(stream_map, data_key, data_item);
 
             // Add content analysis for potential content streams
             if (data_length > 10 && data_length < 2000) { // Only analyze reasonably sized streams
                 Item content_analysis = analyze_pdf_content_stream(ctx.input(), *pdf, data_length);
                 if (content_analysis .item != ITEM_NULL) {
-                    String* analysis_key = ctx.builder().createString("analysis");
+                    String* analysis_key = ctx.builder.createString("analysis");
                     if (analysis_key) {
                         Item analysis_item = {.item = content_analysis.item};
-                        ctx.builder().putToMap(stream_map, analysis_key, analysis_item);
+                        ctx.builder.putToMap(stream_map, analysis_key, analysis_item);
                     }
                 }
             }
@@ -646,12 +646,12 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
     if (!xref_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key = ctx.builder().createString("type");
+    String* type_key = ctx.builder.createString("type");
     if (type_key) {
-        String* type_value = ctx.builder().createString("xref_table");
+        String* type_value = ctx.builder.createString("xref_table");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder().putToMap(xref_map, type_key, type_item);
+            ctx.builder.putToMap(xref_map, type_key, type_item);
         }
     }
 
@@ -702,31 +702,31 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                     if (entry_map) {
                                         if (entry_map->data) {
                                             // Store object number
-                                            String* obj_key = ctx.builder().createString("object");
+                                            String* obj_key = ctx.builder.createString("object");
                                             if (obj_key) {
                                                 double* obj_val;
                                                 obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
                                                 if (obj_val) {
                                                     *obj_val = (double)(start_num + i);
                                                     Item obj_item = {.item = d2it(obj_val)};
-                                                    ctx.builder().putToMap(entry_map, obj_key, obj_item);
+                                                    ctx.builder.putToMap(entry_map, obj_key, obj_item);
                                                 }
                                             }
 
                                             // Store offset
-                                            String* offset_key = ctx.builder().createString("offset");
+                                            String* offset_key = ctx.builder.createString("offset");
                                             if (offset_key) {
                                                 double* offset_val;
                                                 offset_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
                                                 if (offset_val) {
                                                     *offset_val = (double)offset;
                                                     Item offset_item = {.item = d2it(offset_val)};
-                                                    ctx.builder().putToMap(entry_map, offset_key, offset_item);
+                                                    ctx.builder.putToMap(entry_map, offset_key, offset_item);
                                                 }
                                             }
 
                                             // Store flag
-                                            String* flag_key = ctx.builder().createString("flag");
+                                            String* flag_key = ctx.builder.createString("flag");
                                             if (flag_key) {
                                                 String* flag_val;
                                                 flag_val = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 2);
@@ -736,7 +736,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                     flag_val->len = 1;
                                                     flag_val->ref_cnt = 0;
                                                     Item flag_item = {.item = s2it(flag_val)};
-                                                    ctx.builder().putToMap(entry_map, flag_key, flag_item);
+                                                    ctx.builder.putToMap(entry_map, flag_key, flag_item);
                                                 }
                                             }
 
@@ -758,10 +758,10 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
         }
 
         // Store entries in xref map
-        String* entries_key = ctx.builder().createString("entries");
+        String* entries_key = ctx.builder.createString("entries");
         if (entries_key) {
             Item entries_item = {.item = (uint64_t)entries};
-            ctx.builder().putToMap(xref_map, entries_key, entries_item);
+            ctx.builder.putToMap(xref_map, entries_key, entries_item);
         }
     }
     return {.item = (uint64_t)xref_map};
@@ -783,20 +783,20 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
     if (!trailer_map) return {.item = (uint64_t)trailer_dict};
 
     // Store type identifier
-    String* type_key = ctx.builder().createString("type");
+    String* type_key = ctx.builder.createString("type");
     if (type_key) {
-        String* type_value = ctx.builder().createString("trailer");
+        String* type_value = ctx.builder.createString("trailer");
         if (type_value) {
             Item type_item = {.item = s2it(type_value)};
-            ctx.builder().putToMap(trailer_map, type_key, type_item);
+            ctx.builder.putToMap(trailer_map, type_key, type_item);
         }
     }
 
     // Store the dictionary
-    String* dict_key = ctx.builder().createString("dictionary");
+    String* dict_key = ctx.builder.createString("dictionary");
     if (dict_key) {
         Item dict_item = {.item = (uint64_t)trailer_dict};
-        ctx.builder().putToMap(trailer_map, dict_key, dict_item);
+        ctx.builder.putToMap(trailer_map, dict_key, dict_item);
     }
     return {.item = (uint64_t)trailer_map};
 }
@@ -935,13 +935,13 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // create unified InputContext with source tracking
     InputContext ctx(input, pdf_string, strlen(pdf_string));
 
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     const char* pdf = pdf_string;
 
     // Validate input
     if (!pdf_string || !*pdf_string) {
-        ctx.addError(ctx.tracker().location(), "Empty PDF content");
+        ctx.addError(ctx.tracker.location(), "Empty PDF content");
         printf("Error: Empty PDF content\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -949,7 +949,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
-        ctx.addError(ctx.tracker().location(), "Invalid PDF format - must start with %%PDF-");
+        ctx.addError(ctx.tracker.location(), "Invalid PDF format - must start with %%PDF-");
         printf("Error: Invalid PDF format - must start with %%PDF-\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -958,7 +958,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // Create a simple map with basic PDF info
     Map* pdf_info = map_pooled(input->pool);
     if (!pdf_info) {
-        ctx.addError(ctx.tracker().location(), "Failed to allocate PDF info map");
+        ctx.addError(ctx.tracker.location(), "Failed to allocate PDF info map");
         printf("Error: Failed to allocate PDF info map\n");
         input->root = {.item = ITEM_ERROR};
         return;

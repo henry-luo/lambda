@@ -23,7 +23,7 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
 // Common function to handle escape sequences in strings
 // is_multiline: true for multiline basic strings, false for regular strings
 static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char **toml, bool is_multiline, int *line_num) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**toml != '\\') return false;
 
@@ -173,8 +173,8 @@ static void skip_tab_pace_and_comments(const char **toml, int *line_num) {
 }
 
 static String* parse_bare_key(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker();
-    MarkBuilder* builder = &ctx.builder();
+    SourceTracker& tracker = ctx.tracker;
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     const char *start = *toml;
@@ -198,10 +198,10 @@ static String* parse_bare_key(InputContext& ctx, const char **toml) {
 }
 
 static String* parse_quoted_key(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**toml != '"') return NULL;
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation key_loc = tracker.location();
@@ -237,8 +237,8 @@ static String* parse_quoted_key(InputContext& ctx, const char **toml) {
 
 static String* parse_literal_key(InputContext& ctx, const char **toml) {
     if (**toml != '\'') return NULL;
-    SourceTracker& tracker = ctx.tracker();
-    MarkBuilder* builder = &ctx.builder();
+    SourceTracker& tracker = ctx.tracker;
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation key_loc = tracker.location();
@@ -267,10 +267,10 @@ static String* parse_literal_key(InputContext& ctx, const char **toml) {
 }
 
 static String* parse_basic_string(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**toml != '"') return NULL;
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
@@ -305,10 +305,10 @@ static String* parse_basic_string(InputContext& ctx, const char **toml) {
 }
 
 static String* parse_literal_string(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**toml != '\'') return NULL;
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
@@ -337,10 +337,10 @@ static String* parse_literal_string(InputContext& ctx, const char **toml) {
 }
 
 static String* parse_multiline_basic_string(InputContext& ctx, const char **toml, int *line_num) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
@@ -390,10 +390,10 @@ static String* parse_multiline_basic_string(InputContext& ctx, const char **toml
 }
 
 static String* parse_multiline_literal_string(InputContext& ctx, const char **toml, int *line_num) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (strncmp(*toml, "'''", 3) != 0) return NULL;
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
@@ -447,7 +447,7 @@ static String* parse_key(InputContext& ctx, const char **toml) {
 }
 
 static Item parse_number(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
     char* end;
@@ -614,10 +614,10 @@ static Item parse_number(InputContext& ctx, const char **toml) {
 }
 
 static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
 
     if (**toml != '[') return NULL;
     Array* arr = array_pooled(input->pool);
@@ -661,10 +661,10 @@ static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
 }
 
 static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
 
     if (**toml != '{') return NULL;
     Map* mp = map_pooled(input->pool);
@@ -699,7 +699,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
             return NULL;
         }
 
-        ctx.builder().putToMap(mp, key, value);
+        ctx.builder.putToMap(mp, key, value);
 
         skip_tab_pace(toml);
         if (**toml == '}') {
@@ -718,10 +718,10 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
 }
 
 static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     Input* input = ctx.input();
-    MarkBuilder* builder = &ctx.builder();
+    MarkBuilder* builder = &ctx.builder;
 
     skip_tab_pace_and_comments(toml, line_num);
 
@@ -814,7 +814,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
     }
 }// Helper function to create string key from C string
 static String* create_string_key(InputContext& ctx, const char* key_str) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -850,7 +850,7 @@ static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char*
     if (!section_map) return NULL;
 
     // Add section to root map
-    ctx.builder().putToMap(root_map, key, {.item = (uint64_t)section_map});
+    ctx.builder.putToMap(root_map, key, {.item = (uint64_t)section_map});
 
     return section_map;
 }
@@ -908,7 +908,7 @@ static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* 
             nested_map = map_pooled(input->pool);
             if (!nested_map) return NULL;
 
-            ctx.builder().putToMap(current_map, key, {.item = (uint64_t)nested_map});
+            ctx.builder.putToMap(current_map, key, {.item = (uint64_t)nested_map});
         }
 
         current_map = nested_map;
@@ -974,7 +974,7 @@ void parse_toml(Input* input, const char* toml_string) {
         if (*toml == '[') {
             // Check for array of tables [[...]] which we don't support yet
             if (*(toml + 1) == '[') {
-                ctx.addWarning(ctx.tracker().location(), "Array of tables [[...]] not yet supported");
+                ctx.addWarning(ctx.tracker.location(), "Array of tables [[...]] not yet supported");
                 skip_line(&toml, &line_num);
                 continue;
             }
@@ -990,14 +990,14 @@ void parse_toml(Input* input, const char* toml_string) {
                 skip_line(&toml, &line_num);
                 continue;
             } else {
-                ctx.addError(ctx.tracker().location(), "Invalid table header");
+                ctx.addError(ctx.tracker.location(), "Invalid table header");
                 skip_line(&toml, &line_num);
                 continue;
             }
         }
 
         // Parse key-value pair
-        SourceLocation key_loc = ctx.tracker().location();
+        SourceLocation key_loc = ctx.tracker.location();
         String* key = parse_key(ctx, &toml);
         if (!key) {
             ctx.addError(key_loc, "Invalid or empty key");
@@ -1007,7 +1007,7 @@ void parse_toml(Input* input, const char* toml_string) {
 
         skip_tab_pace(&toml);
         if (*toml != '=') {
-            ctx.addError(ctx.tracker().location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
+            ctx.addError(ctx.tracker.location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
             skip_line(&toml, &line_num);
             continue;
         }
@@ -1015,12 +1015,12 @@ void parse_toml(Input* input, const char* toml_string) {
 
         Item value = parse_value(ctx, &toml, &line_num);
         if (value.item == ITEM_ERROR) {
-            ctx.addError(ctx.tracker().location(), "Failed to parse value for key '%.*s'", (int)key->len, key->chars);
+            ctx.addError(ctx.tracker.location(), "Failed to parse value for key '%.*s'", (int)key->len, key->chars);
             skip_line(&toml, &line_num);
             continue;
         }
 
-        ctx.builder().putToMap(current_table, key, value);
+        ctx.builder.putToMap(current_table, key, value);
 
         skip_line(&toml, &line_num);
     }

@@ -44,7 +44,7 @@ static bool is_jsx_component_name(const char* name) {
 
 // JSX expression parsing functions
 static String* parse_jsx_expression_content(InputContext& ctx, const char** js_expr, const char* end) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -117,7 +117,7 @@ static String* parse_jsx_expression_content(InputContext& ctx, const char** js_e
 }
 
 static Element* create_jsx_js_expression_element(InputContext& ctx, const char* js_content) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     ElementBuilder js_elem = builder.element("js");
     String* content = builder.createString(js_content);
@@ -151,7 +151,7 @@ static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const 
 
 // Parse JSX text content until < or {
 static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const char* end) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -187,7 +187,7 @@ static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const
 
 // Parse JSX tag name
 static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const char* end) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -326,7 +326,7 @@ static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const ch
 
     *jsx += 2; // Skip <>
 
-    ElementBuilder fragment = ctx.builder().element("jsx_fragment");
+    ElementBuilder fragment = ctx.builder.element("jsx_fragment");
     fragment.attr("type", "jsx_fragment");
 
     // Parse children until </>
@@ -394,7 +394,7 @@ static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const cha
         return NULL;
     }
 
-    ElementBuilder element = ctx.builder().element(tag_name->chars);
+    ElementBuilder element = ctx.builder.element(tag_name->chars);
     element.attr("type", "jsx_element");
 
     // Mark as component if starts with uppercase
@@ -492,7 +492,7 @@ Item input_jsx(Input* input, const char* jsx_string) {
         if (root) {
             return {.item = (uint64_t)root};
         } else {
-            ctx.addError(ctx.tracker().location(), "Failed to parse JSX element");
+            ctx.addError(ctx.tracker.location(), "Failed to parse JSX element");
         }
     }
 

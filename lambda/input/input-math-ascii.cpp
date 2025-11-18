@@ -377,7 +377,7 @@ static ASCIIToken* ascii_tokenize(const char* input, size_t* token_count) {
 // Parse simple expression (constants, bracketed expressions, unary operations)
 static Item parse_ascii_simple_expression(InputContext& ctx, ASCIIToken* tokens, size_t* pos, size_t token_count) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     if (*pos >= token_count || tokens[*pos].type == ASCII_TOKEN_EOF) {
         return {.item = ITEM_ERROR};
@@ -798,7 +798,7 @@ Item parse_ascii_math(Input* input, const char* math_text) {
     size_t token_count;
     ASCIIToken* tokens = ascii_tokenize(math_text, &token_count);
     if (!tokens) {
-        ctx.addError(ctx.tracker().location(), "Failed to tokenize ASCII math expression");
+        ctx.addError(ctx.tracker.location(), "Failed to tokenize ASCII math expression");
         printf("DEBUG: Tokenization failed\n");
         return {.item = ITEM_ERROR};
     }

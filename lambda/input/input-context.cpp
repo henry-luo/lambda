@@ -16,7 +16,7 @@ void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
     std::string context_line;
 
     if (!owned_source_.empty()) {
-        context_line = tracker_.extractLine(loc.line);
+        context_line = tracker.extractLine(loc.line);
     }
 
     if (context_line.empty()) {
@@ -30,7 +30,7 @@ void InputContext::addError(const SourceLocation& loc, const std::string& messag
     std::string context_line;
 
     if (!owned_source_.empty()) {
-        context_line = tracker_.extractLine(loc.line);
+        context_line = tracker.extractLine(loc.line);
     }
 
     if (context_line.empty()) {
@@ -45,7 +45,7 @@ void InputContext::addError(const SourceLocation& loc, const std::string& messag
     std::string context_line;
 
     if (!owned_source_.empty()) {
-        context_line = tracker_.extractLine(loc.line);
+        context_line = tracker.extractLine(loc.line);
     }
 
     errors_.addError(ParseError(loc, ParseErrorSeverity::ERROR, message,
@@ -66,7 +66,7 @@ void InputContext::addWarning(const SourceLocation& loc, const std::string& mess
     std::string context_line;
 
     if (!owned_source_.empty()) {
-        context_line = tracker_.extractLine(loc.line);
+        context_line = tracker.extractLine(loc.line);
     }
 
     if (context_line.empty()) {
@@ -98,7 +98,7 @@ void InputContext::addError(const char* fmt, ...) {
     va_end(args);
 
     if (!owned_source_.empty()) {
-        addError(tracker_.location(), std::string(buffer));
+        addError(tracker.location(), std::string(buffer));
     } else {
         // No source tracking, add error without location
         errors_.addError(SourceLocation(0, 1, 1), std::string(buffer));
@@ -107,7 +107,7 @@ void InputContext::addError(const char* fmt, ...) {
 
 void InputContext::addError(const std::string& message) {
     if (!owned_source_.empty()) {
-        addError(tracker_.location(), message);
+        addError(tracker.location(), message);
     } else {
         errors_.addError(SourceLocation(0, 1, 1), message);
     }
@@ -121,7 +121,7 @@ void InputContext::addWarning(const char* fmt, ...) {
     va_end(args);
 
     if (!owned_source_.empty()) {
-        addWarning(tracker_.location(), std::string(buffer));
+        addWarning(tracker.location(), std::string(buffer));
     } else {
         errors_.addWarning(SourceLocation(0, 1, 1), std::string(buffer));
     }
@@ -129,7 +129,7 @@ void InputContext::addWarning(const char* fmt, ...) {
 
 void InputContext::addWarning(const std::string& message) {
     if (!owned_source_.empty()) {
-        addWarning(tracker_.location(), message);
+        addWarning(tracker.location(), message);
     } else {
         errors_.addWarning(SourceLocation(0, 1, 1), message);
     }
@@ -143,7 +143,7 @@ void InputContext::addNote(const char* fmt, ...) {
     va_end(args);
 
     if (!owned_source_.empty()) {
-        addNote(tracker_.location(), std::string(buffer));
+        addNote(tracker.location(), std::string(buffer));
     } else {
         errors_.addNote(SourceLocation(0, 1, 1), std::string(buffer));
     }
@@ -151,7 +151,7 @@ void InputContext::addNote(const char* fmt, ...) {
 
 void InputContext::addNote(const std::string& message) {
     if (!owned_source_.empty()) {
-        addNote(tracker_.location(), message);
+        addNote(tracker.location(), message);
     } else {
         errors_.addNote(SourceLocation(0, 1, 1), message);
     }

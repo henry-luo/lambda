@@ -44,7 +44,7 @@ static void skip_to_brace(const char **rtf, char target_brace) {
 }
 
 static String* parse_rtf_string(InputContext& ctx, const char **rtf, char delimiter) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -132,7 +132,7 @@ static String* parse_rtf_string(InputContext& ctx, const char **rtf, char delimi
 }
 
 static RTFControlWord parse_control_word(InputContext& ctx, const char **rtf) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     RTFControlWord control_word = {0};
 
     if (**rtf != '\\') {
@@ -181,7 +181,7 @@ static RTFControlWord parse_control_word(InputContext& ctx, const char **rtf) {
 
 static Array* parse_color_table(InputContext& ctx, const char **rtf) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     Array* colors = array_pooled(input->pool);
     if (!colors) return NULL;
 
@@ -284,7 +284,7 @@ static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
                 } else {
                     value = {.item = b2it(true)};
                 }
-                ctx.builder().putToMap(props, cw.keyword, value);
+                ctx.builder.putToMap(props, cw.keyword, value);
             }
         } else {
             (*rtf)++;
@@ -295,7 +295,7 @@ static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
 
 static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     if (**rtf != '{') {
         return {.item = ITEM_ERROR};
     }
@@ -329,7 +329,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
                             strcpy(key->chars, "color_table");
                             key->len = 11;
                             key->ref_cnt = 0;
-                            ctx.builder().putToMap(group, key, color_table);
+                            ctx.builder.putToMap(group, key, color_table);
                         }
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
@@ -343,7 +343,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
                             strcpy(key->chars, "font_table");
                             key->len = 10;
                             key->ref_cnt = 0;
-                            ctx.builder().putToMap(group, key, font_table);
+                            ctx.builder.putToMap(group, key, font_table);
                         }
                     }
                 } else {
@@ -361,7 +361,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
                     } else {
                         value = {.item = b2it(true)};
                     }
-                    ctx.builder().putToMap(formatting, cw.keyword, value);
+                    ctx.builder.putToMap(formatting, cw.keyword, value);
                 }
             }
         } else if (**rtf == '{') {
@@ -396,7 +396,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
             strcpy(content_key->chars, "content");
             content_key->len = 7;
             content_key->ref_cnt = 0;
-            ctx.builder().putToMap(group, content_key, content_item);
+            ctx.builder.putToMap(group, content_key, content_item);
         }
     }
 
@@ -409,7 +409,7 @@ static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
             strcpy(format_key->chars, "formatting");
             format_key->len = 10;
             format_key->ref_cnt = 0;
-            ctx.builder().putToMap(group, format_key, format_item);
+            ctx.builder.putToMap(group, format_key, format_item);
         }
     }
     return {.item = (uint64_t)group};
@@ -428,14 +428,14 @@ static Item parse_rtf_content(InputContext& ctx, const char **rtf) {
 void parse_rtf(Input* input, const char* rtf_string) {
     printf("rtf_parse\n");
     InputContext ctx(input, rtf_string, strlen(rtf_string));
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);
 
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
-        ctx.addError(ctx.tracker().location(), "Invalid RTF format: document must start with '{\\rtf'");
+        ctx.addError(ctx.tracker.location(), "Invalid RTF format: document must start with '{\\rtf'");
         printf("Error: Invalid RTF format - must start with {\\rtf\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -444,7 +444,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
     // Create document root to hold all groups
     Array* document = array_pooled(input->pool);
     if (!document) {
-        ctx.addError(ctx.tracker().location(), "Memory allocation failed for RTF document array");
+        ctx.addError(ctx.tracker.location(), "Memory allocation failed for RTF document array");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -459,11 +459,11 @@ void parse_rtf(Input* input, const char* rtf_string) {
             if (group.item != ITEM_ERROR && group.item != ITEM_NULL) {
                 array_append(document, group, input->pool);
             } else if (group.item == ITEM_ERROR) {
-                ctx.addWarning(ctx.tracker().location(), "Failed to parse RTF group, skipping");
+                ctx.addWarning(ctx.tracker.location(), "Failed to parse RTF group, skipping");
             }
         } else {
             // Skip unknown content
-            ctx.addWarning(ctx.tracker().location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
+            ctx.addWarning(ctx.tracker.location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
             rtf++;
         }
     }

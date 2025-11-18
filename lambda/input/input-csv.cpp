@@ -82,7 +82,7 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
     }
 
     if (sb->length > 0) {
-        return ctx->builder().createString(sb->str->chars, sb->length);
+        return ctx->builder.createString(sb->str->chars, sb->length);
     }
     return &EMPTY_STRING;
 }
@@ -101,7 +101,7 @@ void parse_csv(Input* input, const char* csv_string) {
 
     const char *csv = csv_string;
     Array *headers = NULL;
-    ArrayBuilder rows_builder = ctx.builder().array();
+    ArrayBuilder rows_builder = ctx.builder.array();
     int expected_columns = 0;
     int line_num = 1;
 
@@ -161,7 +161,7 @@ void parse_csv(Input* input, const char* csv_string) {
 
         if (has_header) {
             // Create a map for each row using MapBuilder
-            MapBuilder row_builder = ctx.builder().map();
+            MapBuilder row_builder = ctx.builder.map();
 
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
@@ -201,7 +201,7 @@ void parse_csv(Input* input, const char* csv_string) {
             rows_builder.append(row_builder.final());
         } else {
             // Create an array for each row using ArrayBuilder
-            ArrayBuilder fields_builder = ctx.builder().array();
+            ArrayBuilder fields_builder = ctx.builder.array();
 
             // Track columns for first row to set expectation
             int field_index = 0;
@@ -210,7 +210,7 @@ void parse_csv(Input* input, const char* csv_string) {
 
                 // Append field to array - handles NULL and empty strings
                 if (field == &EMPTY_STRING || !field) {
-                    fields_builder.append(ctx.builder().createNull());
+                    fields_builder.append(ctx.builder.createNull());
                 } else {
                     fields_builder.append((Item){.item = s2it(field)});
                 }

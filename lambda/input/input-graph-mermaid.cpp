@@ -44,7 +44,7 @@ static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker) {
 
 // Parse Mermaid identifier (alphanumeric + underscore + dash)
 static String* parse_mermaid_identifier(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) return nullptr;
@@ -67,16 +67,16 @@ static String* parse_mermaid_identifier(InputContext& ctx) {
         }
     }
 
-    return ctx.builder().createString(start, len);
+    return ctx.builder.createString(start, len);
 }
 
 // Parse Mermaid node shape and extract label
 static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) {
-        return ctx.builder().createString(node_id);
+        return ctx.builder.createString(node_id);
     }
 
     StringBuf* sb = ctx.sb;
@@ -110,7 +110,7 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) 
         tracker.advance();
     } else {
         // no shape specified, return node_id as label
-        return ctx.builder().createString(node_id);
+        return ctx.builder.createString(node_id);
     }
 
     // Extract label text
@@ -132,7 +132,7 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) 
     if (tracker.atEnd() || tracker.current() != close_char) {
         std::string msg = std::string("Expected closing character '") + close_char + "' for node shape";
         ctx.addError(tracker.location(), msg);
-        return ctx.builder().createString(node_id);
+        return ctx.builder.createString(node_id);
     }
 
     tracker.advance(); // skip close_char
@@ -143,12 +143,12 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) 
     }
 
     const char* label_text = sb->str->chars;
-    return ctx.builder().createString(label_text);
+    return ctx.builder.createString(label_text);
 }
 
 // Parse Mermaid label in quotes or brackets
 static String* parse_mermaid_label(InputContext& ctx) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) return nullptr;
@@ -186,12 +186,12 @@ static String* parse_mermaid_label(InputContext& ctx) {
     }
 
     tracker.advance(); // skip closing quote
-    return ctx.builder().createString(sb->str->chars);
+    return ctx.builder.createString(sb->str->chars);
 }
 
 // Parse Mermaid node definition: nodeId[label] or nodeId(label) etc.
 static void parse_mermaid_node_def(InputContext& ctx, Element* graph) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse node ID
@@ -217,7 +217,7 @@ static void parse_mermaid_node_def(InputContext& ctx, Element* graph) {
 
 // Parse Mermaid edge definition: nodeA --> nodeB or nodeA -.-> nodeB etc.
 static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse edge arrow type
@@ -250,7 +250,7 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
 
             if (!tracker.atEnd() && tracker.current() == '|') {
                 tracker.advance();
-                label = ctx.builder().createString(sb->str->chars);
+                label = ctx.builder.createString(sb->str->chars);
             }
 
             // skip remaining dashes after label
@@ -296,7 +296,7 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
 
 // Parse Mermaid class definition (for styling): class nodeIds className
 static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse node IDs (can be comma-separated)
@@ -331,14 +331,14 @@ static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
 void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     InputContext ctx(input, mermaid_string, strlen(mermaid_string));
 
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     skip_whitespace_and_comments_mermaid(tracker);
 
     // detect diagram type
     String* diagram_type = nullptr;
 
     if (tracker.match("graph")) {
-        diagram_type = ctx.builder().createString("flowchart");
+        diagram_type = ctx.builder.createString("flowchart");
         tracker.advance(5);
 
         // check for direction
@@ -349,7 +349,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             tracker.advance(2);
         }
     } else if (tracker.match("flowchart")) {
-        diagram_type = ctx.builder().createString("flowchart");
+        diagram_type = ctx.builder.createString("flowchart");
         tracker.advance(9);
 
         // check for direction
@@ -358,11 +358,11 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             tracker.advance(2);
         }
     } else if (tracker.match("sequenceDiagram")) {
-        diagram_type = ctx.builder().createString("sequence");
+        diagram_type = ctx.builder.createString("sequence");
         tracker.advance(15);
     } else {
         // default to flowchart
-        diagram_type = ctx.builder().createString("flowchart");
+        diagram_type = ctx.builder.createString("flowchart");
     }
 
     // create main graph element

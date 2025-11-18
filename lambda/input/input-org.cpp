@@ -1548,7 +1548,7 @@ void parse_org(Input* input, const char* org_string) {
     // Create document structure
     Element* doc = create_org_element(input, "org_document");
     if (!doc) {
-        ctx.addError(ctx.tracker().location(), "Failed to create org document element");
+        ctx.addError(ctx.tracker.location(), "Failed to create org document element");
         return;
     }
 
