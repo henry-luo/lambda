@@ -38,7 +38,7 @@ static bool is_comment(const char *ini) {
 
 static String* parse_section_name(InputContext& ctx, const char **ini) {
     if (**ini != '[') return NULL;
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
     SourceLocation section_loc = tracker.location();
     MarkBuilder& builder = ctx.builder();
     StringBuf* sb = builder.stringBuf();
@@ -67,7 +67,7 @@ static String* parse_section_name(InputContext& ctx, const char **ini) {
 }
 
 static String* parse_key(InputContext& ctx, const char **ini) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
     SourceLocation key_loc = tracker.location();
     MarkBuilder& builder = ctx.builder();
     StringBuf* sb = builder.stringBuf();
@@ -89,7 +89,7 @@ static String* parse_key(InputContext& ctx, const char **ini) {
 }
 
 static String* parse_raw_value(InputContext& ctx, const char **ini) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
     SourceLocation value_loc = tracker.location();
     MarkBuilder& builder = ctx.builder();
     StringBuf* sb = builder.stringBuf();
@@ -244,7 +244,7 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
 static Map* parse_section(InputContext& ctx, const char **ini, String* section_name) {
     printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
 
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
     Input* input = ctx.input();
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
@@ -293,7 +293,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
 
 void parse_ini(Input* input, const char* ini_string) {
     InputContext ctx(input, ini_string, strlen(ini_string));
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);

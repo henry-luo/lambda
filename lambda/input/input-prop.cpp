@@ -241,7 +241,7 @@ void parse_properties(Input* input, const char* prop_string) {
     // create root map to hold all properties
     Map* root_map = map_pooled(input->pool);
     if (!root_map) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for properties map");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for properties map");
         return;
     }
     input->root = {.item = (uint64_t)root_map};
@@ -269,7 +269,7 @@ void parse_properties(Input* input, const char* prop_string) {
         // parse key-value pair
         String* key = parse_key(ctx, &current);
         if (!key) {
-            ctx.addWarning(ctx.tracker()->location(), "Failed to parse property key, skipping line");
+            ctx.addWarning(ctx.tracker().location(), "Failed to parse property key, skipping line");
             skip_to_newline(&current);
             continue;
         }
@@ -288,7 +288,7 @@ void parse_properties(Input* input, const char* prop_string) {
             Item typed_value = parse_typed_value(ctx, raw_value);
             ctx.builder().putToMap(root_map, key, typed_value);
         } else {
-            ctx.addWarning(ctx.tracker()->location(), "Failed to parse value for key '%.*s'",
+            ctx.addWarning(ctx.tracker().location(), "Failed to parse value for key '%.*s'",
                           (int)key->len, key->chars);
         }        // move to next line
         skip_to_newline(&current);

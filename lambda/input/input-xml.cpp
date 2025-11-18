@@ -740,7 +740,7 @@ void parse_xml(Input* input, const char* xml_string) {
 
         // Safety check: ensure we always advance to prevent infinite loops
         if (xml == old_xml) {
-            ctx.addWarning(ctx.tracker()->location(), "Possible infinite loop detected in XML parsing, forcing advance");
+            ctx.addWarning(ctx.tracker().location(), "Possible infinite loop detected in XML parsing, forcing advance");
             xml++; // Force advance by at least one character
         }
     }

@@ -492,7 +492,7 @@ Item input_jsx(Input* input, const char* jsx_string) {
         if (root) {
             return {.item = (uint64_t)root};
         } else {
-            ctx.addError(ctx.tracker()->location(), "Failed to parse JSX element");
+            ctx.addError(ctx.tracker().location(), "Failed to parse JSX element");
         }
     }
 
