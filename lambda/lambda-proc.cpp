@@ -19,6 +19,8 @@
 
 extern __thread Context* context;
 
+extern Item fetch_response_to_item(FetchResponse* response);
+
 Item pn_print(Item item) {
     TypeId type_id = get_type_id(item);
     log_debug("pn_print: %d", type_id);
@@ -27,50 +29,6 @@ Item pn_print(Item item) {
         printf("%s", str->chars);
     }
     return ItemNull;
-}
-
-// Helper function to free FetchResponse from within Lambda context
-void free_fetch_response(FetchResponse* response) {
-    if (!response) return;
-
-    if (response->data) {
-        free(response->data);
-        response->data = NULL;
-    }
-
-    if (response->content_type) {
-        free(response->content_type);
-        response->content_type = NULL;
-    }
-
-    for (int i = 0; i < response->response_header_count; i++) {
-        free(response->response_headers[i]);
-    }
-    if (response->response_headers) {
-        free(response->response_headers);
-        response->response_headers = NULL;
-    }
-    response->response_header_count = 0;
-
-    free(response);
-}
-
-// Convert FetchResponse to Lambda Item (simplified approach)
-Item fetch_response_to_item(FetchResponse* response) {
-    if (!response) { return ItemError; }
-    Item result;
-    // For now, return a simple string with the response data
-    // TODO: Implement proper map structure when the complex type system is working
-    String* result_str;
-    if (response->data && response->size > 0) {
-        result_str = heap_strcpy(response->data, response->size);
-        result = {.item = s2it(result_str)};
-    } else {
-        result = ItemNull;
-    }
-    // Clean up the response structure
-    free_fetch_response(response);
-    return result;
 }
 
 Item pn_fetch(Item url, Item options) {

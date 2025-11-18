@@ -19,6 +19,15 @@ typedef struct {
     size_t size;
 } HttpResponse;
 
+struct FetchResponse {
+    char* data;
+    size_t size;
+    long status_code;
+    char** response_headers;
+    int response_header_count;
+    char* content_type;
+};
+
 // HttpConfig is now defined in input.h
 
 // Default HTTP configuration
@@ -341,6 +350,7 @@ static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchRes
 
 // Free FetchResponse structure
 static void free_fetch_response(FetchResponse* response) {
+    if (!response) return;
     if (response->data) {
         free(response->data);
         response->data = NULL;
@@ -359,6 +369,8 @@ static void free_fetch_response(FetchResponse* response) {
         response->response_headers = NULL;
     }
     response->response_header_count = 0;
+
+    free(response);
 }
 
 // Perform HTTP request with full fetch-like functionality
@@ -452,7 +464,6 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     if (res != CURLE_OK) {
         log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
         free_fetch_response(response);
-        free(response);
         curl_easy_cleanup(curl);
         if (headers) curl_slist_free_all(headers);
         return NULL;
@@ -469,4 +480,24 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     if (headers) curl_slist_free_all(headers);
 
     return response;
+}
+
+extern String* heap_strcpy(char* src, int len);
+
+// Convert FetchResponse to Lambda Item (simplified approach)
+Item fetch_response_to_item(FetchResponse* response) {
+    if (!response) { return ItemError; }
+    Item result;
+    // For now, return a simple string with the response data
+    // TODO: Implement proper map structure when the complex type system is working
+    String* result_str;
+    if (response->data && response->size > 0) {
+        result_str = heap_strcpy(response->data, response->size);
+        result = {.item = s2it(result_str)};
+    } else {
+        result = ItemNull;
+    }
+    // Clean up the response structure
+    free_fetch_response(response);
+    return result;
 }

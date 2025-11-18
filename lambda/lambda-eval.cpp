@@ -795,33 +795,6 @@ Type* fn_type(Item item) {
 
 extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
-// Add extern declarations for fetch functionality
-extern "C" {
-    typedef struct {
-        const char* method;
-        const char* body;
-        size_t body_size;
-        char** headers;
-        int header_count;
-        long timeout_seconds;
-        long max_redirects;
-        const char* user_agent;
-        bool verify_ssl;
-        bool enable_compression;
-    } FetchConfig;
-
-    typedef struct {
-        char* data;
-        size_t size;
-        long status_code;
-        char** response_headers;
-        int response_header_count;
-        char* content_type;
-    } FetchResponse;
-
-    FetchResponse* http_fetch(const char* url, const FetchConfig* config);
-}
-
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     log_debug("input_data at: %s, type: %s, flavor: %s",
         url ? url->chars : "null", type ? type->chars : "null",
