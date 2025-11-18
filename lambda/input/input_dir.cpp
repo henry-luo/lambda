@@ -4,7 +4,7 @@
 
 #include "input.hpp"
 #include "../mark_builder.hpp"
-#include "input_context.hpp"
+#include "input-context.hpp"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>

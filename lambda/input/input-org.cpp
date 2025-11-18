@@ -1,6 +1,6 @@
 #include "input.hpp"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
-#include "input_context.hpp"
+#include "input-context.hpp"
 #include "source_tracker.hpp"
 #include "../mark_builder.hpp"
 #include <string.h>
