@@ -88,7 +88,9 @@ Element* html_context_ensure_html(HtmlParserContext* ctx) {
 
     if (!ctx->html_element) {
         log_debug("Creating implicit <html> element");
-        ctx->html_element = input_create_element(ctx->input, "html");
+        MarkBuilder builder(ctx->input);
+        ElementBuilder html_builder = builder.element("html");
+        ctx->html_element = html_builder.final().element;
         ctx->has_explicit_html = false;
     }
 
@@ -104,7 +106,9 @@ Element* html_context_ensure_head(HtmlParserContext* ctx) {
 
     if (!ctx->head_element) {
         log_debug("Creating implicit <head> element");
-        ctx->head_element = input_create_element(ctx->input, "head");
+        MarkBuilder builder(ctx->input);
+        ElementBuilder head_builder = builder.element("head");
+        ctx->head_element = head_builder.final().element;
         ctx->has_explicit_head = false;
 
         // Add head to html
@@ -132,7 +136,9 @@ Element* html_context_ensure_body(HtmlParserContext* ctx) {
 
     if (!ctx->body_element) {
         log_debug("Creating implicit <body> element");
-        ctx->body_element = input_create_element(ctx->input, "body");
+        MarkBuilder builder(ctx->input);
+        ElementBuilder body_builder = builder.element("body");
+        ctx->body_element = body_builder.final().element;
         ctx->has_explicit_body = false;
 
         // Add body to html
@@ -674,8 +680,10 @@ void html_reconstruct_formatting(HtmlParserContext* ctx, Element* parent) {
 
         TypeElmt* fmt_type = (TypeElmt*)fmt_elem->type;
 
-        // Create a new clone of the formatting element
-        Element* cloned = input_create_element(ctx->input, fmt_type->name.str);
+        // Create a new clone of the formatting element using MarkBuilder
+        MarkBuilder builder(ctx->input);
+        ElementBuilder cloned_builder = builder.element(fmt_type->name.str);
+        Element* cloned = cloned_builder.final().element;
         if (!cloned) continue;
 
         // Add the cloned formatting element to the parent

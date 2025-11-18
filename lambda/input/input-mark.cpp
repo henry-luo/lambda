@@ -371,7 +371,9 @@ static Element* parse_element(InputContext& ctx, const char **mark) {
 
     if (!element_name) return NULL;
 
-    Element* element = input_create_element(input, element_name->chars);
+    MarkBuilder builder(input);
+    ElementBuilder element_builder = builder.element(element_name->chars);
+    Element* element = element_builder.final().element;
     if (!element) return NULL;
 
     skip_comments(mark);

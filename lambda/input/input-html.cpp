@@ -392,8 +392,9 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
         return {.item = ITEM_ERROR};
     }
 
-    // Create element using shared function (keep using input_create_element for context tracking)
-    Element* element = input_create_element(ctx.input(), tag_name->chars);
+    // Create element using MarkBuilder
+    ElementBuilder elem_builder = ctx.builder().element(tag_name->chars);
+    Element* element = elem_builder.final().element;
     if (!element) {
         html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input");
@@ -720,8 +721,10 @@ static void create_implicit_tbody(Input* input, Element* table_element) {
     if (has_direct_tr && !has_tbody) {
         log_info("Creating implicit <tbody> element for table with direct <tr> children");
 
-        // Create implicit tbody element
-        Element* tbody = input_create_element(input, "tbody");
+        // Create implicit tbody element using MarkBuilder
+        MarkBuilder builder(input);
+        ElementBuilder tbody_builder = builder.element("tbody");
+        Element* tbody = tbody_builder.final().element;
         if (!tbody) {
             log_error("Failed to create implicit tbody element");
             return;
