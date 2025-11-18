@@ -799,7 +799,7 @@ Item parse_ascii_math(Input* input, const char* math_text) {
     size_t token_count;
     ASCIIToken* tokens = ascii_tokenize(math_text, &token_count);
     if (!tokens) {
-        ctx.addError(ctx.tracker()->location(), "Failed to tokenize ASCII math expression");
+        ctx.addError(ctx.tracker().location(), "Failed to tokenize ASCII math expression");
         printf("DEBUG: Tokenization failed\n");
         return {.item = ITEM_ERROR};
     }

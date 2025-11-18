@@ -1027,7 +1027,7 @@ void parse_latex(Input* input, const char* latex_string) {
     // Create root document element
     Element* root_element = create_latex_element(input, "latex_document");
     if (!root_element) {
-        ctx.addError(ctx.tracker()->location(), "Failed to create LaTeX root document element");
+        ctx.addError(ctx.tracker().location(), "Failed to create LaTeX root document element");
         // printf("DEBUG: Failed to create root element\n");
         input->root = {.item = ITEM_ERROR};
         return;

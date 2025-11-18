@@ -15,8 +15,8 @@ void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
     std::string message(buffer);
     std::string context_line;
 
-    if (tracker_) {
-        context_line = tracker_->extractLine(loc.line);
+    if (!owned_source_.empty()) {
+        context_line = tracker_.extractLine(loc.line);
     }
 
     if (context_line.empty()) {
@@ -29,8 +29,8 @@ void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
 void InputContext::addError(const SourceLocation& loc, const std::string& message) {
     std::string context_line;
 
-    if (tracker_) {
-        context_line = tracker_->extractLine(loc.line);
+    if (!owned_source_.empty()) {
+        context_line = tracker_.extractLine(loc.line);
     }
 
     if (context_line.empty()) {
@@ -44,8 +44,8 @@ void InputContext::addError(const SourceLocation& loc, const std::string& messag
                              const std::string& hint) {
     std::string context_line;
 
-    if (tracker_) {
-        context_line = tracker_->extractLine(loc.line);
+    if (!owned_source_.empty()) {
+        context_line = tracker_.extractLine(loc.line);
     }
 
     errors_.addError(ParseError(loc, ParseErrorSeverity::ERROR, message,
@@ -65,8 +65,8 @@ void InputContext::addWarning(const SourceLocation& loc, const char* fmt, ...) {
 void InputContext::addWarning(const SourceLocation& loc, const std::string& message) {
     std::string context_line;
 
-    if (tracker_) {
-        context_line = tracker_->extractLine(loc.line);
+    if (!owned_source_.empty()) {
+        context_line = tracker_.extractLine(loc.line);
     }
 
     if (context_line.empty()) {
@@ -97,17 +97,17 @@ void InputContext::addError(const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    if (tracker_) {
-        addError(tracker_->location(), std::string(buffer));
+    if (!owned_source_.empty()) {
+        addError(tracker_.location(), std::string(buffer));
     } else {
-        // No tracker, add error without location
+        // No source tracking, add error without location
         errors_.addError(SourceLocation(0, 1, 1), std::string(buffer));
     }
 }
 
 void InputContext::addError(const std::string& message) {
-    if (tracker_) {
-        addError(tracker_->location(), message);
+    if (!owned_source_.empty()) {
+        addError(tracker_.location(), message);
     } else {
         errors_.addError(SourceLocation(0, 1, 1), message);
     }
@@ -120,16 +120,16 @@ void InputContext::addWarning(const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    if (tracker_) {
-        addWarning(tracker_->location(), std::string(buffer));
+    if (!owned_source_.empty()) {
+        addWarning(tracker_.location(), std::string(buffer));
     } else {
         errors_.addWarning(SourceLocation(0, 1, 1), std::string(buffer));
     }
 }
 
 void InputContext::addWarning(const std::string& message) {
-    if (tracker_) {
-        addWarning(tracker_->location(), message);
+    if (!owned_source_.empty()) {
+        addWarning(tracker_.location(), message);
     } else {
         errors_.addWarning(SourceLocation(0, 1, 1), message);
     }
@@ -142,16 +142,16 @@ void InputContext::addNote(const char* fmt, ...) {
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    if (tracker_) {
-        addNote(tracker_->location(), std::string(buffer));
+    if (!owned_source_.empty()) {
+        addNote(tracker_.location(), std::string(buffer));
     } else {
         errors_.addNote(SourceLocation(0, 1, 1), std::string(buffer));
     }
 }
 
 void InputContext::addNote(const std::string& message) {
-    if (tracker_) {
-        addNote(tracker_->location(), message);
+    if (!owned_source_.empty()) {
+        addNote(tracker_.location(), message);
     } else {
         errors_.addNote(SourceLocation(0, 1, 1), message);
     }

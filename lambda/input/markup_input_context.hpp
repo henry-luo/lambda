@@ -53,22 +53,6 @@ public:
     }
 
     /**
-     * Create markup input context with external SourceTracker
-     *
-     * @param input Input stream for markup content
-     * @param tracker External source tracker (not owned by context)
-     * @param config Parser configuration
-     */
-    MarkupInputContext(Input* input, SourceTracker* tracker, ParseConfig config)
-        : InputContext(input, tracker)
-        , parser_(parser_create(input, config))
-    {
-        if (!parser_) {
-            addError("Failed to create markup parser", 0, 0);
-        }
-    }
-
-    /**
      * Destructor - cleans up markup parser
      */
     ~MarkupInputContext() {

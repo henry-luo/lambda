@@ -249,14 +249,14 @@ void parse_vcf(Input* input, const char* vcf_string) {
     // Initialize contact map
     Map* contact_map = map_pooled(input->pool);
     if (!contact_map) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for contact map");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for contact map");
         return;
     }
 
     // Initialize properties map to store all raw properties
     Map* properties_map = map_pooled(input->pool);
     if (!properties_map) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for properties map");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for properties map");
         return;
     }
 

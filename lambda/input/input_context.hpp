@@ -11,73 +11,55 @@
 namespace lambda {
 
 // Unified context for parsing with error tracking
-// Manages Input, MarkBuilder, error collection, and optional position tracking
+// Manages Input, MarkBuilder, error collection, and source position tracking
+// Always owns its SourceTracker instance
 class InputContext {
 private:
     Input* input_;                          // The Input being parsed (not owned)
     MarkBuilder builder_;                   // MarkBuilder for creating Items
     ParseErrorList errors_;                 // Error collection
-    std::string owned_source_;              // Owned copy of source (when needed) - MUST be before tracker_!
-    SourceTracker* tracker_;                // Optional position tracker (may be owned)
-    bool owns_tracker_;                     // Whether we own the tracker
+    std::string owned_source_;              // Owned copy of source - MUST be before tracker_!
+    SourceTracker tracker_;                 // Source position tracker (always owned)
 
 public:
-    // Constructor without position tracking
+    // Constructor without source text (empty tracker)
     explicit InputContext(Input* input)
         : input_(input)
         , builder_(input)
         , errors_(100)  // Default max 100 errors
-        , tracker_(nullptr)
-        , owns_tracker_(false)
         , owned_source_()
+        , tracker_("", 0)
     {}
 
-    // Constructor with position tracking (takes ownership)
+    // Constructor with source text and explicit length
     InputContext(Input* input, const char* source, size_t len)
         : input_(input)
         , builder_(input)
         , errors_(100)
-        , tracker_(new SourceTracker(source, len))
-        , owns_tracker_(true)
-        , owned_source_()
+        , owned_source_(source, len)  // Make a copy
+        , tracker_(owned_source_.c_str(), owned_source_.length())
     {}
 
-    // Constructor with position tracking from string
+    // Constructor with source text from std::string
     InputContext(Input* input, const std::string& source)
         : input_(input)
         , builder_(input)
         , errors_(100)
         , owned_source_(source)  // Make a copy
-        , tracker_(new SourceTracker(owned_source_.c_str(), owned_source_.length()))
-        , owns_tracker_(true)
+        , tracker_(owned_source_.c_str(), owned_source_.length())
     {}
 
-    // Constructor with position tracking from C string (calculates length)
+    // Constructor with source text from C string (calculates length)
     InputContext(Input* input, const char* source)
         : input_(input)
         , builder_(input)
         , errors_(100)
         , owned_source_(source ? source : "")  // Make a copy
-        , tracker_(new SourceTracker(owned_source_.c_str(), owned_source_.length()))
-        , owns_tracker_(true)
+        , tracker_(owned_source_.c_str(), owned_source_.length())
     {}
 
-    // Constructor with external tracker (does not take ownership)
-    InputContext(Input* input, SourceTracker* tracker)
-        : input_(input)
-        , builder_(input)
-        , errors_(100)
-        , tracker_(tracker)
-        , owns_tracker_(false)
-        , owned_source_()
-    {}
-
-    // Destructor
-    ~InputContext() {
-        if (owns_tracker_ && tracker_) {
-            delete tracker_;
-        }
-    }
+    // Destructor (no manual cleanup needed - all RAII)
+    ~InputContext() = default;
 
     // Non-copyable (owns resources)
     InputContext(const InputContext&) = delete;
@@ -90,15 +72,15 @@ public:
     const MarkBuilder& builder() const { return builder_; }
     ParseErrorList& errors() { return errors_; }
     const ParseErrorList& errors() const { return errors_; }
-    SourceTracker* tracker() { return tracker_; }
-    const SourceTracker* tracker() const { return tracker_; }
+    SourceTracker& tracker() { return tracker_; }
+    const SourceTracker& tracker() const { return tracker_; }
 
-    // Check if position tracking is available
-    bool hasTracker() const { return tracker_ != nullptr; }
+    // Check if position tracking is available (always true now, but kept for compatibility)
+    bool hasTracker() const { return !owned_source_.empty(); }
 
-    // Get current location (if tracker available)
+    // Get current location
     SourceLocation location() const {
-        return tracker_ ? tracker_->location() : SourceLocation();
+        return tracker_.location();
     }
 
     // Error handling - with location

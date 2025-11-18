@@ -363,7 +363,7 @@ void parse_ics(Input* input, const char* ics_string) {
     // Initialize calendar map
     Map* calendar_map = map_pooled(input->pool);
     if (!calendar_map) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for calendar map");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for calendar map");
         return;
     }
 
@@ -376,14 +376,14 @@ void parse_ics(Input* input, const char* ics_string) {
         components_list->items = NULL;
     }
     if (!components_list) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for components list");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for components list");
         return;
     }
 
     // Initialize properties map to store calendar-level properties
     Map* properties_map = map_pooled(input->pool);
     if (!properties_map) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for properties map");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for properties map");
         return;
     }
 

@@ -290,7 +290,7 @@ void parse_mdx(Input* input, const char* mdx_string) {
     if (root) {
         input->root = (Item){.element = root};
     } else {
-        ctx.addError(ctx.tracker()->location(), "Failed to parse MDX document");
+        ctx.addError(ctx.tracker().location(), "Failed to parse MDX document");
     }
 
     if (ctx.hasErrors()) {

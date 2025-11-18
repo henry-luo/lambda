@@ -9,7 +9,7 @@ using namespace lambda;
 extern __thread Context* input_context;
 
 // Helper macro to access tracker from context
-#define TRACKER (*ctx.tracker())
+#define TRACKER (ctx.tracker())
 
 // Forward declarations for CSS stylesheet parsing
 static Item parse_css_stylesheet(InputContext& ctx);
@@ -1463,7 +1463,7 @@ void parse_css(Input* input, const char* css_string) {
 
     // create error tracking context with tracker
     InputContext ctx(input, css_string, strlen(css_string));
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_css_comments(tracker);
 

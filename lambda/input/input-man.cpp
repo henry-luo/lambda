@@ -439,7 +439,7 @@ void parse_man(Input* input, const char* man_string) {
     char** lines = split_lines(man_string, &line_count);
 
     if (!lines || line_count == 0) {
-        ctx.addError(ctx.tracker()->location(), "Failed to split man page into lines");
+        ctx.addError(ctx.tracker().location(), "Failed to split man page into lines");
         input->root = {.item = ITEM_NULL};
         return;
     }

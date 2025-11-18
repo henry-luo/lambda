@@ -14,7 +14,7 @@ static void skip_whitespace(const char **json) {
 }
 
 static String* parse_string(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (**json != '"') {
         ctx.addError(tracker.location(), "Expected '\"' to start string");
@@ -98,7 +98,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
 }
 
 static Item parse_number(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     const char* start = *json;
     char* end;
@@ -122,7 +122,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
 }
 
 static Item parse_array(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (**json != '[') {
         ctx.addError(tracker.location(), "Expected '[' to start array");
@@ -175,7 +175,7 @@ static Item parse_array(InputContext& ctx, const char **json) {
 }
 
 static Item parse_object(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (**json != '{') {
         ctx.addError(tracker.location(), "Expected '{' to start object");
@@ -265,7 +265,7 @@ static Item parse_object(InputContext& ctx, const char **json) {
 }
 
 static Item parse_value(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace(json);
 

@@ -67,7 +67,7 @@ static void skip_whitespace_and_comments(SourceTracker& tracker) {
 
 // Parse identifier
 static String* parse_identifier(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -96,7 +96,7 @@ static String* parse_identifier(InputContext& ctx) {
 
 // Parse quoted string
 static String* parse_quoted_string(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -151,7 +151,7 @@ static String* parse_quoted_string(InputContext& ctx) {
 
 // Parse attribute value (identifier or quoted string)
 static String* parse_attribute_value(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -164,7 +164,7 @@ static String* parse_attribute_value(InputContext& ctx) {
 
 // Parse attribute list [attr1=value1, attr2=value2, ...]
 static void parse_attribute_list(InputContext& ctx, Element* element) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -224,7 +224,7 @@ static void parse_attribute_list(InputContext& ctx, Element* element) {
 
 // Parse node statement: node_id [attributes]
 static Element* parse_node_statement(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -249,7 +249,7 @@ static Element* parse_node_statement(InputContext& ctx) {
 
 // Parse edge statement: node1 -> node2 [attributes] or node1 -- node2 [attributes]
 static Element* parse_edge_statement(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -317,7 +317,7 @@ static Element* parse_edge_statement(InputContext& ctx) {
 
 // Parse subgraph or cluster
 static void parse_subgraph(InputContext& ctx, Element* graph) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 
@@ -424,7 +424,7 @@ static void parse_subgraph(InputContext& ctx, Element* graph) {
 // Main DOT parser function
 void parse_graph_dot(Input* input, const char* dot_string) {
     InputContext ctx(input, dot_string);
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments(tracker);
 

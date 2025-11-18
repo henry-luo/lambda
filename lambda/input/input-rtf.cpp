@@ -441,7 +441,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
 
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
-        ctx.addError(ctx.tracker()->location(), "Invalid RTF format: document must start with '{\\rtf'");
+        ctx.addError(ctx.tracker().location(), "Invalid RTF format: document must start with '{\\rtf'");
         printf("Error: Invalid RTF format - must start with {\\rtf\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -450,7 +450,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
     // Create document root to hold all groups
     Array* document = array_pooled(input->pool);
     if (!document) {
-        ctx.addError(ctx.tracker()->location(), "Memory allocation failed for RTF document array");
+        ctx.addError(ctx.tracker().location(), "Memory allocation failed for RTF document array");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -465,11 +465,11 @@ void parse_rtf(Input* input, const char* rtf_string) {
             if (group.item != ITEM_ERROR && group.item != ITEM_NULL) {
                 array_append(document, group, input->pool);
             } else if (group.item == ITEM_ERROR) {
-                ctx.addWarning(ctx.tracker()->location(), "Failed to parse RTF group, skipping");
+                ctx.addWarning(ctx.tracker().location(), "Failed to parse RTF group, skipping");
             }
         } else {
             // Skip unknown content
-            ctx.addWarning(ctx.tracker()->location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
+            ctx.addWarning(ctx.tracker().location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
             rtf++;
         }
     }

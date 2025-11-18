@@ -2293,7 +2293,7 @@ Item input_markup(Input *input, const char* content) {
     Item result = parse_markup_content(ctx.markupParser(), content);
 
     if (result.item == ITEM_ERROR) {
-        ctx.addWarning(ctx.tracker()->location(), "Markup parsing returned error");
+        ctx.addWarning(ctx.tracker().location(), "Markup parsing returned error");
     }
 
     // MarkupInputContext destructor will automatically clean up MarkupParser
@@ -2327,7 +2327,7 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     Item result = parse_markup_content(ctx.markupParser(), content);
 
     if (result.item == ITEM_ERROR) {
-        ctx.addWarning(ctx.tracker()->location(), "Markup parsing with explicit format returned error");
+        ctx.addWarning(ctx.tracker().location(), "Markup parsing with explicit format returned error");
     }
 
     // MarkupInputContext destructor will automatically clean up MarkupParser

@@ -942,7 +942,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Validate input
     if (!pdf_string || !*pdf_string) {
-        ctx.addError(ctx.tracker()->location(), "Empty PDF content");
+        ctx.addError(ctx.tracker().location(), "Empty PDF content");
         printf("Error: Empty PDF content\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -950,7 +950,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
-        ctx.addError(ctx.tracker()->location(), "Invalid PDF format - must start with %%PDF-");
+        ctx.addError(ctx.tracker().location(), "Invalid PDF format - must start with %%PDF-");
         printf("Error: Invalid PDF format - must start with %%PDF-\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -959,7 +959,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // Create a simple map with basic PDF info
     Map* pdf_info = map_pooled(input->pool);
     if (!pdf_info) {
-        ctx.addError(ctx.tracker()->location(), "Failed to allocate PDF info map");
+        ctx.addError(ctx.tracker().location(), "Failed to allocate PDF info map");
         printf("Error: Failed to allocate PDF info map\n");
         input->root = {.item = ITEM_ERROR};
         return;

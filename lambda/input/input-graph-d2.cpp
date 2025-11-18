@@ -54,7 +54,7 @@ static void skip_whitespace_and_comments_d2(SourceTracker& tracker) {
 
 // Parse D2 identifier (alphanumeric + underscore + hyphen + dot)
 static String* parse_d2_identifier(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments_d2(tracker);
 
@@ -80,7 +80,7 @@ static String* parse_d2_identifier(InputContext& ctx) {
 
 // Parse D2 quoted string
 static String* parse_d2_quoted_string(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (tracker.atEnd() || tracker.current() != '"') {
         return nullptr;
@@ -133,7 +133,7 @@ static String* parse_d2_quoted_string(InputContext& ctx) {
 
 // Parse D2 label (quoted or unquoted)
 static String* parse_d2_label(InputContext& ctx) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     skip_whitespace_and_comments_d2(tracker);
 
@@ -168,7 +168,7 @@ static String* parse_d2_label(InputContext& ctx) {
 
 // Parse D2 style block { property: value; ... }
 static void parse_d2_style_block(InputContext& ctx, Element* element) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (tracker.atEnd() || tracker.current() != '{') {
         return;
@@ -236,7 +236,7 @@ static void parse_d2_style_block(InputContext& ctx, Element* element) {
 // Parse node property assignment: node.property: value
 static bool parse_d2_property_assignment(InputContext& ctx,
                                          Element* graph, const char* first_id) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (tracker.atEnd() || tracker.current() != '.') {
         return false;
@@ -294,7 +294,7 @@ static bool parse_d2_property_assignment(InputContext& ctx,
 // Parse edge: node1 -> node2 [: label]
 static bool parse_d2_edge(InputContext& ctx,
                           Element* graph, const char* first_id) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     if (tracker.remaining() < 2 || tracker.current() != '-' || tracker.peek(1) != '>') {
         return false;
@@ -337,7 +337,7 @@ static bool parse_d2_edge(InputContext& ctx,
 
 // Parse node with attributes block: node: { ... }
 static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const char* first_id) {
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
     if (tracker.atEnd() || tracker.peek() != ':') {
         return false;
     }
@@ -360,7 +360,7 @@ static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const ch
 
 void parse_graph_d2(Input* input, const char* d2_string) {
     InputContext ctx(input, d2_string);
-    SourceTracker& tracker = *ctx.tracker();
+    SourceTracker& tracker = ctx.tracker();
 
     // create the main graph element
     Element* graph = create_graph_element(input, "directed", "hierarchical", "d2");

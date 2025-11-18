@@ -51,19 +51,6 @@ public:
     }
 
     /**
-     * Create HTML input context with external SourceTracker
-     *
-     * @param input Input stream for HTML content
-     * @param tracker External source tracker (not owned by context)
-     */
-    HtmlInputContext(Input* input, SourceTracker* tracker)
-        : InputContext(input, tracker)
-        , html_ctx_(html_context_create(input))
-    {
-        if (!html_ctx_) {
-            addError("Failed to create HTML parser context", 0, 0);
-        }
-    }    /**
      * Destructor - cleans up HTML parser context
      */
     ~HtmlInputContext() {
