@@ -60,8 +60,6 @@ typedef enum {
     INLINE_WIKI_TEMPLATE
 } InlineType;
 
-#ifdef __cplusplus
-
 namespace lambda {
 
 // MarkupParser extends InputContext for unified parsing
@@ -113,31 +111,5 @@ public:
 };
 
 } // namespace lambda
-
-extern "C" {
-#endif
-
-// C-compatible wrapper functions for legacy code
-#ifdef __cplusplus
-typedef lambda::MarkupParser MarkupParser_t;
-#else
-typedef struct MarkupParser_t MarkupParser_t;
-#endif
-
-// Core Infrastructure Functions (C wrappers)
-MarkupParser_t* parser_create(Input* input, ParseConfig config);
-void parser_destroy(MarkupParser_t* parser);
-void parser_reset_state(MarkupParser_t* parser);
-
-// Format Detection (pure C functions)
-MarkupFormat detect_markup_format(const char* content, const char* filename);
-const char* detect_markup_flavor(MarkupFormat format, const char* content);
-
-// Main parsing function (C wrapper)
-Item parse_markup_content(MarkupParser_t* parser, const char* content);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // MARKUP_PARSER_H

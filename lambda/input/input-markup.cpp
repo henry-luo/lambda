@@ -5,6 +5,10 @@
 #include "source_tracker.hpp"
 #include <string.h>
 #include <ctype.h>
+#include <memory>
+#include <vector>
+#include <algorithm>
+#include <string>
 
 using namespace lambda;
 
@@ -235,22 +239,6 @@ Item MarkupParser::parseContent(const char* content) {
 
 } // namespace lambda
 
-// C-compatible wrapper functions
-MarkupParser_t* parser_create(Input* input, ParseConfig config) {
-    if (!input) return NULL;
-    return new lambda::MarkupParser(input, config);
-}
-
-void parser_destroy(MarkupParser_t* parser) {
-    if (!parser) return;
-    delete parser;
-}
-
-void parser_reset_state(MarkupParser_t* parser) {
-    if (!parser) return;
-    parser->resetState();
-}
-
 // Format detection utilities
 MarkupFormat detect_markup_format(const char* content, const char* filename) {
     if (!content) return MARKUP_AUTO_DETECT;
@@ -346,14 +334,6 @@ const char* detect_markup_flavor(MarkupFormat format, const char* content) {
         default:
             return "standard";
     }
-}
-
-// Main parsing function
-Item parse_markup_content(MarkupParser_t* parser, const char* content) {
-    if (!parser || !content) {
-        return (Item){.item = ITEM_ERROR};
-    }
-    return parser->parseContent(content);
 }
 
 // Document parsing - creates proper structure according to Doc Schema
@@ -2299,7 +2279,7 @@ Item input_markup(Input *input, const char* content) {
     MarkupInputContext ctx(input, content, strlen(content), config);
 
     // Parse content
-    Item result = parse_markup_content(ctx.markupParser(), content);
+    Item result = ctx.markupParser()->parseContent(content);
 
     if (result.item == ITEM_ERROR) {
         ctx.addWarning(ctx.tracker().location(), "Markup parsing returned error");
@@ -2333,7 +2313,7 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     MarkupInputContext ctx(input, content, strlen(content), config);
 
     // Parse content
-    Item result = parse_markup_content(ctx.markupParser(), content);
+    Item result = ctx.markupParser()->parseContent(content);
 
     if (result.item == ITEM_ERROR) {
         ctx.addWarning(ctx.tracker().location(), "Markup parsing with explicit format returned error");
