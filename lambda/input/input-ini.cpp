@@ -284,7 +284,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
 
         String* value_str = parse_raw_value(ctx, ini);
         Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(ctx, value_str)) : (Item){.item = 0};
-        map_put(section_map, key, value, input);
+        ctx.builder().putToMap(section_map, key, value);
 
         skip_to_newline(ini, &tracker);
     }
@@ -330,8 +330,8 @@ void parse_ini(Input* input, const char* ini_string) {
             Map* section_map = parse_section(ctx, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
-                map_put(root_map, current_section_name,
-                    {.item = (uint64_t)section_map}, input);
+                ctx.builder().putToMap(root_map, current_section_name,
+                    {.item = (uint64_t)section_map});
             }
         } else {
             // key-value pair outside of any section (global)
@@ -348,8 +348,8 @@ void parse_ini(Input* input, const char* ini_string) {
                     global_section = parse_section(ctx, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
-                        map_put(root_map, global_name,
-                            {.item = (uint64_t)global_section}, input);
+                        ctx.builder().putToMap(root_map, global_name,
+                            {.item = (uint64_t)global_section});
                     }
                 }
             } else {

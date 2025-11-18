@@ -41,6 +41,30 @@ inline String* input_create_string(Input* input, const char* str) {
     return builder.createString(str);
 }
 
+// Temporary compatibility functions for parsers during migration
+// These create elements using ElementBuilder but return the raw Element*
+inline Element* input_create_element(Input* input, const char* tag_name) {
+    // Use static function directly (it's now declared externally in mark_builder.cpp)
+    extern Element* input_create_element_internal(Input *input, const char* tag_name);
+    return input_create_element_internal(input, tag_name);
+}
+
+inline void input_add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
+
+inline void input_add_attribute_item_to_element(Input* input, Element* element, const char* attr_name, Item attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    if (!key) return;
+    builder.putToElement(element, key, attr_value);
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -52,9 +76,6 @@ int input_count_leading_chars(const char* str, char ch);
 char* input_trim_whitespace(const char* str);
 char** input_split_lines(const char* text, int* line_count);
 void input_free_lines(char** lines, int line_count);
-Element* input_create_element(Input *input, const char* tag_name);
-void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
-void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value);
 Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);

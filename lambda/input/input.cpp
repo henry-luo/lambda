@@ -56,6 +56,7 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
     return shape_entry;
 }
 
+// Internal helper function - not exported in header but accessible to mark_builder.cpp
 void map_put(Map* mp, String* key, Item value, Input *input) {
     TypeMap *map_type = (TypeMap*)mp->type;
     if (map_type == &EmptyMap) {
@@ -121,7 +122,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     }
 }
 
-Element* input_create_element(Input *input, const char* tag_name) {
+// Internal function renamed to avoid conflict with inline wrapper
+Element* input_create_element_internal(Input *input, const char* tag_name) {
     Element* element = elmt_pooled(input->pool);
     if (!element) return NULL;
 
@@ -372,26 +374,6 @@ void input_free_lines(char** lines, int line_count) {
         free(lines[i]);
     }
     free(lines);
-}
-
-void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
-    // Use MarkBuilder's API through ElementBuilder
-    MarkBuilder builder(input);
-    String* key = builder.createString(attr_name);
-    String* value = builder.createString(attr_value);
-    if (!key || !value) return;
-    Item lambda_value = {.item = s2it(value)};
-    // Use low-level elmt_put since we have an existing element
-    elmt_put(element, key, lambda_value, input->pool);
-}
-
-void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value) {
-    // Use MarkBuilder's API through ElementBuilder
-    MarkBuilder builder(input);
-    String* key = builder.createString(attr_name);
-    if (!key) return;
-    // Use low-level elmt_put since we have an existing element
-    elmt_put(element, key, attr_value, input->pool);
 }
 
 extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
