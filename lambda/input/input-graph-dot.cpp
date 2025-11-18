@@ -16,13 +16,13 @@ static void skip_to_eol(SourceTracker& tracker) {
 
 // Forward declarations for internal functions
 static void skip_whitespace_and_comments(SourceTracker& tracker);
-static String* parse_identifier(InputContext& ctx, SourceTracker& tracker);
-static String* parse_quoted_string(InputContext& ctx, SourceTracker& tracker);
-static String* parse_attribute_value(InputContext& ctx, SourceTracker& tracker);
-static void parse_attribute_list(InputContext& ctx, SourceTracker& tracker, Element* element);
-static Element* parse_node_statement(InputContext& ctx, SourceTracker& tracker);
-static Element* parse_edge_statement(InputContext& ctx, SourceTracker& tracker);
-static void parse_subgraph(InputContext& ctx, SourceTracker& tracker, Element* graph);
+static String* parse_identifier(InputContext& ctx);
+static String* parse_quoted_string(InputContext& ctx);
+static String* parse_attribute_value(InputContext& ctx);
+static void parse_attribute_list(InputContext& ctx, Element* element);
+static Element* parse_node_statement(InputContext& ctx);
+static Element* parse_edge_statement(InputContext& ctx);
+static void parse_subgraph(InputContext& ctx, Element* graph);
 
 // Skip whitespace and comments
 static void skip_whitespace_and_comments(SourceTracker& tracker) {
@@ -66,7 +66,9 @@ static void skip_whitespace_and_comments(SourceTracker& tracker) {
 }
 
 // Parse identifier
-static String* parse_identifier(InputContext& ctx, SourceTracker& tracker) {
+static String* parse_identifier(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     if (tracker.atEnd()) return nullptr;
@@ -93,7 +95,9 @@ static String* parse_identifier(InputContext& ctx, SourceTracker& tracker) {
 }
 
 // Parse quoted string
-static String* parse_quoted_string(InputContext& ctx, SourceTracker& tracker) {
+static String* parse_quoted_string(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     if (tracker.atEnd() || tracker.current() != '"') {
@@ -146,18 +150,22 @@ static String* parse_quoted_string(InputContext& ctx, SourceTracker& tracker) {
 }
 
 // Parse attribute value (identifier or quoted string)
-static String* parse_attribute_value(InputContext& ctx, SourceTracker& tracker) {
+static String* parse_attribute_value(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     if (!tracker.atEnd() && tracker.current() == '"') {
-        return parse_quoted_string(ctx, tracker);
+        return parse_quoted_string(ctx);
     } else {
-        return parse_identifier(ctx, tracker);
+        return parse_identifier(ctx);
     }
 }
 
 // Parse attribute list [attr1=value1, attr2=value2, ...]
-static void parse_attribute_list(InputContext& ctx, SourceTracker& tracker, Element* element) {
+static void parse_attribute_list(InputContext& ctx, Element* element) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     if (tracker.atEnd() || tracker.current() != '[') {
@@ -172,7 +180,7 @@ static void parse_attribute_list(InputContext& ctx, SourceTracker& tracker, Elem
         if (tracker.current() == ']') break;
 
         // parse attribute name
-        String* attr_name = parse_identifier(ctx, tracker);
+        String* attr_name = parse_identifier(ctx);
         if (!attr_name) {
             ctx.addError(tracker.location(), "Expected attribute name");
             break;
@@ -190,7 +198,7 @@ static void parse_attribute_list(InputContext& ctx, SourceTracker& tracker, Elem
         skip_whitespace_and_comments(tracker);
 
         // parse attribute value
-        String* attr_value = parse_attribute_value(ctx, tracker);
+        String* attr_value = parse_attribute_value(ctx);
         if (!attr_value) {
             ctx.addError(tracker.location(), "Expected attribute value");
             break;
@@ -215,13 +223,15 @@ static void parse_attribute_list(InputContext& ctx, SourceTracker& tracker, Elem
 }
 
 // Parse node statement: node_id [attributes]
-static Element* parse_node_statement(InputContext& ctx, SourceTracker& tracker) {
+static Element* parse_node_statement(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     // parse node ID
-    String* node_id = parse_identifier(ctx, tracker);
+    String* node_id = parse_identifier(ctx);
     if (!node_id) {
-        node_id = parse_quoted_string(ctx, tracker);
+        node_id = parse_quoted_string(ctx);
     }
     if (!node_id) {
         ctx.addError(tracker.location(), "Expected node identifier");
@@ -232,19 +242,21 @@ static Element* parse_node_statement(InputContext& ctx, SourceTracker& tracker) 
     Element* node = create_node_element(ctx.input(), node_id->chars, node_id->chars);
 
     // parse optional attributes
-    parse_attribute_list(ctx, tracker, node);
+    parse_attribute_list(ctx, node);
 
     return node;
 }
 
 // Parse edge statement: node1 -> node2 [attributes] or node1 -- node2 [attributes]
-static Element* parse_edge_statement(InputContext& ctx, SourceTracker& tracker) {
+static Element* parse_edge_statement(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     // parse from node
-    String* from_id = parse_identifier(ctx, tracker);
+    String* from_id = parse_identifier(ctx);
     if (!from_id) {
-        from_id = parse_quoted_string(ctx, tracker);
+        from_id = parse_quoted_string(ctx);
     }
     if (!from_id) {
         ctx.addError(tracker.location(), "Expected source node identifier for edge");
@@ -282,9 +294,9 @@ static Element* parse_edge_statement(InputContext& ctx, SourceTracker& tracker) 
     skip_whitespace_and_comments(tracker);
 
     // parse to node
-    String* to_id = parse_identifier(ctx, tracker);
+    String* to_id = parse_identifier(ctx);
     if (!to_id) {
-        to_id = parse_quoted_string(ctx, tracker);
+        to_id = parse_quoted_string(ctx);
     }
     if (!to_id) {
         ctx.addError(tracker.location(), "Expected target node identifier for edge");
@@ -298,13 +310,15 @@ static Element* parse_edge_statement(InputContext& ctx, SourceTracker& tracker) 
     add_graph_attribute(ctx.input(), edge, "direction", is_directed ? "forward" : "none");
 
     // parse optional attributes
-    parse_attribute_list(ctx, tracker, edge);
+    parse_attribute_list(ctx, edge);
 
     return edge;
 }
 
 // Parse subgraph or cluster
-static void parse_subgraph(InputContext& ctx, SourceTracker& tracker, Element* graph) {
+static void parse_subgraph(InputContext& ctx, Element* graph) {
+    SourceTracker& tracker = *ctx.tracker();
+
     skip_whitespace_and_comments(tracker);
 
     // look for "subgraph" or "cluster"
@@ -319,9 +333,9 @@ static void parse_subgraph(InputContext& ctx, SourceTracker& tracker, Element* g
     skip_whitespace_and_comments(tracker);
 
     // parse optional subgraph name
-    String* subgraph_id = parse_identifier(ctx, tracker);
+    String* subgraph_id = parse_identifier(ctx);
     if (!subgraph_id) {
-        subgraph_id = parse_quoted_string(ctx, tracker);
+        subgraph_id = parse_quoted_string(ctx);
     }
 
     // default ID if none provided
@@ -353,9 +367,9 @@ static void parse_subgraph(InputContext& ctx, SourceTracker& tracker, Element* g
         SourceLocation checkpoint = tracker.location();
 
         // look ahead to determine if this is an edge statement
-        String* first_id = parse_identifier(ctx, tracker);
+        String* first_id = parse_identifier(ctx);
         if (!first_id) {
-            first_id = parse_quoted_string(ctx, tracker);
+            first_id = parse_quoted_string(ctx);
         }
 
         if (first_id) {
@@ -370,13 +384,13 @@ static void parse_subgraph(InputContext& ctx, SourceTracker& tracker, Element* g
 
             if (is_edge) {
                 // this is an edge statement
-                Element* edge = parse_edge_statement(ctx, tracker);
+                Element* edge = parse_edge_statement(ctx);
                 if (edge) {
                     add_edge_to_graph(ctx.input(), cluster, edge);
                 }
             } else {
                 // this is a node statement
-                Element* node = parse_node_statement(ctx, tracker);
+                Element* node = parse_node_statement(ctx);
                 if (node) {
                     add_node_to_graph(ctx.input(), cluster, node);
                 }
@@ -447,9 +461,9 @@ void parse_graph_dot(Input* input, const char* dot_string) {
     skip_whitespace_and_comments(tracker);
 
     // parse optional graph name
-    graph_name = parse_identifier(ctx, tracker);
+    graph_name = parse_identifier(ctx);
     if (!graph_name) {
-        graph_name = parse_quoted_string(ctx, tracker);
+        graph_name = parse_quoted_string(ctx);
     }
 
     skip_whitespace_and_comments(tracker);
@@ -488,7 +502,7 @@ void parse_graph_dot(Input* input, const char* dot_string) {
 
         // check for subgraph
         if (tracker.match("subgraph") || tracker.match("cluster")) {
-            parse_subgraph(ctx, tracker, graph);
+            parse_subgraph(ctx, graph);
             continue;
         }
 
@@ -496,9 +510,9 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         SourceLocation checkpoint = tracker.location();
 
         // look ahead to determine statement type
-        String* first_id = parse_identifier(ctx, tracker);
+        String* first_id = parse_identifier(ctx);
         if (!first_id) {
-            first_id = parse_quoted_string(ctx, tracker);
+            first_id = parse_quoted_string(ctx);
         }
 
         if (first_id) {
@@ -513,13 +527,13 @@ void parse_graph_dot(Input* input, const char* dot_string) {
 
             if (is_edge) {
                 // this is an edge statement
-                Element* edge = parse_edge_statement(ctx, tracker);
+                Element* edge = parse_edge_statement(ctx);
                 if (edge) {
                     add_edge_to_graph(input, graph, edge);
                 }
             } else {
                 // this is a node statement
-                Element* node = parse_node_statement(ctx, tracker);
+                Element* node = parse_node_statement(ctx);
                 if (node) {
                     add_node_to_graph(input, graph, node);
                 }
@@ -554,4 +568,3 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         ctx.logErrors();
     }
 }
-

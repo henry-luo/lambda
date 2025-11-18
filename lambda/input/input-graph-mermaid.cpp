@@ -16,12 +16,12 @@ static void skip_to_eol(SourceTracker& tracker) {
 
 // Forward declarations for Mermaid parsing
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker);
-static String* parse_mermaid_identifier(InputContext& ctx, SourceTracker& tracker);
-static String* parse_mermaid_label(InputContext& ctx, SourceTracker& tracker);
-static void parse_mermaid_node_def(InputContext& ctx, SourceTracker& tracker, Element* graph);
-static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, Element* graph, String* from_id);
-static void parse_mermaid_class_def(InputContext& ctx, SourceTracker& tracker, Element* graph);
-static String* parse_mermaid_node_shape(InputContext& ctx, SourceTracker& tracker, const char* node_id);
+static String* parse_mermaid_identifier(InputContext& ctx);
+static String* parse_mermaid_label(InputContext& ctx);
+static void parse_mermaid_node_def(InputContext& ctx, Element* graph);
+static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id);
+static void parse_mermaid_class_def(InputContext& ctx, Element* graph);
+static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id);
 
 // Skip whitespace and comments in Mermaid
 static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker) {
@@ -43,7 +43,8 @@ static void skip_whitespace_and_comments_mermaid(SourceTracker& tracker) {
 }
 
 // Parse Mermaid identifier (alphanumeric + underscore + dash)
-static String* parse_mermaid_identifier(InputContext& ctx, SourceTracker& tracker) {
+static String* parse_mermaid_identifier(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) return nullptr;
@@ -70,7 +71,8 @@ static String* parse_mermaid_identifier(InputContext& ctx, SourceTracker& tracke
 }
 
 // Parse Mermaid node shape and extract label
-static String* parse_mermaid_node_shape(InputContext& ctx, SourceTracker& tracker, const char* node_id) {
+static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) {
+    SourceTracker& tracker = *ctx.tracker();
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) {
@@ -145,7 +147,8 @@ static String* parse_mermaid_node_shape(InputContext& ctx, SourceTracker& tracke
 }
 
 // Parse Mermaid label in quotes or brackets
-static String* parse_mermaid_label(InputContext& ctx, SourceTracker& tracker) {
+static String* parse_mermaid_label(InputContext& ctx) {
+    SourceTracker& tracker = *ctx.tracker();
     skip_whitespace_and_comments_mermaid(tracker);
 
     if (tracker.atEnd()) return nullptr;
@@ -187,11 +190,12 @@ static String* parse_mermaid_label(InputContext& ctx, SourceTracker& tracker) {
 }
 
 // Parse Mermaid node definition: nodeId[label] or nodeId(label) etc.
-static void parse_mermaid_node_def(InputContext& ctx, SourceTracker& tracker, Element* graph) {
+static void parse_mermaid_node_def(InputContext& ctx, Element* graph) {
+    SourceTracker& tracker = *ctx.tracker();
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse node ID
-    String* node_id = parse_mermaid_identifier(ctx, tracker);
+    String* node_id = parse_mermaid_identifier(ctx);
     if (!node_id) {
         return;
     }
@@ -199,7 +203,7 @@ static void parse_mermaid_node_def(InputContext& ctx, SourceTracker& tracker, El
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse node shape and label
-    String* label = parse_mermaid_node_shape(ctx, tracker, node_id->chars);
+    String* label = parse_mermaid_node_shape(ctx, node_id->chars);
     if (!label) {
         label = node_id; // use ID as label if no shape specified
     }
@@ -212,7 +216,8 @@ static void parse_mermaid_node_def(InputContext& ctx, SourceTracker& tracker, El
 }
 
 // Parse Mermaid edge definition: nodeA --> nodeB or nodeA -.-> nodeB etc.
-static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, Element* graph, String* from_id) {
+static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* from_id) {
+    SourceTracker& tracker = *ctx.tracker();
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse edge arrow type
@@ -270,7 +275,7 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse target node
-    String* to_id = parse_mermaid_identifier(ctx, tracker);
+    String* to_id = parse_mermaid_identifier(ctx);
     if (!to_id) {
         ctx.addError(tracker.location(), "Expected target node identifier");
         return;
@@ -290,12 +295,13 @@ static void parse_mermaid_edge_def(InputContext& ctx, SourceTracker& tracker, El
 }
 
 // Parse Mermaid class definition (for styling): class nodeIds className
-static void parse_mermaid_class_def(InputContext& ctx, SourceTracker& tracker, Element* graph) {
+static void parse_mermaid_class_def(InputContext& ctx, Element* graph) {
+    SourceTracker& tracker = *ctx.tracker();
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse node IDs (can be comma-separated)
     while (!tracker.atEnd() && !isspace(tracker.current())) {
-        String* node_id = parse_mermaid_identifier(ctx, tracker);
+        String* node_id = parse_mermaid_identifier(ctx);
         if (!node_id) break;
 
         skip_whitespace_and_comments_mermaid(tracker);
@@ -312,7 +318,7 @@ static void parse_mermaid_class_def(InputContext& ctx, SourceTracker& tracker, E
     skip_whitespace_and_comments_mermaid(tracker);
 
     // parse class name
-    String* class_name = parse_mermaid_identifier(ctx, tracker);
+    String* class_name = parse_mermaid_identifier(ctx);
     if (!class_name) {
         ctx.addWarning(tracker.location(), "Expected class name in class definition");
     }
@@ -377,13 +383,13 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         // check for classDef
         if (tracker->match("classDef")) {
             tracker->advance(8);
-            parse_mermaid_class_def(ctx, *tracker, graph);
+            parse_mermaid_class_def(ctx, graph);
             continue;
         }
 
         // try to parse as edge (look for edge operators)
         // size_t checkpoint = tracker.offset();
-        String* potential_node = parse_mermaid_identifier(ctx, *tracker);
+        String* potential_node = parse_mermaid_identifier(ctx);
 
         if (potential_node) {
             // check if node has shape
@@ -391,7 +397,7 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
             if (tracker->current() == '[' || tracker->current() == '(' ||
                 tracker->current() == '{' || tracker->current() == '>') {
                 // skip node shape
-                parse_mermaid_node_shape(ctx, *tracker, potential_node->chars);
+                parse_mermaid_node_shape(ctx, potential_node->chars);
                 skip_whitespace_and_comments_mermaid(*tracker);
             }
 
@@ -400,10 +406,10 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
                 tracker->match("==>") || tracker->match("---") ||
                 tracker->match("-.-") || tracker->match("===")) {
                 // this is an edge
-                parse_mermaid_edge_def(ctx, *tracker, graph, potential_node);
+                parse_mermaid_edge_def(ctx, graph, potential_node);
             } else {
                 // this is a standalone node
-                parse_mermaid_node_def(ctx, *tracker, graph);
+                parse_mermaid_node_def(ctx, graph);
             }
         }
 
