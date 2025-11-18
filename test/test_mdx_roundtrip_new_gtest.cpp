@@ -70,7 +70,7 @@ TEST_F(MDXRoundtripTest, DISABLED_simple_mdx) {
         "More markdown here.";
 
     // Parse MDX
-    Input* input = input_new(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -108,7 +108,7 @@ TEST_F(MDXRoundtripTest, jsx_fragments) {
         "</>\n\n"
         "Regular markdown.";
 
-    Input* input = input_new(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -143,7 +143,7 @@ TEST_F(MDXRoundtripTest, DISABLED_nested_components) {
         "## More Content\n\n"
         "Final paragraph.";
 
-    Input* input = input_new(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -176,7 +176,7 @@ TEST_F(MDXRoundtripTest, DISABLED_jsx_expressions) {
         "<div>{name}</div>\n\n"
         "End content.";
 
-    Input* input = input_new(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);
@@ -197,7 +197,7 @@ TEST_F(MDXRoundtripTest, DISABLED_jsx_expressions) {
 TEST_F(MDXRoundtripTest, empty_mdx) {
     const char* mdx_content = "";
 
-    Input* input = input_new(NULL);
+    Input* input = InputManager::create_input(NULL);
     ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
     Item parsed = input_mdx(input, mdx_content);

@@ -43,9 +43,7 @@ inline String* input_create_string(Input* input, const char* str) {
 
 #ifdef __cplusplus
 extern "C" {
-#endif// Input creation and management
-Input* input_new(Url* abs_url);
-
+#endif
 // Common input utility functions
 void map_put(Map* mp, String* key, Item value, Input *input);
 void input_skip_whitespace(const char **text);

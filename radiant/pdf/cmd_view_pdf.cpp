@@ -13,7 +13,6 @@
 
 // External functions
 void parse_pdf(Input* input, const char* pdf_data); // From input-pdf.cpp
-Input* input_new(Url* abs_url); // From input.cpp
 int ui_context_init(UiContext* uicon, bool headless); // From window.cpp
 void ui_context_cleanup(UiContext* uicon); // From window.cpp
 void ui_context_create_surface(UiContext* uicon, int width, int height); // From window.cpp

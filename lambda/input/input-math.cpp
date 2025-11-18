@@ -4665,7 +4665,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     }
     printf("\n");
 
-    // Reuse the StringBuf from input_new() - don't create a new one
+    // Reuse the StringBuf from Input creation - don't create a new one
     stringbuf_reset(input->sb);
     const char *math = math_string;
 
