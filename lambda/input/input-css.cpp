@@ -9,7 +9,7 @@ using namespace lambda;
 extern __thread Context* input_context;
 
 // Helper macro to access tracker from context
-#define TRACKER (ctx.tracker())
+#define TRACKER (ctx.tracker)
 
 // Forward declarations for CSS stylesheet parsing
 static Item parse_css_stylesheet(InputContext& ctx);
@@ -164,7 +164,7 @@ static Item parse_css_stylesheet(InputContext& ctx) {
     }
 
     // Build stylesheet element with all collections as attributes
-    ElementBuilder stylesheet = ctx.builder().element("stylesheet");
+    ElementBuilder stylesheet = ctx.builder.element("stylesheet");
     stylesheet.attr("rules", {.item = (uint64_t)rules});
 
     if (keyframes->length > 0) {
@@ -240,11 +240,11 @@ static Item parse_css_at_rule(InputContext& ctx) {
         tracker.advance();
     }
 
-    String* at_rule_name = ctx.builder().createString(sb->str->chars, sb->length);
+    String* at_rule_name = ctx.builder.createString(sb->str->chars, sb->length);
     if (!at_rule_name) return {.item = ITEM_ERROR};
 
     // Start building the at-rule element
-    ElementBuilder at_rule = ctx.builder().element("at-rule");
+    ElementBuilder at_rule = ctx.builder.element("at-rule");
     at_rule.attr("name", at_rule_name->chars);
 
     skip_css_comments(tracker);
@@ -347,7 +347,7 @@ static Item parse_css_at_rule(InputContext& ctx) {
                     if (keyframe_selector && tracker.current() == '{') {
                         tracker.advance(); // Skip opening brace
 
-                        ElementBuilder keyframe_rule = ctx.builder().element("keyframe");
+                        ElementBuilder keyframe_rule = ctx.builder.element("keyframe");
 
                         char* trimmed = input_trim_whitespace(keyframe_selector->chars);
                         if (trimmed) {
@@ -477,7 +477,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
     SourceTracker& tracker = TRACKER;
 
     // Start building the rule element
-    ElementBuilder rule = ctx.builder().element("rule");
+    ElementBuilder rule = ctx.builder.element("rule");
 
     // Parse selectors
     printf("Parsing CSS qualified rule\n");
@@ -505,7 +505,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
                 stringbuf_append_char(sb, tracker.current());
                 tracker.advance();
             }
-            String* property_str = ctx.builder().createString(sb->str->chars, sb->length);
+            String* property_str = ctx.builder.createString(sb->str->chars, sb->length);
             printf("got CSS property: %s\n", property_str ? property_str->chars : "NULL");
             if (!property_str) {
                 // Skip to next declaration
@@ -643,7 +643,7 @@ static Item parse_css_selector(InputContext& ctx) {
     if (sb->length > 0) {
         char* trimmed = input_trim_whitespace(sb->str->chars);
         if (trimmed) {
-            String* trimmed_str = ctx.builder().createString(trimmed);
+            String* trimmed_str = ctx.builder.createString(trimmed);
             free(trimmed);
             return trimmed_str ? (Item){.item = s2it(trimmed_str)} : (Item){.item = ITEM_ERROR};
         }
@@ -688,7 +688,7 @@ static Item parse_css_declaration(InputContext& ctx) {
         stringbuf_append_char(sb, tracker.current());
         tracker.advance();
     }
-    String* property_str = ctx.builder().createString(sb->str->chars, sb->length);
+    String* property_str = ctx.builder.createString(sb->str->chars, sb->length);
     if (!property_str) return {.item = ITEM_ERROR};
     printf("Parsing CSS property: %s\n", property_str->chars);
 
@@ -698,7 +698,7 @@ static Item parse_css_declaration(InputContext& ctx) {
         return {.item = ITEM_ERROR};
     }
 
-    ElementBuilder declaration = ctx.builder().element("declaration");
+    ElementBuilder declaration = ctx.builder.element("declaration");
     declaration.attr("property", property_trimmed);
     free(property_trimmed);
 
@@ -789,7 +789,7 @@ static Item parse_css_string(InputContext& ctx) {
         tracker.advance(); // Skip closing quote
     }
 
-    String* str = ctx.builder().createString(sb->str->chars, sb->length);
+    String* str = ctx.builder.createString(sb->str->chars, sb->length);
     return str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
 }
 
@@ -820,7 +820,7 @@ static Item parse_css_url(InputContext& ctx) {
             }
             tracker.advance();
         }
-        String* str = ctx.builder().createString(sb->str->chars, sb->length);
+        String* str = ctx.builder.createString(sb->str->chars, sb->length);
         url_value = str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
     }
 
@@ -830,7 +830,7 @@ static Item parse_css_url(InputContext& ctx) {
     }
 
     // Create url element with the URL as content
-    ElementBuilder url_element = ctx.builder().element("url");
+    ElementBuilder url_element = ctx.builder.element("url");
     if (url_value .item != ITEM_ERROR) {
         // Add URL as child content
         url_element.child(url_value);
@@ -859,7 +859,7 @@ static Item parse_css_color(InputContext& ctx) {
 
         // Valid hex colors are 3, 4, 6, or 8 digits
         if (hex_count == 3 || hex_count == 4 || hex_count == 6 || hex_count == 8) {
-            String* color_str = ctx.builder().createString(sb->str->chars, sb->length);
+            String* color_str = ctx.builder.createString(sb->str->chars, sb->length);
             return color_str ? (Item){.item = s2it(color_str)} : (Item){.item = ITEM_ERROR};
         }
         return {.item = ITEM_ERROR};
@@ -885,7 +885,7 @@ static Item parse_css_color(InputContext& ctx) {
         }
 
         if (sb->length > 0) {
-            String* color_name = ctx.builder().createString(sb->str->chars, sb->length);
+            String* color_name = ctx.builder.createString(sb->str->chars, sb->length);
             if (color_name) {
                 // Common CSS color names - return as symbol
                 const char* name = color_name->chars;
@@ -971,13 +971,13 @@ static Item parse_css_measure(InputContext& ctx) {
     // If we have a unit, return the complete dimension token as a single string
     if (tracker.offset() > unit_start) {
         // Create the complete dimension string (e.g., "10px")
-        String* dimension_str = ctx.builder().createString(sb->str->chars, sb->length);
+        String* dimension_str = ctx.builder.createString(sb->str->chars, sb->length);
         log_debug("parse_css_measure: Parsed '%s' (with unit)", dimension_str ? dimension_str->chars : "NULL");
         return (Item){.item = s2it(dimension_str)};
     } else {
         // No unit - this should be handled as a number
         // But we can't backtrack, so return what we have as a dimension anyway
-        String* dimension_str = ctx.builder().createString(sb->str->chars, sb->length);
+        String* dimension_str = ctx.builder.createString(sb->str->chars, sb->length);
         log_debug("parse_css_measure: Parsed '%s' (no unit)", dimension_str ? dimension_str->chars : "NULL");
         return (Item){.item = s2it(dimension_str)};
     }
@@ -1023,7 +1023,7 @@ static Item parse_css_identifier(InputContext& ctx) {
         }
     }
 
-    String* id_str = ctx.builder().createString(sb->str->chars, sb->length);
+    String* id_str = ctx.builder.createString(sb->str->chars, sb->length);
     if (!id_str) {
         log_debug("parse_css_identifier: Failed to create string, returning ERROR");
         return {.item = ITEM_ERROR};
@@ -1168,11 +1168,11 @@ static Item parse_css_function(InputContext& ctx) {
     skip_css_comments(tracker);
     if (tracker.current() != '(') {
         // Not a function, treat as identifier (symbol)
-        String* id_str = ctx.builder().createString(sb->str->chars, sb->length);
+        String* id_str = ctx.builder.createString(sb->str->chars, sb->length);
         return id_str ? (Item){.item = y2it(id_str)} : (Item){.item = ITEM_ERROR};
     }
 
-    String* func_name = ctx.builder().createString(sb->str->chars, sb->length);
+    String* func_name = ctx.builder.createString(sb->str->chars, sb->length);
     if (!func_name) return {.item = ITEM_ERROR};
 
     printf("Parsing CSS function: %s\n", func_name->chars);
@@ -1187,7 +1187,7 @@ static Item parse_css_function(InputContext& ctx) {
     }
 
     // Create Lambda element with function name as element name
-    ElementBuilder func_element = ctx.builder().element(func_name->chars);
+    ElementBuilder func_element = ctx.builder.element(func_name->chars);
 
     // Add parameters as child content
     // Disable string merging to keep function parameters separate
@@ -1254,7 +1254,7 @@ static Array* parse_css_value_list(InputContext& ctx) {
         if (tracker.current() == ',') {
             log_debug("parse_css_value_list: Found comma separator");
             // Preserve comma separator by adding a marker symbol
-            String* comma_marker = ctx.builder().createString(",");
+            String* comma_marker = ctx.builder.createString(",");
             if (comma_marker) {
                 Item comma_item = {.item = y2it(comma_marker)};
                 array_append(values, comma_item, ctx.input()->pool);
@@ -1269,7 +1269,7 @@ static Array* parse_css_value_list(InputContext& ctx) {
             if (tracker.peek(1) != '*' && tracker.peek(1) != '/') {
                 log_debug("parse_css_value_list: Slash is separator, not comment");
                 // Preserve slash separator by adding a marker symbol
-                String* slash_marker = ctx.builder().createString("/");
+                String* slash_marker = ctx.builder.createString("/");
                 if (slash_marker) {
                     Item slash_item = {.item = y2it(slash_marker)};
                     array_append(values, slash_item, ctx.input()->pool);
@@ -1297,7 +1297,7 @@ static Array* parse_css_value_list(InputContext& ctx) {
             if (tracker.current() == ',') {
                 log_debug("parse_css_value_list: Found comma after whitespace");
                 // Preserve comma separator
-                String* comma_marker = ctx.builder().createString(",");
+                String* comma_marker = ctx.builder.createString(",");
                 if (comma_marker) {
                     Item comma_item = {.item = y2it(comma_marker)};
                     array_append(values, comma_item, ctx.input()->pool);
@@ -1307,7 +1307,7 @@ static Array* parse_css_value_list(InputContext& ctx) {
             } else if (tracker.current() == '/' && tracker.peek(1) != '*' && tracker.peek(1) != '/') {
                 log_debug("parse_css_value_list: Found slash after whitespace");
                 // Preserve slash separator
-                String* slash_marker = ctx.builder().createString("/");
+                String* slash_marker = ctx.builder.createString("/");
                 if (slash_marker) {
                     Item slash_item = {.item = y2it(slash_marker)};
                     array_append(values, slash_item, ctx.input()->pool);
@@ -1463,7 +1463,7 @@ void parse_css(Input* input, const char* css_string) {
 
     // create error tracking context with tracker
     InputContext ctx(input, css_string, strlen(css_string));
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     skip_css_comments(tracker);
 
@@ -1472,7 +1472,7 @@ void parse_css(Input* input, const char* css_string) {
         input->root = parse_css_stylesheet(ctx);
     } else {
         // Empty stylesheet
-        ElementBuilder empty_stylesheet = ctx.builder().element("stylesheet");
+        ElementBuilder empty_stylesheet = ctx.builder.element("stylesheet");
         Array* empty_rules = array_pooled(input->pool);
         if (empty_rules) {
             empty_stylesheet.attr("rules", {.item = (uint64_t)empty_rules});

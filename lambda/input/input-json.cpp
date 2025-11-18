@@ -8,14 +8,14 @@ using namespace lambda;
 static Item parse_value(InputContext& ctx, const char **json);
 
 static String* parse_string(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**json != '"') {
         ctx.addError(tracker.location(), "Expected '\"' to start string");
         return nullptr;
     }
 
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -92,7 +92,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
 }
 
 static Item parse_number(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     const char* start = *json;
     char* end;
@@ -100,7 +100,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
 
     if (end == *json) {
         ctx.addError(tracker.location(), "Invalid number format");
-        return ctx.builder().createNull();
+        return ctx.builder.createNull();
     }
 
     size_t len = end - *json;
@@ -109,21 +109,21 @@ static Item parse_number(InputContext& ctx, const char **json) {
 
     // Check if it's an integer
     if (value == (int64_t)value) {
-        return ctx.builder().createInt((int64_t)value);
+        return ctx.builder.createInt((int64_t)value);
     } else {
-        return ctx.builder().createFloat(value);
+        return ctx.builder.createFloat(value);
     }
 }
 
 static Item parse_array(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**json != '[') {
         ctx.addError(tracker.location(), "Expected '[' to start array");
-        return ctx.builder().createNull();
+        return ctx.builder.createNull();
     }
 
-    ArrayBuilder arr_builder = ctx.builder().array();
+    ArrayBuilder arr_builder = ctx.builder.array();
 
     (*json)++; // skip [
     tracker.advance(1);
@@ -169,14 +169,14 @@ static Item parse_array(InputContext& ctx, const char **json) {
 }
 
 static Item parse_object(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     if (**json != '{') {
         ctx.addError(tracker.location(), "Expected '{' to start object");
-        return ctx.builder().createNull();
+        return ctx.builder.createNull();
     }
 
-    MapBuilder map_builder = ctx.builder().map();
+    MapBuilder map_builder = ctx.builder.map();
 
     (*json)++; // skip '{'
     tracker.advance(1);
@@ -259,13 +259,13 @@ static Item parse_object(InputContext& ctx, const char **json) {
 }
 
 static Item parse_value(InputContext& ctx, const char **json) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     skip_whitespace(json);
 
     if (!**json) {
         ctx.addError(tracker.location(), "Unexpected end of JSON");
-        return ctx.builder().createNull();
+        return ctx.builder.createNull();
     }
 
     switch (**json) {
@@ -275,41 +275,41 @@ static Item parse_value(InputContext& ctx, const char **json) {
             return parse_array(ctx, json);
         case '"': {
             String* str = parse_string(ctx, json);
-            if (!str) return ctx.builder().createNull();
-            if (str == &EMPTY_STRING) return ctx.builder().createNull();
+            if (!str) return ctx.builder.createNull();
+            if (str == &EMPTY_STRING) return ctx.builder.createNull();
             return (Item){.item = s2it(str)};
         }
         case 't':
             if (strncmp(*json, "true", 4) == 0) {
                 *json += 4;
                 tracker.advance(4);
-                return ctx.builder().createBool(true);
+                return ctx.builder.createBool(true);
             }
             ctx.addError(tracker.location(), "Invalid value, expected 'true'");
-            return ctx.builder().createNull();
+            return ctx.builder.createNull();
         case 'f':
             if (strncmp(*json, "false", 5) == 0) {
                 *json += 5;
                 tracker.advance(5);
-                return ctx.builder().createBool(false);
+                return ctx.builder.createBool(false);
             }
             ctx.addError(tracker.location(), "Invalid value, expected 'false'");
-            return ctx.builder().createNull();
+            return ctx.builder.createNull();
         case 'n':
             if (strncmp(*json, "null", 4) == 0) {
                 *json += 4;
                 tracker.advance(4);
-                return ctx.builder().createNull();
+                return ctx.builder.createNull();
             }
             ctx.addError(tracker.location(), "Invalid value, expected 'null'");
-            return ctx.builder().createNull();
+            return ctx.builder.createNull();
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {
                 return parse_number(ctx, json);
             }
             ctx.addError(tracker.location(),
                         std::string("Unexpected character: '") + **json + "'");
-            return ctx.builder().createNull();
+            return ctx.builder.createNull();
     }
 }
 

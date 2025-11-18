@@ -129,7 +129,7 @@ static Item parse_man_formatted_text(InputContext& ctx, const char* line, const 
     if (*content != '\0') {
         char* trimmed_content = trim_whitespace(content);
         if (trimmed_content && strlen(trimmed_content) > 0) {
-            MarkBuilder& builder = ctx.builder();
+            MarkBuilder& builder = ctx.builder;
             String* content_str = builder.createString(trimmed_content);
             if (content_str) {
                 list_push((List*)element, {.item = s2it(content_str)});
@@ -144,7 +144,7 @@ static Item parse_man_formatted_text(InputContext& ctx, const char* line, const 
 
 static Item parse_man_list_item(InputContext& ctx, char** lines, int* current_line, int total_lines) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     const char* line = lines[*current_line];
     Element* list_item = create_man_element(input, "li");
     if (!list_item) return {.item = ITEM_NULL};
@@ -212,7 +212,7 @@ static Item parse_man_list_item(InputContext& ctx, char** lines, int* current_li
 
 static Item parse_man_inline(InputContext& ctx, const char* text) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     if (!text || strlen(text) == 0) return {.item = ITEM_NULL};
 
     // Check if text contains any formatting characters (man pages use backslashes for formatting)
@@ -438,7 +438,7 @@ void parse_man(Input* input, const char* man_string) {
     char** lines = split_lines(man_string, &line_count);
 
     if (!lines || line_count == 0) {
-        ctx.addError(ctx.tracker().location(), "Failed to split man page into lines");
+        ctx.addError(ctx.tracker.location(), "Failed to split man page into lines");
         input->root = {.item = ITEM_NULL};
         return;
     }

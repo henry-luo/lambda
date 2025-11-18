@@ -159,19 +159,19 @@ static bool is_table_row(const char* line);
 
 // Local helper functions to replace macros
 static inline String* create_string(MarkupParser* parser, const char* str) {
-    return parser->builder().createString(str);
+    return parser->builder.createString(str);
 }
 
 static inline Element* create_element(MarkupParser* parser, const char* tag_name) {
-    return parser->builder().element(tag_name).final().element;
+    return parser->builder.element(tag_name).final().element;
 }
 
 static inline void add_attribute_to_element(MarkupParser* parser, Element* element, const char* attr_name, const char* attr_value) {
-    String* key = parser->builder().createString(attr_name);
-    String* value = parser->builder().createString(attr_value);
+    String* key = parser->builder.createString(attr_name);
+    String* value = parser->builder.createString(attr_value);
     if (!key || !value) return;
     Item lambda_value = {.item = s2it(value)};
-    parser->builder().putToElement(element, key, lambda_value);
+    parser->builder.putToElement(element, key, lambda_value);
 }
 
 // MarkupParser C++ implementation
@@ -658,7 +658,7 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
     }
 
     // Parse inline content with enhancements and add as children
-    String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
     Item content = parse_inline_spans(parser, text_content->chars);
 
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
@@ -968,7 +968,7 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
                 }
 
                 // Parse the math content using ASCII flavor
-                String* math_content_str = parser->builder().createString(sb->str->chars, sb->length);
+                String* math_content_str = parser->builder.createString(sb->str->chars, sb->length);
                 InputContext math_ctx(parser->input(), math_content_str->chars, math_content_str->len);
                 Item parsed_math = parse_math_content(math_ctx, math_content_str->chars, "ascii");
 
@@ -1013,7 +1013,7 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
     }
 
     // Create code content (no inline parsing for code blocks)
-    String* code_content = parser->builder().createString(sb->str->chars, sb->length);
+    String* code_content = parser->builder.createString(sb->str->chars, sb->length);
     Item text_item = {.item = s2it(code_content)};
     list_push((List*)code, text_item);
     increment_element_content_length(code);
@@ -1133,7 +1133,7 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
     }
 
     // Parse the math content using the math parser
-    String* math_content_str = parser->builder().createString(sb->str->chars, sb->length);
+    String* math_content_str = parser->builder.createString(sb->str->chars, sb->length);
     const char* math_flavor = detect_math_flavor(math_content_str->chars);
 
     InputContext math_ctx(parser->input(), math_content_str->chars, math_content_str->len);
@@ -1520,7 +1520,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         if (*pos == '*' || *pos == '_') {
             // Flush any accumulated text
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1537,7 +1537,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '`') {
             // Flush text and parse code span
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1553,7 +1553,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '[') {
             // Flush text first
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1607,7 +1607,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '\'' && parser->config.format == MARKUP_WIKI) {
             // Flush text and parse MediaWiki bold/italic
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1627,11 +1627,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '!' && *(pos+1) == '[') {
             // Flush text and parse image
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 String* key = create_string(parser, "content");
                 // Use builder to add attribute to existing element
-                parser->builder().putToElement(span, key, text_item);
+                parser->builder.putToElement(span, key, text_item);
                 stringbuf_reset(sb);
             }
 
@@ -1645,7 +1645,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '~' && *(pos+1) == '~') {
             // Flush text and parse strikethrough
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1665,7 +1665,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '^') {
             // Flush text and parse superscript
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1685,7 +1685,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '~' && *(pos+1) != '~') {
             // Flush text and parse subscript
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1769,7 +1769,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             } else {
                 // Regular colon handling - flush text and try emoji shortcode
                 if (sb->length > 0) {
-                    String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                    String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                     Item text_item = {.item = s2it(text_content)};
                     list_push((List*)span, text_item);
                     increment_element_content_length(span);
@@ -1794,7 +1794,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '{' && *(pos+1) == '{') {
             // Flush text and parse wiki template
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1810,7 +1810,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '$') {
             // Flush text and parse inline math
             if (sb->length > 0) {
-                String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+                String* text_content = parser->builder.createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
@@ -1836,7 +1836,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
     // Flush any remaining text
     if (sb->length > 0) {
-        String* text_content = parser->builder().createString(sb->str->chars, sb->length);
+        String* text_content = parser->builder.createString(sb->str->chars, sb->length);
         Item text_item = {.item = s2it(text_content)};
         list_push((List*)span, text_item);
         increment_element_content_length(span);
@@ -2280,7 +2280,7 @@ Item input_markup(Input *input, const char* content) {
     Item result = parser.parseContent(content);
 
     if (result.item == ITEM_ERROR) {
-        parser.addWarning(parser.tracker().location(), "Markup parsing returned error");
+        parser.addWarning(parser.tracker.location(), "Markup parsing returned error");
     }
 
     if (parser.hasErrors()) {
@@ -2312,7 +2312,7 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     Item result = parser.parseContent(content);
 
     if (result.item == ITEM_ERROR) {
-        parser.addWarning(parser.tracker().location(), "Markup parsing with explicit format returned error");
+        parser.addWarning(parser.tracker.location(), "Markup parsing with explicit format returned error");
     }
 
     if (parser.hasErrors()) {

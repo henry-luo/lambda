@@ -40,7 +40,7 @@ static int is_directory(const char* path) {
 
 // Helper: create <file> or <dir> element with metadata
 static Element* create_entry_element(InputContext& ctx, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
-    ElementBuilder elmt = ctx.builder().element(is_dir ? "dir" : "file");
+    ElementBuilder elmt = ctx.builder.element(is_dir ? "dir" : "file");
     elmt.attr("name", name);
 
     // Create size as integer
@@ -68,7 +68,7 @@ static Element* create_entry_element(InputContext& ctx, const char* name, const 
     // Keep mode as string for permissions
     char buf[64];
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
-    String* mode_str = ctx.builder().createString(buf);
+    String* mode_str = ctx.builder.createString(buf);
     elmt.attr("mode", {.item = y2it(mode_str)});
 
     // Return raw Element* for compatibility with existing code
@@ -140,10 +140,10 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     if (!root) { free(input); return NULL; }
 
     // Add the full path as a separate attribute for the root directory
-    String* path_key = ctx.builder().createString("path");
-    String* path_value = ctx.builder().createString(directory_path);
+    String* path_key = ctx.builder.createString("path");
+    String* path_value = ctx.builder.createString(directory_path);
     if (path_key && path_value) {
-        ctx.builder().putToElement(root, path_key, {.item = s2it(path_value)});
+        ctx.builder.putToElement(root, path_key, {.item = s2it(path_value)});
     }
 
     // Traverse and populate

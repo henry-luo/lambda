@@ -34,7 +34,7 @@ static void skip_comments(const char **mark) {
 
 static String* parse_string(InputContext& ctx, const char **mark) {
     if (**mark != '"') return NULL;
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
@@ -84,7 +84,7 @@ static String* parse_string(InputContext& ctx, const char **mark) {
 
 static String* parse_symbol(InputContext& ctx, const char **mark) {
     if (**mark != '\'') return NULL;
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
@@ -114,7 +114,7 @@ static String* parse_symbol(InputContext& ctx, const char **mark) {
 }
 
 static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
@@ -334,7 +334,7 @@ static Map* parse_map(InputContext& ctx, const char **mark) {
         skip_comments(mark);
 
         Item value = parse_value(ctx, mark);
-        ctx.builder().putToMap(mp, key, value);
+        ctx.builder.putToMap(mp, key, value);
 
         skip_comments(mark);
         if (**mark == '}') {

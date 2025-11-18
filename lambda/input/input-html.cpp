@@ -149,11 +149,11 @@ static Item parse_comment(HtmlInputContext& ctx, const char **html, const char* 
     size_t comment_len = *html - comment_start;
 
     // Create element with tag name "!--" using ElementBuilder
-    ElementBuilder element = ctx.builder().element("!--");
+    ElementBuilder element = ctx.builder.element("!--");
 
     // Add comment content as a text node child (if not empty)
     if (comment_len > 0) {
-        String* comment_text = ctx.builder().createString(comment_start, comment_len);
+        String* comment_text = ctx.builder.createString(comment_start, comment_len);
         Item text_item = {.item = s2it(comment_text)};
         element.child(text_item);
     }
@@ -196,11 +196,11 @@ static Item parse_doctype(HtmlInputContext& ctx, const char **html, const char* 
     size_t content_len = *html - content_start;
 
     // Create element with tag name "!DOCTYPE" or "!doctype" to preserve source case using ElementBuilder
-    ElementBuilder element = ctx.builder().element(is_uppercase_DOCTYPE ? "!DOCTYPE" : "!doctype");
+    ElementBuilder element = ctx.builder.element(is_uppercase_DOCTYPE ? "!DOCTYPE" : "!doctype");
 
     // Add DOCTYPE content as a text node child (if not empty)
     if (content_len > 0) {
-        String* doctype_text = ctx.builder().createString(content_start, content_len);
+        String* doctype_text = ctx.builder.createString(content_start, content_len);
         Item text_item = {.item = s2it(doctype_text)};
         element.child(text_item);
     }
@@ -235,11 +235,11 @@ static Item parse_xml_declaration(HtmlInputContext& ctx, const char **html, cons
     size_t decl_len = *html - decl_start;
 
     // Create element with tag name "?xml" using ElementBuilder
-    ElementBuilder element = ctx.builder().element("?xml");
+    ElementBuilder element = ctx.builder.element("?xml");
 
     // Store the entire XML declaration as a text child (for easy roundtrip)
     if (decl_len > 0) {
-        String* decl_text = ctx.builder().createString(decl_start, decl_len);
+        String* decl_text = ctx.builder.createString(decl_start, decl_len);
         Item text_item = {.item = s2it(decl_text)};
         element.child(text_item);
     }
@@ -388,7 +388,7 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
     }
 
     // Create element using MarkBuilder
-    ElementBuilder elem_builder = ctx.builder().element(tag_name->chars);
+    ElementBuilder elem_builder = ctx.builder.element(tag_name->chars);
     Element* element = elem_builder.final().element;
     if (!element) {
         html_exit_element();
@@ -482,7 +482,7 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
         }
 
         // Add attribute to element using builder
-        ctx.builder().putToElement(element, attr_name, attr_value);
+        ctx.builder.putToElement(element, attr_name, attr_value);
 
         skip_whitespace(html);
     }

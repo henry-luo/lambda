@@ -32,7 +32,7 @@ static bool is_folded_line(const char *ics) {
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **ics) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
 
@@ -50,7 +50,7 @@ static String* parse_property_name(InputContext& ctx, const char **ics) {
 
 // Helper function to parse property parameters (between ; and :)
 static void parse_property_parameters(InputContext& ctx, const char **ics, Map* params_map) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     while (**ics == ';') {
         (*ics)++; // skip ';'
@@ -111,7 +111,7 @@ static String* parse_property_value(InputContext& ctx, const char **ics) {
 
     (*ics)++; // skip ':'
 
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
 
@@ -162,7 +162,7 @@ static void normalize_property_name(char* name) {
 // Helper function to parse date-time values
 static Map* parse_datetime(InputContext& ctx, const char* value) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     if (!input || !value) return NULL;
 
@@ -187,7 +187,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
         if (sb->length > sizeof(uint32_t)) {
             String* year_str = stringbuf_to_string(sb);
             String* year_key = builder.createString("year");
-            ctx.builder().putToMap(dt_map, year_key, {.item = s2it(year_str)});
+            ctx.builder.putToMap(dt_map, year_key, {.item = s2it(year_str)});
         }
 
         // Parse month (2 digits)
@@ -202,7 +202,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
         if (sb->length > sizeof(uint32_t)) {
             String* month_str = stringbuf_to_string(sb);
             String* month_key = builder.createString("month");
-            ctx.builder().putToMap(dt_map, month_key, {.item = s2it(month_str)});
+            ctx.builder.putToMap(dt_map, month_key, {.item = s2it(month_str)});
         }
 
         // Parse day (2 digits)
@@ -217,7 +217,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
         if (sb->length > sizeof(uint32_t)) {
             String* day_str = stringbuf_to_string(sb);
             String* day_key = builder.createString("day");
-            ctx.builder().putToMap(dt_map, day_key, {.item = s2it(day_str)});
+            ctx.builder.putToMap(dt_map, day_key, {.item = s2it(day_str)});
         }
 
         // Check for time part (T separator)
@@ -236,7 +236,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
             if (sb->length > sizeof(uint32_t)) {
                 String* hour_str = stringbuf_to_string(sb);
                 String* hour_key = builder.createString("hour");
-                ctx.builder().putToMap(dt_map, hour_key, {.item = s2it(hour_str)});
+                ctx.builder.putToMap(dt_map, hour_key, {.item = s2it(hour_str)});
             }
 
             // Parse minute (2 digits)
@@ -251,7 +251,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
             if (sb->length > sizeof(uint32_t)) {
                 String* minute_str = stringbuf_to_string(sb);
                 String* minute_key = builder.createString("minute");
-                ctx.builder().putToMap(dt_map, minute_key, {.item = s2it(minute_str)});
+                ctx.builder.putToMap(dt_map, minute_key, {.item = s2it(minute_str)});
             }
 
             // Parse second (2 digits)
@@ -266,14 +266,14 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
             if (sb->length > sizeof(uint32_t)) {
                 String* second_str = stringbuf_to_string(sb);
                 String* second_key = builder.createString("second");
-                ctx.builder().putToMap(dt_map, second_key, {.item = s2it(second_str)});
+                ctx.builder.putToMap(dt_map, second_key, {.item = s2it(second_str)});
             }
 
             // Check for timezone (Z for UTC)
             if (*ptr == 'Z') {
                 String* tz_key = builder.createString("timezone");
                 String* tz_value = builder.createString("UTC");
-                ctx.builder().putToMap(dt_map, tz_key, {.item = s2it(tz_value)});
+                ctx.builder.putToMap(dt_map, tz_key, {.item = s2it(tz_value)});
             }
         }
     }
@@ -284,7 +284,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
 // Helper function to parse duration values
 static Map* parse_duration(InputContext& ctx, const char* value) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     if (!input || !value) return NULL;
 
@@ -340,7 +340,7 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
         }
 
         if (key && num_str) {
-            ctx.builder().putToMap(dur_map, key, {.item = s2it(num_str)});
+            ctx.builder.putToMap(dur_map, key, {.item = s2it(num_str)});
         }
     }
 
@@ -355,14 +355,14 @@ void parse_ics(Input* input, const char* ics_string) {
 
     // create error tracking context with source tracking
     InputContext ctx(input, ics_string, strlen(ics_string));
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
 
     const char* ics = ics_string;
 
     // Initialize calendar map
     Map* calendar_map = map_pooled(input->pool);
     if (!calendar_map) {
-        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for calendar map");
+        ctx.addError(ctx.tracker.location(), "Failed to allocate memory for calendar map");
         return;
     }
 
@@ -375,14 +375,14 @@ void parse_ics(Input* input, const char* ics_string) {
         components_list->items = NULL;
     }
     if (!components_list) {
-        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for components list");
+        ctx.addError(ctx.tracker.location(), "Failed to allocate memory for components list");
         return;
     }
 
     // Initialize properties map to store calendar-level properties
     Map* properties_map = map_pooled(input->pool);
     if (!properties_map) {
-        ctx.addError(ctx.tracker().location(), "Failed to allocate memory for properties map");
+        ctx.addError(ctx.tracker.location(), "Failed to allocate memory for properties map");
         return;
     }
 
@@ -447,7 +447,7 @@ void parse_ics(Input* input, const char* ics_string) {
                     // Store component type
                     String* type_key = builder.createString("type");
                     if (type_key) {
-                        ctx.builder().putToMap(current_component, type_key, {.item = s2it(current_component_type)});
+                        ctx.builder.putToMap(current_component, type_key, {.item = s2it(current_component_type)});
                     }
                 }
             }
@@ -463,7 +463,7 @@ void parse_ics(Input* input, const char* ics_string) {
                 if (current_component_props) {
                     String* props_key = builder.createString("properties");
                     Item props_value = {.item = (uint64_t)current_component_props};
-                    ctx.builder().putToMap(current_component, props_key, props_value);
+                    ctx.builder.putToMap(current_component, props_key, props_value);
                 }
 
                 // Add component to list
@@ -484,25 +484,25 @@ void parse_ics(Input* input, const char* ics_string) {
 
         if (current_component && current_component_props) {
             // We're inside a component, store in component properties
-            ctx.builder().putToMap(current_component_props, property_name, prop_value);
+            ctx.builder.putToMap(current_component_props, property_name, prop_value);
 
             // Handle common component properties with special processing
             if (strcmp(property_name->chars, "SUMMARY") == 0) {
                 String* summary_key = builder.createString("summary");
-                ctx.builder().putToMap(current_component, summary_key, prop_value);
+                ctx.builder.putToMap(current_component, summary_key, prop_value);
             }
             else if (strcmp(property_name->chars, "DESCRIPTION") == 0) {
                 String* desc_key = builder.createString("description");
-                ctx.builder().putToMap(current_component, desc_key, prop_value);
+                ctx.builder.putToMap(current_component, desc_key, prop_value);
             }
             else if (strcmp(property_name->chars, "DTSTART") == 0) {
                 String* start_key = builder.createString("start_time");
                 Map* dt_struct = parse_datetime(ctx, property_value->chars);
                 if (dt_struct) {
                     Item dt_value = {.item = (uint64_t)dt_struct};
-                    ctx.builder().putToMap(current_component, start_key, dt_value);
+                    ctx.builder.putToMap(current_component, start_key, dt_value);
                 } else {
-                    ctx.builder().putToMap(current_component, start_key, prop_value);
+                    ctx.builder.putToMap(current_component, start_key, prop_value);
                 }
             }
             else if (strcmp(property_name->chars, "DTEND") == 0) {
@@ -510,9 +510,9 @@ void parse_ics(Input* input, const char* ics_string) {
                 Map* dt_struct = parse_datetime(ctx, property_value->chars);
                 if (dt_struct) {
                     Item dt_value = {.item = (uint64_t)dt_struct};
-                    ctx.builder().putToMap(current_component, end_key, dt_value);
+                    ctx.builder.putToMap(current_component, end_key, dt_value);
                 } else {
-                    ctx.builder().putToMap(current_component, end_key, prop_value);
+                    ctx.builder.putToMap(current_component, end_key, prop_value);
                 }
             }
             else if (strcmp(property_name->chars, "DURATION") == 0) {
@@ -520,55 +520,55 @@ void parse_ics(Input* input, const char* ics_string) {
                 Map* dur_struct = parse_duration(ctx, property_value->chars);
                 if (dur_struct) {
                     Item dur_value = {.item = (uint64_t)dur_struct};
-                    ctx.builder().putToMap(current_component, duration_key, dur_value);
+                    ctx.builder.putToMap(current_component, duration_key, dur_value);
                 } else {
-                    ctx.builder().putToMap(current_component, duration_key, prop_value);
+                    ctx.builder.putToMap(current_component, duration_key, prop_value);
                 }
             }
             else if (strcmp(property_name->chars, "LOCATION") == 0) {
                 String* location_key = builder.createString("location");
-                ctx.builder().putToMap(current_component, location_key, prop_value);
+                ctx.builder.putToMap(current_component, location_key, prop_value);
             }
             else if (strcmp(property_name->chars, "STATUS") == 0) {
                 String* status_key = builder.createString("status");
-                ctx.builder().putToMap(current_component, status_key, prop_value);
+                ctx.builder.putToMap(current_component, status_key, prop_value);
             }
             else if (strcmp(property_name->chars, "PRIORITY") == 0) {
                 String* priority_key = builder.createString("priority");
-                ctx.builder().putToMap(current_component, priority_key, prop_value);
+                ctx.builder.putToMap(current_component, priority_key, prop_value);
             }
             else if (strcmp(property_name->chars, "ORGANIZER") == 0) {
                 String* organizer_key = builder.createString("organizer");
-                ctx.builder().putToMap(current_component, organizer_key, prop_value);
+                ctx.builder.putToMap(current_component, organizer_key, prop_value);
             }
             else if (strcmp(property_name->chars, "ATTENDEE") == 0) {
                 String* attendee_key = builder.createString("attendee");
-                ctx.builder().putToMap(current_component, attendee_key, prop_value);
+                ctx.builder.putToMap(current_component, attendee_key, prop_value);
             }
             else if (strcmp(property_name->chars, "UID") == 0) {
                 String* uid_key = builder.createString("uid");
-                ctx.builder().putToMap(current_component, uid_key, prop_value);
+                ctx.builder.putToMap(current_component, uid_key, prop_value);
             }
         } else {
             // Calendar-level property
-            ctx.builder().putToMap(properties_map, property_name, prop_value);
+            ctx.builder.putToMap(properties_map, property_name, prop_value);
 
             // Handle common calendar properties with special processing
             if (strcmp(property_name->chars, "VERSION") == 0) {
                 String* version_key = builder.createString("version");
-                ctx.builder().putToMap(calendar_map, version_key, prop_value);
+                ctx.builder.putToMap(calendar_map, version_key, prop_value);
             }
             else if (strcmp(property_name->chars, "PRODID") == 0) {
                 String* prodid_key = builder.createString("product_id");
-                ctx.builder().putToMap(calendar_map, prodid_key, prop_value);
+                ctx.builder.putToMap(calendar_map, prodid_key, prop_value);
             }
             else if (strcmp(property_name->chars, "CALSCALE") == 0) {
                 String* scale_key = builder.createString("calendar_scale");
-                ctx.builder().putToMap(calendar_map, scale_key, prop_value);
+                ctx.builder.putToMap(calendar_map, scale_key, prop_value);
             }
             else if (strcmp(property_name->chars, "METHOD") == 0) {
                 String* method_key = builder.createString("method");
-                ctx.builder().putToMap(calendar_map, method_key, prop_value);
+                ctx.builder.putToMap(calendar_map, method_key, prop_value);
             }
         }
     }
@@ -576,12 +576,12 @@ void parse_ics(Input* input, const char* ics_string) {
     // Store components list in calendar
     String* components_key = builder.createString("components");
     Item components_value = {.item = (uint64_t)components_list};
-    ctx.builder().putToMap(calendar_map, components_key, components_value);
+    ctx.builder.putToMap(calendar_map, components_key, components_value);
 
     // Store properties map in calendar
     String* properties_key = builder.createString("properties");
     Item properties_value = {.item = (uint64_t)properties_map};
-    ctx.builder().putToMap(calendar_map, properties_key, properties_value);
+    ctx.builder.putToMap(calendar_map, properties_key, properties_value);
 
     // Set the calendar map as the root of the input
     input->root = {.item = (uint64_t)calendar_map};

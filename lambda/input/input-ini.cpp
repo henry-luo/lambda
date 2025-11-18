@@ -32,9 +32,9 @@ static bool is_comment(const char *ini) {
 
 static String* parse_section_name(InputContext& ctx, const char **ini) {
     if (**ini != '[') return NULL;
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     SourceLocation section_loc = tracker.location();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -61,9 +61,9 @@ static String* parse_section_name(InputContext& ctx, const char **ini) {
 }
 
 static String* parse_key(InputContext& ctx, const char **ini) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     SourceLocation key_loc = tracker.location();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -83,9 +83,9 @@ static String* parse_key(InputContext& ctx, const char **ini) {
 }
 
 static String* parse_raw_value(InputContext& ctx, const char **ini) {
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     SourceLocation value_loc = tracker.location();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -238,7 +238,7 @@ static Item parse_typed_value(InputContext& ctx, String* value_str) {
 static Map* parse_section(InputContext& ctx, const char **ini, String* section_name) {
     printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
 
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
     Input* input = ctx.input();
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
@@ -278,7 +278,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
 
         String* value_str = parse_raw_value(ctx, ini);
         Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(ctx, value_str)) : (Item){.item = 0};
-        ctx.builder().putToMap(section_map, key, value);
+        ctx.builder.putToMap(section_map, key, value);
 
         skip_to_newline(ini, &tracker);
     }
@@ -287,7 +287,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
 
 void parse_ini(Input* input, const char* ini_string) {
     InputContext ctx(input, ini_string, strlen(ini_string));
-    SourceTracker& tracker = ctx.tracker();
+    SourceTracker& tracker = ctx.tracker;
 
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);
@@ -324,7 +324,7 @@ void parse_ini(Input* input, const char* ini_string) {
             Map* section_map = parse_section(ctx, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
-                ctx.builder().putToMap(root_map, current_section_name,
+                ctx.builder.putToMap(root_map, current_section_name,
                     {.item = (uint64_t)section_map});
             }
         } else {
@@ -342,7 +342,7 @@ void parse_ini(Input* input, const char* ini_string) {
                     global_section = parse_section(ctx, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
-                        ctx.builder().putToMap(root_map, global_name,
+                        ctx.builder.putToMap(root_map, global_name,
                             {.item = (uint64_t)global_section});
                     }
                 }

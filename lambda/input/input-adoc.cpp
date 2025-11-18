@@ -639,7 +639,7 @@ void parse_asciidoc(Input* input, const char* asciidoc_string) {
     char** lines = split_lines(asciidoc_string, &line_count);
 
     if (!lines || line_count == 0) {
-        ctx.addError(ctx.tracker().location(), "Failed to split AsciiDoc content into lines");
+        ctx.addError(ctx.tracker.location(), "Failed to split AsciiDoc content into lines");
         input->root = {.item = ITEM_NULL};
         return;
     }

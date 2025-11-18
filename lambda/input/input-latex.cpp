@@ -30,7 +30,7 @@ static inline void add_attribute_to_element(Input* input, Element* element, cons
 static const char* latex_special_chars = "\\{}$&#^_%~";
 
 static String* parse_latex_string_content(InputContext& ctx, const char **latex, char end_char) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     int char_count = 0;
@@ -81,7 +81,7 @@ static String* parse_latex_string_content(InputContext& ctx, const char **latex,
 }
 
 static String* parse_command_name(InputContext& ctx, const char **latex) {
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
@@ -129,7 +129,7 @@ static Array* parse_command_arguments(InputContext& ctx, const char **latex) {
 
         // For required arguments, we need to handle nested braces
         int brace_depth = 1;
-        MarkBuilder& builder = ctx.builder();
+        MarkBuilder& builder = ctx.builder;
         StringBuf* arg_sb = ctx.sb;
         stringbuf_reset(arg_sb);
 
@@ -413,7 +413,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         // Their content is everything until the next \item or \end{environment}
         // printf("DEBUG: Parsing \\item command content\n");
 
-        MarkBuilder& builder = ctx.builder();
+        MarkBuilder& builder = ctx.builder;
         skip_whitespace(latex);
 
         // Parse content until next \item or \end
@@ -487,7 +487,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         if (args && args->length > 0) {
             // printf("DEBUG: Processing \\begin command with %lld arguments\n", args->length);
 
-            MarkBuilder& builder = ctx.builder();
+            MarkBuilder& builder = ctx.builder;
 
             // Extract environment name from the successfully parsed argument
             const char* env_name = "itemize"; // Default
@@ -731,7 +731,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
 
 static Item parse_latex_element(InputContext& ctx, const char **latex) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     static int parse_depth = 0;
     parse_depth++;
 
@@ -1017,7 +1017,7 @@ void parse_latex(Input* input, const char* latex_string) {
     // Create root document element
     Element* root_element = create_latex_element(input, "latex_document");
     if (!root_element) {
-        ctx.addError(ctx.tracker().location(), "Failed to create LaTeX root document element");
+        ctx.addError(ctx.tracker.location(), "Failed to create LaTeX root document element");
         // printf("DEBUG: Failed to create root element\n");
         input->root = {.item = ITEM_ERROR};
         return;

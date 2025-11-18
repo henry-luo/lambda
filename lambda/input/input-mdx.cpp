@@ -50,7 +50,7 @@ static const char* extract_tag_name(const char* pos, const char* end, char* buff
 // Parse JSX component using existing JSX parser
 static Element* parse_jsx_component(InputContext& ctx, const char** pos, const char* end) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     // Use the existing JSX parsing functionality
     // For now, create a simple JSX element and delegate to JSX parser
     const char* jsx_start = *pos;
@@ -127,7 +127,7 @@ static Element* parse_jsx_component(InputContext& ctx, const char** pos, const c
 // Parse HTML element using existing HTML parser
 static Element* parse_html_element(InputContext& ctx, const char** pos, const char* end) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     // Use existing HTML parsing functionality
     const char* html_start = *pos;
 
@@ -191,7 +191,7 @@ static Element* parse_mdx_element(InputContext& ctx, const char** pos, const cha
 // Parse MDX content with mixed markdown, HTML, and JSX
 static Element* parse_mdx_content(InputContext& ctx, const char* content) {
     Input* input = ctx.input();
-    MarkBuilder& builder = ctx.builder();
+    MarkBuilder& builder = ctx.builder;
     ElementBuilder root = builder.element("mdx_document");
     ElementBuilder body = builder.element("body");
 
@@ -282,7 +282,7 @@ void parse_mdx(Input* input, const char* mdx_string) {
     if (root) {
         input->root = (Item){.element = root};
     } else {
-        ctx.addError(ctx.tracker().location(), "Failed to parse MDX document");
+        ctx.addError(ctx.tracker.location(), "Failed to parse MDX document");
     }
 
     if (ctx.hasErrors()) {
