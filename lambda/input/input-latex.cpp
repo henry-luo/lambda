@@ -183,7 +183,6 @@ static Array* parse_command_arguments(InputContext& ctx, const char **latex) {
                 Input* arg_input = InputManager::create_input(NULL);
                 if (arg_input) {
                     arg_input->pool = input->pool; // Share the same memory pool
-                    arg_input->sb = stringbuf_new(input->pool);
 
                     // Create InputContext for argument parsing
                     InputContext arg_ctx(arg_input, content_chars, content_len);
@@ -276,7 +275,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             }
 
             // Add the literal character as content
-            StringBuf* text_sb = input->sb;
+            StringBuf* text_sb = ctx.builder().stringBuf();
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
             String* char_str = stringbuf_to_string(text_sb);
@@ -301,7 +300,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         else if (escaped_char == '-') {
             // \- = soft hyphen
             // printf("DEBUG: Converting \\- to soft hyphen\n");
-            StringBuf* text_sb = input->sb;
+            StringBuf* text_sb = ctx.builder().stringBuf();
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u00AD"); // Unicode soft hyphen
 
@@ -311,7 +310,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         else if (escaped_char == '/') {
             // \/ = zero-width non-joiner
             // printf("DEBUG: Converting \\/ to ZWNJ\n");
-            StringBuf* text_sb = input->sb;
+            StringBuf* text_sb = ctx.builder().stringBuf();
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u200C"); // Unicode ZWNJ
 
@@ -321,7 +320,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         else if (escaped_char == '@') {
             // \@ = zero-width space (prevent space collapsing)
             // printf("DEBUG: Converting \\@ to zero-width space\n");
-            StringBuf* text_sb = input->sb;
+            StringBuf* text_sb = ctx.builder().stringBuf();
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u200B"); // Unicode zero-width space
 
@@ -369,7 +368,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             (*latex)++; // Skip delimiter
 
             // Find closing delimiter
-            StringBuf* verb_sb = input->sb;
+            StringBuf* verb_sb = ctx.builder().stringBuf();
             stringbuf_reset(verb_sb);
 
             while (**latex && **latex != delimiter) {
@@ -427,7 +426,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         skip_whitespace(latex);
 
         // Parse content until next \item or \end
-        StringBuf* content_sb = input->sb;
+        StringBuf* content_sb = ctx.builder().stringBuf();
         stringbuf_reset(content_sb);
 
         while (**latex) {
@@ -539,7 +538,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
 
             if (is_math_env || is_raw_text_env) {
                 // For math and raw text environments, collect content as raw text
-                StringBuf* content_sb = input->sb;
+                StringBuf* content_sb = ctx.builder().stringBuf();
                 stringbuf_reset(content_sb);
 
                 int content_chars = 0;
@@ -577,12 +576,12 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                             Input* math_input = InputManager::create_input((Url*)input->url);
                             if (math_input) {
                                 // Reset our StrBuf before calling math parser
-                                stringbuf_reset(input->sb);
+                                stringbuf_reset(ctx.builder().stringBuf());
 
                                 parse_math(math_input, content_string->chars, "latex");
 
                                 // Reset our StrBuf after calling math parser
-                                stringbuf_reset(input->sb);
+                                stringbuf_reset(ctx.builder().stringBuf());
 
                                 if (math_input->root .item != ITEM_NULL) {
                                     // Add the parsed math as child
@@ -645,7 +644,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                         skip_comment(latex);
                     } else {
                         // Parse text content with proper escape handling
-                        StringBuf* text_sb = input->sb;
+                        StringBuf* text_sb = ctx.builder().stringBuf();
                         stringbuf_reset(text_sb);
 
                         int text_chars = 0;
@@ -824,13 +823,13 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                 Input* math_input = InputManager::create_input((Url*)input->url);
                 if (math_input) {
                     // Reset our StrBuf before calling math parser
-                    stringbuf_reset(input->sb);
+                    stringbuf_reset(ctx.builder().stringBuf());
 
                     // Parse the math content using our math parser
                     parse_math(math_input, math_string->chars, "latex");
 
                     // Reset our StrBuf after calling math parser
-                    stringbuf_reset(input->sb);
+                    stringbuf_reset(ctx.builder().stringBuf());
 
                     // Create wrapper element for the math
                     const char* math_name = display_math ? "displaymath" : "math";

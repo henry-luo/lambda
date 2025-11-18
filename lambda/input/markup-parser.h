@@ -70,6 +70,7 @@ typedef struct {
     char** lines;
     int line_count;
     int current_line;
+    StringBuf* sb;              // Shared string buffer for parsing operations
 
     // Format-specific state
     struct {

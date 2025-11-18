@@ -508,8 +508,8 @@ TEST_F(MarkupRoundtripTest, DISABLED_RstExtendedFeatures) {
            static_cast<void*>(input), static_cast<unsigned long long>(input->root.item));
 
     // Check if the input pointer is corrupted
-    printf("DEBUG: Input struct fields: url=%p, pool=%p, type_list=%p, sb=%p\n",
-           input->url, input->pool, input->type_list, input->sb);
+    printf("DEBUG: Input struct fields: url=%p, pool=%p, type_list=%p\n",
+           input->url, input->pool, input->type_list);
 
     StrBuf* strbuf = strbuf_new();
     printf("DEBUG test: Before test format_item, input->root=0x%llx\n",

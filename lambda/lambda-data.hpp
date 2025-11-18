@@ -399,7 +399,7 @@ typedef struct Input {
     NamePool* name_pool;        // centralized name management
     ArrayList* type_list;       // list of types
     Item root;
-    StringBuf* sb;
+    // StringBuf* sb;
 
     // member functions
     static Input* create(Pool* pool);

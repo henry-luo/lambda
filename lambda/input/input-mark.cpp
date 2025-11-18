@@ -142,13 +142,14 @@ static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
     return builder.createString(sb->str->chars, sb->length);
 }
 
-static Item parse_binary(Input *input, const char **mark) {
+static Item parse_binary(InputContext& ctx, const char **mark) {
     if (**mark != 'b' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
 
     *mark += 2; // Skip b'
     skip_whitespace(mark);
 
-    StringBuf* sb = input->sb;
+    MarkBuilder builder(ctx.input());
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
 
     // Check for hex format
@@ -202,13 +203,14 @@ static Item parse_binary(Input *input, const char **mark) {
     return binary_str ? (Item){.item = s2it(binary_str)} : (Item){.item = ITEM_ERROR};
 }
 
-static Item parse_datetime(Input *input, const char **mark) {
+static Item parse_datetime(InputContext& ctx, const char **mark) {
     if (**mark != 't' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
 
     *mark += 2; // Skip t'
     skip_whitespace(mark);
 
-    StringBuf* sb = input->sb;
+    MarkBuilder builder(ctx.input());
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
 
     while (**mark && **mark != '\'') {
@@ -497,12 +499,12 @@ static Item parse_value(InputContext& ctx, const char **mark) {
             }
         case 'b':
             if (*(*mark + 1) == '\'') {
-                return parse_binary(input, mark);
+                return parse_binary(ctx, mark);
             }
             goto UNQUOTED_IDENTIFIER;
         case 't':
             if (*(*mark + 1) == '\'') {
-                return parse_datetime(input, mark);
+                return parse_datetime(ctx, mark);
             } else if (strncmp(*mark, "true", 4) == 0) {
                 *mark += 4;
                 return {.item = b2it(true)};

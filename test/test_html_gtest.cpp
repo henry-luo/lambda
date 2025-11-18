@@ -1532,7 +1532,6 @@ TEST_F(HtmlParserTest, ParserContextCreation) {
     // Create a properly initialized input structure for testing
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
@@ -1557,7 +1556,6 @@ TEST_F(HtmlParserTest, ParserContextCreation) {
 TEST_F(HtmlParserTest, ParserContextEnsureHtml) {
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
@@ -1585,7 +1583,6 @@ TEST_F(HtmlParserTest, ParserContextEnsureHtml) {
 TEST_F(HtmlParserTest, ParserContextEnsureHead) {
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
@@ -1613,7 +1610,6 @@ TEST_F(HtmlParserTest, ParserContextEnsureHead) {
 TEST_F(HtmlParserTest, ParserContextEnsureBody) {
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
@@ -1644,7 +1640,6 @@ TEST_F(HtmlParserTest, ParserContextEnsureBody) {
 TEST_F(HtmlParserTest, ParserContextGetInsertionPointHeadElement) {
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
@@ -1669,7 +1664,6 @@ TEST_F(HtmlParserTest, ParserContextGetInsertionPointHeadElement) {
 TEST_F(HtmlParserTest, ParserContextGetInsertionPointBodyElement) {
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
@@ -1697,7 +1691,6 @@ TEST_F(HtmlParserTest, ParserContextGetInsertionPointBodyElement) {
 TEST_F(HtmlParserTest, ParserContextExplicitElements) {
     Pool* pool = pool_create();
     Input* test_input = Input::create(pool);
-    test_input->sb = stringbuf_new(pool);
     test_input->type_list = arraylist_new(10);
 
     HtmlParserContext* ctx = html_context_create(test_input);
