@@ -31,8 +31,9 @@ static bool is_folded_line(const char *ics) {
 }
 
 // Helper function to parse property name (before the colon)
-static String* parse_property_name(Input *input, MarkBuilder* builder, const char **ics) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_property_name(InputContext& ctx, const char **ics) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer for reuse
 
     while (**ics && **ics != ':' && **ics != ';' && **ics != '\n' && **ics != '\r') {
@@ -41,19 +42,22 @@ static String* parse_property_name(Input *input, MarkBuilder* builder, const cha
     }
 
     if (sb->length > sizeof(uint32_t)) {
-        String* result = builder->createString(sb->str->chars, sb->length);
+        String* result = builder.createString(sb->str->chars, sb->length);
         return result;
     }
     return NULL;
 }
 
 // Helper function to parse property parameters (between ; and :)
-static void parse_property_parameters(Input *input, MarkBuilder* builder, const char **ics, Map* params_map) {
+static void parse_property_parameters(InputContext& ctx, const char **ics, Map* params_map) {
+    MarkBuilder& builder = ctx.builder();
+    Input* input = ctx.input();
+
     while (**ics == ';') {
         (*ics)++; // skip ';'
 
         // Parse parameter name
-        StringBuf* sb = builder->stringBuf();
+        StringBuf* sb = builder.stringBuf();
         stringbuf_reset(sb);
 
         while (**ics && **ics != '=' && **ics != ':' && **ics != '\n' && **ics != '\r') {
@@ -63,7 +67,7 @@ static void parse_property_parameters(Input *input, MarkBuilder* builder, const 
 
         if (sb->length <= sizeof(uint32_t)) continue;
 
-        String* param_name = builder->createString(sb->str->chars, sb->length);
+        String* param_name = builder.createString(sb->str->chars, sb->length);
         if (!param_name) continue;
 
         String* param_value = NULL;
@@ -103,12 +107,13 @@ static void parse_property_parameters(Input *input, MarkBuilder* builder, const 
 }
 
 // Helper function to parse property value (after the colon, handling folded lines)
-static String* parse_property_value(Input *input, MarkBuilder* builder, const char **ics) {
+static String* parse_property_value(InputContext& ctx, const char **ics) {
     if (**ics != ':') return NULL;
 
     (*ics)++; // skip ':'
 
-    StringBuf* sb = builder->stringBuf();
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer for reuse
 
     // Parse the value, handling line folding
@@ -142,7 +147,7 @@ static String* parse_property_value(Input *input, MarkBuilder* builder, const ch
     }
 
     if (sb->length > sizeof(uint32_t)) {
-        return builder->createString(sb->str->chars, sb->length);
+        return builder.createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
@@ -156,7 +161,10 @@ static void normalize_property_name(char* name) {
 }
 
 // Helper function to parse date-time values
-static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value) {
+static Map* parse_datetime(InputContext& ctx, const char* value) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
+
     if (!input || !value) return NULL;
 
     Map* dt_map = map_pooled(input->pool);
@@ -179,7 +187,7 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
         }
         if (sb->length > sizeof(uint32_t)) {
             String* year_str = stringbuf_to_string(sb);
-            String* year_key = builder->createString("year");
+            String* year_key = builder.createString("year");
             map_put(dt_map, year_key, {.item = s2it(year_str)}, input);
         }
 
@@ -194,7 +202,7 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
         }
         if (sb->length > sizeof(uint32_t)) {
             String* month_str = stringbuf_to_string(sb);
-            String* month_key = builder->createString("month");
+            String* month_key = builder.createString("month");
             map_put(dt_map, month_key, {.item = s2it(month_str)}, input);
         }
 
@@ -209,7 +217,7 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
         }
         if (sb->length > sizeof(uint32_t)) {
             String* day_str = stringbuf_to_string(sb);
-            String* day_key = builder->createString("day");
+            String* day_key = builder.createString("day");
             map_put(dt_map, day_key, {.item = s2it(day_str)}, input);
         }
 
@@ -228,7 +236,7 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
             }
             if (sb->length > sizeof(uint32_t)) {
                 String* hour_str = stringbuf_to_string(sb);
-                String* hour_key = builder->createString("hour");
+                String* hour_key = builder.createString("hour");
                 map_put(dt_map, hour_key, {.item = s2it(hour_str)}, input);
             }
 
@@ -243,7 +251,7 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
             }
             if (sb->length > sizeof(uint32_t)) {
                 String* minute_str = stringbuf_to_string(sb);
-                String* minute_key = builder->createString("minute");
+                String* minute_key = builder.createString("minute");
                 map_put(dt_map, minute_key, {.item = s2it(minute_str)}, input);
             }
 
@@ -258,14 +266,14 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
             }
             if (sb->length > sizeof(uint32_t)) {
                 String* second_str = stringbuf_to_string(sb);
-                String* second_key = builder->createString("second");
+                String* second_key = builder.createString("second");
                 map_put(dt_map, second_key, {.item = s2it(second_str)}, input);
             }
 
             // Check for timezone (Z for UTC)
             if (*ptr == 'Z') {
-                String* tz_key = builder->createString("timezone");
-                String* tz_value = builder->createString("UTC");
+                String* tz_key = builder.createString("timezone");
+                String* tz_value = builder.createString("UTC");
                 map_put(dt_map, tz_key, {.item = s2it(tz_value)}, input);
             }
         }
@@ -275,7 +283,10 @@ static Map* parse_datetime(Input *input, MarkBuilder* builder, const char* value
 }
 
 // Helper function to parse duration values
-static Map* parse_duration(Input *input, MarkBuilder* builder, const char* value) {
+static Map* parse_duration(InputContext& ctx, const char* value) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
+
     if (!input || !value) return NULL;
 
     Map* dur_map = map_pooled(input->pool);
@@ -315,17 +326,17 @@ static Map* parse_duration(Input *input, MarkBuilder* builder, const char* value
         String* key = NULL;
 
         switch (unit) {
-            case 'W': key = builder->createString("weeks"); break;
-            case 'D': key = builder->createString("days"); break;
-            case 'H': key = builder->createString("hours"); break;
+            case 'W': key = builder.createString("weeks"); break;
+            case 'D': key = builder.createString("days"); break;
+            case 'H': key = builder.createString("hours"); break;
             case 'M':
                 if (in_time_part) {
-                    key = builder->createString("minutes");
+                    key = builder.createString("minutes");
                 } else {
-                    key = builder->createString("months");
+                    key = builder.createString("months");
                 }
                 break;
-            case 'S': key = builder->createString("seconds"); break;
+            case 'S': key = builder.createString("seconds"); break;
             default: break;
         }
 
@@ -343,19 +354,16 @@ void parse_ics(Input* input, const char* ics_string) {
         return;
     }
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(ics_string, strlen(ics_string));
-
-    // Initialize MarkBuilder for proper Lambda Item creation
-    MarkBuilder builder(input);
+    // create error tracking context with source tracking
+    InputContext ctx(input, ics_string, strlen(ics_string));
+    MarkBuilder& builder = ctx.builder();
 
     const char* ics = ics_string;
 
     // Initialize calendar map
     Map* calendar_map = map_pooled(input->pool);
     if (!calendar_map) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for calendar map");
+        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for calendar map");
         return;
     }
 
@@ -368,14 +376,14 @@ void parse_ics(Input* input, const char* ics_string) {
         components_list->items = NULL;
     }
     if (!components_list) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for components list");
+        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for components list");
         return;
     }
 
     // Initialize properties map to store calendar-level properties
     Map* properties_map = map_pooled(input->pool);
     if (!properties_map) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for properties map");
+        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for properties map");
         return;
     }
 
@@ -399,7 +407,7 @@ void parse_ics(Input* input, const char* ics_string) {
         }
 
         // Parse property name
-        String* property_name = parse_property_name(input, &builder, &ics);
+        String* property_name = parse_property_name(ctx, &ics);
         if (!property_name || !property_name->chars) {
             skip_to_newline(&ics);
             continue;
@@ -411,11 +419,11 @@ void parse_ics(Input* input, const char* ics_string) {
         // Parse property parameters
         Map* params_map = map_pooled(input->pool);
         if (params_map) {
-            parse_property_parameters(input, &builder, &ics, params_map);
+            parse_property_parameters(ctx, &ics, params_map);
         }
 
         // Parse property value
-        String* property_value = parse_property_value(input, &builder, &ics);
+        String* property_value = parse_property_value(ctx, &ics);
         if (!property_value || !property_value->chars) {
             continue;
         }
@@ -490,7 +498,7 @@ void parse_ics(Input* input, const char* ics_string) {
             }
             else if (strcmp(property_name->chars, "DTSTART") == 0) {
                 String* start_key = builder.createString("start_time");
-                Map* dt_struct = parse_datetime(input, &builder, property_value->chars);
+                Map* dt_struct = parse_datetime(ctx, property_value->chars);
                 if (dt_struct) {
                     Item dt_value = {.item = (uint64_t)dt_struct};
                     map_put(current_component, start_key, dt_value, input);
@@ -500,7 +508,7 @@ void parse_ics(Input* input, const char* ics_string) {
             }
             else if (strcmp(property_name->chars, "DTEND") == 0) {
                 String* end_key = builder.createString("end_time");
-                Map* dt_struct = parse_datetime(input, &builder, property_value->chars);
+                Map* dt_struct = parse_datetime(ctx, property_value->chars);
                 if (dt_struct) {
                     Item dt_value = {.item = (uint64_t)dt_struct};
                     map_put(current_component, end_key, dt_value, input);
@@ -510,7 +518,7 @@ void parse_ics(Input* input, const char* ics_string) {
             }
             else if (strcmp(property_name->chars, "DURATION") == 0) {
                 String* duration_key = builder.createString("duration");
-                Map* dur_struct = parse_duration(input, &builder, property_value->chars);
+                Map* dur_struct = parse_duration(ctx, property_value->chars);
                 if (dur_struct) {
                     Item dur_value = {.item = (uint64_t)dur_struct};
                     map_put(current_component, duration_key, dur_value, input);

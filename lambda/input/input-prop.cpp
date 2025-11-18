@@ -26,8 +26,9 @@ static bool is_comment(const char *prop) {
     return *prop == '#' || *prop == '!';
 }
 
-static String* parse_key(Input *input, MarkBuilder* builder, const char **prop) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_key(InputContext& ctx, const char **prop) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     // read until '=', ':', or whitespace
@@ -37,13 +38,14 @@ static String* parse_key(Input *input, MarkBuilder* builder, const char **prop) 
     }
 
     if (sb->length > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return builder.createString(sb->str->chars, sb->length);
     }
     return NULL;
 }
 
-static String* parse_raw_value(Input *input, MarkBuilder* builder, const char **prop) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_raw_value(InputContext& ctx, const char **prop) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     skip_whitespace(prop);
@@ -122,7 +124,7 @@ static String* parse_raw_value(Input *input, MarkBuilder* builder, const char **
     }
 
     if (sb->length > 0) {
-        return builder->createString(sb->str->chars, sb->length);
+        return builder.createString(sb->str->chars, sb->length);
     }
     return &EMPTY_STRING;
 }
@@ -136,11 +138,12 @@ static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
     return 0;
 }
 
-static Item parse_typed_value(Input *input, String* value_str) {
+static Item parse_typed_value(InputContext& ctx, String* value_str) {
     if (!value_str || value_str->len == 0) {
         return {.item = s2it(value_str)};
     }
 
+    Input* input = ctx.input();
     char* str = value_str->chars;
     size_t len = value_str->len;
 
@@ -231,17 +234,14 @@ static Item parse_typed_value(Input *input, String* value_str) {
 }
 
 void parse_properties(Input* input, const char* prop_string) {
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(prop_string, strlen(prop_string));
-
-    // Create MarkBuilder for memory-safe string handling
-    MarkBuilder builder(input);
+    // create error tracking context with source tracking
+    InputContext ctx(input, prop_string, strlen(prop_string));
+    MarkBuilder& builder = ctx.builder();
 
     // create root map to hold all properties
     Map* root_map = map_pooled(input->pool);
     if (!root_map) {
-        ctx.addError(tracker.location(), "Failed to allocate memory for properties map");
+        ctx.addError(ctx.tracker()->location(), "Failed to allocate memory for properties map");
         return;
     }
     input->root = {.item = (uint64_t)root_map};
@@ -267,9 +267,9 @@ void parse_properties(Input* input, const char* prop_string) {
         }
 
         // parse key-value pair
-        String* key = parse_key(input, &builder, &current);
+        String* key = parse_key(ctx, &current);
         if (!key) {
-            ctx.addWarning(tracker.location(), "Failed to parse property key, skipping line");
+            ctx.addWarning(ctx.tracker()->location(), "Failed to parse property key, skipping line");
             skip_to_newline(&current);
             continue;
         }
@@ -283,12 +283,12 @@ void parse_properties(Input* input, const char* prop_string) {
         }
 
         // parse value
-        String* raw_value = parse_raw_value(input, &builder, &current);
+        String* raw_value = parse_raw_value(ctx, &current);
         if (raw_value) {
-            Item typed_value = parse_typed_value(input, raw_value);
+            Item typed_value = parse_typed_value(ctx, raw_value);
             map_put(root_map, key, typed_value, input);
         } else {
-            ctx.addWarning(tracker.location(), "Failed to parse value for key '%.*s'",
+            ctx.addWarning(ctx.tracker()->location(), "Failed to parse value for key '%.*s'",
                           (int)key->len, key->chars);
         }        // move to next line
         skip_to_newline(&current);

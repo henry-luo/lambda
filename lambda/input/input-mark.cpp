@@ -5,9 +5,9 @@
 
 using namespace lambda;
 
-static Element* parse_element(Input *input, MarkBuilder* builder, const char **mark);
-static Item parse_value(Input *input, MarkBuilder* builder, const char **mark);
-static Item parse_content(Input *input, MarkBuilder* builder, const char **mark);
+static Element* parse_element(InputContext& ctx, const char **mark);
+static Item parse_value(InputContext& ctx, const char **mark);
+static Item parse_content(InputContext& ctx, const char **mark);
 
 static void skip_whitespace(const char **mark) {
     while (**mark && (**mark == ' ' || **mark == '\n' || **mark == '\r' || **mark == '\t')) {
@@ -38,9 +38,10 @@ static void skip_comments(const char **mark) {
     }
 }
 
-static String* parse_string(Input *input, MarkBuilder* builder, const char **mark) {
+static String* parse_string(InputContext& ctx, const char **mark) {
     if (**mark != '"') return NULL;
-    StringBuf* sb = builder->stringBuf();
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
 
     (*mark)++; // Skip opening quote
@@ -84,12 +85,13 @@ static String* parse_string(Input *input, MarkBuilder* builder, const char **mar
     if (**mark == '"') {
         (*mark)++; // skip closing quote
     }
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
-static String* parse_symbol(Input *input, MarkBuilder* builder, const char **mark) {
+static String* parse_symbol(InputContext& ctx, const char **mark) {
     if (**mark != '\'') return NULL;
-    StringBuf* sb = builder->stringBuf();
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
 
     (*mark)++; // Skip opening quote
@@ -114,11 +116,12 @@ static String* parse_symbol(Input *input, MarkBuilder* builder, const char **mar
         (*mark)++; // skip closing quote
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
-static String* parse_unquoted_identifier(Input *input, MarkBuilder* builder, const char **mark) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);  // Reset buffer before use
 
     // First character must be alpha or underscore
@@ -136,7 +139,7 @@ static String* parse_unquoted_identifier(Input *input, MarkBuilder* builder, con
         (*mark)++;
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
 static Item parse_binary(Input *input, const char **mark) {
@@ -239,7 +242,8 @@ static Item parse_number(Input *input, const char **mark) {
     return {.item = d2it(dval)};
 }
 
-static Array* parse_array(Input *input, MarkBuilder* builder, const char **mark) {
+static Array* parse_array(InputContext& ctx, const char **mark) {
+    Input* input = ctx.input();
     if (**mark != '[') return NULL;
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
@@ -253,7 +257,7 @@ static Array* parse_array(Input *input, MarkBuilder* builder, const char **mark)
     }
 
     while (**mark) {
-        Item item = parse_value(input, builder, mark);
+        Item item = parse_value(ctx, mark);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
@@ -270,7 +274,8 @@ static Array* parse_array(Input *input, MarkBuilder* builder, const char **mark)
     return arr;
 }
 
-static Array* parse_list(Input *input, MarkBuilder* builder, const char **mark) {
+static Array* parse_list(InputContext& ctx, const char **mark) {
+    Input* input = ctx.input();
     if (**mark != '(') return NULL;
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
@@ -284,7 +289,7 @@ static Array* parse_list(Input *input, MarkBuilder* builder, const char **mark) 
     }
 
     while (**mark) {
-        Item item = parse_value(input, builder, mark);
+        Item item = parse_value(ctx, mark);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
@@ -301,7 +306,8 @@ static Array* parse_list(Input *input, MarkBuilder* builder, const char **mark) 
     return arr;
 }
 
-static Map* parse_map(Input *input, MarkBuilder* builder, const char **mark) {
+static Map* parse_map(InputContext& ctx, const char **mark) {
+    Input* input = ctx.input();
     if (**mark != '{') return NULL;
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
@@ -319,11 +325,11 @@ static Map* parse_map(Input *input, MarkBuilder* builder, const char **mark) {
 
         // Parse key - can be string, symbol, or identifier
         if (**mark == '"') {
-            key = parse_string(input, builder, mark);
+            key = parse_string(ctx, mark);
         } else if (**mark == '\'') {
-            key = parse_symbol(input, builder, mark);
+            key = parse_symbol(ctx, mark);
         } else {
-            key = parse_unquoted_identifier(input, builder, mark);
+            key = parse_unquoted_identifier(ctx, mark);
         }
 
         if (!key) return mp;
@@ -333,7 +339,7 @@ static Map* parse_map(Input *input, MarkBuilder* builder, const char **mark) {
         (*mark)++;
         skip_comments(mark);
 
-        Item value = parse_value(input, builder, mark);
+        Item value = parse_value(ctx, mark);
         map_put(mp, key, value, input);
 
         skip_comments(mark);
@@ -348,7 +354,8 @@ static Map* parse_map(Input *input, MarkBuilder* builder, const char **mark) {
     return mp;
 }
 
-static Element* parse_element(Input *input, MarkBuilder* builder, const char **mark) {
+static Element* parse_element(InputContext& ctx, const char **mark) {
+    Input* input = ctx.input();
     if (**mark != '<') return NULL;
 
     (*mark)++; // skip '<'
@@ -357,9 +364,9 @@ static Element* parse_element(Input *input, MarkBuilder* builder, const char **m
     // Parse element name - can be symbol or identifier
     String* element_name = NULL;
     if (**mark == '\'') {
-        element_name = parse_symbol(input, builder, mark);
+        element_name = parse_symbol(ctx, mark);
     } else {
-        element_name = parse_unquoted_identifier(input, builder, mark);
+        element_name = parse_unquoted_identifier(ctx, mark);
     }
 
     if (!element_name) return NULL;
@@ -400,11 +407,11 @@ static Element* parse_element(Input *input, MarkBuilder* builder, const char **m
 
         // Parse attribute name
         if (**mark == '"') {
-            attr_name = parse_string(input, builder, mark);
+            attr_name = parse_string(ctx, mark);
         } else if (**mark == '\'') {
-            attr_name = parse_symbol(input, builder, mark);
+            attr_name = parse_symbol(ctx, mark);
         } else {
-            attr_name = parse_unquoted_identifier(input, builder, mark);
+            attr_name = parse_unquoted_identifier(ctx, mark);
         }
 
         if (!attr_name) break;
@@ -415,7 +422,7 @@ static Element* parse_element(Input *input, MarkBuilder* builder, const char **m
         skip_comments(mark);
 
         // Parse attribute value
-        Item attr_value = parse_value(input, builder, mark);
+        Item attr_value = parse_value(ctx, mark);
         input_add_attribute_item_to_element(input, element, attr_name->chars, attr_value);
 
         skip_comments(mark);
@@ -430,7 +437,7 @@ static Element* parse_element(Input *input, MarkBuilder* builder, const char **m
 
     // Parse content - content can be separated by semicolons, newlines, or just whitespace
     while (**mark && **mark != '>') {
-        Item content_item = parse_content(input, builder, mark);
+        Item content_item = parse_content(ctx, mark);
         if (content_item .item != ITEM_ERROR && content_item .item != ITEM_NULL) {
             // Add content to element
             list_push((List*)element, content_item);
@@ -452,33 +459,34 @@ static Element* parse_element(Input *input, MarkBuilder* builder, const char **m
     return element;
 }
 
-static Item parse_content(Input *input, MarkBuilder* builder, const char **mark) {
+static Item parse_content(InputContext& ctx, const char **mark) {
     skip_comments(mark);
 
     if (**mark == '<') {
-        return {.item = (uint64_t)parse_element(input, builder, mark)};
+        return {.item = (uint64_t)parse_element(ctx, mark)};
     } else {
-        return parse_value(input, builder, mark);
+        return parse_value(ctx, mark);
     }
 }
 
-static Item parse_value(Input *input, MarkBuilder* builder, const char **mark) {
+static Item parse_value(InputContext& ctx, const char **mark) {
+    Input* input = ctx.input();
     skip_comments(mark);
 
     switch (**mark) {
         case '{':
-            return {.item = (uint64_t)parse_map(input, builder, mark)};
+            return {.item = (uint64_t)parse_map(ctx, mark)};
         case '[':
-            return {.item = (uint64_t)parse_array(input, builder, mark)};
+            return {.item = (uint64_t)parse_array(ctx, mark)};
         case '(':
-            return {.item = (uint64_t)parse_list(input, builder, mark)};
+            return {.item = (uint64_t)parse_list(ctx, mark)};
         case '<':
-            return {.item = (uint64_t)parse_element(input, builder, mark)};
+            return {.item = (uint64_t)parse_element(ctx, mark)};
         case '"':
-            return {.item = s2it(parse_string(input, builder, mark))};
+            return {.item = s2it(parse_string(ctx, mark))};
         case '\'':
             {
-                String* sym = parse_symbol(input, builder, mark);
+                String* sym = parse_symbol(ctx, mark);
                 return {.item = y2it(sym)};
             }
         case 'b':
@@ -548,7 +556,7 @@ static Item parse_value(Input *input, MarkBuilder* builder, const char **mark) {
                 (**mark >= 'A' && **mark <= 'Z') || **mark == '_') {
                 UNQUOTED_IDENTIFIER:
                 // Parse as identifier/symbol
-                String* id = parse_unquoted_identifier(input, builder, mark);
+                String* id = parse_unquoted_identifier(ctx, mark);
                 return id ? (Item){.item = y2it(id)} : (Item){.item = ITEM_ERROR};
             }
             return {.item = ITEM_ERROR};
@@ -556,17 +564,14 @@ static Item parse_value(Input *input, MarkBuilder* builder, const char **mark) {
 }
 
 void parse_mark(Input* input, const char* mark_string) {
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(mark_string, strlen(mark_string));
-
-    MarkBuilder builder(input);
+    // create error tracking context with integrated source tracking
+    InputContext ctx(input, mark_string, strlen(mark_string));
 
     const char* mark = mark_string;
     skip_comments(&mark);
 
     // Parse the root content - could be a single value or element
-    input->root = parse_content(input, &builder, &mark);
+    input->root = parse_content(ctx, &mark);
 
     if (ctx.hasErrors()) {
         // errors occurred during parsing
