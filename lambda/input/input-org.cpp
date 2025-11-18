@@ -1534,14 +1534,13 @@ static Element* create_heading(Input* input, int level, const char* title) {
 void parse_org(Input* input, const char* org_string) {
     if (!org_string || !input) return;
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(org_string, strlen(org_string));
+    // create unified InputContext with source tracking
+    InputContext ctx(input, org_string, strlen(org_string));
 
     // Create document structure
     Element* doc = create_org_element(input, "org_document");
     if (!doc) {
-        ctx.addError(tracker.location(), "Failed to create org document element");
+        ctx.addError(ctx.tracker()->location(), "Failed to create org document element");
         return;
     }
 

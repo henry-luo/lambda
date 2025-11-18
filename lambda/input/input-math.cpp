@@ -4651,9 +4651,8 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     printf("parse_math called with: '%s', flavor: '%s' (length: %zu)\n", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(math_string, strlen(math_string));
+    // create unified InputContext with source tracking
+    InputContext ctx(input, math_string, strlen(math_string));
 
     // Add timeout protection
     clock_t start_time = clock();
@@ -4678,7 +4677,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
 
     // Check timeout before parsing
     if ((clock() - start_time) / CLOCKS_PER_SEC > PARSING_TIMEOUT_SECONDS) {
-        ctx.addError(tracker.location(), "Math parsing timed out before parsing (%.2f seconds)", PARSING_TIMEOUT_SECONDS);
+        ctx.addError(ctx.tracker()->location(), "Math parsing timed out before parsing (%.2f seconds)", PARSING_TIMEOUT_SECONDS);
         fprintf(stderr, "Error: Math parsing timed out before parsing (%.2f seconds)\n", PARSING_TIMEOUT_SECONDS);
         input->root = {.item = ITEM_ERROR};
         return;
@@ -4697,14 +4696,14 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     // Check timeout after parsing
     double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
     if (elapsed_time > PARSING_TIMEOUT_SECONDS) {
-        ctx.addError(tracker.location(), "Math parsing timed out (%.2f seconds)", elapsed_time);
+        ctx.addError(ctx.tracker()->location(), "Math parsing timed out (%.2f seconds)", elapsed_time);
         fprintf(stderr, "Error: Math parsing timed out (%.2f seconds)\n", elapsed_time);
         input->root = {.item = ITEM_ERROR};
         return;
     }
 
     if (result .item == ITEM_ERROR || result .item == ITEM_NULL) {
-        ctx.addWarning(tracker.location(), "Math parsing returned error or null result");
+        ctx.addWarning(ctx.tracker()->location(), "Math parsing returned error or null result");
         printf("Result is error or null, setting input->root to ITEM_ERROR\n");
         input->root = {.item = ITEM_ERROR};
         return;

@@ -10,7 +10,7 @@
 
 using namespace lambda;
 
-static Item parse_element(Input *input, MarkBuilder* builder, const char **html, const char *html_start, HtmlParserContext* context);
+static Item parse_element(InputContext& ctx, const char **html, const char *html_start, HtmlParserContext* context);
 
 // Global length limit for text content, strings, and raw text elements
 static const int MAX_CONTENT_CHARS = 256 * 1024; // 256KB
@@ -61,16 +61,16 @@ static void skip_whitespace(const char **html) {
 }
 
 // Compatibility wrapper - parse_string_content now calls html_parse_string_content
-static String* parse_string_content(Input *input, MarkBuilder* builder, const char **html, char end_char) {
-    return html_parse_string_content(builder->stringBuf(), html, end_char);
+static String* parse_string_content(InputContext& ctx, const char **html, char end_char) {
+    return html_parse_string_content(ctx.builder().stringBuf(), html, end_char);
 }
 
 // Continue with parse_attribute_value (kept here as it needs Input context)
-static String* parse_attribute_value(Input *input, MarkBuilder* builder, const char **html, const char *html_start) {
-    return html_parse_attribute_value(builder->stringBuf(), html, html_start);
+static String* parse_attribute_value(InputContext& ctx, const char **html, const char *html_start) {
+    return html_parse_attribute_value(ctx.builder().stringBuf(), html, html_start);
 }
 
-static bool parse_attributes(Input *input, ElementBuilder& element, MarkBuilder* builder, const char **html, const char *html_start) {
+static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const char **html, const char *html_start) {
     skip_whitespace(html);
 
     int attr_count = 0;
@@ -82,7 +82,7 @@ static bool parse_attributes(Input *input, ElementBuilder& element, MarkBuilder*
         log_debug("Parsing attribute %d, at char: %d, '%c'", attr_count, (int)(*html - html_start), **html);
 
         // Parse attribute name
-        StringBuf* sb = builder->stringBuf();
+        StringBuf* sb = ctx.builder().stringBuf();
         stringbuf_reset(sb); // Reset buffer before parsing attribute name
         const char* attr_start = *html;
         const char* name_start = *html;
@@ -105,7 +105,7 @@ static bool parse_attributes(Input *input, ElementBuilder& element, MarkBuilder*
         if (**html == '=') {
             (*html)++; // Skip =
             skip_whitespace(html); // Skip whitespace after =
-            String* str_value = parse_attribute_value(input, builder, html, html_start);
+            String* str_value = parse_attribute_value(ctx, html, html_start);
             // Store attribute value (NULL for empty strings like class="")
             attr_value = (Item){.item = s2it(str_value)};
             // Type will be LMD_TYPE_NULL if str_value is NULL, LMD_TYPE_STRING otherwise
@@ -127,8 +127,8 @@ static bool parse_attributes(Input *input, ElementBuilder& element, MarkBuilder*
     return true;
 }
 
-static String* parse_tag_name(Input *input, MarkBuilder* builder, const char **html) {
-    return html_parse_tag_name(builder->stringBuf(), html);
+static String* parse_tag_name(InputContext& ctx, const char **html) {
+    return html_parse_tag_name(ctx.builder().stringBuf(), html);
 }
 
 // Parse HTML comment and return it as an element with tag name "!--"
@@ -294,7 +294,7 @@ static bool is_aria_attribute(const char* attr_name) {
     return html_is_aria_attribute(attr_name);
 }
 
-static Item parse_element(Input *input, MarkBuilder* builder, const char **html, const char *html_start, HtmlParserContext* context) {
+static Item parse_element(InputContext& ctx, const char **html, const char *html_start, HtmlParserContext* context) {
     html_enter_element();
     int parse_depth = html_get_parse_depth();
 
@@ -306,8 +306,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
 
     // Parse comments as special elements
     if (strncmp(*html, "<!--", 4) == 0) {
-        InputContext temp_ctx(input, html_start, strlen(html_start));
-        Item comment = parse_comment(temp_ctx, html, html_start);
+        Item comment = parse_comment(ctx, html, html_start);
         html_exit_element();
         return comment;
     }
@@ -317,7 +316,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         skip_doctype(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, builder, html, html_start, context); // Try next element
+            Item result = parse_element(ctx, html, html_start, context); // Try next element
             html_exit_element();
             return result;
         }
@@ -331,7 +330,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         skip_processing_instruction(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, builder, html, html_start, context); // Try next element
+            Item result = parse_element(ctx, html, html_start, context); // Try next element
             html_exit_element();
             return result;
         }
@@ -345,7 +344,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         skip_cdata(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, builder, html, html_start, context); // Try next element
+            Item result = parse_element(ctx, html, html_start, context); // Try next element
             html_exit_element();
             return result;
         }
@@ -364,7 +363,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         (*html)++; // Skip /
 
         const char* tag_start = *html;
-        String* closing_tag_name = parse_tag_name(input, builder, html);
+        String* closing_tag_name = parse_tag_name(ctx, html);
 
         // Phase 4.2: Transition insertion mode for closing tag
         if (context && closing_tag_name && closing_tag_name->len > 0) {
@@ -386,7 +385,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         return {.item = ITEM_NULL};
     }
 
-    String* tag_name = parse_tag_name(input, builder, html);
+    String* tag_name = parse_tag_name(ctx, html);
     if (!tag_name || tag_name->len == 0) {
         html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input after start tag");
@@ -394,7 +393,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
     }
 
     // Create element using shared function (keep using input_create_element for context tracking)
-    Element* element = input_create_element(input, tag_name->chars);
+    Element* element = input_create_element(ctx.input(), tag_name->chars);
     if (!element) {
         html_exit_element();
         log_parse_error(html_start, *html, "Unexpected end of input");
@@ -451,7 +450,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         log_debug("Parsing attribute %d, at char: %d, '%c'", attr_count, (int)(*html - html_start), **html);
 
         // Parse attribute name
-        StringBuf* sb = builder->stringBuf();
+        StringBuf* sb = ctx.builder().stringBuf();
         stringbuf_reset(sb); // Reset buffer before parsing attribute name
         const char* attr_start = *html;
         const char* name_start = *html;
@@ -474,7 +473,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         if (**html == '=') {
             (*html)++; // Skip =
             skip_whitespace(html); // Skip whitespace after =
-            String* str_value = parse_attribute_value(input, builder, html, html_start);
+            String* str_value = parse_attribute_value(ctx, html, html_start);
             // Store attribute value (NULL for empty strings like class="")
             attr_value = (Item){.item = s2it(str_value)};
             // Type will be LMD_TYPE_NULL if str_value is NULL, LMD_TYPE_STRING otherwise
@@ -484,7 +483,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
         }
 
         // Add attribute to element using elmt_put (direct manipulation for HTML5 context)
-        elmt_put(element, attr_name, attr_value, input->pool);
+        elmt_put(element, attr_name, attr_value, ctx.input()->pool);
 
         skip_whitespace(html);
     }
@@ -524,7 +523,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
 
         // Handle raw text elements (script, style, textarea, etc.) specially
         if (is_raw_text_element(tag_name->chars)) {
-            StringBuf* content_sb = builder->stringBuf();
+            StringBuf* content_sb = ctx.builder().stringBuf();
             stringbuf_reset(content_sb); // Ensure clean state
 
             // For raw text elements, we need to find the exact closing tag
@@ -583,7 +582,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
                     } else {
                         // Parse child element
                         const char* before_child_parse = *html;
-                        Item child = parse_element(input, builder, html, html_start, context);
+                        Item child = parse_element(ctx, html, html_start, context);
 
                         TypeId child_type = get_type_id(child);
                         if (child_type == LMD_TYPE_ERROR) {
@@ -604,7 +603,7 @@ static Item parse_element(Input *input, MarkBuilder* builder, const char **html,
                 else {
                     // Parse text content including whitespace
                     // Start building text content
-                    StringBuf* text_sb = builder->stringBuf();
+                    StringBuf* text_sb = ctx.builder().stringBuf();
                     stringbuf_reset(text_sb);
 
                     // Collect text until we hit '<' or closing tag
@@ -821,9 +820,6 @@ void parse_html_impl(Input* input, const char* html_string) {
     // create error tracking context with source
     InputContext ctx(input, html_string, strlen(html_string));
 
-    // Create MarkBuilder for parse_element (which still uses old signature)
-    MarkBuilder builder(input);
-
     // Create parser context to track document structure
     HtmlParserContext* context = html_context_create(input);
     if (!context) {
@@ -904,7 +900,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse regular element (should be <html> or similar)
         if (*html == '<' && *(html + 1) != '/' && *(html + 1) != '!') {
-            Item element_item = parse_element(input, &builder, &html, html_string, context);
+            Item element_item = parse_element(ctx, &html, html_string, context);
             if (element_item.item != ITEM_ERROR && element_item.item != ITEM_NULL) {
                 list_push(root_list, element_item);
             }

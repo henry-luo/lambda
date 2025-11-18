@@ -323,37 +323,37 @@ static void parse_mermaid_class_def(InputContext& ctx, SourceTracker& tracker, E
 
 // Main Mermaid parser function
 void parse_graph_mermaid(Input* input, const char* mermaid_string) {
-    InputContext ctx(input);
-    SourceTracker tracker(mermaid_string);
+    InputContext ctx(input, mermaid_string, strlen(mermaid_string));
 
-    skip_whitespace_and_comments_mermaid(tracker);
+    SourceTracker* tracker = ctx.tracker();
+    skip_whitespace_and_comments_mermaid(*tracker);
 
     // detect diagram type
     String* diagram_type = nullptr;
 
-    if (tracker.match("graph")) {
+    if (tracker->match("graph")) {
         diagram_type = ctx.builder().createString("flowchart");
-        tracker.advance(5);
+        tracker->advance(5);
 
         // check for direction
-        skip_whitespace_and_comments_mermaid(tracker);
-        if (tracker.match("TD") || tracker.match("TB") ||
-            tracker.match("LR") || tracker.match("RL") ||
-            tracker.match("BT")) {
-            tracker.advance(2);
+        skip_whitespace_and_comments_mermaid(*tracker);
+        if (tracker->match("TD") || tracker->match("TB") ||
+            tracker->match("LR") || tracker->match("RL") ||
+            tracker->match("BT")) {
+            tracker->advance(2);
         }
-    } else if (tracker.match("flowchart")) {
+    } else if (tracker->match("flowchart")) {
         diagram_type = ctx.builder().createString("flowchart");
-        tracker.advance(9);
+        tracker->advance(9);
 
         // check for direction
-        skip_whitespace_and_comments_mermaid(tracker);
-        if (tracker.match("TD") || tracker.match("TB") || tracker.match("LR")) {
-            tracker.advance(2);
+        skip_whitespace_and_comments_mermaid(*tracker);
+        if (tracker->match("TD") || tracker->match("TB") || tracker->match("LR")) {
+            tracker->advance(2);
         }
-    } else if (tracker.match("sequenceDiagram")) {
+    } else if (tracker->match("sequenceDiagram")) {
         diagram_type = ctx.builder().createString("sequence");
-        tracker.advance(15);
+        tracker->advance(15);
     } else {
         // default to flowchart
         diagram_type = ctx.builder().createString("flowchart");
@@ -365,54 +365,54 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
     add_graph_attribute(input, graph, "directed", "true");
 
     // parse diagram content
-    while (!tracker.atEnd()) {
-        skip_whitespace_and_comments_mermaid(tracker);
+    while (!tracker->atEnd()) {
+        skip_whitespace_and_comments_mermaid(*tracker);
 
-        if (tracker.atEnd()) {
+        if (tracker->atEnd()) {
             break;
         }
 
-        const char* line_start = tracker.rest();
+        const char* line_start = tracker->rest();
 
         // check for classDef
-        if (tracker.match("classDef")) {
-            tracker.advance(8);
-            parse_mermaid_class_def(ctx, tracker, graph);
+        if (tracker->match("classDef")) {
+            tracker->advance(8);
+            parse_mermaid_class_def(ctx, *tracker, graph);
             continue;
         }
 
         // try to parse as edge (look for edge operators)
         // size_t checkpoint = tracker.offset();
-        String* potential_node = parse_mermaid_identifier(ctx, tracker);
+        String* potential_node = parse_mermaid_identifier(ctx, *tracker);
 
         if (potential_node) {
             // check if node has shape
-            skip_whitespace_and_comments_mermaid(tracker);
-            if (tracker.current() == '[' || tracker.current() == '(' ||
-                tracker.current() == '{' || tracker.current() == '>') {
+            skip_whitespace_and_comments_mermaid(*tracker);
+            if (tracker->current() == '[' || tracker->current() == '(' ||
+                tracker->current() == '{' || tracker->current() == '>') {
                 // skip node shape
-                parse_mermaid_node_shape(ctx, tracker, potential_node->chars);
-                skip_whitespace_and_comments_mermaid(tracker);
+                parse_mermaid_node_shape(ctx, *tracker, potential_node->chars);
+                skip_whitespace_and_comments_mermaid(*tracker);
             }
 
             // look for edge operator
-            if (tracker.match("-->") || tracker.match("-.->") ||
-                tracker.match("==>") || tracker.match("---") ||
-                tracker.match("-.-") || tracker.match("===")) {
+            if (tracker->match("-->") || tracker->match("-.->") ||
+                tracker->match("==>") || tracker->match("---") ||
+                tracker->match("-.-") || tracker->match("===")) {
                 // this is an edge
-                parse_mermaid_edge_def(ctx, tracker, graph, potential_node);
+                parse_mermaid_edge_def(ctx, *tracker, graph, potential_node);
             } else {
                 // this is a standalone node
-                parse_mermaid_node_def(ctx, tracker, graph);
+                parse_mermaid_node_def(ctx, *tracker, graph);
             }
         }
 
         // skip to next line if we haven't made progress
-        const char* line_end = tracker.rest();
+        const char* line_end = tracker->rest();
         if (line_end == line_start) {
-            skip_to_eol(tracker);
-            if (!tracker.atEnd() && tracker.current() == '\n') {
-                tracker.advance();
+            skip_to_eol(*tracker);
+            if (!tracker->atEnd() && tracker->current() == '\n') {
+                tracker->advance();
             }
         }
     }

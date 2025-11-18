@@ -52,7 +52,7 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, 
 static Item parse_small_caps(MarkupParser* parser, MarkBuilder* builder, const char** text);
 
 // Math parser integration functions
-static Item parse_math_content(Input* input, MarkBuilder* builder, const char* math_content, const char* flavor);
+static Item parse_math_content(InputContext& ctx, const char* math_content, const char* flavor);
 static const char* detect_math_flavor(const char* content);
 
 // Phase 6: Advanced features - footnotes, citations, directives, metadata
@@ -964,7 +964,8 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
 
                 // Parse the math content using ASCII flavor
                 String* math_content_str = builder->createString(sb->str->chars, sb->length);
-                Item parsed_math = parse_math_content(parser->input, builder, math_content_str->chars, "ascii");
+                InputContext math_ctx(parser->input, math_content_str->chars, math_content_str->len);
+                Item parsed_math = parse_math_content(math_ctx, math_content_str->chars, "ascii");
 
                 if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
                     list_push((List*)math, parsed_math);
@@ -1079,7 +1080,8 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
                 math_content[content_len] = '\0';
 
                 const char* math_flavor = detect_math_flavor(math_content);
-                Item parsed_math = parse_math_content(parser->input, builder, math_content, math_flavor);
+                InputContext math_ctx(parser->input, math_content, content_len);
+                Item parsed_math = parse_math_content(math_ctx, math_content, math_flavor);
 
                 if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
                     list_push((List*)math, parsed_math);
@@ -1129,7 +1131,8 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
     String* math_content_str = builder->createString(sb->str->chars, sb->length);
     const char* math_flavor = detect_math_flavor(math_content_str->chars);
 
-    Item parsed_math = parse_math_content(parser->input, builder, math_content_str->chars, math_flavor);
+    InputContext math_ctx(parser->input, math_content_str->chars, math_content_str->len);
+    Item parsed_math = parse_math_content(math_ctx, math_content_str->chars, math_flavor);
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
         list_push((List*)math, parsed_math);
         increment_element_content_length(math);
@@ -2235,9 +2238,8 @@ Item input_markup(Input *input, const char* content) {
         return (Item){.item = ITEM_ERROR};
     }
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(content, strlen(content));
+    // create unified InputContext with source tracking
+    InputContext ctx(input, content, strlen(content));
 
     // Extract filename from URL if available for format detection
     const char* filename = NULL;
@@ -2271,7 +2273,7 @@ Item input_markup(Input *input, const char* content) {
     // Create parser
     MarkupParser* parser = parser_create(input, config);
     if (!parser) {
-        ctx.addError(tracker.location(), "Failed to create markup parser");
+        ctx.addError(ctx.tracker()->location(), "Failed to create markup parser");
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -2279,7 +2281,7 @@ Item input_markup(Input *input, const char* content) {
     Item result = parse_markup_content(parser, content);
 
     if (result.item == ITEM_ERROR) {
-        ctx.addWarning(tracker.location(), "Markup parsing returned error");
+        ctx.addWarning(ctx.tracker()->location(), "Markup parsing returned error");
     }
 
     // Cleanup
@@ -2298,9 +2300,8 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
         return (Item){.item = ITEM_ERROR};
     }
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(content, strlen(content));
+    // create unified InputContext with source tracking
+    InputContext ctx(input, content, strlen(content));
 
     const char* flavor = detect_markup_flavor(format, content);
 
@@ -2314,7 +2315,7 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     // Create parser
     MarkupParser* parser = parser_create(input, config);
     if (!parser) {
-        ctx.addError(tracker.location(), "Failed to create markup parser with explicit format");
+        ctx.addError(ctx.tracker()->location(), "Failed to create markup parser with explicit format");
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -2322,7 +2323,7 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
     Item result = parse_markup_content(parser, content);
 
     if (result.item == ITEM_ERROR) {
-        ctx.addWarning(tracker.location(), "Markup parsing with explicit format returned error");
+        ctx.addWarning(ctx.tracker()->location(), "Markup parsing with explicit format returned error");
     }
 
     // Cleanup
@@ -2336,7 +2337,9 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
 }
 
 // Math parser integration functions
-static Item parse_math_content(Input* input, MarkBuilder* builder, const char* math_content, const char* flavor) {
+static Item parse_math_content(InputContext& ctx, const char* math_content, const char* flavor) {
+    Input* input = ctx.input();
+
     if (!input || !math_content) {
         return (Item){.item = ITEM_ERROR};
     }
@@ -3571,7 +3574,8 @@ static Item parse_inline_math(MarkupParser* parser, MarkBuilder* builder, const 
 
     // Parse the math content using the math parser
     const char* math_flavor = detect_math_flavor(content);
-    Item parsed_math = parse_math_content(parser->input, builder, content, math_flavor);
+    InputContext math_ctx(parser->input, content, content_len);
+    Item parsed_math = parse_math_content(math_ctx, content, math_flavor);
 
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
         // Check if parsing was successful by verifying content wasn't lost
@@ -3673,7 +3677,8 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, MarkBuilder* builder, 
     printf("DEBUG: Extracted content: '%s'\n", content);
 
     // Parse the math content using ASCII flavor
-    Item parsed_math = parse_math_content(parser->input, builder, content, "ascii");
+    InputContext math_ctx(parser->input, content, content_len);
+    Item parsed_math = parse_math_content(math_ctx, content, "ascii");
     printf("DEBUG: Math parsing result: %s\n",
            (parsed_math.item == ITEM_ERROR) ? "ERROR" :
            (parsed_math.item == ITEM_UNDEFINED) ? "UNDEFINED" : "SUCCESS");
