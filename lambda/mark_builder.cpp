@@ -28,7 +28,7 @@ MarkBuilder::MarkBuilder(Input* input)
     , arena_(input->arena)
     , name_pool_(input->name_pool)
     , type_list_(input->type_list)
-    , sb_(input->sb)
+    , sb_(stringbuf_new(input->pool))
     , auto_string_merge_(false)
     , intern_strings_(true)
 {

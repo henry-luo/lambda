@@ -643,7 +643,6 @@ Input* Input::create(Pool* pool) {
     input->arena = arena_create_default(pool);
     input->name_pool = nullptr;
     input->type_list = nullptr;
-    input->sb = nullptr;
     input->url = nullptr;
     input->path = nullptr;
     input->root = (Item){.item = 0};
@@ -656,7 +655,6 @@ Input* Input::create(Pool* pool, Url* abs_url) {
     input->arena = arena_create_default(pool);
     input->name_pool = name_pool_create(pool, NULL);  // Initialize name pool for string interning
     input->type_list = arraylist_new(16);
-    input->sb = stringbuf_new(pool);  // Always allocate StringBuf
     input->url = abs_url;
     input->path = nullptr;
     input->root = (Item){.item = ITEM_NULL};

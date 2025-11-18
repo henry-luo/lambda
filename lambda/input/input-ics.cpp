@@ -173,7 +173,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
     // Parse various date-time formats
     // Format: YYYYMMDD, YYYYMMDDTHHMMSS, YYYYMMDDTHHMMSSZ
     const char* ptr = value;
-    StringBuf* sb = input->sb;
+    StringBuf* sb = ctx.builder().stringBuf();
 
     // Parse year (4 digits)
     if (strlen(ptr) >= 8) {
@@ -298,7 +298,7 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
     if (*ptr != 'P') return dur_map; // Invalid duration format
     ptr++; // skip 'P'
 
-    StringBuf* sb = input->sb;
+    StringBuf* sb = ctx.builder().stringBuf();
     bool in_time_part = false;
 
     while (*ptr) {

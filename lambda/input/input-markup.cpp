@@ -188,6 +188,13 @@ MarkupParser* parser_create(Input* input, ParseConfig config) {
     parser->line_count = 0;
     parser->current_line = 0;
 
+    // Initialize shared string buffer for parsing operations
+    parser->sb = stringbuf_new(input->pool);
+    if (!parser->sb) {
+        free(parser);
+        return NULL;
+    }
+
     // Initialize state
     parser_reset_state(parser);
 
@@ -200,6 +207,9 @@ void parser_destroy(MarkupParser* parser) {
     if (parser->lines) {
         free_lines(parser->lines, parser->line_count);
     }
+
+    // StringBuf is allocated from pool, so it will be freed with the pool
+    // No explicit cleanup needed for parser->sb
 
     free(parser);
 }
@@ -629,7 +639,7 @@ static Item parse_paragraph(MarkupParser* parser, MarkBuilder* builder, const ch
     }
 
     // Use StrBuf to build content from potentially multiple lines
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
     // For the first line, always add it to the paragraph
@@ -960,7 +970,7 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
                 parser->current_line++; // Skip opening fence
 
                 // Collect math content until closing fence
-                StringBuf* sb = builder->stringBuf();
+                StringBuf* sb = parser->sb;
                 stringbuf_reset(sb);
 
                 while (parser->current_line < parser->line_count) {
@@ -1005,7 +1015,7 @@ static Item parse_code_block(MarkupParser* parser, MarkBuilder* builder, const c
     parser->current_line++; // Skip opening fence
 
     // Collect code content until closing fence
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -1123,7 +1133,7 @@ static Item parse_math_block(MarkupParser* parser, MarkBuilder* builder, const c
     parser->current_line++; // Skip opening $$
 
     // Collect math content until closing $$
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -1526,7 +1536,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
 
     // Parse inline elements
     const char* pos = text;
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
     while (*pos) {
@@ -2348,7 +2358,6 @@ static Item parse_math_content(InputContext& ctx, const char* math_content, cons
     }
 
     // Create a temporary Input to preserve the current state
-    StringBuf* original_sb = input->sb;
     Item original_root = input->root;
 
     // Parse the math expression using the existing parse_math function
@@ -2358,7 +2367,6 @@ static Item parse_math_content(InputContext& ctx, const char* math_content, cons
 
     // Restore original state
     input->root = original_root;
-    input->sb = original_sb;
 
     return result;
 }
@@ -3986,7 +3994,7 @@ static Item parse_rst_directive(MarkupParser* parser, MarkBuilder* builder, cons
     }
 
     // Parse directive content (indented lines)
-    StringBuf* sb = parser->input->sb;
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -4068,7 +4076,7 @@ static Item parse_org_block(MarkupParser* parser, MarkBuilder* builder, const ch
     sprintf(end_marker, "#+END_%.*s", (int)type_len, type_start);
 
     // Collect block content until end marker
-    StringBuf* sb = parser->input->sb;
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
     while (parser->current_line < parser->line_count) {
@@ -4133,7 +4141,7 @@ static void parse_yaml_line(MarkupParser* parser, const char* line, Element* met
     }
 
     // Extract key
-    StringBuf* sb = parser->input->sb;
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
     const char* key_start = line;
     while (key_start < colon) {
@@ -4992,7 +5000,7 @@ static Item parse_rst_literal_block(MarkupParser* parser, MarkBuilder* builder) 
     parser->current_line++;
 
     // collect literal content
-    StringBuf* sb = parser->input->sb;
+    StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
     bool first_line = true;
     int base_indent = -1;
