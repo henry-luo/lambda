@@ -22,7 +22,7 @@ static bool is_comment(const char *prop) {
 
 static String* parse_key(InputContext& ctx, const char **prop) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // read until '=', ':', or whitespace
@@ -39,7 +39,7 @@ static String* parse_key(InputContext& ctx, const char **prop) {
 
 static String* parse_raw_value(InputContext& ctx, const char **prop) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     skip_tab_pace(prop);

@@ -45,7 +45,7 @@ static void skip_to_brace(const char **rtf, char target_brace) {
 
 static String* parse_rtf_string(InputContext& ctx, const char **rtf, char delimiter) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (**rtf && **rtf != delimiter && **rtf != '{' && **rtf != '}') {
@@ -141,7 +141,7 @@ static RTFControlWord parse_control_word(InputContext& ctx, const char **rtf) {
 
     (*rtf)++; // Skip backslash
 
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // Parse keyword (letters only)

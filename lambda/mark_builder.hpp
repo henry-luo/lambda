@@ -46,7 +46,6 @@ private:
     Arena* arena_;              // arena allocator (cached from input) - primary allocator
     NamePool* name_pool_;       // string interning pool
     ArrayList* type_list_;      // type registry
-    StringBuf* sb_;             // shared string buffer for temp work
 
     bool auto_string_merge_;    // automatically merge consecutive strings
     bool intern_strings_;       // use string interning
@@ -171,7 +170,6 @@ public:
     Arena* arena() const { return arena_; }
     NamePool* namePool() const { return name_pool_; }
     ArrayList* typeList() const { return type_list_; }
-    StringBuf* stringBuf() const { return sb_; }
     bool autoStringMerge() const { return auto_string_merge_; }
     bool internStrings() const { return intern_strings_; }
 

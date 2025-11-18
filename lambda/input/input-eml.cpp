@@ -32,7 +32,7 @@ static bool is_continuation_line(const char *eml) {
 
 // Helper function to parse header name
 static String* parse_header_name(InputContext& ctx, const char **eml) {
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (**eml && **eml != ':' && **eml != '\n' && **eml != '\r') {
@@ -48,7 +48,7 @@ static String* parse_header_name(InputContext& ctx, const char **eml) {
 
 // Helper function to parse header value (including continuation lines)
 static String* parse_header_value(InputContext& ctx, const char **eml) {
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // Skip the colon and initial whitespace
@@ -108,7 +108,7 @@ static void normalize_header_name(char* name) {
 static String* extract_email_address(InputContext& ctx, const char* header_value) {
     if (!header_value) return NULL;
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     const char* start = strchr(header_value, '<');
     const char* end = NULL;
@@ -289,7 +289,7 @@ void parse_eml(Input* input, const char* eml_string) {
 
     // At this point, eml should be positioned at the start of the body
     // Parse body
-    StringBuf* body_sb = ctx.builder().stringBuf();
+    StringBuf* body_sb = ctx.sb;
     stringbuf_reset(body_sb);
 
     while (*eml) {

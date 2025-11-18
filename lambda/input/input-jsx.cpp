@@ -45,7 +45,7 @@ static bool is_jsx_component_name(const char* name) {
 // JSX expression parsing functions
 static String* parse_jsx_expression_content(InputContext& ctx, const char** js_expr, const char* end) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     JSXExpressionState state = {0};
@@ -152,7 +152,7 @@ static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const 
 // Parse JSX text content until < or {
 static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const char* end) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (*jsx < end && **jsx != '<' && **jsx != '{') {
@@ -188,7 +188,7 @@ static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const
 // Parse JSX tag name
 static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const char* end) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // First character
@@ -231,7 +231,7 @@ static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, co
         char quote = **jsx;
         (*jsx)++; // Skip opening quote
 
-        StringBuf* sb = ctx.builder().stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
         while (*jsx < end && **jsx != quote) {
@@ -255,7 +255,7 @@ static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, co
         return stringbuf_to_string(sb);
     } else {
         // Unquoted attribute value (shouldn't happen in JSX but handle it)
-        StringBuf* sb = ctx.builder().stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
         while (*jsx < end && !is_jsx_whitespace(**jsx) && **jsx != '>' && **jsx != '/') {

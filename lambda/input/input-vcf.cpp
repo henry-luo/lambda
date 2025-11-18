@@ -33,7 +33,7 @@ static bool is_folded_line(const char *vcf) {
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **vcf) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (**vcf && **vcf != ':' && **vcf != ';' && **vcf != '\n' && **vcf != '\r') {
@@ -57,7 +57,7 @@ static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* 
         (*vcf)++; // skip ';'
 
         // Parse parameter name
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
         while (**vcf && **vcf != '=' && **vcf != ':' && **vcf != '\n' && **vcf != '\r') {
@@ -113,7 +113,7 @@ static String* parse_property_value(InputContext& ctx, const char **vcf) {
     (*vcf)++; // skip ':'
 
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // Parse the value, handling line folding
@@ -174,7 +174,7 @@ static Map* parse_structured_name(InputContext& ctx, const char* value) {
     int field_count = sizeof(field_names) / sizeof(field_names[0]);
 
     for (int i = 0; i < field_count && *ptr; i++) {
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
         // Parse until semicolon or end
@@ -212,7 +212,7 @@ static Map* parse_address(InputContext& ctx, const char* value) {
     int field_count = sizeof(field_names) / sizeof(field_names[0]);
 
     for (int i = 0; i < field_count && *ptr; i++) {
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
         // Parse until semicolon or end

@@ -33,7 +33,7 @@ static bool is_folded_line(const char *ics) {
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(InputContext& ctx, const char **ics) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
 
     while (**ics && **ics != ':' && **ics != ';' && **ics != '\n' && **ics != '\r') {
@@ -51,13 +51,12 @@ static String* parse_property_name(InputContext& ctx, const char **ics) {
 // Helper function to parse property parameters (between ; and :)
 static void parse_property_parameters(InputContext& ctx, const char **ics, Map* params_map) {
     MarkBuilder& builder = ctx.builder();
-    Input* input = ctx.input();
 
     while (**ics == ';') {
         (*ics)++; // skip ';'
 
         // Parse parameter name
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
 
         while (**ics && **ics != '=' && **ics != ':' && **ics != '\n' && **ics != '\r') {
@@ -101,7 +100,7 @@ static void parse_property_parameters(InputContext& ctx, const char **ics, Map* 
 
         if (param_value) {
             Item value = {.item = s2it(param_value)};
-            ctx.builder().putToMap(params_map, param_name, value);
+            builder.putToMap(params_map, param_name, value);
         }
     }
 }
@@ -113,7 +112,7 @@ static String* parse_property_value(InputContext& ctx, const char **ics) {
     (*ics)++; // skip ':'
 
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
 
     // Parse the value, handling line folding
@@ -173,7 +172,7 @@ static Map* parse_datetime(InputContext& ctx, const char* value) {
     // Parse various date-time formats
     // Format: YYYYMMDD, YYYYMMDDTHHMMSS, YYYYMMDDTHHMMSSZ
     const char* ptr = value;
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
 
     // Parse year (4 digits)
     if (strlen(ptr) >= 8) {
@@ -298,7 +297,7 @@ static Map* parse_duration(InputContext& ctx, const char* value) {
     if (*ptr != 'P') return dur_map; // Invalid duration format
     ptr++; // skip 'P'
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     bool in_time_part = false;
 
     while (*ptr) {

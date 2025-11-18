@@ -107,7 +107,7 @@ static String* parse_quoted_string(InputContext& ctx) {
     SourceLocation start_loc = tracker.location();
     tracker.advance(); // skip opening quote
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (!tracker.atEnd() && tracker.current() != '"') {

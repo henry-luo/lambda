@@ -79,7 +79,7 @@ static String* parse_mermaid_node_shape(InputContext& ctx, const char* node_id) 
         return ctx.builder().createString(node_id);
     }
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     char open_char = tracker.current();
@@ -161,7 +161,7 @@ static String* parse_mermaid_label(InputContext& ctx) {
     char closing = (quote == '[') ? ']' : quote;
     tracker.advance();
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (!tracker.atEnd() && tracker.current() != closing) {
@@ -240,7 +240,7 @@ static void parse_mermaid_edge_def(InputContext& ctx, Element* graph, String* fr
         // check for label inside |text|
         if (tracker.current() == '|') {
             tracker.advance();
-            StringBuf* sb = ctx.builder().stringBuf();
+            StringBuf* sb = ctx.sb;
             stringbuf_reset(sb);
 
             while (!tracker.atEnd() && tracker.current() != '|') {

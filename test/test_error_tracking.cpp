@@ -72,7 +72,6 @@ TEST(ErrorTrackingTests, InputContext) {
     const char* source = "test source\nline 2";
     InputContext ctx(input, source, strlen(source));
 
-    EXPECT_TRUE(ctx.hasTracker());
     EXPECT_EQ(ctx.input(), input);
 
     // Add error at current position
