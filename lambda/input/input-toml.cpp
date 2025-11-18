@@ -797,8 +797,9 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
             return {.item = ITEM_ERROR};
     }
 }// Helper function to create string key from C string
-static String* create_string_key(Input *input, MarkBuilder* builder, const char* key_str) {
-    StringBuf* sb = builder->stringBuf();
+static String* create_string_key(InputContext& ctx, const char* key_str) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     int len = strlen(key_str);
@@ -806,13 +807,14 @@ static String* create_string_key(Input *input, MarkBuilder* builder, const char*
         stringbuf_append_char(sb, key_str[i]);
     }
 
-    String* key = builder->createString(sb->str->chars, sb->length);
+    String* key = builder.createString(sb->str->chars, sb->length);
     return key;
 }
 
 // Helper function to find or create a section in the root map
-static Map* find_or_create_section(Input *input, MarkBuilder* builder, Map* root_map, const char* section_name) {
-    String* key = create_string_key(input, builder, section_name);
+static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char* section_name) {
+    Input* input = ctx.input();
+    String* key = create_string_key(ctx, section_name);
     if (!key) return NULL;
 
     // Look for existing section in root map
@@ -838,7 +840,8 @@ static Map* find_or_create_section(Input *input, MarkBuilder* builder, Map* root
 }
 
 // Helper function to handle nested sections (like "database.credentials")
-static Map* handle_nested_section(Input *input, MarkBuilder* builder, Map* root_map, const char* section_path) {
+static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* section_path) {
+    Input* input = ctx.input();
     char path_copy[512];
     strncpy(path_copy, section_path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
@@ -850,7 +853,7 @@ static Map* handle_nested_section(Input *input, MarkBuilder* builder, Map* root_
     if (!first_part) return NULL;
 
     // Get or create the first level section
-    Map* current_map = find_or_create_section(input, builder, root_map, first_part);
+    Map* current_map = find_or_create_section(ctx, root_map, first_part);
     if (!current_map) return NULL;
 
     // If there's no remaining path, return the current section
@@ -867,7 +870,7 @@ static Map* handle_nested_section(Input *input, MarkBuilder* builder, Map* root_
 
     char* token = strtok(remaining_path, ".");
     while (token != NULL) {
-        String* key = create_string_key(input, builder, token);
+        String* key = create_string_key(ctx, token);
         if (!key) return NULL;
 
         // Look for existing nested table in current map
@@ -934,8 +937,7 @@ static bool parse_table_header(const char **toml, char *table_name, int *line_nu
 }
 
 void parse_toml(Input* input, const char* toml_string) {
-    InputContext ctx(input, toml_string);
-    SourceTracker tracker(toml_string);
+    InputContext ctx(input, toml_string, strlen(toml_string));
 
     Map* root_map = map_pooled(input->pool);
     if (!root_map) { return; }
@@ -956,7 +958,7 @@ void parse_toml(Input* input, const char* toml_string) {
         if (*toml == '[') {
             // Check for array of tables [[...]] which we don't support yet
             if (*(toml + 1) == '[') {
-                ctx.addWarning(tracker.location(), "Array of tables [[...]] not yet supported");
+                ctx.addWarning(ctx.tracker()->location(), "Array of tables [[...]] not yet supported");
                 skip_line(&toml, &line_num);
                 continue;
             }
@@ -964,7 +966,7 @@ void parse_toml(Input* input, const char* toml_string) {
             char table_name[256];
             if (parse_table_header(&toml, table_name, &line_num)) {
                 // Handle sections using the new refactored function
-                Map* section_map = handle_nested_section(input, &ctx.builder(), root_map, table_name);
+                Map* section_map = handle_nested_section(ctx, root_map, table_name);
                 if (section_map) {
                     current_table = section_map;
                     current_table_type = (TypeMap*)section_map->type;
@@ -972,15 +974,15 @@ void parse_toml(Input* input, const char* toml_string) {
                 skip_line(&toml, &line_num);
                 continue;
             } else {
-                ctx.addError(tracker.location(), "Invalid table header");
+                ctx.addError(ctx.tracker()->location(), "Invalid table header");
                 skip_line(&toml, &line_num);
                 continue;
             }
         }
 
         // Parse key-value pair
-        SourceLocation key_loc = tracker.location();
-        String* key = parse_key(ctx, tracker, &toml);
+        SourceLocation key_loc = ctx.tracker()->location();
+        String* key = parse_key(ctx, *ctx.tracker(), &toml);
         if (!key) {
             ctx.addError(key_loc, "Invalid or empty key");
             skip_line(&toml, &line_num);
@@ -989,15 +991,15 @@ void parse_toml(Input* input, const char* toml_string) {
 
         skip_whitespace(&toml);
         if (*toml != '=') {
-            ctx.addError(tracker.location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
+            ctx.addError(ctx.tracker()->location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
             skip_line(&toml, &line_num);
             continue;
         }
         toml++; // skip '='
 
-        Item value = parse_value(ctx, tracker, &toml, &line_num);
+        Item value = parse_value(ctx, *ctx.tracker(), &toml, &line_num);
         if (value.item == ITEM_ERROR) {
-            ctx.addError(tracker.location(), "Failed to parse value for key '%.*s'", (int)key->len, key->chars);
+            ctx.addError(ctx.tracker()->location(), "Failed to parse value for key '%.*s'", (int)key->len, key->chars);
             skip_line(&toml, &line_num);
             continue;
         }

@@ -9,15 +9,15 @@
 using namespace lambda;
 
 // Forward declarations
-static Element* parse_mdx_content(Input* input, MarkBuilder* builder, const char* content);
-static Element* parse_mdx_element(Input* input, MarkBuilder* builder, const char** pos, const char* end);
+static Element* parse_mdx_content(InputContext& ctx, const char* content);
+static Element* parse_mdx_element(InputContext& ctx, const char** pos, const char* end);
 static bool is_jsx_component_tag(const char* tag_name);
 static bool is_html_element_tag(const char* tag_name);
 static const char* extract_tag_name(const char* pos, const char* end, char* buffer, size_t buffer_size);
-static Element* parse_jsx_component(Input* input, MarkBuilder* builder, const char** pos, const char* end);
-static Element* parse_html_element(Input* input, MarkBuilder* builder, const char** pos, const char* end);
+static Element* parse_jsx_component(InputContext& ctx, const char** pos, const char* end);
+static Element* parse_html_element(InputContext& ctx, const char** pos, const char* end);
 static void skip_whitespace(const char** pos, const char* end);
-static Element* create_mdx_document(Input* input, MarkBuilder* builder, const char* content);
+static Element* create_mdx_document(InputContext& ctx, const char* content);
 
 // Utility function to check if a tag name represents a JSX component (starts with uppercase)
 static bool is_jsx_component_tag(const char* tag_name) {
@@ -56,7 +56,9 @@ static void skip_whitespace(const char** pos, const char* end) {
 }
 
 // Parse JSX component using existing JSX parser
-static Element* parse_jsx_component(Input* input, MarkBuilder* builder, const char** pos, const char* end) {
+static Element* parse_jsx_component(InputContext& ctx, const char** pos, const char* end) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
     // Use the existing JSX parsing functionality
     // For now, create a simple JSX element and delegate to JSX parser
     const char* jsx_start = *pos;
@@ -119,7 +121,7 @@ static Element* parse_jsx_component(Input* input, MarkBuilder* builder, const ch
     if (jsx_buffer) {
         strncpy(jsx_buffer, jsx_start, jsx_len);
         jsx_buffer[jsx_len] = '\0';
-        String* jsx_content = builder->createString(jsx_buffer);
+        String* jsx_content = builder.createString(jsx_buffer);
         Item jsx_item = {.item = s2it(jsx_content)};
         input_add_attribute_item_to_element(input, jsx_elem, "content", jsx_item);
         free(jsx_buffer);
@@ -130,7 +132,9 @@ static Element* parse_jsx_component(Input* input, MarkBuilder* builder, const ch
 }
 
 // Parse HTML element using existing HTML parser
-static Element* parse_html_element(Input* input, MarkBuilder* builder, const char** pos, const char* end) {
+static Element* parse_html_element(InputContext& ctx, const char** pos, const char* end) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
     // Use existing HTML parsing functionality
     const char* html_start = *pos;
 
@@ -160,7 +164,7 @@ static Element* parse_html_element(Input* input, MarkBuilder* builder, const cha
     if (html_buffer) {
         strncpy(html_buffer, html_start, html_len);
         html_buffer[html_len] = '\0';
-        String* html_content = builder->createString(html_buffer);
+        String* html_content = builder.createString(html_buffer);
         Item html_item = {.item = s2it(html_content)};
         input_add_attribute_item_to_element(input, html_elem, "content", html_item);
         free(html_buffer);
@@ -171,7 +175,7 @@ static Element* parse_html_element(Input* input, MarkBuilder* builder, const cha
 }
 
 // Parse MDX element (either JSX component or HTML element)
-static Element* parse_mdx_element(Input* input, MarkBuilder* builder, const char** pos, const char* end) {
+static Element* parse_mdx_element(InputContext& ctx, const char** pos, const char* end) {
     char tag_name[256];
     const char* tag = extract_tag_name(*pos, end, tag_name, sizeof(tag_name));
 
@@ -181,17 +185,19 @@ static Element* parse_mdx_element(Input* input, MarkBuilder* builder, const char
 
     if (is_jsx_component_tag(tag)) {
         // Uppercase tag -> JSX component
-        return parse_jsx_component(input, builder, pos, end);
+        return parse_jsx_component(ctx, pos, end);
     } else if (is_html_element_tag(tag)) {
         // Lowercase tag -> HTML element
-        return parse_html_element(input, builder, pos, end);
+        return parse_html_element(ctx, pos, end);
     }
 
     return NULL;
 }
 
 // Parse MDX content with mixed markdown, HTML, and JSX
-static Element* parse_mdx_content(Input* input, MarkBuilder* builder, const char* content) {
+static Element* parse_mdx_content(InputContext& ctx, const char* content) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
     Element* root = input_create_element(input, "mdx_document");
     Element* body = input_create_element(input, "body");
 
@@ -223,7 +229,7 @@ static Element* parse_mdx_content(Input* input, MarkBuilder* builder, const char
             }
 
             // Parse the element (JSX or HTML)
-            Element* element = parse_mdx_element(input, builder, &pos, end);
+            Element* element = parse_mdx_element(ctx, &pos, end);
             if (element) {
                 Item element_item = {.element = element};
                 // Add element as child
@@ -266,23 +272,22 @@ static Element* parse_mdx_content(Input* input, MarkBuilder* builder, const char
 }
 
 // Enhanced MDX document creation with proper parsing
-static Element* create_mdx_document(Input* input, MarkBuilder* builder, const char* content) {
-    return parse_mdx_content(input, builder, content);
+static Element* create_mdx_document(InputContext& ctx, const char* content) {
+    return parse_mdx_content(ctx, content);
 }
 
 // Main MDX parsing function
 void parse_mdx(Input* input, const char* mdx_string) {
     if (!mdx_string || !input) return;
 
-    // create error tracking context with source
+    // create error tracking context with integrated source tracking
     InputContext ctx(input, mdx_string, strlen(mdx_string));
 
-    MarkBuilder builder(input);
-    Element* root = create_mdx_document(input, &builder, mdx_string);
+    Element* root = create_mdx_document(ctx, mdx_string);
     if (root) {
         input->root = (Item){.element = root};
     } else {
-        ctx.addError("Failed to parse MDX document");
+        ctx.addError(ctx.tracker()->location(), "Failed to parse MDX document");
     }
 
     if (ctx.hasErrors()) {

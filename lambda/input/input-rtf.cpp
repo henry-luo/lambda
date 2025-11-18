@@ -5,7 +5,7 @@
 
 using namespace lambda;
 
-static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **rtf);
+static Item parse_rtf_content(InputContext& ctx, const char **rtf);
 
 // RTF color table entry
 typedef struct {
@@ -49,8 +49,9 @@ static void skip_to_brace(const char **rtf, char target_brace) {
     }
 }
 
-static String* parse_rtf_string(Input *input, MarkBuilder* builder, const char **rtf, char delimiter) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_rtf_string(InputContext& ctx, const char **rtf, char delimiter) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     while (**rtf && **rtf != delimiter && **rtf != '{' && **rtf != '}') {
@@ -133,10 +134,11 @@ static String* parse_rtf_string(Input *input, MarkBuilder* builder, const char *
         (*rtf)++;
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
-static RTFControlWord parse_control_word(Input *input, MarkBuilder* builder, const char **rtf) {
+static RTFControlWord parse_control_word(InputContext& ctx, const char **rtf) {
+    MarkBuilder& builder = ctx.builder();
     RTFControlWord control_word = {0};
 
     if (**rtf != '\\') {
@@ -145,7 +147,7 @@ static RTFControlWord parse_control_word(Input *input, MarkBuilder* builder, con
 
     (*rtf)++; // Skip backslash
 
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     // Parse keyword (letters only)
@@ -154,7 +156,7 @@ static RTFControlWord parse_control_word(Input *input, MarkBuilder* builder, con
         (*rtf)++;
     }
 
-    control_word.keyword = builder->createString(sb->str->chars, sb->length);
+    control_word.keyword = builder.createString(sb->str->chars, sb->length);
 
     // Parse optional parameter (digits with optional minus sign)
     if (**rtf == '-' || (**rtf >= '0' && **rtf <= '9')) {
@@ -183,14 +185,16 @@ static RTFControlWord parse_control_word(Input *input, MarkBuilder* builder, con
     return control_word;
 }
 
-static Array* parse_color_table(Input *input, MarkBuilder* builder, const char **rtf) {
+static Array* parse_color_table(InputContext& ctx, const char **rtf) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
     Array* colors = array_pooled(input->pool);
     if (!colors) return NULL;
 
     // Skip the \colortbl keyword
     while (**rtf && **rtf != ';' && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, builder, rtf);
+            RTFControlWord cw = parse_control_word(ctx, rtf);
             if (cw.keyword) {
                 RTFColor* color;
                 color = (RTFColor*)pool_calloc(input->pool, sizeof(RTFColor));
@@ -221,13 +225,14 @@ static Array* parse_color_table(Input *input, MarkBuilder* builder, const char *
     return colors;
 }
 
-static Array* parse_font_table(Input *input, MarkBuilder* builder, const char **rtf) {
+static Array* parse_font_table(InputContext& ctx, const char **rtf) {
+    Input* input = ctx.input();
     Array* fonts = array_pooled(input->pool);
     if (!fonts) return NULL;
 
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, builder, rtf);
+            RTFControlWord cw = parse_control_word(ctx, rtf);
             if (cw.keyword && strcmp(cw.keyword->chars, "f") == 0 && cw.has_parameter) {
                 // Start of font definition
                 RTFFont* font;
@@ -239,13 +244,13 @@ static Array* parse_font_table(Input *input, MarkBuilder* builder, const char **
                 // Parse font family
                 skip_whitespace(rtf);
                 if (**rtf == '\\') {
-                    RTFControlWord family_cw = parse_control_word(input, builder, rtf);
+                    RTFControlWord family_cw = parse_control_word(ctx, rtf);
                     font->font_family = family_cw.keyword;
                 }
 
                 // Parse font name (until semicolon)
                 skip_whitespace(rtf);
-                font->font_name = parse_rtf_string(input, builder, rtf, ';');
+                font->font_name = parse_rtf_string(ctx, rtf, ';');
 
                 if (**rtf == ';') {
                     (*rtf)++; // Skip semicolon
@@ -262,13 +267,14 @@ static Array* parse_font_table(Input *input, MarkBuilder* builder, const char **
     return fonts;
 }
 
-static Map* parse_document_properties(Input *input, MarkBuilder* builder, const char **rtf) {
+static Map* parse_document_properties(InputContext& ctx, const char **rtf) {
+    Input* input = ctx.input();
     Map* props = map_pooled(input->pool);
     if (!props) return NULL;
 
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, builder, rtf);
+            RTFControlWord cw = parse_control_word(ctx, rtf);
             if (cw.keyword) {
                 Item value;
 
@@ -293,7 +299,9 @@ static Map* parse_document_properties(Input *input, MarkBuilder* builder, const 
     return props;
 }
 
-static Item parse_rtf_group(Input *input, MarkBuilder* builder, const char **rtf) {
+static Item parse_rtf_group(InputContext& ctx, const char **rtf) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
     if (**rtf != '{') {
         return {.item = ITEM_ERROR};
     }
@@ -313,11 +321,11 @@ static Item parse_rtf_group(Input *input, MarkBuilder* builder, const char **rtf
 
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
-            RTFControlWord cw = parse_control_word(input, builder, rtf);
+            RTFControlWord cw = parse_control_word(ctx, rtf);
             if (cw.keyword) {
                 // Handle various RTF control words
                 if (strcmp(cw.keyword->chars, "colortbl") == 0) {
-                    Array* colors = parse_color_table(input, builder, rtf);
+                    Array* colors = parse_color_table(ctx, rtf);
                     if (colors) {
                         Item color_table = {.item = (uint64_t)colors};
 
@@ -331,7 +339,7 @@ static Item parse_rtf_group(Input *input, MarkBuilder* builder, const char **rtf
                         }
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
-                    Array* fonts = parse_font_table(input, builder, rtf);
+                    Array* fonts = parse_font_table(ctx, rtf);
                     if (fonts) {
                         Item font_table = {.item = (uint64_t)fonts};
 
@@ -364,13 +372,13 @@ static Item parse_rtf_group(Input *input, MarkBuilder* builder, const char **rtf
             }
         } else if (**rtf == '{') {
             // Nested group
-            Item nested = parse_rtf_group(input, builder, rtf);
+            Item nested = parse_rtf_group(ctx, rtf);
             if (nested .item != ITEM_ERROR && nested .item != ITEM_NULL) {
                 array_append(content, nested, input->pool);
             }
         } else {
             // Text content
-            String* text = parse_rtf_string(input, builder, rtf, '{');
+            String* text = parse_rtf_string(ctx, rtf, '{');
             if (text && text->len > 0) {
                 Item text_item = {.item = s2it(text)};
                 array_append(content, text_item, input->pool);
@@ -413,11 +421,11 @@ static Item parse_rtf_group(Input *input, MarkBuilder* builder, const char **rtf
     return {.item = (uint64_t)group};
 }
 
-static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **rtf) {
+static Item parse_rtf_content(InputContext& ctx, const char **rtf) {
     skip_whitespace(rtf);
 
     if (**rtf == '{') {
-        return parse_rtf_group(input, builder, rtf);
+        return parse_rtf_group(ctx, rtf);
     }
 
     return {.item = ITEM_ERROR};
@@ -425,16 +433,15 @@ static Item parse_rtf_content(Input *input, MarkBuilder* builder, const char **r
 
 void parse_rtf(Input* input, const char* rtf_string) {
     printf("rtf_parse\n");
-    InputContext ctx(input);
-    SourceTracker tracker(rtf_string, strlen(rtf_string));
-    MarkBuilder* builder = &ctx.builder();
+    InputContext ctx(input, rtf_string, strlen(rtf_string));
+    MarkBuilder& builder = ctx.builder();
 
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);
 
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
-        ctx.addError(tracker.location(), "Invalid RTF format: document must start with '{\\rtf'");
+        ctx.addError(ctx.tracker()->location(), "Invalid RTF format: document must start with '{\\rtf'");
         printf("Error: Invalid RTF format - must start with {\\rtf\n");
         input->root = {.item = ITEM_ERROR};
         return;
@@ -443,7 +450,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
     // Create document root to hold all groups
     Array* document = array_pooled(input->pool);
     if (!document) {
-        ctx.addError(tracker.location(), "Memory allocation failed for RTF document array");
+        ctx.addError(ctx.tracker()->location(), "Memory allocation failed for RTF document array");
         input->root = {.item = ITEM_ERROR};
         return;
     }
@@ -454,15 +461,15 @@ void parse_rtf(Input* input, const char* rtf_string) {
         if (*rtf == '\0') break;
 
         if (*rtf == '{') {
-            Item group = parse_rtf_group(input, builder, &rtf);
+            Item group = parse_rtf_group(ctx, &rtf);
             if (group.item != ITEM_ERROR && group.item != ITEM_NULL) {
                 array_append(document, group, input->pool);
             } else if (group.item == ITEM_ERROR) {
-                ctx.addWarning(tracker.location(), "Failed to parse RTF group, skipping");
+                ctx.addWarning(ctx.tracker()->location(), "Failed to parse RTF group, skipping");
             }
         } else {
             // Skip unknown content
-            ctx.addWarning(tracker.location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
+            ctx.addWarning(ctx.tracker()->location(), "Unexpected character '%c' (0x%02X) outside group, skipping", *rtf, (unsigned char)*rtf);
             rtf++;
         }
     }
