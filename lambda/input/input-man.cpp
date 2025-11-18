@@ -17,8 +17,21 @@ static Item parse_man_inline(InputContext& ctx, const char* text);
 #define trim_whitespace input_trim_whitespace
 #define split_lines input_split_lines
 #define free_lines input_free_lines
-#define create_man_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
+
+// Local helper functions to replace macros
+static inline Element* create_man_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
+
+static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
 
 // Man page specific parsing functions
 static bool is_man_section_header(const char* line) {

@@ -15,11 +15,28 @@ static Item parse_asciidoc_inline(Input *input, const char* text);
 #define is_empty_line input_is_empty_line
 #define count_leading_chars input_count_leading_chars
 #define trim_whitespace input_trim_whitespace
-#define create_string input_create_string
 #define split_lines input_split_lines
 #define free_lines input_free_lines
-#define create_asciidoc_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
+
+// Local helper functions to replace macros
+static inline String* create_string(Input* input, const char* str) {
+    MarkBuilder builder(input);
+    return builder.createString(str);
+}
+
+static inline Element* create_asciidoc_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
+
+static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
 
 // AsciiDoc specific parsing functions
 static bool is_asciidoc_heading(const char* line) {

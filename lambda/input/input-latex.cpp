@@ -12,9 +12,20 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 
 static Item parse_latex_element(InputContext& ctx, const char **latex);
 
-// Use common utility functions from input.c and input-common.c
-#define create_latex_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
+// Local helper functions to replace macros
+static inline Element* create_latex_element(Input* input, const char* tag_name) {
+    MarkBuilder builder(input);
+    return builder.element(tag_name).final().element;
+}
+
+static inline void add_attribute_to_element(Input* input, Element* element, const char* attr_name, const char* attr_value) {
+    MarkBuilder builder(input);
+    String* key = builder.createString(attr_name);
+    String* value = builder.createString(attr_value);
+    if (!key || !value) return;
+    Item lambda_value = {.item = s2it(value)};
+    builder.putToElement(element, key, lambda_value);
+}
 
 static void skip_whitespace(const char **latex) {
     skip_common_whitespace(latex);
