@@ -151,7 +151,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
         // parse value
         Item value = parse_pdf_object(ctx, pdf);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
-            map_put(dict, key, value, ctx.input());
+            ctx.builder().putToMap(dict, key, value);
             pair_count++;
         }
 
@@ -436,52 +436,34 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     if (!ref_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key;
-    type_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+    String* type_key = ctx.builder().createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 14);
+        String* type_value = ctx.builder().createString("indirect_ref");
         if (type_value) {
-            strcpy(type_value->chars, "indirect_ref");
-            type_value->len = 12;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(ref_map, type_key, type_item, ctx.input());
+            ctx.builder().putToMap(ref_map, type_key, type_item);
         }
     }
 
     // Store object number
-    String* obj_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 12);
+    String* obj_key = ctx.builder().createString("object_num");
     if (obj_key) {
-        strcpy(obj_key->chars, "object_num");
-        obj_key->len = 10;
-        obj_key->ref_cnt = 0;
-
         double* obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
-            map_put(ref_map, obj_key, obj_item, ctx.input());
+            ctx.builder().putToMap(ref_map, obj_key, obj_item);
         }
     }
 
     // Store generation number
-    String* gen_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 8);
+    String* gen_key = ctx.builder().createString("gen_num");
     if (gen_key) {
-        strcpy(gen_key->chars, "gen_num");
-        gen_key->len = 7;
-        gen_key->ref_cnt = 0;
-
         double* gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
-            map_put(ref_map, gen_key, gen_item, ctx.input());
+            ctx.builder().putToMap(ref_map, gen_key, gen_item);
         }
     }
     return {.item = (uint64_t)ref_map};
@@ -525,70 +507,45 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     if (!obj_map) return content; // return content if we can't create wrapper
 
     // Store type identifier
-    String* type_key;
-    type_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+    String* type_key = ctx.builder().createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 16);
+        String* type_value = ctx.builder().createString("indirect_object");
         if (type_value) {
-            strcpy(type_value->chars, "indirect_object");
-            type_value->len = 15;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(obj_map, type_key, type_item, ctx.input());
+            ctx.builder().putToMap(obj_map, type_key, type_item);
         }
     }
 
     // Store object number
-    String* obj_key;
-    obj_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 12);
+    String* obj_key = ctx.builder().createString("object_num");
     if (obj_key) {
-        strcpy(obj_key->chars, "object_num");
-        obj_key->len = 10;
-        obj_key->ref_cnt = 0;
-
         double* obj_val;
         obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
-            map_put(obj_map, obj_key, obj_item, ctx.input());
+            ctx.builder().putToMap(obj_map, obj_key, obj_item);
         }
     }
 
     // Store generation number
-    String* gen_key;
-    gen_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 8);
+    String* gen_key = ctx.builder().createString("gen_num");
     if (gen_key) {
-        strcpy(gen_key->chars, "gen_num");
-        gen_key->len = 7;
-        gen_key->ref_cnt = 0;
-
         double* gen_val;
         gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
-            map_put(obj_map, gen_key, gen_item, ctx.input());
+            ctx.builder().putToMap(obj_map, gen_key, gen_item);
         }
     }
 
     // Store content
     if (content .item != ITEM_ERROR && content .item != ITEM_NULL) {
-        String* content_key;
-        content_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 8);
+        String* content_key = ctx.builder().createString("content");
         if (content_key) {
-            strcpy(content_key->chars, "content");
-            content_key->len = 7;
-            content_key->ref_cnt = 0;
-
             Item content_item = {.item = content.item};
-            map_put(obj_map, content_key, content_item, ctx.input());
+            ctx.builder().putToMap(obj_map, content_key, content_item);
         }
     }
     return {.item = (uint64_t)obj_map};
@@ -616,64 +573,39 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
     if (!stream_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key;
-    type_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+    String* type_key = ctx.builder().createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 7);
+        String* type_value = ctx.builder().createString("stream");
         if (type_value) {
-            strcpy(type_value->chars, "stream");
-            type_value->len = 6;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(stream_map, type_key, type_item, ctx.input());
+            ctx.builder().putToMap(stream_map, type_key, type_item);
         }
     }
 
     // Store dictionary if provided
     if (dict) {
-        String* dict_key;
-        dict_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 11);
+        String* dict_key = ctx.builder().createString("dictionary");
         if (dict_key) {
-            strcpy(dict_key->chars, "dictionary");
-            dict_key->len = 10;
-            dict_key->ref_cnt = 0;
-
             Item dict_item = {.item = (uint64_t)dict};
-            map_put(stream_map, dict_key, dict_item, ctx.input());
+            ctx.builder().putToMap(stream_map, dict_key, dict_item);
         }
     }
 
     // Store data length
-    String* length_key;
-    length_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 7);
+    String* length_key = ctx.builder().createString("length");
     if (length_key) {
-        strcpy(length_key->chars, "length");
-        length_key->len = 6;
-        length_key->ref_cnt = 0;
-
         double* length_val;
         length_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (length_val) {
             *length_val = (double)data_length;
             Item length_item = {.item = d2it(length_val)};
-            map_put(stream_map, length_key, length_item, ctx.input());
+            ctx.builder().putToMap(stream_map, length_key, length_item);
         }
     }
 
     // Store stream data as a string (truncated for safety)
-    String* data_key;
-    data_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+    String* data_key = ctx.builder().createString("data");
     if (data_key) {
-        strcpy(data_key->chars, "data");
-        data_key->len = 4;
-        data_key->ref_cnt = 0;
-
         String* stream_data;
         stream_data = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + data_length + 1);
         if (stream_data) {
@@ -683,20 +615,16 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
             stream_data->ref_cnt = 0;
 
             Item data_item = {.item = s2it(stream_data)};
-            map_put(stream_map, data_key, data_item, ctx.input());
+            ctx.builder().putToMap(stream_map, data_key, data_item);
 
             // Add content analysis for potential content streams
             if (data_length > 10 && data_length < 2000) { // Only analyze reasonably sized streams
                 Item content_analysis = analyze_pdf_content_stream(ctx.input(), *pdf, data_length);
                 if (content_analysis .item != ITEM_NULL) {
-                    String* analysis_key;
-                    analysis_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 9);
+                    String* analysis_key = ctx.builder().createString("analysis");
                     if (analysis_key) {
-                        strcpy(analysis_key->chars, "analysis");
-                        analysis_key->len = 8;
-                        analysis_key->ref_cnt = 0;
                         Item analysis_item = {.item = content_analysis.item};
-                        map_put(stream_map, analysis_key, analysis_item, ctx.input());
+                        ctx.builder().putToMap(stream_map, analysis_key, analysis_item);
                     }
                 }
             }
@@ -719,22 +647,12 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
     if (!xref_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key;
-    type_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+    String* type_key = ctx.builder().createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 11);
+        String* type_value = ctx.builder().createString("xref_table");
         if (type_value) {
-            strcpy(type_value->chars, "xref_table");
-            type_value->len = 10;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(xref_map, type_key, type_item, ctx.input());
+            ctx.builder().putToMap(xref_map, type_key, type_item);
         }
     }
 
@@ -785,47 +703,32 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                     if (entry_map) {
                                         if (entry_map->data) {
                                             // Store object number
-                                            String* obj_key;
-                                            obj_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 7);
+                                            String* obj_key = ctx.builder().createString("object");
                                             if (obj_key) {
-                                                strcpy(obj_key->chars, "object");
-                                                obj_key->len = 6;
-                                                obj_key->ref_cnt = 0;
-
                                                 double* obj_val;
                                                 obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
                                                 if (obj_val) {
                                                     *obj_val = (double)(start_num + i);
                                                     Item obj_item = {.item = d2it(obj_val)};
-                                                    map_put(entry_map, obj_key, obj_item, ctx.input());
+                                                    ctx.builder().putToMap(entry_map, obj_key, obj_item);
                                                 }
                                             }
 
                                             // Store offset
-                                            String* offset_key;
-                                            offset_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 7);
+                                            String* offset_key = ctx.builder().createString("offset");
                                             if (offset_key) {
-                                                strcpy(offset_key->chars, "offset");
-                                                offset_key->len = 6;
-                                                offset_key->ref_cnt = 0;
-
                                                 double* offset_val;
                                                 offset_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
                                                 if (offset_val) {
                                                     *offset_val = (double)offset;
                                                     Item offset_item = {.item = d2it(offset_val)};
-                                                    map_put(entry_map, offset_key, offset_item, ctx.input());
+                                                    ctx.builder().putToMap(entry_map, offset_key, offset_item);
                                                 }
                                             }
 
                                             // Store flag
-                                            String* flag_key;
-                                            flag_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+                                            String* flag_key = ctx.builder().createString("flag");
                                             if (flag_key) {
-                                                strcpy(flag_key->chars, "flag");
-                                                flag_key->len = 4;
-                                                flag_key->ref_cnt = 0;
-
                                                 String* flag_val;
                                                 flag_val = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 2);
                                                 if (flag_val) {
@@ -834,7 +737,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
                                                     flag_val->len = 1;
                                                     flag_val->ref_cnt = 0;
                                                     Item flag_item = {.item = s2it(flag_val)};
-                                                    map_put(entry_map, flag_key, flag_item, ctx.input());
+                                                    ctx.builder().putToMap(entry_map, flag_key, flag_item);
                                                 }
                                             }
 
@@ -856,14 +759,10 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
         }
 
         // Store entries in xref map
-        String* entries_key;
-        entries_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 8);
+        String* entries_key = ctx.builder().createString("entries");
         if (entries_key) {
-            strcpy(entries_key->chars, "entries");
-            entries_key->len = 7;
-            entries_key->ref_cnt = 0;
             Item entries_item = {.item = (uint64_t)entries};
-            map_put(xref_map, entries_key, entries_item, ctx.input());
+            ctx.builder().putToMap(xref_map, entries_key, entries_item);
         }
     }
     return {.item = (uint64_t)xref_map};
@@ -885,34 +784,20 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
     if (!trailer_map) return {.item = (uint64_t)trailer_dict};
 
     // Store type identifier
-    String* type_key;
-    type_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 5);
+    String* type_key = ctx.builder().createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 8);
+        String* type_value = ctx.builder().createString("trailer");
         if (type_value) {
-            strcpy(type_value->chars, "trailer");
-            type_value->len = 7;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(trailer_map, type_key, type_item, ctx.input());
+            ctx.builder().putToMap(trailer_map, type_key, type_item);
         }
     }
 
     // Store the dictionary
-    String* dict_key;
-    dict_key = (String*)pool_calloc(ctx.input()->pool, sizeof(String) + 11);
+    String* dict_key = ctx.builder().createString("dictionary");
     if (dict_key) {
-        strcpy(dict_key->chars, "dictionary");
-        dict_key->len = 10;
-        dict_key->ref_cnt = 0;
         Item dict_item = {.item = (uint64_t)trailer_dict};
-        map_put(trailer_map, dict_key, dict_item, ctx.input());
+        ctx.builder().putToMap(trailer_map, dict_key, dict_item);
     }
     return {.item = (uint64_t)trailer_map};
 }
@@ -952,56 +837,38 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
     }
 
     // Store analysis results
-    String* type_key;
-    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    MarkBuilder builder(input);
+
+    String* type_key = builder.createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 17);
+        String* type_value = builder.createString("content_analysis");
         if (type_value) {
-            strcpy(type_value->chars, "content_analysis");
-            type_value->len = 16;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(analysis_map, type_key, type_item, input);
+            builder.putToMap(analysis_map, type_key, type_item);
         }
     }
 
     // Text objects count
-    String* text_key;
-    text_key = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+    String* text_key = builder.createString("text_objects");
     if (text_key) {
-        strcpy(text_key->chars, "text_objects");
-        text_key->len = 12;
-        text_key->ref_cnt = 0;
-
         double* text_count;
         text_count = (double*)pool_calloc(input->pool, sizeof(double));
         if (text_count) {
             *text_count = (double)text_objects;
             Item text_item = {.item = d2it(text_count)};
-            map_put(analysis_map, text_key, text_item, input);
+            builder.putToMap(analysis_map, text_key, text_item);
         }
     }
 
     // Drawing operations count
-    String* draw_key;
-    draw_key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+    String* draw_key = builder.createString("drawing_ops");
     if (draw_key) {
-        strcpy(draw_key->chars, "drawing_ops");
-        draw_key->len = 11;
-        draw_key->ref_cnt = 0;
-
         double* draw_count;
         draw_count = (double*)pool_calloc(input->pool, sizeof(double));
         if (draw_count) {
             *draw_count = (double)drawing_ops;
             Item draw_item = {.item = d2it(draw_count)};
-            map_put(analysis_map, draw_key, draw_item, input);
+            builder.putToMap(analysis_map, draw_key, draw_item);
         }
     }
     return {.item = (uint64_t)analysis_map};
@@ -1014,35 +881,23 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
     Map* font_analysis = map_pooled(input->pool);
     if (!font_analysis) return {.item = ITEM_NULL};
 
+    MarkBuilder builder(input);
+
     // Extract font information from the dictionary
-    String* type_key;
-    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    String* type_key = builder.createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 14);
+        String* type_value = builder.createString("font_analysis");
         if (type_value) {
-            strcpy(type_value->chars, "font_analysis");
-            type_value->len = 13;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(font_analysis, type_key, type_item, input);
+            builder.putToMap(font_analysis, type_key, type_item);
         }
     }
 
     // Copy relevant font properties (Type, Subtype, BaseFont, etc.)
-    String* original_key;
-    original_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+    String* original_key = builder.createString("original");
     if (original_key) {
-        strcpy(original_key->chars, "original");
-        original_key->len = 8;
-        original_key->ref_cnt = 0;
         Item original_item = {.item = (uint64_t)font_dict};
-        map_put(font_analysis, original_key, original_item, input);
+        builder.putToMap(font_analysis, original_key, original_item);
     }
     return {.item = (uint64_t)font_analysis};
 }
@@ -1054,35 +909,23 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
     Map* page_analysis = map_pooled(input->pool);
     if (!page_analysis) return {.item = ITEM_NULL};
 
+    MarkBuilder builder(input);
+
     // Store type
-    String* type_key;
-    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    String* type_key = builder.createString("type");
     if (type_key) {
-        strcpy(type_key->chars, "type");
-        type_key->len = 4;
-        type_key->ref_cnt = 0;
-
-        String* type_value;
-        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+        String* type_value = builder.createString("page_analysis");
         if (type_value) {
-            strcpy(type_value->chars, "page_analysis");
-            type_value->len = 12;
-            type_value->ref_cnt = 0;
-
             Item type_item = {.item = s2it(type_value)};
-            map_put(page_analysis, type_key, type_item, input);
+            builder.putToMap(page_analysis, type_key, type_item);
         }
     }
 
     // Copy the original page dictionary for reference
-    String* original_key;
-    original_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+    String* original_key = builder.createString("original");
     if (original_key) {
-        strcpy(original_key->chars, "original");
-        original_key->len = 8;
-        original_key->ref_cnt = 0;
         Item original_item = {.item = (uint64_t)page_dict};
-        map_put(page_analysis, original_key, original_item, input);
+        builder.putToMap(page_analysis, original_key, original_item);
     }
     return {.item = (uint64_t)page_analysis};
 }
@@ -1141,14 +984,10 @@ void parse_pdf(Input* input, const char* pdf_string) {
     String* version = builder.createStringFromBuf(version_sb);
 
     // Store version in map
-    String* version_key;
-    version_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+    String* version_key = builder.createString("version");
     if (version_key) {
-        strcpy(version_key->chars, "version");
-        version_key->len = 7;
-        version_key->ref_cnt = 0;
         Item version_item = {.item = s2it(version)};
-        map_put(pdf_info, version_key, version_item, input);
+        builder.putToMap(pdf_info, version_key, version_item);
     }
 
     skip_whitespace_and_comments(&pdf);
@@ -1291,89 +1130,60 @@ void parse_pdf(Input* input, const char* pdf_string) {
         }
 
         // Store objects in map
-        String* objects_key;
-        objects_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        String* objects_key = builder.createString("objects");
         if (objects_key) {
-            strcpy(objects_key->chars, "objects");
-            objects_key->len = 7;
-            objects_key->ref_cnt = 0;
             Item objects_item = {.item = (uint64_t)objects};
-            map_put(pdf_info, objects_key, objects_item, input);
+            builder.putToMap(pdf_info, objects_key, objects_item);
         }
     }
 
     // Store xref table if found
     if (xref_table .item != ITEM_NULL) {
-        String* xref_key;
-        xref_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+        String* xref_key = builder.createString("xref_table");
         if (xref_key) {
-            strcpy(xref_key->chars, "xref_table");
-            xref_key->len = 10;
-            xref_key->ref_cnt = 0;
-            map_put(pdf_info, xref_key, xref_table, input);
+            builder.putToMap(pdf_info, xref_key, xref_table);
         }
     }
 
     // Store trailer if found
     if (trailer .item != ITEM_NULL) {
-        String* trailer_key;
-        trailer_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        String* trailer_key = builder.createString("trailer");
         if (trailer_key) {
-            strcpy(trailer_key->chars, "trailer");
-            trailer_key->len = 7;
-            trailer_key->ref_cnt = 0;
-            map_put(pdf_info, trailer_key, trailer, input);
+            builder.putToMap(pdf_info, trailer_key, trailer);
         }
     }
 
     // Add basic PDF statistics
-    String* stats_key;
-    stats_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+    String* stats_key = builder.createString("statistics");
     if (stats_key) {
-        strcpy(stats_key->chars, "statistics");
-        stats_key->len = 10;
-        stats_key->ref_cnt = 0;
-
         // Create statistics map
         Map* stats_map = map_pooled(input->pool);
         if (stats_map) {
             if (stats_map->data) {
                 // Object count (use objects array length if available)
-                String* obj_count_key;
-                obj_count_key = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+                String* obj_count_key = builder.createString("object_count");
                 if (obj_count_key) {
-                    strcpy(obj_count_key->chars, "object_count");
-                    obj_count_key->len = 12;
-                    obj_count_key->ref_cnt = 0;
                     double* obj_count_val;
                     obj_count_val = (double*)pool_calloc(input->pool, sizeof(double));
                     if (obj_count_val) {
                         *obj_count_val = objects ? (double)objects->length : 0.0;
                         Item obj_count_item = {.item = d2it(obj_count_val)};
-                        map_put(stats_map, obj_count_key, obj_count_item, input);
+                        builder.putToMap(stats_map, obj_count_key, obj_count_item);
                     }
                 }
 
                 // Has xref table
-                String* has_xref_key;
-                has_xref_key = (String*)pool_calloc(input->pool, sizeof(String) + 10);
+                String* has_xref_key = builder.createString("has_xref");
                 if (has_xref_key) {
-                    strcpy(has_xref_key->chars, "has_xref");
-                    has_xref_key->len = 8;
-                    has_xref_key->ref_cnt = 0;
                     Item has_xref_item = {.item = b2it(xref_table .item != ITEM_NULL)};
-                    map_put(stats_map, has_xref_key, has_xref_item, input);
+                    builder.putToMap(stats_map, has_xref_key, has_xref_item);
                 }
 
                 // Has trailer
-                String* has_trailer_key;
-                has_trailer_key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+                String* has_trailer_key = builder.createString("has_trailer");
                 if (has_trailer_key) {
-                    strcpy(has_trailer_key->chars, "has_trailer");
-                    has_trailer_key->len = 11;
-                    has_trailer_key->ref_cnt = 0;
                     Item has_trailer_item = {.item = b2it(trailer .item != ITEM_NULL)};
-                    map_put(stats_map, has_trailer_key, has_trailer_item, input);
+                    builder.putToMap(stats_map, has_trailer_key, has_trailer_item);
                 }
 
                 // Count stream objects
@@ -1392,75 +1202,54 @@ void parse_pdf(Input* input, const char* pdf_string) {
                 }
 
                 // Stream count
-                String* stream_count_key;
-                stream_count_key = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+                String* stream_count_key = builder.createString("stream_count");
                 if (stream_count_key) {
-                    strcpy(stream_count_key->chars, "stream_count");
-                    stream_count_key->len = 12;
-                    stream_count_key->ref_cnt = 0;
                     double* stream_count_val;
                     stream_count_val = (double*)pool_calloc(input->pool, sizeof(double));
                     if (stream_count_val) {
                         *stream_count_val = (double)stream_count;
                         Item stream_count_item = {.item = d2it(stream_count_val)};
-                        map_put(stats_map, stream_count_key, stream_count_item, input);
+                        builder.putToMap(stats_map, stream_count_key, stream_count_item);
                     }
                 }
 
                 // PDF features detected
-                String* features_key;
-                features_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+                String* features_key = builder.createString("features");
                 if (features_key) {
-                    strcpy(features_key->chars, "features");
-                    features_key->len = 8;
-                    features_key->ref_cnt = 0;
-
                     // Create a features array
                     Array* features_array = array_pooled(input->pool);
                     if (features_array) {
                         // Add features based on what we've found
                         if (xref_table .item != ITEM_NULL) {
-                            String* xref_feature;
-                            xref_feature = (String*)pool_calloc(input->pool, sizeof(String) + 20);
+                            String* xref_feature = builder.createString("cross_reference_table");
                             if (xref_feature) {
-                                strcpy(xref_feature->chars, "cross_reference_table");
-                                xref_feature->len = 19;
-                                xref_feature->ref_cnt = 0;
                                 Item xref_feature_item = {.item = s2it(xref_feature)};
                                 array_append(features_array, xref_feature_item, input->pool);
                             }
                         }
 
                         if (trailer .item != ITEM_NULL) {
-                            String* trailer_feature;
-                            trailer_feature = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+                            String* trailer_feature = builder.createString("trailer");
                             if (trailer_feature) {
-                                strcpy(trailer_feature->chars, "trailer");
-                                trailer_feature->len = 7;
-                                trailer_feature->ref_cnt = 0;
                                 Item trailer_feature_item = {.item = s2it(trailer_feature)};
                                 array_append(features_array, trailer_feature_item, input->pool);
                             }
                         }
 
-                        String* objects_feature;
-                        objects_feature = (String*)pool_calloc(input->pool, sizeof(String) + 16);
+                        String* objects_feature = builder.createString("indirect_objects");
                         if (objects_feature) {
-                            strcpy(objects_feature->chars, "indirect_objects");
-                            objects_feature->len = 15;
-                            objects_feature->ref_cnt = 0;
                             Item objects_feature_item = {.item = s2it(objects_feature)};
                             array_append(features_array, objects_feature_item, input->pool);
                         }
 
                         Item features_item = {.item = (uint64_t)features_array};
-                        map_put(stats_map, features_key, features_item, input);
+                        builder.putToMap(stats_map, features_key, features_item);
                     }
                 }
             }
 
             Item stats_item = {.item = (uint64_t)stats_map};
-            map_put(pdf_info, stats_key, stats_item, input);
+            builder.putToMap(pdf_info, stats_key, stats_item);
         }
     }
 

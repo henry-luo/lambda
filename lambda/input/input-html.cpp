@@ -4,13 +4,13 @@
 #include "input-html-tree.h"
 #include "input-html-context.h"
 #include "../mark_builder.hpp"
-#include "input_context.hpp"
+#include "html_input_context.hpp"
 #include "source_tracker.hpp"
 #include <stdarg.h>
 
 using namespace lambda;
 
-static Item parse_element(InputContext& ctx, const char **html, const char *html_start, HtmlParserContext* context);
+static Item parse_element(HtmlInputContext& ctx, const char **html, const char *html_start);
 
 // Global length limit for text content, strings, and raw text elements
 static const int MAX_CONTENT_CHARS = 256 * 1024; // 256KB
@@ -60,17 +60,17 @@ static void skip_whitespace(const char **html) {
     html_skip_whitespace(html);
 }
 
-// Compatibility wrapper - parse_string_content now calls html_parse_string_content
-static String* parse_string_content(InputContext& ctx, const char **html, char end_char) {
+// Wrapper function for compatibility - now calls html_parse_string_content
+static String* parse_string_content(HtmlInputContext& ctx, const char **html, char end_char) {
     return html_parse_string_content(ctx.builder().stringBuf(), html, end_char);
 }
 
 // Continue with parse_attribute_value (kept here as it needs Input context)
-static String* parse_attribute_value(InputContext& ctx, const char **html, const char *html_start) {
+static String* parse_attribute_value(HtmlInputContext& ctx, const char **html, const char *html_start) {
     return html_parse_attribute_value(ctx.builder().stringBuf(), html, html_start);
 }
 
-static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const char **html, const char *html_start) {
+static bool parse_attributes(HtmlInputContext& ctx, ElementBuilder& element, const char **html, const char *html_start) {
     skip_whitespace(html);
 
     int attr_count = 0;
@@ -127,12 +127,12 @@ static bool parse_attributes(InputContext& ctx, ElementBuilder& element, const c
     return true;
 }
 
-static String* parse_tag_name(InputContext& ctx, const char **html) {
+static String* parse_tag_name(HtmlInputContext& ctx, const char **html) {
     return html_parse_tag_name(ctx.builder().stringBuf(), html);
 }
 
 // Parse HTML comment and return it as an element with tag name "!--"
-static Item parse_comment(InputContext& ctx, const char **html, const char* html_start) {
+static Item parse_comment(HtmlInputContext& ctx, const char **html, const char* html_start) {
     if (strncmp(*html, "<!--", 4) != 0) {
         return {.item = ITEM_ERROR};
     }
@@ -169,7 +169,7 @@ static Item parse_comment(InputContext& ctx, const char **html, const char* html
 }
 
 // Parse DOCTYPE declaration and return it as an element with tag name "!DOCTYPE" or "!doctype"
-static Item parse_doctype(InputContext& ctx, const char **html, const char* html_start) {
+static Item parse_doctype(HtmlInputContext& ctx, const char **html, const char* html_start) {
     if (strncasecmp(*html, "<!doctype", 9) != 0) {
         return {.item = ITEM_ERROR};
     }
@@ -216,8 +216,7 @@ static Item parse_doctype(InputContext& ctx, const char **html, const char* html
 }
 
 // Parse XML declaration and return it as an element with tag name "?xml"
-// Example: <?xml version="1.0" encoding="utf-8"?>
-static Item parse_xml_declaration(InputContext& ctx, const char **html, const char* html_start) {
+static Item parse_xml_declaration(HtmlInputContext& ctx, const char **html, const char* html_start) {
     if (strncmp(*html, "<?xml", 5) != 0) {
         return {.item = ITEM_ERROR};
     }
@@ -294,7 +293,7 @@ static bool is_aria_attribute(const char* attr_name) {
     return html_is_aria_attribute(attr_name);
 }
 
-static Item parse_element(InputContext& ctx, const char **html, const char *html_start, HtmlParserContext* context) {
+static Item parse_element(HtmlInputContext& ctx, const char **html, const char *html_start) {
     html_enter_element();
     int parse_depth = html_get_parse_depth();
 
@@ -316,7 +315,7 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
         skip_doctype(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(ctx, html, html_start, context); // Try next element
+            Item result = parse_element(ctx, html, html_start); // Try next element
             html_exit_element();
             return result;
         }
@@ -330,7 +329,7 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
         skip_processing_instruction(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(ctx, html, html_start, context); // Try next element
+            Item result = parse_element(ctx, html, html_start); // Try next element
             html_exit_element();
             return result;
         }
@@ -344,7 +343,7 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
         skip_cdata(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(ctx, html, html_start, context); // Try next element
+            Item result = parse_element(ctx, html, html_start); // Try next element
             html_exit_element();
             return result;
         }
@@ -366,6 +365,7 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
         String* closing_tag_name = parse_tag_name(ctx, html);
 
         // Phase 4.2: Transition insertion mode for closing tag
+        HtmlParserContext* context = ctx.htmlContext();
         if (context && closing_tag_name && closing_tag_name->len > 0) {
             html_context_transition_mode(context, closing_tag_name->chars, true);
 
@@ -399,6 +399,9 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
         log_parse_error(html_start, *html, "Unexpected end of input");
         return {.item = ITEM_ERROR};
     }
+
+    // Get HTML parser context for state management
+    HtmlParserContext* context = ctx.htmlContext();
 
     // Phase 5: Push element onto open element stack
     if (context && context->open_elements) {
@@ -482,8 +485,8 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
             attr_value = (Item){.item = b2it(true)};
         }
 
-        // Add attribute to element using elmt_put through InputContext's builder
-        elmt_put(element, attr_name, attr_value, ctx.input()->pool);
+        // Add attribute to element using builder
+        ctx.builder().putToElement(element, attr_name, attr_value);
 
         skip_whitespace(html);
     }
@@ -582,7 +585,7 @@ static Item parse_element(InputContext& ctx, const char **html, const char *html
                     } else {
                         // Parse child element
                         const char* before_child_parse = *html;
-                        Item child = parse_element(ctx, html, html_start, context);
+                        Item child = parse_element(ctx, html, html_start);
 
                         TypeId child_type = get_type_id(child);
                         if (child_type == LMD_TYPE_ERROR) {
@@ -817,17 +820,8 @@ __attribute__((visibility("hidden")))
 void parse_html_impl(Input* input, const char* html_string) {
     const char *html = html_string;
 
-    // create error tracking context with source
-    InputContext ctx(input, html_string, strlen(html_string));
-
-    // Create parser context to track document structure
-    HtmlParserContext* context = html_context_create(input);
-    if (!context) {
-        ctx.addError("Failed to create HTML parser context");
-        log_error("Failed to create HTML parser context");
-        input->root = (Item){.item = ITEM_ERROR};
-        return;
-    }
+    // Create HTML input context with error tracking and HTML5 state management
+    HtmlInputContext ctx(input, html_string, strlen(html_string));
 
     // Create a root-level list to collect DOCTYPE, comments, and the main element
     List* root_list = (List*)pool_calloc(input->pool, sizeof(List));
@@ -840,7 +834,6 @@ void parse_html_impl(Input* input, const char* html_string) {
 
     if (!root_list) {
         ctx.addError("Failed to allocate memory for root list");
-        html_context_destroy(context);
         input->root = (Item){.item = ITEM_ERROR};
         return;
     }
@@ -900,7 +893,7 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse regular element (should be <html> or similar)
         if (*html == '<' && *(html + 1) != '/' && *(html + 1) != '!') {
-            Item element_item = parse_element(ctx, &html, html_string, context);
+            Item element_item = parse_element(ctx, &html, html_string);
             if (element_item.item != ITEM_ERROR && element_item.item != ITEM_NULL) {
                 list_push(root_list, element_item);
             }
@@ -935,6 +928,5 @@ void parse_html_impl(Input* input, const char* html_string) {
         // errors occurred during parsing
     }
 
-    // Clean up parser context
-    html_context_destroy(context);
+    // HtmlInputContext destructor will automatically clean up HtmlParserContext
 }

@@ -23,7 +23,7 @@ typedef enum {
 typedef struct {
     MarkupFormat format;
     const char* flavor;  // e.g., "github", "commonmark", "mediawiki"
-    bool strict_mode;    // Strict vs. lenient parsing
+    bool strict_mode;    // strict vs. lenient parsing
 } ParseConfig;
 
 // Block element types for enhanced parsing
