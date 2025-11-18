@@ -17,6 +17,8 @@ extern "C" {
 #include "../../lib/log.h"
 }
 
+extern "C" void skip_whitespace(const char **text);
+
 // HTML entity table (80+ named entities)
 static const struct {
     const char* name;
@@ -55,21 +57,6 @@ static const char* find_html_entity(const char* name, size_t len) {
         }
     }
     return NULL;
-}
-
-void html_skip_whitespace(const char **html) {
-    int whitespace_count = 0;
-    const int max_whitespace = 1000; // safety limit
-
-    while (**html && (**html == ' ' || **html == '\n' || **html == '\r' || **html == '\t') &&
-           whitespace_count < max_whitespace) {
-        (*html)++;
-        whitespace_count++;
-    }
-
-    if (whitespace_count >= max_whitespace) {
-        log_warn("Hit whitespace limit, possible infinite loop in skip_whitespace");
-    }
 }
 
 void html_to_lowercase(char* str) {
@@ -191,7 +178,7 @@ String* html_parse_string_content(StringBuf* sb, const char **html, char end_cha
 }
 
 String* html_parse_attribute_value(StringBuf* sb, const char **html, const char *html_start) {
-    html_skip_whitespace(html);
+    skip_whitespace(html);
 
     log_debug("Parsing attr value at char: %d, '%c'", (int)(*html - html_start), **html);
     if (**html == '"') {

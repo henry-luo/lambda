@@ -9,12 +9,6 @@ static Element* parse_element(InputContext& ctx, const char **mark);
 static Item parse_value(InputContext& ctx, const char **mark);
 static Item parse_content(InputContext& ctx, const char **mark);
 
-static void skip_whitespace(const char **mark) {
-    while (**mark && (**mark == ' ' || **mark == '\n' || **mark == '\r' || **mark == '\t')) {
-        (*mark)++;
-    }
-}
-
 static void skip_comments(const char **mark) {
     skip_whitespace(mark);
     while (**mark == '/' && *(*mark + 1) == '/') {

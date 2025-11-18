@@ -150,7 +150,6 @@ static bool is_blockquote(const char* line);
 static bool is_table_row(const char* line);
 
 // Common utility functions
-#define skip_whitespace input_skip_whitespace
 #define is_whitespace_char input_is_whitespace_char
 #define is_empty_line input_is_empty_line
 #define count_leading_chars input_count_leading_chars

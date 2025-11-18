@@ -144,12 +144,6 @@ static bool handle_escape_sequence(InputContext& ctx, StringBuf* sb, const char 
     return true;
 }
 
-static void skip_whitespace(const char **toml) {
-    while (**toml && (**toml == ' ' || **toml == '\t')) {
-        (*toml)++;
-    }
-}
-
 static void skip_line(const char **toml, int *line_num) {
     while (**toml && **toml != '\n') {
         (*toml)++;
@@ -160,7 +154,7 @@ static void skip_line(const char **toml, int *line_num) {
     }
 }
 
-static void skip_whitespace_and_comments(const char **toml, int *line_num) {
+static void skip_tab_pace_and_comments(const char **toml, int *line_num) {
     while (**toml) {
         if (**toml == ' ' || **toml == '\t') {
             (*toml)++;
@@ -632,7 +626,7 @@ static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
     if (!arr) return NULL;
 
     (*toml)++; // skip [
-    skip_whitespace_and_comments(toml, line_num);
+    skip_tab_pace_and_comments(toml, line_num);
 
     if (**toml == ']') {
         (*toml)++;
@@ -646,7 +640,7 @@ static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
         }
         array_append(arr, value, input->pool);
 
-        skip_whitespace_and_comments(toml, line_num);
+        skip_tab_pace_and_comments(toml, line_num);
 
         if (**toml == ']') {
             (*toml)++;
@@ -656,7 +650,7 @@ static Array* parse_array(InputContext& ctx, const char **toml, int *line_num) {
             return NULL;
         }
         (*toml)++; // skip comma
-        skip_whitespace_and_comments(toml, line_num);
+        skip_tab_pace_and_comments(toml, line_num);
 
         // Handle trailing comma
         if (**toml == ']') {
@@ -680,7 +674,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
 
     (*toml)++; // skip '{'
     tracker.advance(1);
-    skip_whitespace(toml);
+    skip_tab_pace(toml);
 
     if (**toml == '}') { // empty table
         (*toml)++;
@@ -694,13 +688,13 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
             return NULL;
         }
 
-        skip_whitespace(toml);
+        skip_tab_pace(toml);
         if (**toml != '=') {
             return NULL;
         }
         (*toml)++;
         tracker.advance(1);
-        skip_whitespace(toml);
+        skip_tab_pace(toml);
 
         Item value = parse_value(ctx, toml, line_num);
         if (value.item == ITEM_ERROR) {
@@ -709,7 +703,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
 
         ctx.builder().putToMap(mp, key, value);
 
-        skip_whitespace(toml);
+        skip_tab_pace(toml);
         if (**toml == '}') {
             (*toml)++;
             tracker.advance(1);
@@ -720,7 +714,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
         }
         (*toml)++;
         tracker.advance(1);
-        skip_whitespace(toml);
+        skip_tab_pace(toml);
     }
     return mp;
 }
@@ -731,7 +725,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
     Input* input = ctx.input();
     MarkBuilder* builder = &ctx.builder();
 
-    skip_whitespace_and_comments(toml, line_num);
+    skip_tab_pace_and_comments(toml, line_num);
 
     SourceLocation value_loc = tracker.location();
     switch (**toml) {
@@ -939,12 +933,12 @@ static bool parse_table_header(const char **toml, char *table_name, int *line_nu
     if (**toml != '[') return false;
     (*toml)++; // skip '['
 
-    skip_whitespace(toml);
+    skip_tab_pace(toml);
 
     int i = 0;
     while (**toml && **toml != ']' && i < 255) {
         if (**toml == ' ' || **toml == '\t') {
-            skip_whitespace(toml);
+            skip_tab_pace(toml);
             continue;
         }
         table_name[i++] = **toml;
@@ -975,7 +969,7 @@ void parse_toml(Input* input, const char* toml_string) {
     TypeMap* current_table_type = (TypeMap*)root_map->type;
 
     while (*toml) {
-        skip_whitespace_and_comments(&toml, &line_num);
+        skip_tab_pace_and_comments(&toml, &line_num);
         if (!*toml) break;
 
         // Check for table header
@@ -1013,7 +1007,7 @@ void parse_toml(Input* input, const char* toml_string) {
             continue;
         }
 
-        skip_whitespace(&toml);
+        skip_tab_pace(&toml);
         if (*toml != '=') {
             ctx.addError(ctx.tracker().location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
             skip_line(&toml, &line_num);

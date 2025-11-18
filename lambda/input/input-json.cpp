@@ -7,12 +7,6 @@ using namespace lambda;
 
 static Item parse_value(InputContext& ctx, const char **json);
 
-static void skip_whitespace(const char **json) {
-    while (**json && (**json == ' ' || **json == '\n' || **json == '\r' || **json == '\t')) {
-        (*json)++;
-    }
-}
-
 static String* parse_string(InputContext& ctx, const char **json) {
     SourceTracker& tracker = ctx.tracker();
 

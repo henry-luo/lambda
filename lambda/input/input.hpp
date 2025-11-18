@@ -39,7 +39,8 @@ public:
 extern "C" {
 #endif
 // Common input utility functions
-void input_skip_whitespace(const char **text);
+void skip_whitespace(const char **text);    // skip spaces, tabs, newlines
+void skip_tab_pace(const char **text);      // skip spaces and tabs only
 bool input_is_whitespace_char(char c);
 bool input_is_empty_line(const char* line);
 int input_count_leading_chars(const char* str, char ch);

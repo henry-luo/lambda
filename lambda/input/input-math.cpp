@@ -668,7 +668,6 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
 static Item parse_math_number(InputContext& ctx, const char **math);
 static Item parse_math_identifier(InputContext& ctx, const char **math);
 static Item create_binary_expr(InputContext& ctx, const char* op_name, Item left, Item right);
-static void skip_math_whitespace(const char **math);
 static bool is_relational_operator(const char *math);
 
 // Helper functions
@@ -679,11 +678,6 @@ static Item parse_function_call(InputContext& ctx, const char **math, MathFlavor
 // Forward declarations for helper functions from input-common.cpp
 extern bool is_trig_function(const char* func_name);
 extern bool is_log_function(const char* func_name);
-
-// skip whitespace helper
-static void skip_math_whitespace(const char **math) {
-    skip_common_whitespace(math);
-}
 
 // Check if a LaTeX command is a relational operator
 static bool is_relational_operator(const char *math) {
@@ -840,7 +834,7 @@ static Item parse_math_identifier(InputContext& ctx, const char **math) {
     Item symbol_item = {.item = y2it(id_string)};
 
     // Check for prime notation after the identifier
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Count consecutive single quotes for prime notation
     int prime_count = 0;
@@ -912,7 +906,7 @@ static Item parse_math_identifier(InputContext& ctx, const char **math) {
 // parse latex fraction \frac{numerator}{denominator}
 static Item parse_latex_frac(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for numerator
     if (**math != '{') {
@@ -932,7 +926,7 @@ static Item parse_latex_frac(InputContext& ctx, const char **math) {
     }
     (*math)++; // skip }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for denominator
     if (**math != '{') {
@@ -971,7 +965,7 @@ static Item parse_latex_frac(InputContext& ctx, const char **math) {
 // parse latex square root \sqrt{expression}
 static Item parse_latex_sqrt(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item index_item = {.item = ITEM_NULL};
 
@@ -990,7 +984,7 @@ static Item parse_latex_sqrt(InputContext& ctx, const char **math) {
             return {.item = ITEM_ERROR};
         }
         (*math)++; // skip ]
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // expect opening brace for radicand
@@ -1045,7 +1039,7 @@ static Item parse_latex_sqrt(InputContext& ctx, const char **math) {
 // parse latex superscript ^{expression}
 static Item parse_latex_superscript(InputContext& ctx, const char **math, Item base) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item exponent;
     if (**math == '{') {
@@ -1087,7 +1081,7 @@ static Item parse_latex_superscript(InputContext& ctx, const char **math, Item b
 // parse latex subscript _{expression}
 static Item parse_latex_subscript(InputContext& ctx, const char **math, Item base) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item subscript;
     if (**math == '{') {
@@ -1295,12 +1289,12 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
         Element* sum_element = create_math_element(input, "sum");
         if (!sum_element) return {.item = ITEM_ERROR};
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Parse subscript if present
         if (**math == '_') {
             (*math)++; // skip _
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item lower_bound = {.item = ITEM_ERROR};
             if (**math == '{') {
@@ -1318,12 +1312,12 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
             }
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Parse superscript if present
         if (**math == '^') {
             (*math)++; // skip ^
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item upper_bound = {.item = ITEM_ERROR};
             if (**math == '{') {
@@ -1342,7 +1336,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
         }
 
         // Parse the summand/main expression if present
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         if (**math && **math != '}' && **math != '$' && **math != '\n') {
             Item summand = parse_multiplication_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -1360,12 +1354,12 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
         Element* prod_element = create_math_element(input, "prod");
         if (!prod_element) return {.item = ITEM_ERROR};
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Parse subscript if present
         if (**math == '_') {
             (*math)++; // skip _
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item lower_bound = {.item = ITEM_ERROR};
             if (**math == '{') {
@@ -1383,12 +1377,12 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
             }
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Parse superscript if present
         if (**math == '^') {
             (*math)++; // skip ^
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item upper_bound = {.item = ITEM_ERROR};
             if (**math == '{') {
@@ -1407,7 +1401,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
         }
 
         // Parse the summand/main expression if present
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         if (**math && **math != '}' && **math != '$' && **math != '\n') {
             Item summand = parse_multiplication_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -1467,7 +1461,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
     } else if (strcmp(cmd_string->chars, "left") == 0) {
         stringbuf_reset(sb);
         // Handle \left| for absolute value
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         if (**math == '|') {
             (*math)++; // skip |
             return parse_latex_abs(ctx, math);
@@ -1543,7 +1537,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
 static Item parse_typst_power(InputContext& ctx, const char **math, MathFlavor flavor, Item base) {
     Input* input = ctx.input();
     // In Typst, power is x^y
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item exponent = parse_math_primary(ctx, math, flavor);
     if (exponent .item == ITEM_ERROR) {
@@ -1578,7 +1572,7 @@ static Item parse_typst_fraction(InputContext& ctx, const char **math, MathFlavo
     }
     *math += 5; // skip "frac("
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Parse numerator
     Item numerator = parse_math_expression(ctx, math, flavor);
@@ -1586,7 +1580,7 @@ static Item parse_typst_fraction(InputContext& ctx, const char **math, MathFlavo
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Expect comma
     if (**math != ',') {
@@ -1594,7 +1588,7 @@ static Item parse_typst_fraction(InputContext& ctx, const char **math, MathFlavo
     }
     (*math)++; // skip comma
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Parse denominator
     Item denominator = parse_math_expression(ctx, math, flavor);
@@ -1602,7 +1596,7 @@ static Item parse_typst_fraction(InputContext& ctx, const char **math, MathFlavo
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Expect closing parenthesis
     if (**math != ')') {
@@ -1633,7 +1627,7 @@ static Item parse_function_call(InputContext& ctx, const char **math, MathFlavor
     }
     (*math)++; // skip (
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create function element
     Element* func_element = create_math_element(input, func_name);
@@ -1644,7 +1638,7 @@ static Item parse_function_call(InputContext& ctx, const char **math, MathFlavor
     // Parse arguments (comma-separated)
     if (**math != ')') { // Not empty argument list
         do {
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item arg = parse_math_expression(ctx, math, flavor);
             if (arg .item == ITEM_ERROR) {
@@ -1655,7 +1649,7 @@ static Item parse_function_call(InputContext& ctx, const char **math, MathFlavor
                 list_push((List*)func_element, arg);
             }
 
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             if (**math == ',') {
                 (*math)++; // skip comma
@@ -1682,7 +1676,7 @@ static Item parse_latex_function(InputContext& ctx, const char **math, const cha
     log_debug("parse_latex_function: called for '%s', math='%.20s'", func_name, *math);
 
     // Skip any whitespace after the function name
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     log_debug("parse_latex_function: after whitespace skip, math='%.20s'", *math);
 
@@ -1742,7 +1736,7 @@ static Item parse_ascii_power(InputContext& ctx, const char **math, MathFlavor f
         (*math)++; // skip ^
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item exponent = parse_math_primary(ctx, math, flavor);
     if (exponent .item == ITEM_ERROR) {
@@ -1768,7 +1762,7 @@ static Item parse_ascii_power(InputContext& ctx, const char **math, MathFlavor f
 // parse primary expression (numbers, identifiers, parentheses, commands)
 static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor flavor) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (!**math) {
         return {.item = ITEM_NULL};
@@ -1843,7 +1837,7 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
 
                 // Parse expressions inside the angle brackets
                 do {
-                    skip_math_whitespace(math);
+                    skip_whitespace(math);
 
                     Item arg = parse_math_expression(ctx, math, flavor);
                     if (arg .item == ITEM_ERROR) {
@@ -1854,7 +1848,7 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
                         list_push((List*)inner_product_element, arg);
                     }
 
-                    skip_math_whitespace(math);
+                    skip_whitespace(math);
 
                     if (**math == ',') {
                         (*math)++; // skip comma
@@ -1888,7 +1882,7 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
 
                 // Parse comma-separated expressions inside brackets
                 do {
-                    skip_math_whitespace(math);
+                    skip_whitespace(math);
                     if (**math == ']') break; // empty brackets or trailing comma
 
                     Item expr = parse_math_expression(ctx, math, flavor);
@@ -1896,7 +1890,7 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
                         list_push((List*)bracket_element, expr);
                     }
 
-                    skip_math_whitespace(math);
+                    skip_whitespace(math);
                     if (**math == ',') {
                         (*math)++; // skip comma and continue
                     } else {
@@ -2067,7 +2061,7 @@ static Item parse_relational_expression(InputContext& ctx, const char **math, Ma
         return left;
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Add loop safety: prevent infinite loops in relational parsing
     const size_t MAX_RELATIONAL_ITERATIONS = 100;
@@ -2180,7 +2174,7 @@ static Item parse_relational_expression(InputContext& ctx, const char **math, Ma
         }
 
         *math += op_len; // skip operator
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item right = parse_addition_expression(ctx, math, flavor);
         if (right .item == ITEM_ERROR || right .item == ITEM_NULL) {
@@ -2213,7 +2207,7 @@ static Item parse_relational_expression(InputContext& ctx, const char **math, Ma
             return {.item = ITEM_ERROR};
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         iteration_count++;
     }
 
@@ -2228,12 +2222,12 @@ static Item parse_relational_expression(InputContext& ctx, const char **math, Ma
 // parse addition and subtraction (lowest precedence)
 static Item parse_addition_expression(InputContext& ctx, const char **math, MathFlavor flavor) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Handle unary minus at the start of expression
     if (**math == '-') {
         (*math)++; // skip -
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item operand = parse_multiplication_expression(ctx, math, flavor);
         if (operand .item == ITEM_ERROR || operand .item == ITEM_NULL) {
@@ -2251,7 +2245,7 @@ static Item parse_addition_expression(InputContext& ctx, const char **math, Math
 
         Item left = {.item = (uint64_t)neg_element};
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Continue with normal addition/subtraction parsing
         while (**math && **math != '}' && (**math == '+' || **math == '-')) {
@@ -2259,7 +2253,7 @@ static Item parse_addition_expression(InputContext& ctx, const char **math, Math
             const char* op_name = (op == '+') ? "add" : "sub";
 
             (*math)++; // skip operator
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item right = parse_multiplication_expression(ctx, math, flavor);
             if (right .item == ITEM_ERROR) {
@@ -2271,7 +2265,7 @@ static Item parse_addition_expression(InputContext& ctx, const char **math, Math
                 return {.item = ITEM_ERROR};
             }
 
-            skip_math_whitespace(math);
+            skip_whitespace(math);
         }
 
         return left;
@@ -2282,7 +2276,7 @@ static Item parse_addition_expression(InputContext& ctx, const char **math, Math
         return left;
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Add loop safety: prevent infinite loops in addition parsing
     const size_t MAX_ADDITION_ITERATIONS = 100;
@@ -2296,7 +2290,7 @@ static Item parse_addition_expression(InputContext& ctx, const char **math, Math
         const char* position_before = *math;
 
         (*math)++; // skip operator
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item right = parse_multiplication_expression(ctx, math, flavor);
         if (right .item == ITEM_ERROR) {
@@ -2314,7 +2308,7 @@ static Item parse_addition_expression(InputContext& ctx, const char **math, Math
             return {.item = ITEM_ERROR};
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         iteration_count++;
     }
 
@@ -2334,7 +2328,7 @@ static Item parse_multiplication_expression(InputContext& ctx, const char **math
         return left;
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Add loop safety: prevent infinite loops in multiplication parsing
     const size_t MAX_MULTIPLICATION_ITERATIONS = 200;
@@ -2358,7 +2352,7 @@ static Item parse_multiplication_expression(InputContext& ctx, const char **math
             char op = **math;
             op_name = (op == '*') ? "times" : "div";  // Use times instead of mul for explicit *
             (*math)++; // skip operator
-            skip_math_whitespace(math);
+            skip_whitespace(math);
         }
         // Check for LaTeX binary operators (boxed operators, etc.)
         else if (**math == '\\' && flavor == MATH_FLAVOR_LATEX) {
@@ -2380,32 +2374,32 @@ static Item parse_multiplication_expression(InputContext& ctx, const char **math
                         explicit_op = true;
                         op_name = "boxdot";
                         *math = cmd_end; // advance past the command
-                        skip_math_whitespace(math);
+                        skip_whitespace(math);
                     } else if (strcmp(cmd_buffer, "boxplus") == 0) {
                         explicit_op = true;
                         op_name = "boxplus";
                         *math = cmd_end; // advance past the command
-                        skip_math_whitespace(math);
+                        skip_whitespace(math);
                     } else if (strcmp(cmd_buffer, "boxminus") == 0) {
                         explicit_op = true;
                         op_name = "boxminus";
                         *math = cmd_end; // advance past the command
-                        skip_math_whitespace(math);
+                        skip_whitespace(math);
                     } else if (strcmp(cmd_buffer, "boxtimes") == 0) {
                         explicit_op = true;
                         op_name = "boxtimes";
                         *math = cmd_end; // advance past the command
-                        skip_math_whitespace(math);
+                        skip_whitespace(math);
                     } else if (strcmp(cmd_buffer, "cdot") == 0) {
                         explicit_op = true;
                         op_name = "cdot";
                         *math = cmd_end; // advance past the command
-                        skip_math_whitespace(math);
+                        skip_whitespace(math);
                     } else if (strcmp(cmd_buffer, "times") == 0) {
                         explicit_op = true;
                         op_name = "times";
                         *math = cmd_end; // advance past the command
-                        skip_math_whitespace(math);
+                        skip_whitespace(math);
                     }
                     else if (strcmp(cmd_buffer, "prec") == 0 || strcmp(cmd_buffer, "preceq") == 0 ||
                              strcmp(cmd_buffer, "succ") == 0 || strcmp(cmd_buffer, "succeq") == 0 ||
@@ -2460,7 +2454,7 @@ static Item parse_multiplication_expression(InputContext& ctx, const char **math
             return {.item = ITEM_ERROR};
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         iteration_count++;
     }
 
@@ -2480,13 +2474,13 @@ static Item parse_power_expression(InputContext& ctx, const char **math, MathFla
         return left;
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Handle power operations for ASCII flavor
     if (flavor == MATH_FLAVOR_ASCII) {
         if (**math == '^') {
             (*math)++; // skip ^
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             // Power is right-associative, so we recursively call parse_power_expression
             Item right = parse_power_expression(ctx, math, flavor);
@@ -2510,7 +2504,7 @@ static Item parse_power_expression(InputContext& ctx, const char **math, MathFla
             return {.item = (uint64_t)pow_element};
         } else if (**math == '*' && *(*math + 1) == '*') {
             (*math) += 2; // skip **
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             // Power is right-associative, so we recursively call parse_power_expression
             Item right = parse_power_expression(ctx, math, flavor);
@@ -2546,7 +2540,7 @@ static Item parse_primary_with_postfix(InputContext& ctx, const char **math, Mat
         return left;
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // handle postfix operators (superscript, subscript, prime)
     // Add loop safety: prevent infinite loops in postfix parsing
@@ -2661,7 +2655,7 @@ static Item parse_primary_with_postfix(InputContext& ctx, const char **math, Mat
         if (!processed) {
             break;
         }
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         iteration_count++;
     }
 
@@ -2678,7 +2672,7 @@ static Item parse_primary_with_postfix(InputContext& ctx, const char **math, Mat
 // Parse LaTeX sum or product with limits: \sum_{i=1}^{n} or \prod_{i=0}^{n}
 static Item parse_latex_sum_or_prod(InputContext& ctx, const char **math, const char* op_name) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the sum/prod element
     Element* op_element = create_math_element(input, op_name);
@@ -2689,7 +2683,7 @@ static Item parse_latex_sum_or_prod(InputContext& ctx, const char **math, const 
     // Parse optional subscript (lower limit)
     if (**math == '_') {
         (*math)++; // skip _
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item lower_limit;
         if (**math == '{') {
@@ -2711,13 +2705,13 @@ static Item parse_latex_sum_or_prod(InputContext& ctx, const char **math, const 
 
         // Add lower limit as first child
         list_push((List*)op_element, lower_limit);
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Parse optional superscript (upper limit)
     if (**math == '^') {
         (*math)++; // skip ^
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item upper_limit;
         if (**math == '{') {
@@ -2739,12 +2733,12 @@ static Item parse_latex_sum_or_prod(InputContext& ctx, const char **math, const 
 
         // Add upper limit as second child
         list_push((List*)op_element, upper_limit);
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Parse the summand (the expression being summed)
     // This is critical for expressions like \sum_{n=0}^{\infty} \frac{x^n}{n!}
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (**math && **math != '}' && **math != '$') {
         Item summand = parse_multiplication_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -2762,7 +2756,7 @@ static Item parse_latex_sum_or_prod(InputContext& ctx, const char **math, const 
 // Parse LaTeX integral with limits: \int_{a}^{b} f(x) dx
 static Item parse_latex_integral(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the integral element
     Element* int_element = create_math_element(input, "int");
@@ -2773,7 +2767,7 @@ static Item parse_latex_integral(InputContext& ctx, const char **math) {
     // Parse optional subscript (lower limit)
     if (**math == '_') {
         (*math)++; // skip _
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item lower_limit;
         if (**math == '{') {
@@ -2794,13 +2788,13 @@ static Item parse_latex_integral(InputContext& ctx, const char **math) {
         }
 
         list_push((List*)int_element, lower_limit);
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Parse optional superscript (upper limit)
     if (**math == '^') {
         (*math)++; // skip ^
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item upper_limit;
         if (**math == '{') {
@@ -2821,7 +2815,7 @@ static Item parse_latex_integral(InputContext& ctx, const char **math) {
         }
 
         list_push((List*)int_element, upper_limit);
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Parse the integrand expression
@@ -2837,7 +2831,7 @@ static Item parse_latex_integral(InputContext& ctx, const char **math) {
 // Parse LaTeX limit: \lim_{x \to 0} f(x)
 static Item parse_latex_limit(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the limit element
     Element* lim_element = create_math_element(input, "lim");
@@ -2848,7 +2842,7 @@ static Item parse_latex_limit(InputContext& ctx, const char **math) {
     // Parse subscript (limit expression like x \to 0)
     if (**math == '_') {
         (*math)++; // skip _
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item limit_expr;
         if (**math == '{') {
@@ -2869,7 +2863,7 @@ static Item parse_latex_limit(InputContext& ctx, const char **math) {
         }
 
         list_push((List*)lim_element, limit_expr);
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Parse the function expression
@@ -2889,7 +2883,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
 // Also supports simplified syntax \matrix{a & b \\ c & d}
 static Item parse_latex_matrix(InputContext& ctx, const char **math, const char* matrix_type) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check if this is a full environment: \begin{matrix}
     if (strncmp(*math, "\\begin{", 7) == 0) {
@@ -2927,7 +2921,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
     const char* last_position = *math;
 
     while (**math && **math != '}' && iteration_count < MAX_MATRIX_ITERATIONS) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Safety check: ensure we're making progress
         if (*math == last_position && iteration_count > 0) {
@@ -2960,7 +2954,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
                 printf("ERROR: Failed to create matrix row element\n");
                 return {.item = ITEM_ERROR};
             }
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             continue;
         }
 
@@ -2968,7 +2962,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
             // Column separator - parse as next cell in row
             (*math)++; // skip &
             current_col++;
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             continue;
         }
 
@@ -2983,7 +2977,7 @@ static Item parse_latex_matrix(InputContext& ctx, const char **math, const char*
             list_push((List*)current_row, cell);
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         iteration_count++;
     }
 
@@ -3055,7 +3049,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
         printf("WARNING: Environment name '%s' doesn't match expected '%s'\n", env_name, matrix_type);
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the matrix element
     Element* matrix_element = create_math_element(input, matrix_type);
@@ -3078,7 +3072,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
     int current_col = 0;
 
     while (**math) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for end of environment
         if (strncmp(*math, "\\end{", 5) == 0) {
@@ -3108,7 +3102,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
                 printf("ERROR: Failed to create matrix row element\n");
                 return {.item = ITEM_ERROR};
             }
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             continue;
         }
 
@@ -3116,7 +3110,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
             // Column separator
             (*math)++; // skip &
             current_col++;
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             continue;
         }
 
@@ -3168,7 +3162,7 @@ static Item parse_latex_matrix_environment(InputContext& ctx, const char **math,
             list_push((List*)current_row, cell);
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Parse \end{environment}
@@ -3228,7 +3222,7 @@ static Item parse_latex_cases(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
     // Expected format: \begin{cases} expr1 & condition1 \\ expr2 & condition2 \\ ... \end{cases}
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check if this is a full environment: \begin{cases}
     if (strncmp(*math, "\\begin{", 7) == 0) {
@@ -3241,7 +3235,7 @@ static Item parse_latex_cases(InputContext& ctx, const char **math) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the cases element
     Element* cases_element = create_math_element(input, "cases");
@@ -3294,7 +3288,7 @@ static Item parse_latex_cases(InputContext& ctx, const char **math) {
 // Parse LaTeX equation environment: \begin{equation} ... \end{equation}
 static Item parse_latex_equation(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check if this is a full environment: \begin{equation}
     if (strncmp(*math, "\\begin{", 7) == 0) {
@@ -3309,7 +3303,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the equation element
     Element* eq_element = create_math_element(input, "equation");
@@ -3371,7 +3365,7 @@ static Item parse_latex_equation(InputContext& ctx, const char **math) {
 // Parse LaTeX align environment: \begin{align} ... \end{align}
 static Item parse_latex_align(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check if this is a full environment: \begin{align}
     if (strncmp(*math, "\\begin{", 7) == 0) {
@@ -3386,7 +3380,7 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the align element
     Element* align_element = create_math_element(input, "align");
@@ -3402,7 +3396,7 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
     int eq_count = 0;
 
     while (**math) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for end of environment
         if (strncmp(*math, "\\end{align}", 11) == 0) {
@@ -3428,12 +3422,12 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
             list_push((List*)eq_row, left_expr);
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for alignment point &
         if (**math == '&') {
             (*math)++; // skip &
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             // Parse right side of alignment
             Item right_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -3447,7 +3441,7 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
             }
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for row separator \\
         if (strncmp(*math, "\\\\", 2) == 0) {
@@ -3459,7 +3453,7 @@ static Item parse_latex_align(InputContext& ctx, const char **math) {
         list_push((List*)align_element, {.item = (uint64_t)eq_row});
         eq_count++;
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Add equation count as attribute
@@ -3477,7 +3471,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
     // Expected format: \begin{aligned} expr1 &= expr2 \\ expr3 &= expr4 \\ ... \end{aligned}
     // Similar to align but typically used inside other environments and not numbered
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check if this is a full environment: \begin{aligned}
     if (strncmp(*math, "\\begin{", 7) == 0) {
@@ -3492,7 +3486,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the aligned element
     Element* aligned_element = create_math_element(input, "aligned");
@@ -3508,7 +3502,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
     int eq_count = 0;
 
     while (**math) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for end of environment
         if (strncmp(*math, "\\end{aligned}", 13) == 0) {
@@ -3534,12 +3528,12 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
             list_push((List*)eq_row, left_expr);
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for alignment point &
         if (**math == '&') {
             (*math)++; // skip &
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             // Parse right side of alignment
             Item right_expr = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -3553,7 +3547,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
             }
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for row separator \\
         if (strncmp(*math, "\\\\", 2) == 0) {
@@ -3565,7 +3559,7 @@ static Item parse_latex_aligned(InputContext& ctx, const char **math) {
         list_push((List*)aligned_element, {.item = (uint64_t)eq_row});
         eq_count++;
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Add equation count as attribute
@@ -3583,7 +3577,7 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
     // Expected format: \begin{gather} expr1 \\ expr2 \\ ... \end{gather}
     // Center-aligned equations, each numbered
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check if this is a full environment: \begin{gather}
     if (strncmp(*math, "\\begin{", 7) == 0) {
@@ -3598,7 +3592,7 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create the gather element
     Element* gather_element = create_math_element(input, "gather");
@@ -3615,7 +3609,7 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
     int eq_count = 0;
 
     while (**math) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for end of environment
         if (strncmp(*math, "\\end{gather}", 12) == 0) {
@@ -3641,7 +3635,7 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
             list_push((List*)eq_element, eq_expr);
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Check for row separator \\
         if (strncmp(*math, "\\\\", 2) == 0) {
@@ -3653,7 +3647,7 @@ static Item parse_latex_gather(InputContext& ctx, const char **math) {
         list_push((List*)gather_element, {.item = (uint64_t)eq_element});
         eq_count++;
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
     }
 
     // Add equation count as attribute
@@ -3774,7 +3768,7 @@ static bool is_special_symbol(const char* cmd) {
 // Parse absolute value: \left| x \right| or \abs{x}
 static Item parse_latex_abs(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item inner;
 
@@ -3788,7 +3782,7 @@ static Item parse_latex_abs(InputContext& ctx, const char **math) {
             return {.item = ITEM_ERROR};
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Expect closing brace
         if (**math != '}') {
@@ -3804,7 +3798,7 @@ static Item parse_latex_abs(InputContext& ctx, const char **math) {
             return {.item = ITEM_ERROR};
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         // Expect \right|
         if (strncmp(*math, "\\right|", 7) != 0) {
@@ -3829,14 +3823,14 @@ static Item parse_latex_abs(InputContext& ctx, const char **math) {
 // Parse norm delimiters: \lVert x \rVert
 static Item parse_latex_norm(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     Item inner = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
     if (inner.item == ITEM_ERROR) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Expect \rVert
     if (strncmp(*math, "\\rVert", 6) != 0) {
@@ -3860,7 +3854,7 @@ static Item parse_latex_norm(InputContext& ctx, const char **math) {
 // Parse angle bracket delimiters: \langle x, y \rangle
 static Item parse_latex_angle_brackets(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create inner product element
     Element* inner_product_element = create_math_element(input, "inner_product");
@@ -3870,7 +3864,7 @@ static Item parse_latex_angle_brackets(InputContext& ctx, const char **math) {
 
     // Parse expressions inside the angle brackets
     do {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item arg = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
         if (arg.item == ITEM_ERROR) {
@@ -3881,7 +3875,7 @@ static Item parse_latex_angle_brackets(InputContext& ctx, const char **math) {
             list_push((List*)inner_product_element, arg);
         }
 
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         if (**math == ',') {
             (*math)++; // skip comma
@@ -3909,7 +3903,7 @@ static Item parse_latex_angle_brackets(InputContext& ctx, const char **math) {
 // Parse ceiling/floor functions: \lceil x \rceil, \lfloor x \rfloor
 static Item parse_latex_ceil_floor(InputContext& ctx, const char **math, const char* func_name) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Parse the inner expression - no braces expected, just parse until the closing delimiter
     Item inner = parse_math_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -3917,7 +3911,7 @@ static Item parse_latex_ceil_floor(InputContext& ctx, const char **math, const c
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Expect appropriate closing delimiter
     if (strcmp(func_name, "ceil") == 0 && strncmp(*math, "\\rceil", 6) == 0) {
@@ -3976,7 +3970,7 @@ static Item parse_prime_notation(InputContext& ctx, const char **math, Item base
 // Parse binomial coefficients: \binom{n}{k} or \choose{n}{k}
 static Item parse_latex_binomial(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for first argument
     if (**math != '{') {
@@ -3996,7 +3990,7 @@ static Item parse_latex_binomial(InputContext& ctx, const char **math) {
     }
     (*math)++; // skip }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for second argument
     if (**math != '{') {
@@ -4043,7 +4037,7 @@ static Item parse_latex_derivative(InputContext& ctx, const char **math) {
 // Parse vector notation: \vec{v}, \overrightarrow{AB}, etc.
 static Item parse_latex_vector(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace
     if (**math != '{') {
@@ -4081,7 +4075,7 @@ static Item parse_latex_vector(InputContext& ctx, const char **math) {
 // Parse accent marks: \hat{x}, \dot{x}, \bar{x}, etc.
 static Item parse_latex_accent(InputContext& ctx, const char **math, const char* accent_type) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace
     if (**math != '{') {
@@ -4145,7 +4139,7 @@ static Item parse_latex_arrow(InputContext& ctx, const char **math, const char* 
 // Parse over/under constructs: \overline{x}, \underline{x}, \overbrace{x}, \underbrace{x}
 static Item parse_latex_overunder(InputContext& ctx, const char **math, const char* construct_type) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace
     if (**math != '{') {
@@ -4317,10 +4311,10 @@ static Item parse_fraction(InputContext& ctx, const char **math, MathFlavor flav
         if (strcmp(def->special_parser, "parse_frac") == 0) {
             // Check if this might be a partial derivative fraction
             const char *lookahead = *math;
-            skip_math_whitespace(&lookahead);
+            skip_whitespace(&lookahead);
             if (*lookahead == '{') {
                 lookahead++; // skip {
-                skip_math_whitespace(&lookahead);
+                skip_whitespace(&lookahead);
                 // Check if numerator starts with \partial
                 if (strncmp(lookahead, "\\partial", 8) == 0) {
                     return parse_partial_derivative_frac(ctx, math);
@@ -4451,7 +4445,7 @@ static Item parse_logic(InputContext& ctx, const char **math, MathFlavor flavor,
 
     // Logic operators like \neg take one argument
     if (def->has_arguments && def->argument_count > 0) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         Item arg = parse_math_primary(ctx, math, flavor);
         if (arg.item != ITEM_ERROR) {
             list_push((List*)logic_element, arg);
@@ -4477,12 +4471,12 @@ static Item parse_number_set(InputContext& ctx, const char **math, MathFlavor fl
     // For LaTeX \mathbb{} syntax, parse the braces
     if (flavor == MATH_FLAVOR_LATEX && strncmp(def->latex_cmd, "mathbb{", 7) == 0) {
         // Skip the opening brace if not already consumed
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         if (**math == '{') {
             (*math)++;
 
             // Parse set identifier
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             if (**math && isalpha(**math)) {
                 char set_char[2] = {**math, '\0'};
                 add_attribute_to_element(input, set_element, "type", set_char);
@@ -4490,7 +4484,7 @@ static Item parse_number_set(InputContext& ctx, const char **math, MathFlavor fl
             }
 
             // Skip closing brace
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             if (**math == '}') {
                 (*math)++;
             }
@@ -4520,7 +4514,7 @@ static Item parse_calculus(InputContext& ctx, const char **math, MathFlavor flav
 
     // Handle differential operators with arguments
     if (def->has_arguments && def->argument_count == 1) {
-        skip_math_whitespace(math);
+        skip_whitespace(math);
         Item arg = parse_math_primary(ctx, math, flavor);
         if (arg .item != ITEM_ERROR) {
             list_push((List*)calc_element, arg);
@@ -4545,7 +4539,7 @@ static Item parse_algebra(InputContext& ctx, const char **math, MathFlavor flavo
     // Handle expressions with arguments (like binomial coefficients)
     if (def->has_arguments && def->argument_count > 0) {
         for (int i = 0; i < def->argument_count; i++) {
-            skip_math_whitespace(math);
+            skip_whitespace(math);
             Item arg = parse_math_primary(ctx, math, flavor);
             if (arg .item != ITEM_ERROR) {
                 list_push((List*)alg_element, arg);
@@ -4561,7 +4555,7 @@ static Item parse_algebra(InputContext& ctx, const char **math, MathFlavor flavo
 static Item parse_typography(InputContext& ctx, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Input* input = ctx.input();
     // Typography commands like \mathbf{x} need to parse the braced argument
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (**math != '{') {
         // No braced argument, treat as symbol
@@ -4633,7 +4627,7 @@ static Item parse_modular(InputContext& ctx, const char **math, MathFlavor flavo
     // Handle modular operations with arguments
     if (def->has_arguments && def->argument_count > 0) {
         for (int i = 0; i < def->argument_count; i++) {
-            skip_math_whitespace(math);
+            skip_whitespace(math);
 
             Item arg = {.item = ITEM_ERROR};
             if (**math == '{') {
@@ -4756,7 +4750,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     printf("Math flavor resolved to: %d\n", flavor);
 
     // parse the math expression with timeout check
-    skip_math_whitespace(&math);
+    skip_whitespace(&math);
 
     // Check timeout before parsing
     if ((clock() - start_time) / CLOCKS_PER_SEC > PARSING_TIMEOUT_SECONDS) {
@@ -4803,7 +4797,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
 // Parse styled fractions: \dfrac, \tfrac, \cfrac
 static Item parse_latex_frac_style(InputContext& ctx, const char **math, const char* style) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for numerator
     if (**math != '{') {
@@ -4823,7 +4817,7 @@ static Item parse_latex_frac_style(InputContext& ctx, const char **math, const c
     }
     (*math)++; // skip }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for denominator
     if (**math != '{') {
@@ -4865,7 +4859,7 @@ static Item parse_latex_frac_style(InputContext& ctx, const char **math, const c
 // Parse nth root with specified index: \root{n}\of{x}
 static Item parse_latex_root(InputContext& ctx, const char **math, const char* index) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace
     if (**math != '{') {
@@ -4906,7 +4900,7 @@ static Item parse_latex_root(InputContext& ctx, const char **math, const char* i
 // Parse general root with variable index: \root{n}\of{x}
 static Item parse_latex_root_with_index(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for index
     if (**math != '{') {
@@ -4926,7 +4920,7 @@ static Item parse_latex_root_with_index(InputContext& ctx, const char **math) {
     }
     (*math)++; // skip }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect \of
     if (strncmp(*math, "\\of", 3) != 0) {
@@ -4934,7 +4928,7 @@ static Item parse_latex_root_with_index(InputContext& ctx, const char **math) {
     }
     *math += 3;
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for radicand
     if (**math != '{') {
@@ -4975,7 +4969,7 @@ static Item parse_latex_root_with_index(InputContext& ctx, const char **math) {
 // Implementation for phantom spacing commands
 static Item parse_latex_phantom(InputContext& ctx, const char **math, const char* phantom_type) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (**math != '{') {
         return {.item = ITEM_ERROR}; // phantom commands require braces
@@ -5059,7 +5053,7 @@ static Item parse_inner_product(InputContext& ctx, const char **math, MathFlavor
     }
     (*math)++; // skip <
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Parse the first operand
     Item left_operand = parse_math_expression(ctx, math, flavor);
@@ -5067,7 +5061,7 @@ static Item parse_inner_product(InputContext& ctx, const char **math, MathFlavor
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check for comma separator
     if (**math != ',') {
@@ -5075,7 +5069,7 @@ static Item parse_inner_product(InputContext& ctx, const char **math, MathFlavor
     }
     (*math)++; // skip comma
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Parse the second operand
     Item right_operand = parse_math_expression(ctx, math, flavor);
@@ -5083,7 +5077,7 @@ static Item parse_inner_product(InputContext& ctx, const char **math, MathFlavor
         return {.item = ITEM_ERROR};
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Check for closing angle bracket
     if (**math != '>') {
@@ -5110,7 +5104,7 @@ static Item parse_inner_product(InputContext& ctx, const char **math, MathFlavor
 // Implementation for partial derivative fraction notation
 static Item parse_partial_derivative_frac(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for numerator
     if (**math != '{') {
@@ -5130,7 +5124,7 @@ static Item parse_partial_derivative_frac(InputContext& ctx, const char **math) 
     }
     (*math)++; // skip }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // expect opening brace for denominator
     if (**math != '{') {
@@ -5202,7 +5196,7 @@ static Item parse_latex_sum_or_prod_enhanced(InputContext& ctx, const char **mat
  Input* input = ctx.input();
 
     // Note: The command has already been consumed by parse_latex_command, so we don't need to check pattern
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create operator element
     Element* op_element = create_math_element(input, def->element_name);
@@ -5216,7 +5210,7 @@ static Item parse_latex_sum_or_prod_enhanced(InputContext& ctx, const char **mat
     // Parse optional bounds (subscript and superscript)
     if (**math == '_') {
         (*math)++; // skip _
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item lower_bound = {.item = ITEM_ERROR};
         if (**math == '{') {
@@ -5235,11 +5229,11 @@ static Item parse_latex_sum_or_prod_enhanced(InputContext& ctx, const char **mat
         }
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (**math == '^') {
         (*math)++; // skip ^
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item upper_bound = {.item = ITEM_ERROR};
         if (**math == '{') {
@@ -5259,7 +5253,7 @@ static Item parse_latex_sum_or_prod_enhanced(InputContext& ctx, const char **mat
     }
 
     // Parse the summand/main expression if present
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (**math && **math != '}' && **math != '$' && **math != '\n') {
         Item summand = parse_multiplication_expression(ctx, math, MATH_FLAVOR_LATEX);
@@ -5278,7 +5272,7 @@ static Item parse_latex_sum_or_prod_enhanced(InputContext& ctx, const char **mat
 static Item parse_latex_integral_enhanced(InputContext& ctx, const char **math, const MathExprDef *def) {
     Input* input = ctx.input();
     // Skip whitespace (the command has already been consumed)
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     // Create integral element
     Element* integral_element = create_math_element(input, def->element_name);
@@ -5292,7 +5286,7 @@ static Item parse_latex_integral_enhanced(InputContext& ctx, const char **math, 
     // Parse optional bounds directly into the integral element for big operator formatting
     if (**math == '_') {
         (*math)++; // skip _
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item lower_bound = {.item = ITEM_ERROR};
         if (**math == '{') {
@@ -5312,11 +5306,11 @@ static Item parse_latex_integral_enhanced(InputContext& ctx, const char **math, 
         }
     }
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     if (**math == '^') {
         (*math)++; // skip ^
-        skip_math_whitespace(math);
+        skip_whitespace(math);
 
         Item upper_bound = {.item = ITEM_ERROR};
         if (**math == '{') {
@@ -5339,7 +5333,7 @@ static Item parse_latex_integral_enhanced(InputContext& ctx, const char **math, 
     // Set content length
     ((TypeElmt*)integral_element->type)->content_length = ((List*)integral_element)->length;
 
-    skip_math_whitespace(math);
+    skip_whitespace(math);
 
     return {.item = (uint64_t)integral_element};
 }

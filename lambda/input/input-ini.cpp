@@ -5,12 +5,6 @@
 
 using namespace lambda;
 
-static void skip_whitespace(const char **ini) {
-    while (**ini && (**ini == ' ' || **ini == '\t')) {
-        (*ini)++;
-    }
-}
-
 static void skip_to_newline(const char **ini, SourceTracker* tracker = nullptr) {
     while (**ini && **ini != '\n' && **ini != '\r') {
         if (tracker) tracker->advance(**ini);
@@ -95,7 +89,7 @@ static String* parse_raw_value(InputContext& ctx, const char **ini) {
     StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
-    skip_whitespace(ini);
+    skip_tab_pace(ini);
     // handle quoted values
     bool quoted = false;
     if (**ini == '"' || **ini == '\'') {
@@ -250,7 +244,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
     if (!section_map) return NULL;
 
     while (**ini) {
-        skip_whitespace(ini);
+        skip_tab_pace(ini);
 
         // check for end of file
         if (!**ini) break;
@@ -273,7 +267,7 @@ static Map* parse_section(InputContext& ctx, const char **ini, String* section_n
             continue;
         }
 
-        skip_whitespace(ini);
+        skip_tab_pace(ini);
         if (**ini != '=') {
             ctx.addError(tracker.location(), "Expected '=' after key '%.*s'", (int)key->len, key->chars);
             skip_to_newline(ini, &tracker);
@@ -306,7 +300,7 @@ void parse_ini(Input* input, const char* ini_string) {
     // handle key-value pairs before any section (global section)
     Map* global_section = NULL;
     while (*current) {
-        skip_whitespace(&current);
+        skip_tab_pace(&current);
 
         // check for end of file
         if (!*current) break;

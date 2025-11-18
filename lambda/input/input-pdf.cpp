@@ -46,9 +46,8 @@ typedef struct {
     int length;
 } StreamObject;
 
-static void skip_whitespace(const char **pdf) {
-    while (**pdf && (**pdf == ' ' || **pdf == '\n' || **pdf == '\r' ||
-           **pdf == '\t' || **pdf == '\f')) {
+static void skip_pdf_whitespace(const char **pdf) {
+    while (**pdf && (**pdf == ' ' || **pdf == '\n' || **pdf == '\r' || **pdf == '\t' || **pdf == '\f')) {
         (*pdf)++;
     }
 }
@@ -59,13 +58,13 @@ static void skip_comments(const char **pdf) {
         while (**pdf && **pdf != '\n' && **pdf != '\r') {
             (*pdf)++;
         }
-        skip_whitespace(pdf);
+        skip_pdf_whitespace(pdf);
     }
 }
 
-static void skip_whitespace_and_comments(const char **pdf) {
+static void skip_pdf_whitespace_and_comments(const char **pdf) {
     while (**pdf) {
-        skip_whitespace(pdf);
+        skip_pdf_whitespace(pdf);
         if (**pdf == '%') {
             skip_comments(pdf);
         } else {
@@ -103,7 +102,7 @@ static Array* parse_pdf_array(InputContext& ctx, const char **pdf) {
     if (**pdf != '[') return NULL;
 
     (*pdf)++; // skip [
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     Array* arr = array_pooled(ctx.input()->pool);
     if (!arr) return NULL;
@@ -115,7 +114,7 @@ static Array* parse_pdf_array(InputContext& ctx, const char **pdf) {
             array_append(arr, obj, ctx.input()->pool);
             item_count++;
         }
-        skip_whitespace_and_comments(pdf);
+        skip_pdf_whitespace_and_comments(pdf);
     }
 
     if (**pdf == ']') {
@@ -129,7 +128,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
     if (!(**pdf == '<' && *(*pdf + 1) == '<')) return NULL;
 
     *pdf += 2; // skip <<
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     Map* dict = map_pooled(ctx.input()->pool);
     if (!dict) return NULL;
@@ -146,7 +145,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
         String* key = parse_pdf_name(ctx, pdf);
         if (!key) break;
 
-        skip_whitespace_and_comments(pdf);
+        skip_pdf_whitespace_and_comments(pdf);
 
         // parse value
         Item value = parse_pdf_object(ctx, pdf);
@@ -155,7 +154,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf) {
             pair_count++;
         }
 
-        skip_whitespace_and_comments(pdf);
+        skip_pdf_whitespace_and_comments(pdf);
     }
 
     if (**pdf == '>' && *(*pdf + 1) == '>') {
@@ -310,7 +309,7 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
         return {.item = ITEM_NULL};
     }
 
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     if (!**pdf) {
         call_count--;
@@ -384,7 +383,7 @@ static Item parse_pdf_object(InputContext& ctx, const char **pdf) {
         if (dict) {
             // Check if this dictionary is followed by a stream
             const char* saved_pos = *pdf;
-            skip_whitespace_and_comments(pdf);
+            skip_pdf_whitespace_and_comments(pdf);
             if (strncmp(*pdf, "stream", 6) == 0) {
                 // Parse as stream with dictionary
                 Item stream = parse_pdf_stream(ctx, pdf, dict);
@@ -419,7 +418,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     if (end == *pdf) return {.item = ITEM_ERROR}; // no conversion
 
     *pdf = end;
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
     if (!**pdf) return {.item = ITEM_ERROR};
 
     // Parse generation number
@@ -427,7 +426,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     if (end == *pdf) return {.item = ITEM_ERROR}; // no conversion
 
     *pdf = end;
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
     if (**pdf != 'R') return {.item = ITEM_ERROR};
     (*pdf)++; // skip R
 
@@ -479,19 +478,19 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     if (end == *pdf) return {.item = ITEM_ERROR};
 
     *pdf = end;
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     // Parse generation number
     gen_num = strtol(*pdf, &end, 10);
     if (end == *pdf) return {.item = ITEM_ERROR};
 
     *pdf = end;
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     // Check for "obj" keyword
     if (strncmp(*pdf, "obj", 3) != 0) return {.item = ITEM_ERROR};
     *pdf += 3;
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     // Parse the object content
     Item content = parse_pdf_object(ctx, pdf);
@@ -556,7 +555,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
     if (strncmp(*pdf, "stream", 6) != 0) return {.item = ITEM_ERROR};
 
     *pdf += 6; // skip stream
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     // find end of stream
     const char* end_stream = strstr(*pdf, "endstream");
@@ -640,7 +639,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
     if (strncmp(*pdf, "xref", 4) != 0) return {.item = ITEM_ERROR};
 
     *pdf += 4; // skip "xref"
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     // Create a map to represent the xref table
     Map* xref_map = map_pooled(ctx.input()->pool);
@@ -663,7 +662,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
         int max_entries = 20; // Conservative limit
 
         while (*pdf && entry_count < max_entries) {
-            skip_whitespace_and_comments(pdf);
+            skip_pdf_whitespace_and_comments(pdf);
 
             // Check if we've hit the trailer
             if (strncmp(*pdf, "trailer", 7) == 0) break;
@@ -671,27 +670,27 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
             // Try to parse a subsection header (starting_obj_num count)
             if (isdigit(**pdf)) {
                 int start_num = strtol(*pdf, (char**)pdf, 10);
-                skip_whitespace_and_comments(pdf);
+                skip_pdf_whitespace_and_comments(pdf);
 
                 if (isdigit(**pdf)) {
                     int count = strtol(*pdf, (char**)pdf, 10);
-                    skip_whitespace_and_comments(pdf);
+                    skip_pdf_whitespace_and_comments(pdf);
 
                     // Limit the number of entries we process
                     if (count > 10) count = 10;
 
                     // Parse individual entries
                     for (int i = 0; i < count && entry_count < max_entries; i++) {
-                        skip_whitespace_and_comments(pdf);
+                        skip_pdf_whitespace_and_comments(pdf);
 
                         // Parse entry: offset generation flag
                         if (isdigit(**pdf)) {
                             int offset = strtol(*pdf, (char**)pdf, 10);
-                            skip_whitespace_and_comments(pdf);
+                            skip_pdf_whitespace_and_comments(pdf);
 
                             if (isdigit(**pdf)) {
                                 int generation = strtol(*pdf, (char**)pdf, 10);
-                                skip_whitespace_and_comments(pdf);
+                                skip_pdf_whitespace_and_comments(pdf);
 
                                 // Parse flag (n or f)
                                 char flag = **pdf;
@@ -773,7 +772,7 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
     if (strncmp(*pdf, "trailer", 7) != 0) return {.item = ITEM_ERROR};
 
     *pdf += 7; // skip "trailer"
-    skip_whitespace_and_comments(pdf);
+    skip_pdf_whitespace_and_comments(pdf);
 
     // Parse the trailer dictionary
     Map* trailer_dict = parse_pdf_dictionary(ctx, pdf);
@@ -990,7 +989,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         builder.putToMap(pdf_info, version_key, version_item);
     }
 
-    skip_whitespace_and_comments(&pdf);
+    skip_pdf_whitespace_and_comments(&pdf);
 
     // Parse a few simple objects safely, and look for xref/trailer
     Array* objects = array_pooled(input->pool);
@@ -1004,7 +1003,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         const int max_consecutive_errors = 3;
 
         while (*pdf && obj_count < max_objects && consecutive_errors < max_consecutive_errors) {
-            skip_whitespace_and_comments(&pdf);
+            skip_pdf_whitespace_and_comments(&pdf);
             if (!*pdf) break;
 
             Item obj = {.item = ITEM_NULL};
@@ -1063,7 +1062,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             while (*scan_pdf && scanned < scan_limit) {
                 // Skip whitespace but be more careful about advancement
                 if (isspace(*scan_pdf) || *scan_pdf == '%') {
-                    skip_whitespace_and_comments(&scan_pdf);
+                    skip_pdf_whitespace_and_comments(&scan_pdf);
                     if (!*scan_pdf) break;
                     scanned += 10; // Count whitespace skipping as progress
                     continue;
@@ -1096,7 +1095,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                 // Check for startxref (PDF pointer to xref table)
                 if (strncmp(scan_pdf, "startxref", 9) == 0) {
                     scan_pdf += 9;
-                    skip_whitespace_and_comments(&scan_pdf);
+                    skip_pdf_whitespace_and_comments(&scan_pdf);
                     // Try to parse the xref offset number
                     if (isdigit(*scan_pdf)) {
                         long xref_offset = strtol(scan_pdf, (char**)&scan_pdf, 10);

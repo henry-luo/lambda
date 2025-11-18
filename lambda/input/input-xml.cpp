@@ -25,12 +25,6 @@ static const char* resolve_entity(const char* entity_name, size_t length) {
     return NULL; // Unknown entity
 }
 
-static void skip_whitespace(const char **xml) {
-    while (**xml && (**xml == ' ' || **xml == '\n' || **xml == '\r' || **xml == '\t')) {
-        (*xml)++;
-    }
-}
-
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char) {
     MarkBuilder& builder = ctx.builder();
     StringBuf* sb = builder.stringBuf();

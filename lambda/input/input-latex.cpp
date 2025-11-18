@@ -7,9 +7,9 @@
 
 using namespace lambda;
 
+void skip_latex_comment(const char **latex);
 // Forward declaration for math parser integration
 void parse_math(Input* input, const char* math_string, const char* flavor);
-
 static Item parse_latex_element(InputContext& ctx, const char **latex);
 
 // Local helper functions to replace macros
@@ -27,16 +27,8 @@ static inline void add_attribute_to_element(Input* input, Element* element, cons
     builder.putToElement(element, key, lambda_value);
 }
 
-static void skip_whitespace(const char **latex) {
-    skip_common_whitespace(latex);
-}
-
 // LaTeX special characters that need escaping
 static const char* latex_special_chars = "\\{}$&#^_%~";
-
-static void skip_comment(const char **latex) {
-    skip_latex_comment(latex);
-}
 
 static String* parse_latex_string_content(InputContext& ctx, const char **latex, char end_char) {
     MarkBuilder& builder = ctx.builder();
@@ -78,7 +70,7 @@ static String* parse_latex_string_content(InputContext& ctx, const char **latex,
             (*latex)++;
         } else if (**latex == '%') {
             // Skip LaTeX comments
-            skip_comment(latex);
+            skip_latex_comment(latex);
         } else {
             stringbuf_append_char(sb, **latex);
             (*latex)++;
@@ -641,7 +633,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                             list_push((List*)element, child);
                         }
                     } else if (**latex == '%') {
-                        skip_comment(latex);
+                        skip_latex_comment(latex);
                     } else {
                         // Parse text content with proper escape handling
                         StringBuf* text_sb = ctx.builder().stringBuf();
@@ -758,7 +750,7 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
 
     // Skip comments
     if (**latex == '%') {
-        skip_comment(latex);
+        skip_latex_comment(latex);
         skip_whitespace(latex);
         if (**latex) {
             Item result = parse_latex_element(ctx, latex);
