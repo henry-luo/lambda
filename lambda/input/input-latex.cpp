@@ -1,5 +1,4 @@
 #include "input.hpp"
-#include "input-common.h"
 #include "../../lib/log.h"
 #include "../mark_builder.hpp"
 #include "input_context.hpp"

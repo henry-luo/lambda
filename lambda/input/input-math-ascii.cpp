@@ -2,7 +2,6 @@
 #include "../mark_builder.hpp"
 #include "input_context.hpp"
 #include "source_tracker.hpp"
-#include "input-common.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
