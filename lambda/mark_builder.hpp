@@ -281,6 +281,11 @@ public:
      */
     ElementBuilder& attr(String* key, bool value);
 
+    // Explicit nullptr overloads to avoid ambiguity (delegate to const char* version)
+    ElementBuilder& attr(std::nullptr_t, Item value) { return attr((const char*)nullptr, value); }
+    ElementBuilder& attr(std::nullptr_t, const char* value) { return attr((const char*)nullptr, value); }
+    ElementBuilder& attr(const char* key, std::nullptr_t) { return attr(key, (const char*)nullptr); }
+
     // ============================================================================
     // Child Management (return reference for chaining)
     // ============================================================================
@@ -419,6 +424,11 @@ public:
      * Put key-value pair with String* key and boolean value
      */
     MapBuilder& put(String* key, bool value);
+
+    // Explicit nullptr overloads to avoid ambiguity (delegate to const char* version)
+    MapBuilder& put(std::nullptr_t, Item value) { return put((const char*)nullptr, value); }
+    MapBuilder& put(std::nullptr_t, const char* value) { return put((const char*)nullptr, value); }
+    MapBuilder& put(const char* key, std::nullptr_t) { return put(key, (const char*)nullptr); }
 
     // ============================================================================
     // Finalization (returns final Map from arena)
