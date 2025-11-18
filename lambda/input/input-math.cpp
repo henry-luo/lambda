@@ -715,7 +715,7 @@ static bool is_relational_operator(const char *math) {
 // parse a number (integer or float)
 static Item parse_math_number(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // handle negative sign
@@ -790,7 +790,7 @@ static Item parse_math_number(InputContext& ctx, const char **math) {
 // parse identifier/variable name as symbol with optional prime notation
 static Item parse_math_identifier(InputContext& ctx, const char **math) {
     Input* input = ctx.input();
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
 
     // parse letters and digits
     while (**math && (isalpha(**math) || isdigit(**math))) {
@@ -1185,7 +1185,7 @@ static Item parse_latex_command(InputContext& ctx, const char **math) {
     (*math)++; // skip backslash
 
     // parse command name
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // Handle spacing commands first (single punctuation characters)
@@ -1784,7 +1784,7 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
 
                 if (*lookahead == '(') {
                     // This is a function call, parse the function name first
-                    StringBuf* sb = ctx.builder().stringBuf();
+                    StringBuf* sb = ctx.sb;
                     stringbuf_reset(sb);
 
                     while (**math && (isalpha(**math) || isdigit(**math) || **math == '_')) {
@@ -1947,7 +1947,7 @@ static Item parse_math_primary(InputContext& ctx, const char **math, MathFlavor 
 
                 if (*lookahead == '(') {
                     // This is a function call, parse the function name first
-                    StringBuf* sb = ctx.builder().stringBuf();
+                    StringBuf* sb = ctx.sb;
                     stringbuf_reset(sb);
 
                     while (**math && (isalpha(**math) || isdigit(**math))) {

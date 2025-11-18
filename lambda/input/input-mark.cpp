@@ -35,7 +35,7 @@ static void skip_comments(const char **mark) {
 static String* parse_string(InputContext& ctx, const char **mark) {
     if (**mark != '"') return NULL;
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
     (*mark)++; // Skip opening quote
@@ -85,7 +85,7 @@ static String* parse_string(InputContext& ctx, const char **mark) {
 static String* parse_symbol(InputContext& ctx, const char **mark) {
     if (**mark != '\'') return NULL;
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
     (*mark)++; // Skip opening quote
@@ -115,7 +115,7 @@ static String* parse_symbol(InputContext& ctx, const char **mark) {
 
 static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
     // First character must be alpha or underscore
@@ -142,8 +142,7 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
     *mark += 2; // Skip b'
     skip_whitespace(mark);
 
-    MarkBuilder builder(ctx.input());
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
     // Check for hex format
@@ -203,8 +202,7 @@ static Item parse_datetime(InputContext& ctx, const char **mark) {
     *mark += 2; // Skip t'
     skip_whitespace(mark);
 
-    MarkBuilder builder(ctx.input());
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
     while (**mark && **mark != '\'') {

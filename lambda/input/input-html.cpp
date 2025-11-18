@@ -57,12 +57,12 @@ static bool is_raw_text_element(const char* tag_name) {
 
 // Wrapper function for compatibility - now calls html_parse_string_content
 static String* parse_string_content(HtmlInputContext& ctx, const char **html, char end_char) {
-    return html_parse_string_content(ctx.builder().stringBuf(), html, end_char);
+    return html_parse_string_content(ctx.sb, html, end_char);
 }
 
 // Continue with parse_attribute_value (kept here as it needs Input context)
 static String* parse_attribute_value(HtmlInputContext& ctx, const char **html, const char *html_start) {
-    return html_parse_attribute_value(ctx.builder().stringBuf(), html, html_start);
+    return html_parse_attribute_value(ctx.sb, html, html_start);
 }
 
 static bool parse_attributes(HtmlInputContext& ctx, ElementBuilder& element, const char **html, const char *html_start) {
@@ -77,7 +77,7 @@ static bool parse_attributes(HtmlInputContext& ctx, ElementBuilder& element, con
         log_debug("Parsing attribute %d, at char: %d, '%c'", attr_count, (int)(*html - html_start), **html);
 
         // Parse attribute name
-        StringBuf* sb = ctx.builder().stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb); // Reset buffer before parsing attribute name
         const char* attr_start = *html;
         const char* name_start = *html;
@@ -123,7 +123,7 @@ static bool parse_attributes(HtmlInputContext& ctx, ElementBuilder& element, con
 }
 
 static String* parse_tag_name(HtmlInputContext& ctx, const char **html) {
-    return html_parse_tag_name(ctx.builder().stringBuf(), html);
+    return html_parse_tag_name(ctx.sb, html);
 }
 
 // Parse HTML comment and return it as an element with tag name "!--"
@@ -449,7 +449,7 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
         log_debug("Parsing attribute %d, at char: %d, '%c'", attr_count, (int)(*html - html_start), **html);
 
         // Parse attribute name
-        StringBuf* sb = ctx.builder().stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb); // Reset buffer before parsing attribute name
         const char* attr_start = *html;
         const char* name_start = *html;
@@ -522,7 +522,7 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
 
         // Handle raw text elements (script, style, textarea, etc.) specially
         if (is_raw_text_element(tag_name->chars)) {
-            StringBuf* content_sb = ctx.builder().stringBuf();
+            StringBuf* content_sb = ctx.sb;
             stringbuf_reset(content_sb); // Ensure clean state
 
             // For raw text elements, we need to find the exact closing tag
@@ -602,7 +602,7 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
                 else {
                     // Parse text content including whitespace
                     // Start building text content
-                    StringBuf* text_sb = ctx.builder().stringBuf();
+                    StringBuf* text_sb = ctx.sb;
                     stringbuf_reset(text_sb);
 
                     // Collect text until we hit '<' or closing tag

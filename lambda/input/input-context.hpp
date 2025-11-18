@@ -15,13 +15,15 @@ namespace lambda {
 // Always owns its SourceTracker instance
 class InputContext {
 private:
-    Input* input_;                          // The Input being parsed (not owned)
-    MarkBuilder builder_;                   // MarkBuilder for creating Items
-    ParseErrorList errors_;                 // Error collection
-    std::string owned_source_;              // Owned copy of source - MUST be before tracker_!
-    SourceTracker tracker_;                 // Source position tracker (always owned)
+    Input* input_;                   // The Input being parsed (not owned)
+    MarkBuilder builder_;            // MarkBuilder for creating Items
+    ParseErrorList errors_;          // Error collection
+    std::string owned_source_;       // Owned copy of source - MUST be before tracker_!
+    SourceTracker tracker_;          // Source position tracker (always owned)
 
 public:
+    StringBuf* sb;                   // shared string buffer for temp work
+
     // Constructor without source text (empty tracker)
     explicit InputContext(Input* input)
         : input_(input)
@@ -29,6 +31,7 @@ public:
         , errors_(100)  // Default max 100 errors
         , owned_source_()
         , tracker_("", 0)
+        , sb(stringbuf_new(input->pool))
     {}
 
     // Constructor with source text and explicit length
@@ -38,6 +41,7 @@ public:
         , errors_(100)
         , owned_source_(source, len)  // Make a copy
         , tracker_(owned_source_.c_str(), owned_source_.length())
+        , sb(stringbuf_new(input->pool))
     {}
 
     // Constructor with source text from std::string
@@ -47,6 +51,7 @@ public:
         , errors_(100)
         , owned_source_(source)  // Make a copy
         , tracker_(owned_source_.c_str(), owned_source_.length())
+        , sb(stringbuf_new(input->pool))
     {}
 
     // Constructor with source text from C string (calculates length)
@@ -56,6 +61,7 @@ public:
         , errors_(100)
         , owned_source_(source ? source : "")  // Make a copy
         , tracker_(owned_source_.c_str(), owned_source_.length())
+        , sb(stringbuf_new(input->pool))
     {}
 
     // Destructor (no manual cleanup needed - all RAII)
@@ -74,9 +80,6 @@ public:
     const ParseErrorList& errors() const { return errors_; }
     SourceTracker& tracker() { return tracker_; }
     const SourceTracker& tracker() const { return tracker_; }
-
-    // Check if position tracking is available (always true now, but kept for compatibility)
-    bool hasTracker() const { return !owned_source_.empty(); }
 
     // Get current location
     SourceLocation location() const {

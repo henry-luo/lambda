@@ -27,7 +27,7 @@ static const char* resolve_entity(const char* entity_name, size_t length) {
 
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (**xml && **xml != end_char) {
@@ -136,7 +136,7 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
 
 static String* parse_tag_name(InputContext& ctx, const char **xml) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     while (**xml && (isalnum(**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
@@ -196,7 +196,7 @@ static Item parse_comment(InputContext& ctx, const char **xml) {
 
     // Add comment content as text
     if (comment_end > comment_start) {
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
         while (comment_start < comment_end) {
             stringbuf_append_char(sb, *comment_start);
@@ -229,7 +229,7 @@ static Item parse_cdata(InputContext& ctx, const char **xml) {
     }
 
     // Create CDATA content string
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     while (cdata_start < *xml) {
         stringbuf_append_char(sb, *cdata_start);
@@ -301,7 +301,7 @@ static Item parse_entity(InputContext& ctx, const char **xml) {
 
     // Add entity name as "name" attribute
     if (entity_name_end > entity_name_start) {
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
         const char* temp = entity_name_start;
         while (temp < entity_name_end) {
@@ -314,7 +314,7 @@ static Item parse_entity(InputContext& ctx, const char **xml) {
 
     // Add entity value/reference as "value" attribute
     if (entity_value_end > entity_value_start) {
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
         const char* temp = entity_value_start;
         while (temp < entity_value_end) {
@@ -348,7 +348,7 @@ static Item parse_dtd_declaration(InputContext& ctx, const char **xml) {
     if (decl_name_len == 0) return {.item = ITEM_ERROR};
 
     // Create declaration element name with "!" prefix
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     stringbuf_append_char(sb, '!');
     const char* temp = decl_start;
@@ -525,7 +525,7 @@ static Item parse_element(InputContext& ctx, const char **xml) {
         if (!target_name) return {.item = ITEM_ERROR};
 
         // Create processing instruction element name "?target"
-        StringBuf* sb = builder.stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
         stringbuf_append_char(sb, '?');
         stringbuf_append_str(sb, target_name->chars);
@@ -604,7 +604,7 @@ static Item parse_element(InputContext& ctx, const char **xml) {
 
                 if (*xml > text_start) {
                     // Create text content
-                    StringBuf* sb = builder.stringBuf();
+                    StringBuf* sb = ctx.sb;
                     stringbuf_reset(sb);
 
                     // Trim leading whitespace

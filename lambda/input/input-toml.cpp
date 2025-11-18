@@ -174,9 +174,8 @@ static void skip_tab_pace_and_comments(const char **toml, int *line_num) {
 
 static String* parse_bare_key(InputContext& ctx, const char **toml) {
     SourceTracker& tracker = ctx.tracker();
-
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     const char *start = *toml;
     SourceLocation key_loc = tracker.location();
@@ -203,7 +202,7 @@ static String* parse_quoted_key(InputContext& ctx, const char **toml) {
 
     if (**toml != '"') return NULL;
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation key_loc = tracker.location();
 
@@ -237,11 +236,10 @@ static String* parse_quoted_key(InputContext& ctx, const char **toml) {
 }
 
 static String* parse_literal_key(InputContext& ctx, const char **toml) {
-    SourceTracker& tracker = ctx.tracker();
-
     if (**toml != '\'') return NULL;
+    SourceTracker& tracker = ctx.tracker();
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation key_loc = tracker.location();
 
@@ -273,7 +271,7 @@ static String* parse_basic_string(InputContext& ctx, const char **toml) {
 
     if (**toml != '"') return NULL;
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
 
@@ -311,7 +309,7 @@ static String* parse_literal_string(InputContext& ctx, const char **toml) {
 
     if (**toml != '\'') return NULL;
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
 
@@ -343,7 +341,7 @@ static String* parse_multiline_basic_string(InputContext& ctx, const char **toml
 
     if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
 
@@ -396,7 +394,7 @@ static String* parse_multiline_literal_string(InputContext& ctx, const char **to
 
     if (strncmp(*toml, "'''", 3) != 0) return NULL;
     MarkBuilder* builder = &ctx.builder();
-    StringBuf* sb = builder->stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     SourceLocation str_loc = tracker.location();
 
@@ -817,7 +815,7 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num) {
 }// Helper function to create string key from C string
 static String* create_string_key(InputContext& ctx, const char* key_str) {
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     int len = strlen(key_str);

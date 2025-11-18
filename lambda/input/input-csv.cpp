@@ -46,7 +46,7 @@ bool is_header_line(const char* csv_string, char separator) {
 
 // Helper: parse a single CSV field (handles quoted fields)
 String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int line_num, int field_num) {
-    StringBuf *sb = ctx->builder().stringBuf();
+    StringBuf *sb = ctx->sb;
     stringbuf_reset(sb);
 
     if (**csv == '"') {

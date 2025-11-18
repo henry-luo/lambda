@@ -167,7 +167,7 @@ static String* parse_pdf_name(InputContext& ctx, const char **pdf) {
     if (**pdf != '/') return NULL;
 
     (*pdf)++; // skip /
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     int char_count = 0;
     int max_chars = 100; // Safety limit for name length
@@ -204,7 +204,7 @@ static Map* parse_pdf_dictionary(InputContext& ctx, const char **pdf);
 static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
     if (**pdf != '(' && **pdf != '<') return NULL;
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     if (**pdf == '(') {
@@ -966,7 +966,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Parse and store version with enhanced validation
     pdf += 5; // skip "%PDF-"
-    StringBuf* version_sb = builder.stringBuf();
+    StringBuf* version_sb = ctx.sb;
     stringbuf_reset(version_sb);
 
     int counter = 0;

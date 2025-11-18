@@ -16,7 +16,7 @@ static String* parse_string(InputContext& ctx, const char **json) {
     }
 
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     (*json)++; // Skip opening quote

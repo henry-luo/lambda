@@ -35,7 +35,7 @@ static String* parse_section_name(InputContext& ctx, const char **ini) {
     SourceTracker& tracker = ctx.tracker();
     SourceLocation section_loc = tracker.location();
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     (*ini)++; // skip '['
@@ -64,7 +64,7 @@ static String* parse_key(InputContext& ctx, const char **ini) {
     SourceTracker& tracker = ctx.tracker();
     SourceLocation key_loc = tracker.location();
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     // Read until '=' or whitespace
@@ -86,7 +86,7 @@ static String* parse_raw_value(InputContext& ctx, const char **ini) {
     SourceTracker& tracker = ctx.tracker();
     SourceLocation value_loc = tracker.location();
     MarkBuilder& builder = ctx.builder();
-    StringBuf* sb = builder.stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
 
     skip_tab_pace(ini);

@@ -233,7 +233,7 @@ static Item parse_css_at_rule(InputContext& ctx) {
     tracker.advance(); // Skip @
 
     // Parse at-rule name
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer to avoid accumulating previous content
     while (is_css_identifier_char(tracker.current())) {
         stringbuf_append_char(sb, tracker.current());
@@ -499,7 +499,7 @@ static Item parse_css_qualified_rule(InputContext& ctx) {
             if (tracker.current() == '}') break;
 
             // Parse property name
-            StringBuf* sb = ctx.builder().stringBuf();
+            StringBuf* sb = ctx.sb;
             stringbuf_reset(sb);  // Reset the buffer before parsing each property
             while (!tracker.atEnd() && tracker.current() != ':' && tracker.current() != ';' && tracker.current() != '}' && !isspace(tracker.current())) {
                 stringbuf_append_char(sb, tracker.current());
@@ -594,7 +594,7 @@ static Array* parse_css_selectors(InputContext& ctx) {
 
 static Item parse_css_selector(InputContext& ctx) {
     SourceTracker& tracker = TRACKER;
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing each selector
 
     // Parse selector text until comma or opening brace
@@ -682,7 +682,7 @@ static Item parse_css_declaration(InputContext& ctx) {
     skip_css_comments(tracker);
 
     // Parse property name
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing property name
     while (!tracker.atEnd() && tracker.current() != ':' && tracker.current() != ';' && tracker.current() != '}') {
         stringbuf_append_char(sb, tracker.current());
@@ -734,7 +734,7 @@ static Item parse_css_string(InputContext& ctx) {
     // Normalize: always use double quotes internally regardless of input quote style
     // This ensures 'Segoe UI' and "Segoe UI" both normalize to "Segoe UI"
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing string
 
     tracker.advance(); // Skip opening quote
@@ -807,7 +807,7 @@ static Item parse_css_url(InputContext& ctx) {
         url_value = parse_css_string(ctx);
     } else {
         // Unquoted URL
-        StringBuf* sb = ctx.builder().stringBuf();
+        StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
         while (!tracker.atEnd() && tracker.current() != ')' && !(tracker.current() == ' ' || tracker.current() == '\t' || tracker.current() == '\n' || tracker.current() == '\r')) {
             if (tracker.current() == '\\') {
@@ -844,7 +844,7 @@ static Item parse_css_color(InputContext& ctx) {
     log_debug("parse_css_color called, current='%c' (0x%02x), next 10='%.10s'",
               tracker.current(), (unsigned char)tracker.current(), tracker.rest());
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);    if (tracker.current() == '#') {
         // Hex color
         stringbuf_append_char(sb, tracker.current());
@@ -922,7 +922,7 @@ static Item parse_css_number(InputContext& ctx) {
 static Item parse_css_measure(InputContext& ctx) {
     SourceTracker& tracker = TRACKER;
     log_debug("parse_css_measure: START, current='%c' (0x%02x)", tracker.current(), (unsigned char)tracker.current());
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing measure
     size_t start = tracker.offset();
 
@@ -988,7 +988,7 @@ static Item parse_css_identifier(InputContext& ctx) {
     log_debug("parse_css_identifier: START, current='%c' (0x%02x)", tracker.current(), (unsigned char)tracker.current());
     if (!is_css_identifier_start(tracker.current())) return {.item = ITEM_ERROR};
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset the buffer before parsing identifier
 
     // Handle CSS pseudo-elements (::) and pseudo-classes (:)
@@ -1158,7 +1158,7 @@ static Item parse_css_function(InputContext& ctx) {
     // Parse function name
     if (!is_css_identifier_start(tracker.current())) return {.item = ITEM_ERROR};
 
-    StringBuf* sb = ctx.builder().stringBuf();
+    StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);
     while (is_css_identifier_char(tracker.current())) {
         stringbuf_append_char(sb, tracker.current());
