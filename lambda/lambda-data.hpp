@@ -415,6 +415,7 @@ void array_append(Array* arr, Item itm, Pool* pool);
 Map* map_pooled(Pool* pool);
 Element* elmt_pooled(Pool* pool);
 
+void map_put(Map* mp, String* key, Item value, Input *input);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
 #ifdef __cplusplus

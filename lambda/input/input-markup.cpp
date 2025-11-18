@@ -1625,6 +1625,7 @@ static Item parse_inline_spans(MarkupParser* parser, MarkBuilder* builder, const
                 String* text_content = builder->createString(sb->str->chars, sb->length);
                 Item text_item = {.item = s2it(text_content)};
                 String* key = input_create_string(parser->input, "content");
+                // Use elmt_put to add attribute to existing element
                 elmt_put(span, key, text_item, parser->input->pool);
                 stringbuf_reset(sb);
             }

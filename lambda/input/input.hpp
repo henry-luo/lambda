@@ -45,7 +45,6 @@ inline String* input_create_string(Input* input, const char* str) {
 extern "C" {
 #endif
 // Common input utility functions
-void map_put(Map* mp, String* key, Item value, Input *input);
 void input_skip_whitespace(const char **text);
 bool input_is_whitespace_char(char c);
 bool input_is_empty_line(const char* line);
