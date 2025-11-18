@@ -89,7 +89,7 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
 
 // CSV parser
 void parse_csv(Input* input, const char* csv_string) {
-    InputContext ctx(input);
+    InputContext ctx(input, csv_string, strlen(csv_string));
 
     // Detect separator and header
     char separator = detect_csv_separator(csv_string);

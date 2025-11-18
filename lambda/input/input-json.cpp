@@ -310,10 +310,9 @@ static Item parse_value(InputContext& ctx, SourceTracker& tracker, const char **
 }
 
 void parse_json(Input* input, const char* json_string) {
-    InputContext ctx(input, json_string);
-    SourceTracker tracker(json_string, strlen(json_string));
+    InputContext ctx(input, json_string, strlen(json_string));
 
-    input->root = parse_value(ctx, tracker, &json_string);
+    input->root = parse_value(ctx, *ctx.tracker(), &json_string);
 
     // Log any errors that occurred during parsing
     if (ctx.hasErrors()) {

@@ -316,7 +316,7 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
 }
 
 void parse_yaml(Input *input, const char* yaml_str) {
-    InputContext ctx(input);
+    InputContext ctx(input, yaml_str, strlen(yaml_str));
 
     // Split into lines
     char* yaml_copy = strdup(yaml_str);

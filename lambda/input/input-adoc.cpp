@@ -615,19 +615,15 @@ void parse_asciidoc(Input* input, const char* asciidoc_string) {
         return;
     }
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(asciidoc_string, strlen(asciidoc_string));
-
-    // Initialize MarkBuilder for proper Lambda Item creation
-    MarkBuilder builder(input);
+    // create unified InputContext with source tracking
+    InputContext ctx(input, asciidoc_string, strlen(asciidoc_string));
 
     // Split input into lines for processing
     int line_count;
     char** lines = split_lines(asciidoc_string, &line_count);
 
     if (!lines || line_count == 0) {
-        ctx.addError(tracker.location(), "Failed to split AsciiDoc content into lines");
+        ctx.addError(ctx.tracker()->location(), "Failed to split AsciiDoc content into lines");
         input->root = {.item = ITEM_NULL};
         return;
     }

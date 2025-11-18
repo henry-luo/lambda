@@ -16,12 +16,12 @@ typedef struct {
 } JSXExpressionState;
 
 // Forward declarations
-static Element* parse_jsx_element(Input* input, MarkBuilder* builder, const char** jsx, const char* end);
-static Element* parse_jsx_fragment(Input* input, MarkBuilder* builder, const char** jsx, const char* end);
-static void parse_jsx_attributes(Input* input, MarkBuilder* builder, Element* element, const char** jsx, const char* end);
-static String* parse_jsx_attribute_value(Input* input, MarkBuilder* builder, const char** jsx, const char* end);
-static Element* parse_jsx_expression(Input* input, MarkBuilder* builder, const char** jsx, const char* end);
-static String* parse_jsx_text_content(Input* input, MarkBuilder* builder, const char** jsx, const char* end);
+static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end);
+static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end);
+static void parse_jsx_attributes(InputContext& ctx, Element* element, const char** jsx, const char* end);
+static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end);
+static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const char* end);
+static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const char* end);
 
 // Utility functions
 static bool is_jsx_identifier_char(char c) {
@@ -43,8 +43,9 @@ static bool is_jsx_component_name(const char* name) {
 }
 
 // JSX expression parsing functions
-static String* parse_jsx_expression_content(Input* input, MarkBuilder* builder, const char** js_expr, const char* end) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_jsx_expression_content(InputContext& ctx, const char** js_expr, const char* end) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     JSXExpressionState state = {0};
@@ -103,7 +104,7 @@ static String* parse_jsx_expression_content(Input* input, MarkBuilder* builder, 
                 state.brace_depth--;
                 if (state.brace_depth == 0) {
                     // Don't include the closing brace
-                    return builder->createString(sb->str->chars, sb->length);
+                    return builder.createString(sb->str->chars, sb->length);
                 }
                 break;
         }
@@ -112,26 +113,29 @@ static String* parse_jsx_expression_content(Input* input, MarkBuilder* builder, 
         (*js_expr)++;
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
-static Element* create_jsx_js_expression_element(Input* input, MarkBuilder* builder, const char* js_content) {
+static Element* create_jsx_js_expression_element(InputContext& ctx, const char* js_content) {
+    Input* input = ctx.input();
+    MarkBuilder& builder = ctx.builder();
+
     Element* js_elem = input_create_element(input, "js");
-    String* content = builder->createString(js_content);
+    String* content = builder.createString(js_content);
     Item content_item = {.item = s2it(content)};
     list_push((List*)js_elem, content_item);
     return js_elem;
 }
 
 // Parse JSX expression: {expression}
-static Element* parse_jsx_expression(Input* input, MarkBuilder* builder, const char** jsx, const char* end) {
+static Element* parse_jsx_expression(InputContext& ctx, const char** jsx, const char* end) {
     if (*jsx >= end || **jsx != '{') {
         return NULL;
     }
 
     (*jsx)++; // Skip opening {
 
-    String* expr_content = parse_jsx_expression_content(input, builder, jsx, end);
+    String* expr_content = parse_jsx_expression_content(ctx, jsx, end);
     if (!expr_content) {
         return NULL;
     }
@@ -141,12 +145,13 @@ static Element* parse_jsx_expression(Input* input, MarkBuilder* builder, const c
         (*jsx)++; // Skip closing }
     }
 
-    return create_jsx_js_expression_element(input, builder, expr_content->chars);
+    return create_jsx_js_expression_element(ctx, expr_content->chars);
 }
 
 // Parse JSX text content until < or {
-static String* parse_jsx_text_content(Input* input, MarkBuilder* builder, const char** jsx, const char* end) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_jsx_text_content(InputContext& ctx, const char** jsx, const char* end) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     while (*jsx < end && **jsx != '<' && **jsx != '{') {
@@ -176,12 +181,13 @@ static String* parse_jsx_text_content(Input* input, MarkBuilder* builder, const 
         (*jsx)++;
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
 // Parse JSX tag name
-static String* parse_jsx_tag_name(Input* input, MarkBuilder* builder, const char** jsx, const char* end) {
-    StringBuf* sb = builder->stringBuf();
+static String* parse_jsx_tag_name(InputContext& ctx, const char** jsx, const char* end) {
+    MarkBuilder& builder = ctx.builder();
+    StringBuf* sb = builder.stringBuf();
     stringbuf_reset(sb);
 
     // First character
@@ -209,11 +215,13 @@ static String* parse_jsx_tag_name(Input* input, MarkBuilder* builder, const char
         }
     }
 
-    return builder->createString(sb->str->chars, sb->length);
+    return builder.createString(sb->str->chars, sb->length);
 }
 
 // Parse JSX attribute value
-static String* parse_jsx_attribute_value(Input* input, MarkBuilder* builder, const char** jsx, const char* end) {
+static String* parse_jsx_attribute_value(InputContext& ctx, const char** jsx, const char* end) {
+    Input* input = ctx.input();
+
     skip_jsx_whitespace(jsx, end);
 
     if (*jsx >= end) return NULL;
@@ -259,7 +267,7 @@ static String* parse_jsx_attribute_value(Input* input, MarkBuilder* builder, con
 }
 
 // Parse JSX attributes
-static void parse_jsx_attributes(Input* input, MarkBuilder* builder, Element* element, const char** jsx, const char* end) {
+static void parse_jsx_attributes(InputContext& ctx, Element* element, const char** jsx, const char* end) {
     while (*jsx < end) {
         skip_jsx_whitespace(jsx, end);
 
@@ -270,7 +278,7 @@ static void parse_jsx_attributes(Input* input, MarkBuilder* builder, Element* el
         // Check for JSX expression as attribute
         if (**jsx == '{') {
             // Spread attributes or expression attributes - skip for now
-            Element* expr = parse_jsx_expression(input, builder, jsx, end);
+            Element* expr = parse_jsx_expression(ctx, jsx, end);
             if (expr) {
                 // For spread attributes, we'd need special handling
                 // For now, just skip
@@ -279,7 +287,7 @@ static void parse_jsx_attributes(Input* input, MarkBuilder* builder, Element* el
         }
 
         // Parse attribute name
-        String* attr_name = parse_jsx_tag_name(input, builder, jsx, end);
+        String* attr_name = parse_jsx_tag_name(ctx, jsx, end);
         if (!attr_name) break;
 
         skip_jsx_whitespace(jsx, end);
@@ -290,33 +298,37 @@ static void parse_jsx_attributes(Input* input, MarkBuilder* builder, Element* el
 
             if (*jsx < end && **jsx == '{') {
                 // JSX expression attribute value
-                Element* expr = parse_jsx_expression(input, builder, jsx, end);
+                Element* expr = parse_jsx_expression(ctx, jsx, end);
                 if (expr) {
+                    Input* input = ctx.input();
                     Item expr_item = {.item = (uint64_t)expr};
                     input_add_attribute_item_to_element(input, element, attr_name->chars, expr_item);
                 }
             } else {
                 // String attribute value
-                String* attr_value = parse_jsx_attribute_value(input, builder, jsx, end);
+                String* attr_value = parse_jsx_attribute_value(ctx, jsx, end);
                 if (attr_value) {
+                    Input* input = ctx.input();
                     input_add_attribute_to_element(input, element, attr_name->chars, attr_value->chars);
                 }
             }
         } else {
             // Boolean attribute (no value)
+            Input* input = ctx.input();
             input_add_attribute_to_element(input, element, attr_name->chars, "true");
         }
     }
 }
 
 // Parse JSX fragment: <>...</>
-static Element* parse_jsx_fragment(Input* input, MarkBuilder* builder, const char** jsx, const char* end) {
+static Element* parse_jsx_fragment(InputContext& ctx, const char** jsx, const char* end) {
     if (*jsx + 1 >= end || **jsx != '<' || *(*jsx + 1) != '>') {
         return NULL;
     }
 
     *jsx += 2; // Skip <>
 
+    Input* input = ctx.input();
     Element* fragment = input_create_element(input, "jsx_fragment");
     input_add_attribute_to_element(input, fragment, "type", "jsx_fragment");
 
@@ -332,19 +344,19 @@ static Element* parse_jsx_fragment(Input* input, MarkBuilder* builder, const cha
         if (*jsx >= end) break;
 
         if (**jsx == '<') {
-            Element* child = parse_jsx_element(input, builder, jsx, end);
+            Element* child = parse_jsx_element(ctx, jsx, end);
             if (child) {
                 Item child_item = {.item = (uint64_t)child};
                 list_push((List*)fragment, child_item);
             }
         } else if (**jsx == '{') {
-            Element* expr = parse_jsx_expression(input, builder, jsx, end);
+            Element* expr = parse_jsx_expression(ctx, jsx, end);
             if (expr) {
                 Item expr_item = {.item = (uint64_t)expr};
                 list_push((List*)fragment, expr_item);
             }
         } else {
-            String* text = parse_jsx_text_content(input, builder, jsx, end);
+            String* text = parse_jsx_text_content(ctx, jsx, end);
             if (text && text->len > 0) {
                 // Only add non-empty text
                 bool has_non_whitespace = false;
@@ -366,24 +378,25 @@ static Element* parse_jsx_fragment(Input* input, MarkBuilder* builder, const cha
 }
 
 // Parse JSX element: <tag>...</tag> or <tag />
-static Element* parse_jsx_element(Input* input, MarkBuilder* builder, const char** jsx, const char* end) {
+static Element* parse_jsx_element(InputContext& ctx, const char** jsx, const char* end) {
     if (*jsx >= end || **jsx != '<') {
         return NULL;
     }
 
     // Check for fragment
     if (*jsx + 1 < end && *(*jsx + 1) == '>') {
-        return parse_jsx_fragment(input, builder, jsx, end);
+        return parse_jsx_fragment(ctx, jsx, end);
     }
 
     (*jsx)++; // Skip <
 
     // Parse tag name
-    String* tag_name = parse_jsx_tag_name(input, builder, jsx, end);
+    String* tag_name = parse_jsx_tag_name(ctx, jsx, end);
     if (!tag_name) {
         return NULL;
     }
 
+    Input* input = ctx.input();
     Element* element = input_create_element(input, tag_name->chars);
     input_add_attribute_to_element(input, element, "type", "jsx_element");
 
@@ -393,7 +406,7 @@ static Element* parse_jsx_element(Input* input, MarkBuilder* builder, const char
     }
 
     // Parse attributes
-    parse_jsx_attributes(input, builder, element, jsx, end);
+    parse_jsx_attributes(ctx, element, jsx, end);
 
     skip_jsx_whitespace(jsx, end);
 
@@ -428,19 +441,19 @@ static Element* parse_jsx_element(Input* input, MarkBuilder* builder, const char
         }
 
         if (**jsx == '<') {
-            Element* child = parse_jsx_element(input, builder, jsx, end);
+            Element* child = parse_jsx_element(ctx, jsx, end);
             if (child) {
                 Item child_item = {.item = (uint64_t)child};
                 list_push((List*)element, child_item);
             }
         } else if (**jsx == '{') {
-            Element* expr = parse_jsx_expression(input, builder, jsx, end);
+            Element* expr = parse_jsx_expression(ctx, jsx, end);
             if (expr) {
                 Item expr_item = {.item = (uint64_t)expr};
                 list_push((List*)element, expr_item);
             }
         } else {
-            String* text = parse_jsx_text_content(input, builder, jsx, end);
+            String* text = parse_jsx_text_content(ctx, jsx, end);
             if (text && text->len > 0) {
                 // Only add non-empty text
                 bool has_non_whitespace = false;
@@ -465,11 +478,8 @@ static Element* parse_jsx_element(Input* input, MarkBuilder* builder, const char
 Item input_jsx(Input* input, const char* jsx_string) {
     if (!input || !jsx_string) return {.item = ITEM_NULL};
 
-    // create error tracking context
-    InputContext ctx(input);
-    SourceTracker tracker(jsx_string, strlen(jsx_string));
-
-    MarkBuilder builder(input);
+    // create unified InputContext with source tracking
+    InputContext ctx(input, jsx_string, strlen(jsx_string));
 
     const char* jsx = jsx_string;
     const char* end = jsx_string + strlen(jsx_string);
@@ -479,11 +489,11 @@ Item input_jsx(Input* input, const char* jsx_string) {
 
     // Parse the root JSX element
     if (jsx < end) {
-        Element* root = parse_jsx_element(input, &builder, &jsx, end);
+        Element* root = parse_jsx_element(ctx, &jsx, end);
         if (root) {
             return {.item = (uint64_t)root};
         } else {
-            ctx.addError(tracker.location(), "Failed to parse JSX element");
+            ctx.addError(ctx.tracker()->location(), "Failed to parse JSX element");
         }
     }
 
