@@ -418,15 +418,15 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
 
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
-        // Use input_new to properly set up the Input with a pool
-        input = input_new(abs_url);
+        // Use InputManager to properly set up the Input with a pool
+        input = InputManager::create_input(abs_url);
         // Allocate string from the pool instead of malloc
         String *str = create_string(input->pool, source);
         input->root = {.item = s2it(str)};
     }
     else {
         Context context;  Context *pa_input_context = input_context;
-        input = input_new(abs_url);
+        input = InputManager::create_input(abs_url);
         context.pool = input->pool;  context.consts = NULL;
         context.cwd = NULL;  context.run_main = false;
         context.disable_string_merging = false;  // default: allow string merging
@@ -761,22 +761,4 @@ void InputManager::destroy_global() {
         delete g_input_manager;
         g_input_manager = nullptr;
     }
-}
-
-Input* input_new(Url* abs_url) {
-    // Use InputManager::create_input for backward compatibility
-    Input* input = InputManager::create_input(abs_url);
-    if (!input) {
-        // Fallback to old behavior if manager creation fails
-        input = (Input*)malloc(sizeof(Input));
-        input->url = abs_url;
-        input->pool = pool_create();
-        if (input->pool == NULL) { free(input);  return NULL; }
-        input->arena = arena_create_default(input->pool);
-        input->name_pool = name_pool_create(input->pool, NULL);
-        input->type_list = arraylist_new(16);
-        input->root = {.item = ITEM_NULL};
-        input->sb = stringbuf_new(input->pool);
-    }
-    return input;
 }
