@@ -4,6 +4,7 @@
 
 #include "input.hpp"
 #include "../mark_builder.hpp"
+#include "input_context.hpp"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -13,6 +14,8 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+
+using namespace lambda;
 #include <stdlib.h>
 #include "../../lib/datetime.h"
 #include <sys/stat.h>
@@ -36,43 +39,43 @@ static int is_directory(const char* path) {
 #include <time.h>
 
 // Helper: create <file> or <dir> element with metadata
-static Element* create_entry_element(Input* input, MarkBuilder* builder, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
-    Element* elmt = input_create_element(input, is_dir ? "dir" : "file");
+static Element* create_entry_element(InputContext& ctx, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
+    Element* elmt = input_create_element(ctx.input(), is_dir ? "dir" : "file");
     if (!elmt) return NULL;
-    input_add_attribute_to_element(input, elmt, "name", name);
+    input_add_attribute_to_element(ctx.input(), elmt, "name", name);
 
     // Create size as integer
     int64_t* size_ptr;
-    size_ptr = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+    size_ptr = (int64_t*)pool_calloc(ctx.input()->pool, sizeof(int64_t));
     if (size_ptr != NULL) {
         *size_ptr = (int64_t)st->st_size;
         Item size_item = {.item = l2it(size_ptr)};
-        input_add_attribute_item_to_element(input, elmt, "size", size_item);
+        input_add_attribute_item_to_element(ctx.input(), elmt, "size", size_item);
     }
 
     // Create modified as Lambda datetime from Unix timestamp
-    DateTime* dt_ptr = datetime_from_unix(input->pool, (int64_t)st->st_mtime);
+    DateTime* dt_ptr = datetime_from_unix(ctx.input()->pool, (int64_t)st->st_mtime);
     if (dt_ptr) {
         Item datetime_item = {.item = k2it(dt_ptr)};
-        input_add_attribute_item_to_element(input, elmt, "modified", datetime_item);
+        input_add_attribute_item_to_element(ctx.input(), elmt, "modified", datetime_item);
     }
 
     // Add is_link attribute if it's a symbolic link
     if (is_link) {
         Item link_item = {.item = b2it(true)};
-        input_add_attribute_item_to_element(input, elmt, "is_link", link_item);
+        input_add_attribute_item_to_element(ctx.input(), elmt, "is_link", link_item);
     }
 
     // Keep mode as string for permissions
     char buf[64];
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
-    String* mode_str = builder->createString(buf);
-    input_add_attribute_item_to_element(input, elmt, "mode", {.item = y2it(mode_str)});
+    String* mode_str = ctx.builder().createString(buf);
+    input_add_attribute_item_to_element(ctx.input(), elmt, "mode", {.item = y2it(mode_str)});
     return elmt;
 }
 
 // Recursive directory traversal
-static void traverse_directory(Input* input, MarkBuilder* builder, Element* parent, const char* dir_path, bool recursive, int max_depth, int cur_depth) {
+static void traverse_directory(InputContext& ctx, Element* parent, const char* dir_path, bool recursive, int max_depth, int cur_depth) {
     DIR* dir = opendir(dir_path);
     if (!dir) return;
     struct dirent* entry;
@@ -95,7 +98,7 @@ static void traverse_directory(Input* input, MarkBuilder* builder, Element* pare
         }
 
         int is_dir = S_ISDIR(st.st_mode);
-        Element* elmt = create_entry_element(input, builder, entry->d_name, full_path, &st, is_dir, is_link);
+        Element* elmt = create_entry_element(ctx, entry->d_name, full_path, &st, is_dir, is_link);
         if (!elmt) continue;
         // Add as child content, not attribute
         Item elmt_item = {.element = elmt};
@@ -103,7 +106,7 @@ static void traverse_directory(Input* input, MarkBuilder* builder, Element* pare
         ((TypeElmt*)parent->type)->content_length++;
         // Recurse if directory
         if (recursive && is_dir && (max_depth < 0 || cur_depth < max_depth)) {
-            traverse_directory(input, builder, elmt, full_path, recursive, max_depth, cur_depth + 1);
+            traverse_directory(ctx, elmt, full_path, recursive, max_depth, cur_depth + 1);
         }
     }
     closedir(dir);
@@ -119,7 +122,7 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     Input* input = InputManager::create_input(NULL);
     if (!input) return NULL;
 
-    MarkBuilder builder(input);
+    InputContext ctx(input);
 
     struct stat st;
     if (stat(directory_path, &st) != 0) return NULL;
@@ -132,14 +135,14 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
         dir_name = directory_path; // No '/' found, use the whole path
     }
 
-    Element* root = create_entry_element(input, &builder, dir_name, directory_path, &st, 1, false);
+    Element* root = create_entry_element(ctx, dir_name, directory_path, &st, 1, false);
     if (!root) { free(input); return NULL; }
 
     // Add the full path as a separate attribute for the root directory
     input_add_attribute_to_element(input, root, "path", directory_path);
 
     // Traverse and populate
-    traverse_directory(input, &builder, root, directory_path, recursive, max_depth, 0);
+    traverse_directory(ctx, root, directory_path, recursive, max_depth, 0);
     input->root = {.item = (uint64_t)root};
     return input;
 }
