@@ -30,7 +30,7 @@ public:
      */
     MarkupInputContext(Input* input, const char* source, size_t len, ParseConfig config)
         : InputContext(input, source, len)
-        , parser_(parser_create(input, config))
+        , parser_(new MarkupParser(input, config))
     {
         if (!parser_) {
             addError("Failed to create markup parser", 0, 0);
@@ -45,7 +45,7 @@ public:
      */
     MarkupInputContext(Input* input, ParseConfig config)
         : InputContext(input)
-        , parser_(parser_create(input, config))
+        , parser_(new MarkupParser(input, config))
     {
         if (!parser_) {
             addError("Failed to create markup parser", 0, 0);
@@ -57,7 +57,7 @@ public:
      */
     ~MarkupInputContext() {
         if (parser_) {
-            parser_destroy(parser_);
+            delete parser_;
         }
     }
 
@@ -147,7 +147,7 @@ public:
      */
     void resetState() {
         if (parser_) {
-            parser_reset_state(parser_);
+            parser_->resetState();
         }
     }
 
