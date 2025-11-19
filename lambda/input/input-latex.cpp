@@ -411,66 +411,27 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
     if (strcmp(cmd_name->chars, "item") == 0) {
         // \item commands don't take arguments in braces
         // Their content is everything until the next \item or \end{environment}
-        // printf("DEBUG: Parsing \\item command content\n");
-
+        
         MarkBuilder& builder = ctx.builder;
         skip_whitespace(latex);
 
-        // Parse content until next \item or \end
-        StringBuf* content_sb = ctx.sb;
-        stringbuf_reset(content_sb);
-
+        // Parse content until next \item or \end - but parse it properly as LaTeX
         while (**latex) {
-            // Stop at next \item or \end
+            skip_whitespace(latex);
+            if (!**latex) break;
+            
+            // Stop at next \item or \end (check AFTER skipping whitespace)
             if (strncmp(*latex, "\\item", 5) == 0 || strncmp(*latex, "\\end{", 5) == 0) {
                 break;
             }
 
-            // Handle escaped characters
-            if (**latex == '\\') {
-                // This might be a command within the item content
-                // For now, just add the backslash and continue
-                stringbuf_append_char(content_sb, **latex);
-                (*latex)++;
-                if (**latex) {
-                    stringbuf_append_char(content_sb, **latex);
-                    (*latex)++;
-                }
-            } else {
-                stringbuf_append_char(content_sb, **latex);
-                (*latex)++;
+            // Parse the content as LaTeX elements, not raw text
+            Item child = parse_latex_element(ctx, latex);
+            if (child.item != ITEM_ERROR && child.item != ITEM_NULL) {
+                list_push((List*)element, child);
+            } else if (child.item == ITEM_ERROR) {
+                break;
             }
-        }
-
-        // Add the content as a child of the item element
-        if (content_sb->length > 0) {
-            String *content_string = stringbuf_to_string(content_sb);
-            if (content_string) {
-                // Trim whitespace from content
-                char* trimmed_content = (char*)pool_calloc(input->pool, content_string->len + 1);
-                if (trimmed_content) {
-                    strncpy(trimmed_content, content_string->chars, content_string->len);
-                    trimmed_content[content_string->len] = '\0';
-
-                    // Simple trim - remove leading/trailing whitespace
-                    char* start = trimmed_content;
-                    while (*start && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r')) start++;
-
-                    char* end = start + strlen(start) - 1;
-                    while (end > start && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
-                    *(end + 1) = '\0';
-
-                    if (strlen(start) > 0) {
-                        String *trimmed_string = builder.createString(start);
-                        if (trimmed_string) {
-                            // printf("DEBUG: Adding item content: '%s'\n", start);
-                            Item content_item = {.item = s2it(trimmed_string)};
-                            list_push((List*)element, content_item);
-                        }
-                    }
-                }
-            }
-            stringbuf_reset(content_sb);
         }
 
         // Set content length
@@ -490,18 +451,33 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             MarkBuilder& builder = ctx.builder;
 
             // Extract environment name from the successfully parsed argument
-            const char* env_name = "itemize"; // Default
+            const char* env_name = "itemize"; // Default fallback
 
             // Try to access the first argument which contains the environment name
             if (args && args->length > 0 && args->items) {
                 Item first_arg = args->items[0];
                 TypeId arg_type = get_type_id(first_arg);
 
-                if (arg_type == LMD_TYPE_STRING) {
+                // Arguments are parsed as Element wrappers with tag "argument"
+                if (arg_type == LMD_TYPE_ELEMENT) {
+                    Element* arg_element = (Element*)first_arg.pointer;
+                    if (arg_element && arg_element->length > 0) {
+                        // The first item in the argument element should be the environment name
+                        Item content_item = arg_element->items[0];
+                        TypeId content_type = get_type_id(content_item);
+                        
+                        if (content_type == LMD_TYPE_STRING) {
+                            String* env_string = (String*)content_item.pointer;
+                            if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
+                                env_name = env_string->chars;
+                            }
+                        }
+                    }
+                }
+                // Legacy fallback: also check if it's directly a string (old behavior)
+                else if (arg_type == LMD_TYPE_STRING) {
                     String* env_string = (String*)first_arg.pointer;
                     if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
-                        // We have a valid environment name string
-                        // // printf("DEBUG: Found environment name from argument: '%s'\n", env_string->chars);
                         env_name = env_string->chars;
                     }
                 }
@@ -628,8 +604,11 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                     // Parse content within the environment
                     if (**latex == '\\') {
                         Item child = parse_latex_command(ctx, latex);
-                        if (child .item != ITEM_ERROR && child .item != ITEM_NULL) {
+                        if (child.item != ITEM_ERROR && child.item != ITEM_NULL) {
                             list_push((List*)element, child);
+                        } else if (child.item == ITEM_ERROR) {
+                            // Stop parsing on error
+                            break;
                         }
                     } else if (**latex == '%') {
                         skip_latex_comment(latex);
@@ -644,6 +623,11 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                         while (**latex && text_chars < max_text_chars) {
                             // Check for end of environment pattern
                             if (strncmp(*latex, "\\end{", 5) == 0) {
+                                break;
+                            }
+
+                            // Check for nested environment (begin pattern)
+                            if (strncmp(*latex, "\\begin{", 7) == 0) {
                                 break;
                             }
 
@@ -677,6 +661,20 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                             } else if (**latex == '%') {
                                 // This is a comment, break to let the comment handler deal with it
                                 break;
+                            } else if (**latex == '\n') {
+                                // Check for paragraph break (double newline)
+                                const char* lookahead = *latex + 1;
+                                // Skip spaces and tabs after first newline
+                                while (*lookahead == ' ' || *lookahead == '\t') lookahead++;
+                                // Check if there's another newline (paragraph break)
+                                if (*lookahead == '\n') {
+                                    // Found paragraph break, break to create a textblock element
+                                    break;
+                                } else {
+                                    // Single newline, include in text
+                                    stringbuf_append_char(text_sb, **latex);
+                                    (*latex)++;
+                                }
                             } else {
                                 stringbuf_append_char(text_sb, **latex);
                                 (*latex)++;
@@ -707,6 +705,23 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                             }
                         } else {
                             stringbuf_reset(text_sb);
+                        }
+
+                        // Check if we stopped due to paragraph break
+                        if (**latex == '\n') {
+                            const char* lookahead = *latex + 1;
+                            while (*lookahead == ' ' || *lookahead == '\t') lookahead++;
+                            if (*lookahead == '\n') {
+                                // Create a parbreak element for paragraph break
+                                Element* parbreak = create_latex_element(input, "parbreak");
+                                if (parbreak) {
+                                    Item parbreak_item = {.item = (uint64_t)parbreak};
+                                    list_push((List*)element, parbreak_item);
+                                }
+                                // Skip the paragraph break
+                                *latex = lookahead + 1;
+                                skip_whitespace(latex);
+                            }
                         }
                     }
 
@@ -912,6 +927,10 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                 (*latex)++;
                 text_chars++;
             }
+        } else if (**latex == '{' && *(*latex + 1) == '}') {
+            // Skip empty LaTeX groups {} - they're just syntactic elements
+            (*latex) += 2;
+            // Don't increment text_chars or append anything
         } else if (**latex == '$' || **latex == '%') {
             // Math mode, break
             // printf("DEBUG: Found math, breaking with %d chars collected\n", text_chars);

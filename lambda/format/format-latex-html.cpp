@@ -420,25 +420,33 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             stringbuf_append_str(html_buf, "</code>");
         }
         else if (strcmp(cmd_name, "thinspace") == 0) {
-            stringbuf_append_str(html_buf, "&thinsp;"); // HTML thin space entity (U+2009)
+            stringbuf_append_char(html_buf, ' '); // Thin space rendered as regular space in HTML
+            return;
         }
         else if (strcmp(cmd_name, "literal") == 0) {
             // Render literal character content with HTML escaping
-            size_t start_pos = html_buf->length;
-            process_element_content_simple(html_buf, elem, pool, depth);
-            
-            // Add trailing space after special characters that need it
-            // This matches LaTeX behavior where \$ produces "$ " not "$"
-            if (html_buf->length > start_pos && html_buf->str && html_buf->str->chars) {
-                char last_char = html_buf->str->chars[html_buf->length - 1];
-                // Add space after money symbols, hash, percent
-                if (last_char == '$' || last_char == '#' || last_char == '%') {
-                    stringbuf_append_char(html_buf, ' ');
+            // Extract the character from elem->items[0] (which should be a string)
+            if (elem->items && elem->length > 0) {
+                Item content_item = elem->items[0];
+                if (content_item.type_id() == LMD_TYPE_STRING) {
+                    String* str = (String*)content_item.pointer;
+                    if (str && str->chars) {
+                        // Use append_escaped_text to properly escape HTML entities
+                        append_escaped_text(html_buf, str->chars);
+                    }
                 }
             }
+            
+            // Add trailing space after ALL literal characters
+            // This matches LaTeX behavior where \$ produces "$ " not "$"
+            stringbuf_append_char(html_buf, ' ');
+            return;
         }
         else if (strcmp(cmd_name, "textbackslash") == 0) {
             stringbuf_append_char(html_buf, '\\'); // Render backslash
+            stringbuf_append_char(html_buf, ' '); // Add trailing space to match literal spacing
+            // Note: Skip processing element content - \textbackslash{} should just output backslash
+            return;
         }
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
@@ -461,11 +469,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
     else if (type == LMD_TYPE_STRING) {
         // Handle text content
         String* str = (String*)item.pointer;
-        printf("DEBUG: LMD_TYPE_STRING - str=%p\n", str);
-        if (str) {
+        if (str && str->len > 0) {
             stringbuf_append_str(html_buf, str->chars);
-        } else {
-            printf("DEBUG: String pointer is null, skipping\n");
         }
     }
     else if (type == LMD_TYPE_ARRAY) {
@@ -883,7 +888,8 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<pre class=\"latex-verbatim\">");
 
-    process_element_content(html_buf, elem, pool, depth);
+    // Use simple content processing to avoid adding paragraph tags
+    process_element_content_simple(html_buf, elem, pool, depth);
 
     stringbuf_append_str(html_buf, "</pre>\n");
 }
@@ -929,8 +935,10 @@ static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<li>");
 
+    // Process content - this may include nested lists or other block elements
     process_element_content_simple(html_buf, elem, pool, depth);
 
+    // Close the list item - nested elements are already processed above
     stringbuf_append_str(html_buf, "</li>\n");
 }
 
