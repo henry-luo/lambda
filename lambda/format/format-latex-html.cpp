@@ -420,11 +420,22 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             stringbuf_append_str(html_buf, "</code>");
         }
         else if (strcmp(cmd_name, "thinspace") == 0) {
-            stringbuf_append_char(html_buf, ' '); // Render as regular space
+            stringbuf_append_str(html_buf, "&thinsp;"); // HTML thin space entity (U+2009)
         }
         else if (strcmp(cmd_name, "literal") == 0) {
             // Render literal character content with HTML escaping
+            size_t start_pos = html_buf->length;
             process_element_content_simple(html_buf, elem, pool, depth);
+            
+            // Add trailing space after special characters that need it
+            // This matches LaTeX behavior where \$ produces "$ " not "$"
+            if (html_buf->length > start_pos && html_buf->str && html_buf->str->chars) {
+                char last_char = html_buf->str->chars[html_buf->length - 1];
+                // Add space after money symbols, hash, percent
+                if (last_char == '$' || last_char == '#' || last_char == '%') {
+                    stringbuf_append_char(html_buf, ' ');
+                }
+            }
         }
         else if (strcmp(cmd_name, "textbackslash") == 0) {
             stringbuf_append_char(html_buf, '\\'); // Render backslash
@@ -502,6 +513,10 @@ static bool is_block_element(Item item) {
             strcmp(cmd_name, "center") == 0 ||
             strcmp(cmd_name, "flushleft") == 0 ||
             strcmp(cmd_name, "flushright") == 0 ||
+            strcmp(cmd_name, "title") == 0 ||
+            strcmp(cmd_name, "author") == 0 ||
+            strcmp(cmd_name, "date") == 0 ||
+            strcmp(cmd_name, "maketitle") == 0 ||
             strcmp(cmd_name, "par") == 0);
 }
 
@@ -682,58 +697,76 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
     printf("DEBUG: process_element_content completed\n");
 }
 
+// Helper function for recursive text extraction from elements
+static void extract_text_recursive(StringBuf* buf, Element* elem, Pool* pool) {
+    if (!elem || !elem->items) return;
+    
+    for (int i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        TypeId type = get_type_id(child);
+        
+        if (type == LMD_TYPE_STRING) {
+            String* str = (String*)child.pointer;
+            if (str && str->chars) {
+                stringbuf_append_str(buf, str->chars);
+            }
+        } else if (type == LMD_TYPE_ELEMENT) {
+            Element* child_elem = (Element*)child.pointer;
+            extract_text_recursive(buf, child_elem, pool);
+        }
+    }
+}
+
 // Process title command
 static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
-    // Store title for later use in maketitle
-    if (elem->items && elem->length > 0) {
-        TypeId content_type = get_type_id(elem->items[0]);
-        if (content_type == LMD_TYPE_STRING) {
-            String* title_str = (String*)elem->items[0].pointer;
-            if (title_str && title_str->chars && title_str->len > 0) {
-                doc_state.title = strdup(title_str->chars);
-            }
-        }
+    // Use temporary buffer to extract all text recursively
+    StringBuf* temp_buf = stringbuf_new(pool);
+    extract_text_recursive(temp_buf, elem, pool);
+    
+    String* title_str = stringbuf_to_string(temp_buf);
+    if (title_str && title_str->len > 0) {
+        doc_state.title = strdup(title_str->chars);
     }
+    
+    stringbuf_free(temp_buf);
 }
 
 // Process author command
 static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
-    // Store author for later use in maketitle
-    if (elem->items && elem->length > 0) {
-        TypeId content_type = get_type_id(elem->items[0]);
-        if (content_type == LMD_TYPE_STRING) {
-            String* author_str = (String*)elem->items[0].pointer;
-            if (author_str && author_str->chars && author_str->len > 0) {
-                doc_state.author = strdup(author_str->chars);
-            }
-        }
+    // Use temporary buffer to extract all text recursively
+    StringBuf* temp_buf = stringbuf_new(pool);
+    extract_text_recursive(temp_buf, elem, pool);
+    
+    String* author_str = stringbuf_to_string(temp_buf);
+    if (author_str && author_str->len > 0) {
+        doc_state.author = strdup(author_str->chars);
     }
+    
+    stringbuf_free(temp_buf);
 }
 
 // Process date command
 static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
-    // Store date for later use in maketitle
-    if (elem->items && elem->length > 0) {
-        TypeId content_type = get_type_id(elem->items[0]);
-        if (content_type == LMD_TYPE_STRING) {
-            String* date_str = (String*)elem->items[0].pointer;
-            if (date_str && date_str->chars && date_str->len > 0) {
-                doc_state.date = strdup(date_str->chars);
-            }
-        }
+    // Use temporary buffer to extract all text recursively
+    StringBuf* temp_buf = stringbuf_new(pool);
+    extract_text_recursive(temp_buf, elem, pool);
+    
+    String* date_str = stringbuf_to_string(temp_buf);
+    if (date_str && date_str->len > 0) {
+        doc_state.date = strdup(date_str->chars);
     }
+    
+    stringbuf_free(temp_buf);
 }
 
 // Process maketitle command
 static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth) {
-    append_indent(html_buf, depth);
-
     if (doc_state.title) {
         stringbuf_append_str(html_buf, "<div class=\"latex-title\">");
         append_escaped_text(html_buf, doc_state.title);
@@ -741,14 +774,12 @@ static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth) {
     }
 
     if (doc_state.author) {
-        append_indent(html_buf, depth);
         stringbuf_append_str(html_buf, "<div class=\"latex-author\">");
         append_escaped_text(html_buf, doc_state.author);
         stringbuf_append_str(html_buf, "</div>\n");
     }
 
     if (doc_state.date) {
-        append_indent(html_buf, depth);
         stringbuf_append_str(html_buf, "<div class=\"latex-date\">");
         append_escaped_text(html_buf, doc_state.date);
         stringbuf_append_str(html_buf, "</div>\n");
@@ -904,27 +935,36 @@ static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
 }
 
 
-// Helper function to append escaped text
+// Helper function to append escaped text with dash conversion
 static void append_escaped_text(StringBuf* html_buf, const char* text) {
     if (!text) return;
 
     for (const char* p = text; *p; p++) {
-        switch (*p) {
-            case '<':
-                stringbuf_append_str(html_buf, "&lt;");
-                break;
-            case '>':
-                stringbuf_append_str(html_buf, "&gt;");
-                break;
-            case '&':
-                stringbuf_append_str(html_buf, "&amp;");
-                break;
-            case '"':
-                stringbuf_append_str(html_buf, "&quot;");
-                break;
-            default:
-                stringbuf_append_char(html_buf, *p);
-                break;
+        // Check for em-dash (---)
+        if (*p == '-' && *(p+1) == '-' && *(p+2) == '-') {
+            stringbuf_append_str(html_buf, "—"); // U+2014 em-dash
+            p += 2; // Skip next two dashes
+        }
+        // Check for en-dash (--)
+        else if (*p == '-' && *(p+1) == '-') {
+            stringbuf_append_str(html_buf, "–"); // U+2013 en-dash
+            p += 1; // Skip next dash
+        }
+        // HTML entity escaping
+        else if (*p == '<') {
+            stringbuf_append_str(html_buf, "&lt;");
+        }
+        else if (*p == '>') {
+            stringbuf_append_str(html_buf, "&gt;");
+        }
+        else if (*p == '&') {
+            stringbuf_append_str(html_buf, "&amp;");
+        }
+        else if (*p == '"') {
+            stringbuf_append_str(html_buf, "&quot;");
+        }
+        else {
+            stringbuf_append_char(html_buf, *p);
         }
     }
 }
