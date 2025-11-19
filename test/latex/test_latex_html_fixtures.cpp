@@ -177,23 +177,20 @@ class LatexHtmlFixtureParameterizedTest : public LatexHtmlFixtureTest,
 TEST_P(LatexHtmlFixtureParameterizedTest, RunFixture) {
     const LatexHtmlFixture& fixture = GetParam();
 
-    // List of test names to skip (temporarily disabled due to parser issues)
-    std::set<std::string> tests_to_skip = {
-        "document with title",           // Missing title/author/date processing
-        "UTF-8 text and punctuation",   // Spacing issues with thin spaces
-        "special characters",            // Incorrect character escaping and spacing
-        "verbatim text",                // Inline verbatim command issues
-        "quote environment",            // Treated as itemize instead of quote
-        "verbatim environment",         // Treated as itemize instead of verbatim
-        "center environment",           // Treated as itemize instead of center
-        "enumerate environment",        // Treated as itemize instead of ordered list
-        "text alignment",               // Environment parsing issues
-        "nested lists",                 // Nested environment parsing issues
-        "mixed environments"            // Mixed list/quote parsing issues
+    // List of test names to skip (parser issues - to be fixed in Phase 1)
+    std::set<std::string> tests_to_skip_parser = {
+        "verbatim text",                // Inline verbatim command issues (Phase 3)
+        "quote environment",            // Treated as itemize instead of quote (Phase 1)
+        "verbatim environment",         // Treated as itemize instead of verbatim (Phase 1)
+        "center environment",           // Treated as itemize instead of center (Phase 1)
+        "enumerate environment",        // Treated as itemize instead of ordered list (Phase 1)
+        "text alignment",               // Environment parsing issues (Phase 1)
+        "nested lists",                 // Nested environment parsing issues (Phase 1)
+        "mixed environments"            // Mixed list/quote parsing issues (Phase 1)
     };
 
-    // Skip tests that are known to fail due to parser bugs
-    if (tests_to_skip.find(fixture.header) != tests_to_skip.end()) {
+    // Skip parser-related tests (will enable as we fix parser)
+    if (tests_to_skip_parser.find(fixture.header) != tests_to_skip_parser.end()) {
         GTEST_SKIP() << "Test temporarily disabled due to LaTeX parser issues: " << fixture.header;
     }
 
