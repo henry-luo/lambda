@@ -229,6 +229,81 @@ std::vector<LatexHtmlFixture> load_all_fixtures() {
     return all_fixtures;
 }
 
+// Load baseline fixtures only (must pass 100%)
+std::vector<LatexHtmlFixture> load_baseline_fixtures() {
+    std::vector<LatexHtmlFixture> baseline_fixtures;
+    
+    std::string fixtures_dir = "test/latex/fixtures";
+    
+    // Baseline test files that must always pass 100%
+    std::set<std::string> baseline_files = {
+        "basic_test.tex",
+        "basic_text.tex",
+        "environments.tex",
+        "formatting.tex",
+        "sectioning.tex"
+    };
+    
+    if (!std::filesystem::exists(fixtures_dir)) {
+        std::cerr << "Warning: Fixtures directory not found: " << fixtures_dir << std::endl;
+        return baseline_fixtures;
+    }
+    
+    FixtureLoader loader;
+    std::vector<FixtureFile> fixture_files = loader.load_fixtures_directory(fixtures_dir);
+    
+    for (const auto& file : fixture_files) {
+        for (const auto& fixture : file.fixtures) {
+            // Check if this fixture belongs to a baseline file
+            if (baseline_files.find(fixture.filename) != baseline_files.end()) {
+                baseline_fixtures.push_back(fixture);
+            }
+        }
+    }
+    
+    std::cout << "Loaded " << baseline_fixtures.size() << " baseline fixtures from "
+              << baseline_files.size() << " files" << std::endl;
+    
+    return baseline_fixtures;
+}
+
+// Load ongoing development fixtures
+std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
+    std::vector<LatexHtmlFixture> ongoing_fixtures;
+    
+    std::string fixtures_dir = "test/latex/fixtures";
+    
+    // Baseline test files (exclude these)
+    std::set<std::string> baseline_files = {
+        "basic_test.tex",
+        "basic_text.tex",
+        "environments.tex",
+        "formatting.tex",
+        "sectioning.tex"
+    };
+    
+    if (!std::filesystem::exists(fixtures_dir)) {
+        std::cerr << "Warning: Fixtures directory not found: " << fixtures_dir << std::endl;
+        return ongoing_fixtures;
+    }
+    
+    FixtureLoader loader;
+    std::vector<FixtureFile> fixture_files = loader.load_fixtures_directory(fixtures_dir);
+    
+    for (const auto& file : fixture_files) {
+        for (const auto& fixture : file.fixtures) {
+            // Check if this fixture is NOT in baseline files
+            if (baseline_files.find(fixture.filename) == baseline_files.end()) {
+                ongoing_fixtures.push_back(fixture);
+            }
+        }
+    }
+    
+    std::cout << "Loaded " << ongoing_fixtures.size() << " ongoing fixtures" << std::endl;
+    
+    return ongoing_fixtures;
+}
+
 // Generate test names for parameterized tests
 std::string generate_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>& info) {
     std::string name = info.param.filename + "_" + std::to_string(info.param.id);
@@ -241,11 +316,19 @@ std::string generate_test_name(const ::testing::TestParamInfo<LatexHtmlFixture>&
     return name;
 }
 
-// Register parameterized tests
+// Register BASELINE parameterized tests (must always pass 100%)
 INSTANTIATE_TEST_SUITE_P(
-    AllFixtures,
+    BaselineFixtures,
     LatexHtmlFixtureParameterizedTest,
-    ::testing::ValuesIn(load_all_fixtures()),
+    ::testing::ValuesIn(load_baseline_fixtures()),
+    generate_test_name
+);
+
+// Register ONGOING DEVELOPMENT parameterized tests
+INSTANTIATE_TEST_SUITE_P(
+    OngoingFixtures,
+    LatexHtmlFixtureParameterizedTest,
+    ::testing::ValuesIn(load_ongoing_fixtures()),
     generate_test_name
 );
 
