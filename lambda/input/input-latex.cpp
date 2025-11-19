@@ -29,6 +29,55 @@ static inline void add_attribute_to_element(Input* input, Element* element, cons
 // LaTeX special characters that need escaping
 static const char* latex_special_chars = "\\{}$&#^_%~";
 
+// normalize whitespace in LaTeX text according to LaTeX rules:
+// - multiple spaces/tabs collapse to single space
+// - newlines within paragraphs become spaces
+// - leading/trailing whitespace is trimmed
+static void normalize_latex_whitespace(StringBuf* sb, Pool* pool) {
+    if (sb->length == 0) return;
+    
+    // create temporary buffer to hold normalized text
+    size_t capacity = sb->length + 1;  // at most same size
+    char* temp = (char*)pool_alloc(pool, capacity);
+    if (!temp) return;
+    
+    size_t temp_len = 0;
+    bool in_whitespace = true;  // start in whitespace mode to trim leading
+    bool has_content = false;   // track if we've added any non-whitespace
+    
+    for (size_t i = 0; i < sb->length; i++) {
+        char c = sb->str->chars[i];
+        
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            // whitespace character
+            if (!in_whitespace && has_content) {
+                // not already in whitespace mode and we have content
+                // add a single space
+                temp[temp_len++] = ' ';
+                in_whitespace = true;
+            }
+        } else {
+            // non-whitespace character
+            temp[temp_len++] = c;
+            in_whitespace = false;
+            has_content = true;
+        }
+    }
+    
+    // trim trailing whitespace if needed
+    while (temp_len > 0 && temp[temp_len - 1] == ' ') {
+        temp_len--;
+    }
+    
+    // copy normalized text back to original buffer
+    stringbuf_reset(sb);
+    if (temp_len > 0) {
+        stringbuf_append_str_n(sb, temp, temp_len);
+    }
+    
+    // note: temp will be freed when pool is destroyed
+}
+
 static String* parse_latex_string_content(InputContext& ctx, const char **latex, char end_char) {
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
@@ -659,7 +708,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                                     break;
                                 }
                             } else if (**latex == '%') {
-                                // This is a comment, break to let the comment handler deal with it
+                                // REVERT: This is a comment, break to let the comment handler deal with it
                                 break;
                             } else if (**latex == '\n') {
                                 // Check for paragraph break (double newline)
@@ -675,6 +724,12 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                                     stringbuf_append_char(text_sb, **latex);
                                     (*latex)++;
                                 }
+                            } else if (**latex == '~') {
+                                // TEMPORARILY DISABLED: bare tilde is non-breaking space in LaTeX
+                                // stringbuf_append_str(text_sb, "\u00A0");  // nbsp
+                                // (*latex)++;
+                                stringbuf_append_char(text_sb, **latex);
+                                (*latex)++;
                             } else {
                                 stringbuf_append_char(text_sb, **latex);
                                 (*latex)++;
@@ -683,6 +738,9 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                         }
 
                         if (text_sb->length > 0) {
+                            // normalize whitespace before creating string
+                            normalize_latex_whitespace(text_sb, input->pool);
+                            
                             String *text_string = stringbuf_to_string(text_sb);
                             stringbuf_reset(text_sb);
 
@@ -932,7 +990,7 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
             (*latex) += 2;
             // Don't increment text_chars or append anything
         } else if (**latex == '$' || **latex == '%') {
-            // Math mode, break
+            // Math mode or comment, break
             // printf("DEBUG: Found math, breaking with %d chars collected\n", text_chars);
             break;
         } else if (**latex == '\n') {
@@ -956,6 +1014,14 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                 (*latex)++;
                 text_chars++;
             }
+        } else if (**latex == '~') {
+            // TEMPORARILY DISABLED: bare tilde is non-breaking space in LaTeX
+            // stringbuf_append_str(text_sb, "\u00A0");  // nbsp
+            // (*latex)++;
+            // text_chars++;
+            stringbuf_append_char(text_sb, **latex);
+            (*latex)++;
+            text_chars++;
         } else {
             stringbuf_append_char(text_sb, **latex);
             (*latex)++;
@@ -966,6 +1032,9 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
     // printf("DEBUG: Text parsing finished, text_sb->length = %zu\n", text_sb->length);
 
     if (text_sb->length > 0) {
+        // normalize whitespace before creating string
+        normalize_latex_whitespace(text_sb, input->pool);
+        
         // printf("DEBUG: Processing collected text\n");
         String* text_str = builder.createString(text_sb->str->chars, text_sb->length);
         // printf("DEBUG: Returning text node: '%.*s' (length: %zu)\n",

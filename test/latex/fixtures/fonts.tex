@@ -1,0 +1,149 @@
+** \bfseries declaration
+.
+Hello \bfseries is emphasized.
+.
+<div class="body">
+<p>Hello <span class="bf">is emphasized.</span></p>
+</div>
+.
+
+
+** \em and \emph{}
+.
+\em You can also \emph{emphasize} text.
+.
+<div class="body">
+<p>
+<span class="it">You can also </span>
+<span class="it"><span class="up">emphasize</span></span>
+<span class="it"> text.</span>
+</p>
+</div>
+.
+
+
+s** \emph{} command and nesting
+.
+Hello, \emph{this} is emphasized.
+
+\emph{emph \textup{normal}}, \textup{normal \emph{emph}}
+
+\emph{emph \emph{normal}}
+
+test {test \em\em\em test \em test}
+
+\textit{You can also \emph{emphasize} text if it is set in italics}
+.
+<div class="body">
+<p>Hello, <span class="it">this</span> is emphasized.</p>
+<p><span class="it">emph <span class="up">normal</span></span>, <span class="up">normal <span class="it">emph</span></span></p>
+<p><span class="it">emph <span class="up">normal</span></span></p>
+<p>test test <span class="it">test </span><span class="up">test</span></p>
+<p><span class="it">You can also <span class="up">emphasize</span> text if it is set in italics</span></p>
+</div>
+.
+
+
+** fonts stay until the surrounding group ends      TODO: same spans should be merged
+.
+outer { text \bfseries {what} more text } end outer
+.
+<div class="body">
+<p>outer ​ text <span class="bf">what</span><span class="bf">​ </span><span class="bf">more text </span>​ end outer</p>
+</div>
+.
+
+
+** fonts reach across paragraphs if no group ends
+.
+hello, \itshape what
+
+are we going to do here?
+
+\slshape
+Wrap all the paragraphs.
+.
+<div class="body">
+<p>hello, <span class="it">what</span></p>
+<p><span class="it">are we going to do here?</span></p>
+<p><span class="sl">Wrap all the paragraphs.</span></p>
+</div>
+.
+
+
+** monospaced fonts do not use ligatures
+.
+\texttt{first test of -- and ---}
+.
+<div class="body">
+<p><span class="tt">first test of -- and ---</span></p>
+</div>
+.
+
+
+
+s** em lengths are relative to current font sizes
+.
+\small
+a line of text\\[1em]
+a line of text\\[1em]
+% TODO: in LaTeX, \Huge changes ALL of the current paragraph! also above!
+\Huge
+a line of text\\[1em]
+a line of text
+
+\small
+a line of text\\[1em]
+a line of text
+
+\Huge
+a line of text\\[1em]
+a line of text
+.
+<div class="body">
+<p>
+<span class="small">a line of text</span><span class="small"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="small">a line of text</span><span class="small"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="Huge">a line of text</span><span class="Huge"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="Huge">a line of text</span>
+</p>
+<p>
+<span class="small">a line of text</span><span class="small"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="small">a line of text</span>
+</p>
+<p>
+<span class="Huge">a line of text</span><span class="Huge"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="Huge">a line of text</span>
+</p>
+</div>
+.
+
+
+s** lineheight and relative widths according to font size
+.
+This is yet another paragraph. With a lot of meaningless text and meaningless text meaningless text meaningless text.
+
+\tiny This is yet another paragraph.  With a lot of meaningless\\[1em] text and meaningless text meaningless text meaningless text.
+
+This is yet another \Large paragraph. With a lot of meaningless text and meaningless text meaningless text meaningless text.
+
+This is yet another paragraph. With a\\[1em] lot of meaningless text and meaningless text meaningless text meaningless text.
+.
+<div class="body">
+<p>This is yet another paragraph. With a lot of meaningless text and meaningless text meaningless text meaningless text.</p>
+<p>
+<span class="tiny">This is yet another paragraph. With a lot of meaningless</span>
+<span class="tiny"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="tiny">text and meaningless text meaningless text meaningless text.</span>
+</p>
+<p>
+<span class="tiny">This is yet another </span>
+<span class="Large">paragraph. With a lot of meaningless text and meaningless text meaningless text meaningless text.</span>
+</p>
+<p>
+<span class="Large">This is yet another paragraph. With a</span>
+<span class="Large"><span class="breakspace" style="margin-bottom:1em"></span></span>
+<span class="Large">lot of meaningless text and meaningless text meaningless text meaningless text.</span>
+</p>
+</div>
+.

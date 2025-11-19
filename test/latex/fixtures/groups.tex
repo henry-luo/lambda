@@ -1,0 +1,35 @@
+** groups need to be balanced
+.
+test {text with {{another }two} groups } and more
+.
+<div class="body">
+<p>test text with another two​ groups ​ and more</p>
+</div>
+.
+
+
+** brackets do not need to be balanced, they are just punctuation; and in a macro a simple delimiter
+.
+test[ {t]]ext} more
+.
+<div class="body">
+<p>test[ t]]ext​ more</p>
+</div>
+.
+
+
+** groups overlapping paragraphs
+.
+Here is some unsuspecting text in a paragraph. This paragraph { starts a group.
+
+But then suddenly a new paragraph begins... } and misery with it.
+
+It is also possible {to have a\par par command} in a group.
+.
+<div class="body">
+<p>Here is some unsuspecting text in a paragraph. This paragraph ​ starts a group.</p>
+<p>But then suddenly a new paragraph begins... ​ and misery with it.</p>
+<p>It is also possible to have a</p>
+<p>par command​ in a group.</p>
+</div>
+.
