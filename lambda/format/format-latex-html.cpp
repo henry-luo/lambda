@@ -43,6 +43,41 @@ typedef struct {
 } DocumentState;
 
 static DocumentState doc_state = {0};
+
+// Convert LaTeX dimension to CSS pixels
+// Supports: cm, mm, in, pt, pc, em, ex
+static double latex_dim_to_pixels(const char* dim_str) {
+    if (!dim_str) return 0.0;
+    
+    // Parse number
+    char* end;
+    double value = strtod(dim_str, &end);
+    if (end == dim_str) return 0.0; // No number found
+    
+    // Skip whitespace
+    while (*end == ' ' || *end == '\t') end++;
+    
+    // Parse unit
+    if (strncmp(end, "cm", 2) == 0) {
+        return value * 37.795; // 1cm = 37.795px at 96dpi
+    } else if (strncmp(end, "mm", 2) == 0) {
+        return value * 3.7795; // 1mm = 3.7795px
+    } else if (strncmp(end, "in", 2) == 0) {
+        return value * 96.0; // 1in = 96px
+    } else if (strncmp(end, "pt", 2) == 0) {
+        return value * 1.33333; // 1pt = 1.33333px
+    } else if (strncmp(end, "pc", 2) == 0) {
+        return value * 16.0; // 1pc = 16px
+    } else if (strncmp(end, "em", 2) == 0) {
+        return value * 16.0; // 1em ≈ 16px (depends on font)
+    } else if (strncmp(end, "ex", 2) == 0) {
+        return value * 8.0; // 1ex ≈ 8px (depends on font)
+    }
+    
+    // Default: assume pixels
+    return value;
+}
+
 // Main API function
 void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, Pool* pool) {
     if (!html_buf || !css_buf || !pool) {
@@ -408,6 +443,26 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             process_text_command(html_buf, elem, pool, depth, "latex-textnormal", "span");
         }
         else if (strcmp(cmd_name, "linebreak") == 0) {
+            // Check if linebreak has spacing argument (dimension)
+            if (elem->length > 0 && elem->items) {
+                Item spacing_item = elem->items[0];
+                if (get_type_id(spacing_item) == LMD_TYPE_STRING) {
+                    String* spacing_str = (String*)spacing_item.pointer;
+                    if (spacing_str && spacing_str->len > 0) {
+                        // Output <br> with spacing style
+                        double pixels = latex_dim_to_pixels(spacing_str->chars);
+                        
+                        char px_str[32];
+                        snprintf(px_str, sizeof(px_str), "%.3fpx", pixels);
+                        
+                        stringbuf_append_str(html_buf, "<span class=\"breakspace\" style=\"margin-bottom:");
+                        stringbuf_append_str(html_buf, px_str);
+                        stringbuf_append_str(html_buf, "\"></span>");
+                        return;
+                    }
+                }
+            }
+            // Regular linebreak without spacing
             stringbuf_append_str(html_buf, "<br>");
         }
         else if (strcmp(cmd_name, "par") == 0) {
@@ -458,6 +513,26 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         else if (strcmp(cmd_name, "enumerate") == 0) {
             printf("DEBUG: Processing enumerate environment directly\n");
             process_enumerate(html_buf, elem, pool, depth);
+        }
+        else if (strcmp(cmd_name, "quad") == 0) {
+            // \quad - em space (U+2003)
+            stringbuf_append_str(html_buf, "\xE2\x80\x83");
+            return;
+        }
+        else if (strcmp(cmd_name, "qquad") == 0) {
+            // \qquad - two em spaces
+            stringbuf_append_str(html_buf, "\xE2\x80\x83\xE2\x80\x83");
+            return;
+        }
+        else if (strcmp(cmd_name, "enspace") == 0) {
+            // \enspace - en space (U+2002)
+            stringbuf_append_str(html_buf, "\xE2\x80\x82");
+            return;
+        }
+        else if (strcmp(cmd_name, "negthinspace") == 0) {
+            // \! - negative thin space (use zero-width space for now)
+            stringbuf_append_str(html_buf, "\xE2\x80\x8B");
+            return;
         }
         else {
             // Generic element - process children
