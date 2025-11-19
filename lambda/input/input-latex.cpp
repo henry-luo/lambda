@@ -367,26 +367,82 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
-        // Handle line break (\\)
+        // Handle line break (\\) with optional spacing: \\[dimension]
         else if (escaped_char == '\\') {
-            // printf("DEBUG: Converting \\\\ to line break\n");
             // Create a line break element
             Element* element = create_latex_element(input, "linebreak");
             if (!element) {
                 return {.item = ITEM_ERROR};
             }
+            
+            // Check for optional spacing argument: \\[1cm]
+            skip_whitespace(latex);
+            if (**latex == '[') {
+                (*latex)++; // Skip [
+                
+                // Parse dimension argument
+                StringBuf* dim_sb = ctx.sb;
+                stringbuf_reset(dim_sb);
+                
+                while (**latex && **latex != ']') {
+                    stringbuf_append_char(dim_sb, **latex);
+                    (*latex)++;
+                }
+                
+                if (**latex == ']') {
+                    (*latex)++; // Skip ]
+                    
+                    // Add dimension as child element
+                    if (dim_sb->length > 0) {
+                        String* dim_str = stringbuf_to_string(dim_sb);
+                        if (dim_str) {
+                            list_push((List*)element, {.item = s2it(dim_str)});
+                            ((TypeElmt*)element->type)->content_length = 1;
+                        }
+                    }
+                }
+            }
+            
             return {.item = (uint64_t)element};
         }
     }
 
-    // Handle line break commands
-    if (strcmp(cmd_name->chars, "\\") == 0 || strcmp(cmd_name->chars, "newline") == 0) {
-        // // printf("DEBUG: Processing line break command: %s\n", cmd_name->chars);
+    // Handle line break commands with optional spacing: \\ or \\[dimension]
+    if (strcmp(cmd_name->chars, "\\") == 0 || strcmp(cmd_name->chars, "newline") == 0 || strcmp(cmd_name->chars, "linebreak") == 0) {
         // Create a line break element
         Element* element = create_latex_element(input, "linebreak");
         if (!element) {
             return {.item = ITEM_ERROR};
         }
+        
+        // Check for optional spacing argument: \\[1cm]
+        skip_whitespace(latex);
+        if (**latex == '[') {
+            (*latex)++; // Skip [
+            
+            // Parse dimension argument
+            StringBuf* dim_sb = ctx.sb;
+            stringbuf_reset(dim_sb);
+            
+            while (**latex && **latex != ']') {
+                stringbuf_append_char(dim_sb, **latex);
+                (*latex)++;
+            }
+            
+            if (**latex == ']') {
+                (*latex)++; // Skip ]
+                
+                // Add dimension as child element
+                if (dim_sb->length > 0) {
+                    String* dim_str = stringbuf_to_string(dim_sb);
+                    if (dim_str) {
+                        list_push((List*)element, {.item = s2it(dim_str)});
+                        ((TypeElmt*)element->type)->content_length = 1;
+                    }
+                }
+            }
+        }
+        
         return {.item = (uint64_t)element};
     }
 
@@ -397,6 +453,28 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             return {.item = ITEM_ERROR};
         }
         return {.item = (uint64_t)element};
+    }
+
+    // Spacing commands - simple cases without arguments
+    if (strcmp(cmd_name->chars, "quad") == 0) {
+        Element* element = create_latex_element(input, "quad");
+        return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
+    }
+    if (strcmp(cmd_name->chars, "qquad") == 0) {
+        Element* element = create_latex_element(input, "qquad");
+        return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
+    }
+    if (strcmp(cmd_name->chars, "enspace") == 0) {
+        Element* element = create_latex_element(input, "enspace");
+        return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
+    }
+    if (strcmp(cmd_name->chars, ",") == 0) {  // \, is thin space
+        Element* element = create_latex_element(input, "thinspace");
+        return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
+    }
+    if (strcmp(cmd_name->chars, "negthinspace") == 0) {
+        Element* element = create_latex_element(input, "negthinspace");
+        return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
     }
 
     // Handle verb command
@@ -725,10 +803,8 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                                     (*latex)++;
                                 }
                             } else if (**latex == '~') {
-                                // TEMPORARILY DISABLED: bare tilde is non-breaking space in LaTeX
-                                // stringbuf_append_str(text_sb, "\u00A0");  // nbsp
-                                // (*latex)++;
-                                stringbuf_append_char(text_sb, **latex);
+                                // bare tilde is non-breaking space in LaTeX
+                                stringbuf_append_str(text_sb, "\u00A0");  // nbsp
                                 (*latex)++;
                             } else {
                                 stringbuf_append_char(text_sb, **latex);
@@ -1015,11 +1091,8 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                 text_chars++;
             }
         } else if (**latex == '~') {
-            // TEMPORARILY DISABLED: bare tilde is non-breaking space in LaTeX
-            // stringbuf_append_str(text_sb, "\u00A0");  // nbsp
-            // (*latex)++;
-            // text_chars++;
-            stringbuf_append_char(text_sb, **latex);
+            // bare tilde is non-breaking space in LaTeX
+            stringbuf_append_str(text_sb, "\u00A0");  // nbsp
             (*latex)++;
             text_chars++;
         } else {
