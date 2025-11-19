@@ -179,14 +179,14 @@ TEST_P(LatexHtmlFixtureParameterizedTest, RunFixture) {
 
     // List of test names to skip (parser issues - to be fixed in Phase 1)
     std::set<std::string> tests_to_skip_parser = {
-        "verbatim text",                // Inline verbatim command issues (Phase 3)
-        "quote environment",            // Treated as itemize instead of quote (Phase 1)
-        "verbatim environment",         // Treated as itemize instead of verbatim (Phase 1)
-        "center environment",           // Treated as itemize instead of center (Phase 1)
-        "enumerate environment",        // Treated as itemize instead of ordered list (Phase 1)
-        "text alignment",               // Environment parsing issues (Phase 1)
-        "nested lists",                 // Nested environment parsing issues (Phase 1)
-        "mixed environments"            // Mixed list/quote parsing issues (Phase 1)
+        // "verbatim text",                // Inline verbatim command issues (Phase 3) - FIXED
+        // "enumerate environment",        // Treated as itemize instead of ordered list (Phase 1) - TESTING
+        // "quote environment",            // Treated as itemize instead of quote (Phase 1) - TESTING
+        // "verbatim environment",         // Treated as itemize instead of verbatim (Phase 1) - TESTING
+        // "center environment",           // Treated as itemize instead of center (Phase 1) - TESTING
+        // "text alignment",               // Environment parsing issues (Phase 1) - TESTING
+        // "nested lists",                 // Nested environment parsing issues (Phase 1) - TESTING
+        // "mixed environments"            // Mixed list/quote parsing issues (Phase 1) - TESTING
     };
 
     // Skip parser-related tests (will enable as we fix parser)
