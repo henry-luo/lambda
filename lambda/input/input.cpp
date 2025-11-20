@@ -643,18 +643,6 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     }
 }
 
-Input* Input::create(Pool* pool) {
-    Input* input = (Input*)pool_alloc(pool, sizeof(Input));
-    input->pool = pool;
-    input->arena = arena_create_default(pool);
-    input->name_pool = nullptr;
-    input->type_list = nullptr;
-    input->url = nullptr;
-    input->path = nullptr;
-    input->root = (Item){.item = 0};
-    return input;
-}
-
 Input* Input::create(Pool* pool, Url* abs_url) {
     Input* input = (Input*)pool_alloc(pool, sizeof(Input));
     input->pool = pool;
@@ -667,15 +655,14 @@ Input* Input::create(Pool* pool, Url* abs_url) {
     return input;
 }
 
-// InputManager implementation - C++ class for managing global pool and input lifecycle
+// Global singleton instance
+static InputManager* g_input_manager = nullptr;
 
-// Private constructor
 InputManager::InputManager() {
     global_pool = pool_create();
     inputs = arraylist_new(16);
 }
 
-// Private destructor
 InputManager::~InputManager() {
     // Clean up all tracked inputs
     if (inputs) {
@@ -693,9 +680,6 @@ InputManager::~InputManager() {
         pool_destroy(global_pool);
     }
 }
-
-// Global singleton instance
-static InputManager* g_input_manager = nullptr;
 
 // Static method to create input using global manager
 Input* InputManager::create_input(Url* abs_url) {
