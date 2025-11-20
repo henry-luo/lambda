@@ -39,6 +39,34 @@ String* heap_strcpy(char* src, int len) {
     return str;
 }
 
+// Create a name string using runtime name_pool (always pooled)
+String* heap_create_name(const char* name, size_t len) {
+    if (!context || !context->name_pool) {
+        log_error("heap_create_name called with invalid context or name_pool");
+        return nullptr;
+    }
+    return name_pool_create_len(context->name_pool, name, len);
+}
+
+String* heap_create_name(const char* name) {
+    if (!name) return &EMPTY_STRING;
+    return heap_create_name(name, strlen(name));
+}
+
+// Create a symbol string using runtime name_pool (pooled if ≤32 chars)
+String* heap_create_symbol(const char* symbol, size_t len) {
+    if (!context || !context->name_pool) {
+        log_error("heap_create_symbol called with invalid context or name_pool");
+        return nullptr;
+    }
+    return name_pool_create_symbol_len(context->name_pool, symbol, len);
+}
+
+String* heap_create_symbol(const char* symbol) {
+    if (!symbol) return &EMPTY_STRING;
+    return heap_create_symbol(symbol, strlen(symbol));
+}
+
 Item push_d(double dval) {
     log_debug("push_d: %g", dval);
     // Safety check: if context is num_stack is NULL

@@ -409,7 +409,7 @@ SchemaTranspiler* schema_transpiler_create(Pool* pool) {
     if (!transpiler) return NULL;
 
     // Initialize base transpiler fields
-    transpiler->ast_pool = pool;
+    transpiler->pool = pool;
     transpiler->type_list = arraylist_new(16);
 
     // Initialize schema-specific fields
@@ -447,6 +447,6 @@ void schema_transpiler_enable_validation(SchemaTranspiler* transpiler) {
 void schema_transpiler_add_type_definition(SchemaTranspiler* transpiler, StrView name, TypeSchema* schema) {
     if (!transpiler || !schema) return;
 
-    Type* runtime_type = schema_to_runtime_type(schema, transpiler->ast_pool);
+    Type* runtime_type = schema_to_runtime_type(schema, transpiler->pool);
     type_registry_add(transpiler->type_registry, name, schema, runtime_type);
 }

@@ -73,6 +73,7 @@ typedef struct num_stack_t num_stack_t;
 typedef struct EvalContext : Context {
     Heap* heap;
     Pool* ast_pool;
+    NamePool* name_pool;        // name_pool for runtime-generated names
     ArrayList* type_list;
     num_stack_t* num_stack;  // for long and double pointers
     void* type_info;  // meta info for the base types

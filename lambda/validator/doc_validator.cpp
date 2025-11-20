@@ -32,7 +32,7 @@ Transpiler* transpiler_create(Pool* pool) {
     // Placeholder implementation for Phase 1
     Transpiler* tp = (Transpiler*)pool_calloc(pool, sizeof(Transpiler));
     if (tp) {
-        tp->ast_pool = pool;
+        tp->pool = pool;
     }
     return tp;
 }
@@ -56,8 +56,8 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
     }
 
     // Initialize memory pool if not already done
-    if (!transpiler->ast_pool) {
-        transpiler->ast_pool = pool_create();
+    if (!transpiler->pool) {
+        transpiler->pool = pool_create();
     }
 
     // Initialize type and const lists if not already done
@@ -70,7 +70,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
 
     // Initialize name pool if not already done
     if (!transpiler->name_pool) {
-        transpiler->name_pool = name_pool_create(transpiler->ast_pool, nullptr);
+        transpiler->name_pool = name_pool_create(transpiler->pool, nullptr);
         if (!transpiler->name_pool) {
             return nullptr;
         }
