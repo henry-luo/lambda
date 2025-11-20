@@ -254,11 +254,40 @@ TEST_F(MarkBuilderTest, CreateComplexStructure) {
     EXPECT_GE(article->length, 3);
 }
 
-// Test string interning
-TEST_F(MarkBuilderTest, StringInterning) {
+// Test name/symbol/string separation
+TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     MarkBuilder builder(input);
-    builder.setInternStrings(true);
 
+    // Names are always pooled
+    Item name1 = builder.createNameItem("element");
+    Item name2 = builder.createNameItem("element");
+    EXPECT_EQ(get_type_id(name1), LMD_TYPE_SYMBOL);
+    EXPECT_EQ(get_type_id(name2), LMD_TYPE_SYMBOL);
+    
+    // Extract actual String pointers
+    String* str_name1 = (String*)name1.pointer;
+    String* str_name2 = (String*)name2.pointer;
+    EXPECT_EQ(str_name1, str_name2);  // Same instance due to pooling
+
+    // Short symbols are pooled (≤32 chars)
+    Item sym1 = builder.createSymbolItem("short");
+    Item sym2 = builder.createSymbolItem("short");
+    EXPECT_EQ(get_type_id(sym1), LMD_TYPE_SYMBOL);
+    EXPECT_EQ(get_type_id(sym2), LMD_TYPE_SYMBOL);
+    
+    String* str_sym1 = (String*)sym1.pointer;
+    String* str_sym2 = (String*)sym2.pointer;
+    EXPECT_EQ(str_sym1, str_sym2);  // Pooled
+
+    // Long symbols not pooled (>32 chars)
+    const char* long_sym = "this_is_a_very_long_symbol_name_exceeding_32_characters";
+    Item long1 = builder.createSymbolItem(long_sym);
+    Item long2 = builder.createSymbolItem(long_sym);
+    EXPECT_EQ(get_type_id(long1), LMD_TYPE_SYMBOL);
+    EXPECT_EQ(get_type_id(long2), LMD_TYPE_SYMBOL);
+    EXPECT_NE(long1.pointer, long2.pointer);  // Different instances
+
+    // Strings are never pooled (arena allocated)
     Item str1 = builder.createStringItem("test");
     Item str2 = builder.createStringItem("test");
 
@@ -275,8 +304,8 @@ TEST_F(MarkBuilderTest, StringInterning) {
     EXPECT_STREQ(s1->chars, "test");
     EXPECT_STREQ(s2->chars, "test");
 
-    // Note: Pointer equality depends on name pool implementation
-    // Some implementations may return the same pointer, others may not
+    // Strings are NOT pooled - different pointers
+    EXPECT_NE(s1, s2);
 }
 
 // Test auto string merge

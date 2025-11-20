@@ -48,7 +48,6 @@ private:
     ArrayList* type_list_;      // type registry
 
     bool auto_string_merge_;    // automatically merge consecutive strings
-    bool intern_strings_;       // use string interning
 
 public:
     /**
@@ -71,12 +70,36 @@ public:
     MarkBuilder& operator=(MarkBuilder&&) = default;
 
     // ============================================================================
-    // String Creation Methods (arena-allocates strings for final Mark data)
+    // Name Creation Methods (always use name_pool for deduplication)
     // ============================================================================
 
     /**
-     * Create an arena-allocated String from C string
-     * Uses string interning if enabled
+     * Create a name string (element names, map keys, attribute names)
+     * Always uses name_pool for deduplication
+     */
+    String* createName(const char* name);
+    String* createName(const char* name, size_t len);
+    String* createNameFromStrView(StrView name);
+
+    // ============================================================================
+    // Symbol Creation Methods (use name_pool for short symbols ≤32 chars)
+    // ============================================================================
+
+    /**
+     * Create a symbol string
+     * Uses name_pool for symbols ≤32 chars, otherwise allocates from pool
+     */
+    String* createSymbol(const char* symbol);
+    String* createSymbol(const char* symbol, size_t len);
+    String* createSymbolFromStrView(StrView symbol);
+
+    // ============================================================================
+    // String Creation Methods (arena-allocates strings, NO pooling)
+    // ============================================================================
+
+    /**
+     * Create an arena-allocated String (for content strings)
+     * No deduplication - each call creates a new string
      */
     String* createString(const char* str);
     String* createString(const char* str, size_t len);
@@ -92,8 +115,24 @@ public:
     static String* emptyString();
 
     // ============================================================================
-    // Builder Creation Methods (returns stack-allocated value types)
+    // Item Creation Helpers
     // ============================================================================
+
+    /**
+     * Create Item from name string (uses name_pool)
+     */
+    Item createNameItem(const char* name);
+
+    /**
+     * Create Item from symbol string (uses name_pool for short symbols)
+     */
+    Item createSymbolItem(const char* symbol);
+
+    /**
+     * Create Item from content string (arena allocation)
+     */
+    Item createStringItem(const char* str);
+    Item createStringItem(const char* str, size_t len);
 
     /**
      * Create element builder for given tag name
@@ -133,12 +172,6 @@ public:
     Item createArray();
 
     /**
-     * Create string Item
-     */
-    Item createStringItem(const char* str);
-    Item createStringItem(const char* str, size_t len);
-
-    /**
      * Create primitive Items
      */
     Item createInt(int32_t value);
@@ -156,11 +189,6 @@ public:
      */
     void setAutoStringMerge(bool enabled) { auto_string_merge_ = enabled; }
 
-    /**
-     * Enable/disable string interning
-     */
-    void setInternStrings(bool enabled) { intern_strings_ = enabled; }
-
     // ============================================================================
     // Accessors (for internal use by sub-builders)
     // ============================================================================
@@ -171,7 +199,6 @@ public:
     NamePool* namePool() const { return name_pool_; }
     ArrayList* typeList() const { return type_list_; }
     bool autoStringMerge() const { return auto_string_merge_; }
-    bool internStrings() const { return intern_strings_; }
 
     // ============================================================================
     // Internal Helpers (for ElementBuilder/MapBuilder to call legacy functions)

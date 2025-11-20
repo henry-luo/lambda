@@ -189,7 +189,39 @@ static Item parse_object(InputContext& ctx, const char **json) {
     }
 
     while (**json && !ctx.shouldStopParsing()) {
-        String* key = parse_string(ctx, json);
+        // Parse key as a raw string to get the name
+        if (**json != '"') {
+            ctx.addError(tracker.location(), "Expected '\"' for object key");
+            break;
+        }
+        
+        StringBuf* sb = ctx.sb;
+        stringbuf_reset(sb);
+        (*json)++; // Skip opening quote
+        tracker.advance(1);
+        
+        // Parse key content (simplified - no escape handling needed for keys typically)
+        while (**json && **json != '"') {
+            if (**json == '\\') {
+                (*json)++;
+                tracker.advance(1);
+                if (**json) {
+                    stringbuf_append_char(sb, **json);
+                }
+            } else {
+                stringbuf_append_char(sb, **json);
+            }
+            (*json)++;
+            tracker.advance(1);
+        }
+        
+        if (**json == '"') {
+            (*json)++; // skip closing quote
+            tracker.advance(1);
+        }
+        
+        // Create key as a name (always pooled)
+        String* key = ctx.builder.createName(sb->str->chars, sb->length);
         if (!key) {
             // Error recovery: skip to next comma or closing brace
             while (**json && **json != ',' && **json != '}') {

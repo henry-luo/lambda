@@ -217,18 +217,25 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // build the AST from the syntax tree
     get_time(&start);
-    size_t grow_size = 4096;  // 4k
-    size_t tolerance_percent = 20;
-    tp->ast_pool = pool_create();
-    tp->type_list = arraylist_new(16);
-    tp->const_list = arraylist_new(16);
-
-    // Initialize name pool
-    tp->name_pool = name_pool_create(tp->ast_pool, nullptr);
-    if (!tp->name_pool) {
-        log_error("Error: Failed to create name pool");
+    
+    // Initialize Input base class (Script extends Input)
+    Input* input_base = Input::create(pool_create(), nullptr);
+    if (!input_base) {
+        log_error("Error: Failed to initialize Input base");
         return;
     }
+    
+    // Copy Input fields to Script (Script extends Input)
+    tp->pool = input_base->pool;
+    tp->arena = input_base->arena;
+    tp->name_pool = input_base->name_pool;
+    tp->type_list = input_base->type_list;
+    tp->url = input_base->url;
+    tp->path = input_base->path;
+    tp->root = input_base->root;
+    
+    // Initialize Script-specific fields
+    tp->const_list = arraylist_new(16);
 
     if (strcmp(ts_node_type(root_node), "document") != 0) {
         log_error("Error: The tree has no valid root node.");
@@ -321,8 +328,15 @@ void runner_init(Runtime *runtime, Runner* runner) {
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");
-    runner->context.ast_pool = runner->script->ast_pool;
+    runner->context.pool = runner->script->pool;
     runner->context.type_list = runner->script->type_list;
+    
+    // Initialize name_pool for runtime-generated names (separate from script's name_pool)
+    runner->context.name_pool = name_pool_create(runner->context.pool, nullptr);
+    if (!runner->context.name_pool) {
+        log_error("Failed to create runtime name_pool");
+    }
+    
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
     runner->context.num_stack = num_stack_create(16);
@@ -333,7 +347,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.context_alloc = heap_alloc;
     mpd_defaultcontext(runner->context.decimal_ctx);
     // init AST validator
-    runner->context.validator = schema_validator_create(runner->context.ast_pool);
+    runner->context.validator = schema_validator_create(runner->context.pool);
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
@@ -438,7 +452,7 @@ void runtime_cleanup(Runtime* runtime) {
             Script *script = (Script*)runtime->scripts->data[i];
             if (script->source) free((void*)script->source);
             if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
-            if (script->ast_pool) pool_destroy(script->ast_pool);
+            if (script->pool) pool_destroy(script->pool);
             if (script->type_list) arraylist_free(script->type_list);
             if (script->jit_context) jit_cleanup(script->jit_context);
             if (script->decimal_ctx) {

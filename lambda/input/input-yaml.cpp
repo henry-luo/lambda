@@ -279,8 +279,8 @@ static Item parse_yaml_content(InputContext* ctx, char** lines, int* current_lin
                 continue;
             }
 
-            // Create String object for key
-            String* key = create_string_from_cstr(ctx, key_str);
+            // Create name object for map key (always pooled)
+            String* key = ctx->builder.createName(key_str);
             free(key_str);
             if (!key) continue;
 

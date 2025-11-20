@@ -28,11 +28,11 @@ MarkBuilder::MarkBuilder(Input* input)
     , name_pool_(input->name_pool)
     , type_list_(input->type_list)
     , auto_string_merge_(false)
-    , intern_strings_(true)
 {
     assert(input != nullptr);
     assert(pool_ != nullptr);
     assert(arena_ != nullptr);
+    assert(name_pool_ != nullptr);
     assert(type_list_ != nullptr);
 }
 
@@ -42,7 +42,44 @@ MarkBuilder::~MarkBuilder() {
 }
 
 //------------------------------------------------------------------------------
-// String Creation Methods
+// Name Creation Methods (always use name_pool)
+//------------------------------------------------------------------------------
+
+String* MarkBuilder::createName(const char* name) {
+    if (!name) return &EMPTY_STRING;
+    return createName(name, strlen(name));
+}
+
+String* MarkBuilder::createName(const char* name, size_t len) {
+    if (!name || len == 0) return &EMPTY_STRING;
+    return name_pool_create_len(name_pool_, name, len);
+}
+
+String* MarkBuilder::createNameFromStrView(StrView name) {
+    if (!name.str || name.length == 0) return &EMPTY_STRING;
+    return name_pool_create_strview(name_pool_, name);
+}
+
+//------------------------------------------------------------------------------
+// Symbol Creation Methods (use name_pool for short symbols)
+//------------------------------------------------------------------------------
+
+String* MarkBuilder::createSymbol(const char* symbol) {
+    if (!symbol) return &EMPTY_STRING;
+    return createSymbol(symbol, strlen(symbol));
+}
+
+String* MarkBuilder::createSymbol(const char* symbol, size_t len) {
+    if (!symbol || len == 0) return &EMPTY_STRING;
+    return name_pool_create_symbol_len(name_pool_, symbol, len);
+}
+
+String* MarkBuilder::createSymbolFromStrView(StrView symbol) {
+    return name_pool_create_symbol_strview(name_pool_, symbol);
+}
+
+//------------------------------------------------------------------------------
+// String Creation Methods (arena allocation, no pooling)
 //------------------------------------------------------------------------------
 
 String* MarkBuilder::createString(const char* str) {
@@ -53,18 +90,13 @@ String* MarkBuilder::createString(const char* str) {
 String* MarkBuilder::createString(const char* str, size_t len) {
     if (!str || len == 0) return &EMPTY_STRING;
 
-    if (intern_strings_ && name_pool_) {
-        // use string interning (name_pool manages its own memory)
-        return name_pool_create_len(name_pool_, str, len);
-    } else {
-        // allocate from arena (fast sequential allocation)
-        String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
-        s->ref_cnt = 1;
-        s->len = len;
-        memcpy(s->chars, str, len);
-        s->chars[len] = '\0';
-        return s;
-    }
+    // Allocate from arena (fast sequential allocation, no deduplication)
+    String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
+    s->ref_cnt = 1;
+    s->len = len;
+    memcpy(s->chars, str, len);
+    s->chars[len] = '\0';
+    return s;
 }
 
 String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
@@ -74,6 +106,26 @@ String* MarkBuilder::createStringFromBuf(StringBuf* sb) {
 
 String* MarkBuilder::emptyString() {
     return &EMPTY_STRING;
+}
+
+//------------------------------------------------------------------------------
+// Item Creation Helpers
+//------------------------------------------------------------------------------
+
+Item MarkBuilder::createNameItem(const char* name) {
+    return (Item){.item = y2it(createName(name))};  // use symbol encoding for names
+}
+
+Item MarkBuilder::createSymbolItem(const char* symbol) {
+    return (Item){.item = y2it(createSymbol(symbol))};
+}
+
+Item MarkBuilder::createStringItem(const char* str) {
+    return (Item){.item = s2it(createString(str))};
+}
+
+Item MarkBuilder::createStringItem(const char* str, size_t len) {
+    return (Item){.item = s2it(createString(str, len))};
 }
 
 //------------------------------------------------------------------------------
@@ -106,14 +158,6 @@ Item MarkBuilder::createMap() {
 
 Item MarkBuilder::createArray() {
     return array().final();
-}
-
-Item MarkBuilder::createStringItem(const char* str) {
-    return (Item){.item = s2it(createString(str))};
-}
-
-Item MarkBuilder::createStringItem(const char* str, size_t len) {
-    return (Item){.item = s2it(createString(str, len))};
 }
 
 Item MarkBuilder::createInt(int32_t value) {
@@ -163,7 +207,7 @@ void MarkBuilder::putToMap(Map* map, String* key, Item value) {
 
 ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     : builder_(builder)
-    , tag_name_(builder->createString(tag_name))
+    , tag_name_(builder->createName(tag_name))  // Element names are always pooled
     , elmt_(nullptr)
     , parent_(nullptr)
 {
@@ -177,8 +221,8 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
             element_type->type_index = input->type_list->length - 1;
             // initialize with no attributes
 
-            // Set element name
-            String* name_str = builder->createString(tag_name);
+            // Set element name (use name pool)
+            String* name_str = builder->createName(tag_name);
             if (name_str) {
                 element_type->name.str = name_str->chars;
                 element_type->name.length = name_str->len;
@@ -200,7 +244,7 @@ ElementBuilder::~ElementBuilder() {
 ElementBuilder& ElementBuilder::attr(const char* key, Item value) {
     if (!key) return *this;
     // use elmt_put to add the attribute to the element
-    String* key_str = builder_->createString(key);
+    String* key_str = builder_->createName(key);  // Attribute names are always pooled
     elmt_put(elmt_, key_str, value, builder_->pool());
     return *this;
 }
@@ -329,7 +373,7 @@ MapBuilder::~MapBuilder() {
 MapBuilder& MapBuilder::put(const char* key, Item value) {
     if (!key) return *this;
 
-    String* key_str = builder_->createString(key);
+    String* key_str = builder_->createName(key);  // Map keys are names (always pooled)
     map_put(map_, key_str, value, builder_->input());
 
     // cache the type for convenience

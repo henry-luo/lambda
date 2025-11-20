@@ -11,8 +11,9 @@ typedef struct NamePoolEntry {
 // Hash function for NamePoolEntry
 static uint64_t name_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const NamePoolEntry* entry = (const NamePoolEntry*)item;
-    if (!entry->name) return 0;
-    // Use the StrView for hashing
+    // Hash based on the StrView content, not the name pointer
+    // This allows lookup with a temporary StrView (name can be nullptr during lookup)
+    if (!entry->view.str || entry->view.length == 0) return 0;
     return hashmap_sip(entry->view.str, entry->view.length, seed0, seed1);
 }
 
@@ -217,4 +218,33 @@ void name_pool_print_stats(NamePool* pool) {
         log_debug("  parent stats:");
         name_pool_print_stats(pool->parent);
     }
+}
+
+// Symbol creation with size limit check
+bool name_pool_is_poolable_symbol(size_t length) {
+    return length > 0 && length <= NAME_POOL_SYMBOL_LIMIT;
+}
+
+String* name_pool_create_symbol_len(NamePool* pool, const char* symbol, size_t len) {
+    if (!pool || !symbol || len == 0) return nullptr;
+    
+    // Only pool symbols within size limit
+    if (name_pool_is_poolable_symbol(len)) {
+        StrView sv = {.str = symbol, .length = len};
+        return name_pool_create_strview(pool, sv);
+    }
+    
+    // Symbol too long - allocate normally from pool (no interning)
+    String* str = string_from_strview({.str = symbol, .length = len}, pool->pool);
+    if (str) str->ref_cnt = 1;
+    return str;
+}
+
+String* name_pool_create_symbol(NamePool* pool, const char* symbol) {
+    if (!symbol) return nullptr;
+    return name_pool_create_symbol_len(pool, symbol, strlen(symbol));
+}
+
+String* name_pool_create_symbol_strview(NamePool* pool, StrView symbol) {
+    return name_pool_create_symbol_len(pool, symbol.str, symbol.length);
 }

@@ -12,6 +12,9 @@
 
 #define null 0
 
+// Name pool configuration
+#define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
+
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,

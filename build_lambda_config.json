@@ -1074,6 +1074,19 @@
                         "binary": "test_mark_builder_gtest.exe"
                     },
                     {
+                        "source": "test_name_pool_gtest.cpp",
+                        "name": "🔤 NamePool Tests (GTest) - Phase 5 Name/Symbol Management",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_name_pool_gtest.exe"
+                    },
+                    {
                         "source": "test_mark_reader_gtest.cpp",
                         "name": "📖 MarkReader API Tests (GTest)",
                         "dependencies": [

@@ -275,21 +275,19 @@ typedef struct AstScript : AstNode {
 typedef Item (*main_func_t)(Context*);
 typedef struct MIR_context *MIR_context_t;
 
-struct Script {
+// Script extends Input to inherit unified memory management
+struct Script : Input {
     const char* reference;      // path (relative to the main script) and name of the script
     int index;                  // index of the script in the runtime scripts list
     const char* source;
     TSTree* syntax_tree;
 
-    // AST and Memory Management
-    Pool* ast_pool;
-    NamePool* name_pool;        // centralized name management for this script
+    // AST-specific fields (beyond Input)
     AstNode *ast_root;
     NameScope* current_scope;   // current name scope
-    ArrayList* type_list;       // list of types
-    ArrayList* const_list;      // list of constants
+    ArrayList* const_list;      // list of constants (Script-specific)
 
-    // each script is JIT compiled its own MIR context
+    // JIT compilation (Script-specific)
     MIR_context_t jit_context;
     main_func_t main_func;      // transpiled main function
     mpd_context_t* decimal_ctx;  // libmpdec context for decimal operations
