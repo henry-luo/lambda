@@ -404,39 +404,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
     MIR_finish_module(ctx);
 }
 
-// Main entry point for MIR compilation
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
-    log_notice("Running script with MIR JIT compilation");
-
-    Script* script;
-    if (source) {
-        // Parse and build AST from source string
-        script = load_script(runtime, script_path, source);
-    } else {
-        // Load script from file - pass script_path as both path and source (load_script will read file)
-        script = load_script(runtime, script_path, NULL);
-    }
-
-    if (!script || !script->ast_root) {
-        log_error("Failed to parse script");
-        // Return Input with error item instead of nullptr
-        Pool* error_pool = pool_create();
-        Input* output = Input::create(error_pool, nullptr);
-        if (!output) {
-            log_error("Failed to create error output Input");
-            if (error_pool) pool_destroy(error_pool);
-            return nullptr;
-        }
-        output->root = ItemError;
-        return output;
-    }
-
-    // Initialize MIR context
-    MIR_context_t ctx = jit_init();
-
-    // Transpile to MIR
-    transpile_mir_ast(ctx, (AstScript*)script->ast_root);
-
+// Helper function to execute MIR-compiled script and create output Input
+static Input* execute_mir_script_and_create_output(MIR_context_t ctx, Script* script, bool run_main) {
     // Generate machine code and execute
     MIR_gen_init(ctx);
     MIR_gen_set_optimize_level(ctx, 2);
@@ -446,8 +415,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     main_func_t main_fn = (main_func_t)find_func(ctx, "main");
     if (!main_fn) {
         log_error("Failed to find main function");
-        jit_cleanup(ctx);
-        // Return Input with error item instead of nullptr
+        // Return Input with error item
         Pool* error_pool = pool_create();
         Input* output = Input::create(error_pool, nullptr);
         if (!output) {
@@ -489,13 +457,11 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     Item result = main_fn(&exec_ctx);
 
     // Create output Input that shares Script's pool (so they share memory resources)
-    // This way, the result Item references remain valid as long as either Input or Script exists
     log_debug("Creating output Input (sharing Script's pool)");
     Input* output = Input::create(script->pool, nullptr);
     if (!output) {
         log_error("Failed to create output Input");
-        jit_cleanup(ctx);
-        // Return Input with error item instead of nullptr
+        // Return Input with error item
         Pool* error_pool = pool_create();
         Input* error_output = Input::create(error_pool, nullptr);
         if (!error_output) {
@@ -504,6 +470,15 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             return nullptr;
         }
         error_output->root = ItemError;
+        
+        // Clean up execution context before returning error
+        frame_end();
+        heap_destroy();
+        if (exec_ctx.num_stack) num_stack_destroy((num_stack_t*)exec_ctx.num_stack);
+        if (exec_ctx.decimal_ctx) free(exec_ctx.decimal_ctx);
+        if (exec_ctx.validator) schema_validator_destroy(exec_ctx.validator);
+        context = saved_context;
+        
         return error_output;
     }
 
@@ -519,12 +494,52 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
 
     // Restore thread-local context
     context = saved_context;
+    
+    log_debug("Result returned in output Input (shares Script's pool)");
+    return output;
+}
 
+// Main entry point for MIR compilation
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
+    log_notice("Running script with MIR JIT compilation");
+
+    Script* script;
+    if (source) {
+        // Parse and build AST from source string
+        script = load_script(runtime, script_path, source);
+    } else {
+        // Load script from file - pass script_path as both path and source (load_script will read file)
+        script = load_script(runtime, script_path, NULL);
+    }
+
+    if (!script || !script->ast_root) {
+        log_error("Failed to parse script");
+        // Return Input with error item instead of nullptr
+        Pool* error_pool = pool_create();
+        Input* output = Input::create(error_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            return nullptr;
+        }
+        output->root = ItemError;
+        return output;
+    }
+
+    // Initialize MIR context
+    MIR_context_t ctx = jit_init();
+
+    // Transpile to MIR
+    transpile_mir_ast(ctx, (AstScript*)script->ast_root);
+
+    // Use common helper to execute and create output
+    Input* output = execute_mir_script_and_create_output(ctx, script, run_main);
+    
+    // Cleanup MIR context
     jit_cleanup(ctx);
     
     // Note: Script must remain alive - it shares the pool with output
     // The caller will eventually destroy the pool, cleaning up both Script and output
     
-    log_debug("Result returned in output Input (shares Script's pool)");
     return output;
 }
