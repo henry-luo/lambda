@@ -1,3 +1,22 @@
+// MarkBuilder - Fluent API for constructing Lambda document structures
+//
+// String Management Strategy (unified name/symbol system):
+//   - createName(): Always pooled via NamePool (string interning)
+//       Use for: map keys, element tags, attribute names - structural identifiers
+//       Same name returns same pointer (enables identity comparison, memory sharing)
+//
+//   - createString(): Never pooled (arena allocated)
+//       Use for: user content, text data, string values - non-structural content
+//       Fast allocation, no hash lookup overhead
+//
+//   - createSymbol(): Conditionally pooled (only if ≤32 chars, otherwise arena)
+//       Use for: symbol literals ('mySymbol), short enum-like values
+//
+// Memory Benefits:
+//   - Structural names deduplicated across entire document hierarchy
+//   - Parent NamePool inheritance (schemas share names with instances)
+//   - Content strings remain fast with arena allocation
+
 #include "mark_builder.hpp"
 #include "lambda-data.hpp"
 #include "input/input.hpp"
@@ -207,7 +226,7 @@ void MarkBuilder::putToMap(Map* map, String* key, Item value) {
 
 ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     : builder_(builder)
-    , tag_name_(builder->createName(tag_name))  // Element names are always pooled
+    , tag_name_(builder->createName(tag_name))  // element names are structural identifiers - always pooled
     , elmt_(nullptr)
     , parent_(nullptr)
 {
@@ -221,7 +240,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
             element_type->type_index = input->type_list->length - 1;
             // initialize with no attributes
 
-            // Set element name (use name pool)
+            // set element name (use name pool for structural identifier)
             String* name_str = builder->createName(tag_name);
             if (name_str) {
                 element_type->name.str = name_str->chars;
@@ -244,13 +263,13 @@ ElementBuilder::~ElementBuilder() {
 ElementBuilder& ElementBuilder::attr(const char* key, Item value) {
     if (!key) return *this;
     // use elmt_put to add the attribute to the element
-    String* key_str = builder_->createName(key);  // Attribute names are always pooled
+    String* key_str = builder_->createName(key);  // attribute names are structural identifiers - always pooled
     elmt_put(elmt_, key_str, value, builder_->pool());
     return *this;
 }
 
 ElementBuilder& ElementBuilder::attr(const char* key, const char* value) {
-    return attr(key, builder_->createStringItem(value));
+    return attr(key, builder_->createStringItem(value));  // note: value content uses createString (NOT pooled)
 }
 
 ElementBuilder& ElementBuilder::attr(const char* key, int64_t value) {
@@ -299,14 +318,14 @@ ElementBuilder& ElementBuilder::child(Item item) {
 
 ElementBuilder& ElementBuilder::text(const char* text) {
     if (text) {
-        child(builder_->createStringItem(text));
+        child(builder_->createStringItem(text));  // text content is user data - NOT pooled
     }
     return *this;
 }
 
 ElementBuilder& ElementBuilder::text(const char* text, size_t len) {
     if (text && len > 0) {
-        child(builder_->createStringItem(text, len));
+        child(builder_->createStringItem(text, len));  // text content is user data - NOT pooled
     }
     return *this;
 }
@@ -373,7 +392,7 @@ MapBuilder::~MapBuilder() {
 MapBuilder& MapBuilder::put(const char* key, Item value) {
     if (!key) return *this;
 
-    String* key_str = builder_->createName(key);  // Map keys are names (always pooled)
+    String* key_str = builder_->createName(key);  // map keys are structural identifiers - always pooled
     map_put(map_, key_str, value, builder_->input());
 
     // cache the type for convenience
@@ -387,7 +406,7 @@ MapBuilder& MapBuilder::put(const char* key, Item value) {
 MapBuilder& MapBuilder::put(String* key, Item value) {
     if (!key) return *this;
 
-    // Use the existing string directly
+    // use the existing string directly (caller responsible for pooling decision)
     map_put(map_, key, value, builder_->input());
 
     // cache the type for convenience

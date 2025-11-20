@@ -32,6 +32,8 @@ void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
+// create a content string by copying from source (NOT pooled - arena allocated)
+// use this for user content, text data, or any non-structural strings
 String* heap_strcpy(char* src, int len) {
     String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
     strcpy(str->chars, src);
@@ -39,7 +41,10 @@ String* heap_strcpy(char* src, int len) {
     return str;
 }
 
-// Create a name string using runtime name_pool (always pooled)
+// create a name string using runtime name_pool (ALWAYS pooled via string interning)
+// use this for structural identifiers: map keys, element tags, attribute names, etc.
+// same name string will always return the same pointer (enables identity comparison)
+// inherits from parent name_pool if available (efficient for schema/document hierarchies)
 String* heap_create_name(const char* name, size_t len) {
     if (!context || !context->name_pool) {
         log_error("heap_create_name called with invalid context or name_pool");
@@ -53,7 +58,9 @@ String* heap_create_name(const char* name) {
     return heap_create_name(name, strlen(name));
 }
 
-// Create a symbol string using runtime name_pool (pooled if ≤32 chars)
+// create a symbol string using runtime name_pool (pooled ONLY if length ≤ 32 chars)
+// use this for symbol literals ('mySymbol), short identifiers, enum-like values
+// long symbols (>32 chars) fall back to arena allocation (no pooling overhead)
 String* heap_create_symbol(const char* symbol, size_t len) {
     if (!context || !context->name_pool) {
         log_error("heap_create_symbol called with invalid context or name_pool");

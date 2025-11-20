@@ -82,7 +82,7 @@ void jit_cleanup(MIR_context_t ctx);
 }
 
 // MIR transpiler functions
-Item run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source);
 void runner_init(Runtime *runtime, Runner* runner);
@@ -90,7 +90,7 @@ void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
 Item run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
-Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
+Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
 
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);

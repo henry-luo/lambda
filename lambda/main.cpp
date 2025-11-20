@@ -86,10 +86,10 @@ extern "C" {
 #endif
 
 // Forward declare MIR transpiler function
-Item run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main);
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main);
 
 // Forward declare function with run_main support
-Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
+Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
 
 // Forward declare REPL functions from main-repl.cpp
 const char* get_repl_prompt();
@@ -191,18 +191,25 @@ void run_repl(Runtime *runtime, bool use_mir) {
         snprintf(script_path, sizeof(script_path), "<repl-%d>", ++exec_count);
 
         // Run the accumulated script
-        Item result;
         if (use_mir) {
-            result = run_script_mir(runtime, repl_history->str, script_path, false);  // false for run_main in REPL
+            Input* output_input = run_script_mir(runtime, repl_history->str, script_path, false);  // false for run_main in REPL
+            if (output_input) {
+                StrBuf *output = strbuf_new_cap(256);
+                print_root_item(output, output_input->root);
+                printf("%s", output->str);
+                strbuf_free(output);
+                
+                // Note: Do NOT destroy output_input->pool here!
+                // The pool is shared with the Script, which is managed by the Runtime
+                delete output_input;
+            }
         } else {
-            result = run_script(runtime, repl_history->str, script_path, false);
+            Item result = run_script(runtime, repl_history->str, script_path, false);
+            StrBuf *output = strbuf_new_cap(256);
+            print_root_item(output, result);
+            printf("%s", output->str);
+            strbuf_free(output);
         }
-
-        // Print result
-        StrBuf *output = strbuf_new_cap(256);
-        print_root_item(output, result);
-        printf("%s", output->str);
-        strbuf_free(output);
 
         free(line);
     }
@@ -215,15 +222,37 @@ void run_repl(Runtime *runtime, bool use_mir) {
 }
 
 void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
-    Item result;
+    log_debug("run_script_file called: %s, use_mir=%d", script_path, use_mir);
+    Input* output_input = nullptr;
     if (use_mir) {
-        result = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
+        output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
     } else {
-        result = run_script_with_run_main(runtime, (char*)script_path, false, run_main);
+        output_input = run_script_with_run_main(runtime, (char*)script_path, false, run_main);
+    }
+
+    log_debug("run_script_file: output_input = %p", output_input);
+    if (!output_input) {
+        log_error("Failed to execute script: %s (output_input is NULL)", script_path);
+        fprintf(stderr, "Error: Failed to execute script: %s\n", script_path);
+        return;
+    }
+
+    log_debug("run_script_file: output_input->root.item = %llu", output_input->root.item);
+    // Check if the result is an error
+    if (output_input->root.type_id() == LMD_TYPE_ERROR) {
+        log_debug("Script returned ItemError");
+        fprintf(stderr, "Error: Script execution failed: %s\n", script_path);
+        // Clean up the error output (it has its own pool)
+        // The Input struct was allocated from its own pool, so we just destroy the pool
+        if (output_input->pool) {
+            pool_destroy(output_input->pool);
+        }
+        // Do NOT delete output_input - it was allocated from the pool we just destroyed
+        return;
     }
 
     StrBuf *output = strbuf_new_cap(256);
-    print_root_item(output, result);
+    print_root_item(output, output_input->root);
     log_debug("Script '%s' executed ====================", script_path);
     if (run_main) {
         // just print to debug log
@@ -235,7 +264,11 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
         log_debug("%s", output->str);
     }
     strbuf_free(output);
-    // todo: should have return value
+    
+    // Note: Do NOT destroy output_input->pool here!
+    // The pool is shared with the Script, which is managed by the Runtime
+    // Just delete the output Input wrapper (it's a lightweight structure)
+    delete output_input;
 }
 
 void run_assertions() {

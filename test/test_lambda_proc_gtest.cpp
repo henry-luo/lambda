@@ -49,7 +49,11 @@ char* read_text_file(const char* file_path) {
 
 // Execute a command and capture output
 char* execute_command(const char* command) {
-    FILE* pipe = popen(command, "r");
+    // Redirect stderr to stdout so we can capture error messages
+    char full_command[512];
+    snprintf(full_command, sizeof(full_command), "%s 2>&1", command);
+    
+    FILE* pipe = popen(full_command, "r");
     if (!pipe) {
         return nullptr;
     }
