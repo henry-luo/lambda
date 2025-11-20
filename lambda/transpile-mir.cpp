@@ -1,9 +1,17 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/url.h"
+#include "validator/validator.hpp"
 #include <mir.h>
 #include <mir-gen.h>
 
 extern Type TYPE_ANY, TYPE_INT;
+extern void* heap_alloc(int size, TypeId type_id);
+extern void heap_init();
+extern void heap_destroy();
+extern void frame_start();
+extern void frame_end();
+extern Url* get_current_dir();
 void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstNode *expr_node, MIR_reg_t *result_reg);
 
 // Forward declare import resolver from mir.c
@@ -397,7 +405,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
 }
 
 // Main entry point for MIR compilation
-Item run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
     log_notice("Running script with MIR JIT compilation");
 
     Script* script;
@@ -411,7 +419,16 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path, boo
 
     if (!script || !script->ast_root) {
         log_error("Failed to parse script");
-        return ItemError;
+        // Return Input with error item instead of nullptr
+        Pool* error_pool = pool_create();
+        Input* output = Input::create(error_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            return nullptr;
+        }
+        output->root = ItemError;
+        return output;
     }
 
     // Initialize MIR context
@@ -430,16 +447,84 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path, boo
     if (!main_fn) {
         log_error("Failed to find main function");
         jit_cleanup(ctx);
-        return ItemError;
+        // Return Input with error item instead of nullptr
+        Pool* error_pool = pool_create();
+        Input* output = Input::create(error_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            return nullptr;
+        }
+        output->root = ItemError;
+        return output;
     }
 
     // Create a context for execution with run_main set appropriately
     EvalContext exec_ctx = {0};
+    exec_ctx.pool = script->pool;
+    exec_ctx.type_list = script->type_list;
+    exec_ctx.name_pool = name_pool_create(exec_ctx.pool, nullptr);
+    exec_ctx.type_info = type_info;
+    exec_ctx.consts = script->const_list->data;
+    exec_ctx.num_stack = num_stack_create(16);
+    exec_ctx.result = ItemNull;
+    exec_ctx.cwd = get_current_dir();
+    exec_ctx.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    exec_ctx.context_alloc = heap_alloc;
+    mpd_defaultcontext(exec_ctx.decimal_ctx);
+    exec_ctx.validator = schema_validator_create(exec_ctx.pool);
     exec_ctx.run_main = run_main;
     log_debug("MIR execution context run_main = %s", run_main ? "true" : "false");
 
+    // set thread-local context
+    extern __thread EvalContext* context;
+    EvalContext* saved_context = context;
+    context = &exec_ctx;
+    
+    // initialize heap for execution
+    heap_init();
+    exec_ctx.pool = exec_ctx.heap->pool;
+    frame_start();
+
     Item result = main_fn(&exec_ctx);
 
+    // Create output Input that shares Script's pool (so they share memory resources)
+    // This way, the result Item references remain valid as long as either Input or Script exists
+    log_debug("Creating output Input (sharing Script's pool)");
+    Input* output = Input::create(script->pool, nullptr);
+    if (!output) {
+        log_error("Failed to create output Input");
+        jit_cleanup(ctx);
+        // Return Input with error item instead of nullptr
+        Pool* error_pool = pool_create();
+        Input* error_output = Input::create(error_pool, nullptr);
+        if (!error_output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            return nullptr;
+        }
+        error_output->root = ItemError;
+        return error_output;
+    }
+
+    // Set the result as root
+    output->root = result;
+
+    // Clean up only the execution context resources (keep the Script alive)
+    frame_end();
+    heap_destroy();
+    if (exec_ctx.num_stack) num_stack_destroy((num_stack_t*)exec_ctx.num_stack);
+    if (exec_ctx.decimal_ctx) free(exec_ctx.decimal_ctx);
+    if (exec_ctx.validator) schema_validator_destroy(exec_ctx.validator);
+
+    // Restore thread-local context
+    context = saved_context;
+
     jit_cleanup(ctx);
-    return result;
+    
+    // Note: Script must remain alive - it shares the pool with output
+    // The caller will eventually destroy the pool, cleaning up both Script and output
+    
+    log_debug("Result returned in output Input (shares Script's pool)");
+    return output;
 }

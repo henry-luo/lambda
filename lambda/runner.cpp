@@ -355,10 +355,24 @@ void runner_setup_context(Runner* runner) {
 }
 
 void runner_cleanup(Runner* runner) {
-    log_debug("runner cleanup");
-    frame_end();
+    log_debug("runner cleanup start");
+    if (!runner) {
+        log_debug("runner is NULL, skipping cleanup");
+        return;
+    }
+    
+    // Only call frame_end if we set up a heap (which means runner_setup_context was called)
+    if (runner->context.heap) {
+        log_debug("calling frame_end");
+        frame_end();
+        log_debug("after frame_end");
+    } else {
+        log_debug("no heap, skipping frame_end");
+    }
+    
     // free final result
     if (runner->context.heap) {
+        log_debug("cleaning up heap");
         print_heap_entries();
         log_debug("freeing final result -----------------");
         if (runner->context.result.item) free_item(runner->context.result, true);
@@ -369,14 +383,17 @@ void runner_cleanup(Runner* runner) {
     }
     // free decimal context
     if (runner->context.decimal_ctx) {
+        log_debug("freeing decimal context");
         free(runner->context.decimal_ctx);
         runner->context.decimal_ctx = NULL;
     }
     // free AST validator
     if (runner->context.validator) {
+        log_debug("freeing validator");
         schema_validator_destroy(runner->context.validator);
         runner->context.validator = NULL;
     }
+    log_debug("runner cleanup end");
 }
 
 Item run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only) {
@@ -408,35 +425,103 @@ Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
     return run_script(runtime, NULL, script_path, transpile_only);
 }
 
-// Extended function that supports setting run_main context
-Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
+// Extended function that supports setting run_main context and returns Input*
+Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
     Runner runner;
     runner_init(runtime, &runner);
     runner.script = load_script(runtime, script_path, NULL);
     if (transpile_only) {
         log_info("Transpiled script %s only, not executing.", script_path);
-        return ItemNull;
+        // Return Input with null item for transpile-only mode
+        Pool* null_pool = pool_create();
+        Input* output = Input::create(null_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create transpile output Input");
+            if (null_pool) pool_destroy(null_pool);
+            return nullptr;
+        }
+        output->root = ItemNull;
+        return output;
     }
+    
     // execute the function
-    Item result;
     if (!runner.script || !runner.script->main_func) {
         log_error("Error: Failed to compile the function.");
-        result = ItemNull;
-    } else {
-        log_notice("Executing JIT compiled code...");
-        runner_setup_context(&runner);
-
-        // Set the run_main flag in the execution context
-        runner.context.run_main = run_main;
-        log_debug("Set context run_main = %s", run_main ? "true" : "false");
-
-        log_debug("exec main func");
-        result = context->result = runner.script->main_func(context);
-        log_debug("after main func");
-        // for the time being, we need to keep the context for result item printing
-        // todo: runner_cleanup(&runner);
+        // Return Input with error item instead of nullptr
+        Pool* error_pool = pool_create();
+        Input* output = Input::create(error_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            runner_cleanup(&runner);
+            return nullptr;
+        }
+        output->root = ItemError;
+        runner_cleanup(&runner);
+        return output;
     }
-    return result;
+    
+    log_notice("Executing JIT compiled code...");    runner_setup_context(&runner);
+
+    // set the run_main flag in the execution context
+    runner.context.run_main = run_main;
+    log_debug("Set context run_main = %s", run_main ? "true" : "false");
+
+    log_debug("exec main func");
+    Item result = context->result = runner.script->main_func(context);
+    log_debug("after main func");
+
+    // Create output Input that shares Script's pool (so they share memory resources)
+    // This way, the result Item references remain valid as long as either Input or Script exists
+    log_debug("Creating output Input (sharing Script's pool)");
+    Input* output = Input::create(runner.script->pool, nullptr);
+    if (!output) {
+        log_error("Failed to create output Input");
+        runner_cleanup(&runner);
+        // Still return an error Input instead of nullptr
+        Pool* error_pool = pool_create();
+        Input* error_output = Input::create(error_pool, nullptr);
+        if (!error_output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            return nullptr;
+        }
+        error_output->root = ItemError;
+        return error_output;
+    }
+    output->root = result;  // simply assign the result - it's already an Item
+    
+    // note: we can't use MarkBuilder to deep copy here because Items contain pointers
+    // to data in the runner's pool/arena/heap. We'll need to keep the runner context alive
+    // or implement a proper deep copy mechanism
+    
+    // Transfer ownership: move runner's resources to output Input
+    output->pool = runner.script->pool;  // script's pool (from transpile_script)
+    output->arena = runner.script->arena;  // script's arena (from transpile_script)
+    output->name_pool = runner.script->name_pool;  // script's name_pool
+    output->type_list = runner.script->type_list;  // script's type list
+    
+    // NULL out the transferred pointers so Script destructor doesn't free them
+    runner.script->pool = nullptr;
+    runner.script->arena = nullptr;
+    runner.script->name_pool = nullptr;
+    runner.script->type_list = nullptr;
+    
+    // do NOT call runner_cleanup here because output needs the memory
+    // the caller will be responsible for cleanup via pool_destroy(output->pool)
+    // note: we still need to clean up some runner-specific resources that aren't transferred
+    if (runner.context.decimal_ctx) {
+        free(runner.context.decimal_ctx);
+        runner.context.decimal_ctx = NULL;
+    }
+    if (runner.context.validator) {
+        schema_validator_destroy(runner.context.validator);
+        runner.context.validator = NULL;
+    }
+    
+    log_debug("Result returned in output Input (shares Script's pool)");
+    
+    return output;
 }
 
 void runtime_init(Runtime* runtime) {
