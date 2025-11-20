@@ -404,8 +404,7 @@ typedef struct Input {
     // StringBuf* sb;
 
     // member functions
-    static Input* create(Pool* pool);
-    static Input* create(Pool* pool, Url* abs_url);
+    static Input* create(Pool* pool, Url* abs_url = nullptr);
 } Input;
 
 #ifdef __cplusplus
