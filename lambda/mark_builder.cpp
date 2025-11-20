@@ -1,6 +1,5 @@
 #include "mark_builder.hpp"
 #include "lambda-data.hpp"
-#include "name_pool.h"
 #include "input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"

@@ -1,11 +1,6 @@
 #pragma once
 
 #include "lambda.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "../lib/mempool.h"
 #include "../lib/strview.h"
 #include "../lib/hashmap.h"
@@ -39,7 +34,3 @@ bool name_pool_contains(NamePool* pool, const char* name);
 bool name_pool_contains_strview(NamePool* pool, StrView name);
 size_t name_pool_count(NamePool* pool);
 void name_pool_print_stats(NamePool* pool);
-
-#ifdef __cplusplus
-}
-#endif

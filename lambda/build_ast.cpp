@@ -1,5 +1,4 @@
 #include "transpiler.hpp"
-#include "name_pool.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/log.h"

@@ -14,7 +14,6 @@
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/format/format.h"
 #include "../../lambda/lambda-data.hpp"
-#include "../../lambda/name_pool.h"
 #include "../../lib/mempool.h"
 #include "../../lib/arraylist.h"
 

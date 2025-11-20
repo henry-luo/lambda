@@ -20,7 +20,6 @@
 #include "../lib/log.h"
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
-#include "../lambda/name_pool.h"
 
 // Test fixture for integration tests
 class ValidatorIntegrationTest : public ::testing::Test {

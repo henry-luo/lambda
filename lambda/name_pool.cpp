@@ -1,4 +1,3 @@
-#include "name_pool.h"
 #include "../lib/log.h"
 #include "../lib/string.h"
 #include "lambda-data.hpp"
