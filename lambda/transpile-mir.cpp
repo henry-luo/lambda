@@ -14,6 +14,11 @@ extern void frame_end();
 extern Url* get_current_dir();
 void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstNode *expr_node, MIR_reg_t *result_reg);
 
+// Forward declare Runner helper functions from runner.cpp
+void runner_init(Runtime *runtime, Runner* runner);
+void runner_setup_context(Runner* runner);
+void runner_cleanup(Runner* runner);
+
 // Forward declare import resolver from mir.c
 extern "C" {
     void *import_resolver(const char *name);
@@ -404,115 +409,24 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
     MIR_finish_module(ctx);
 }
 
-// Helper function to execute MIR-compiled script and create output Input
-static Input* execute_mir_script_and_create_output(MIR_context_t ctx, Script* script, bool run_main) {
-    // Generate machine code and execute
-    MIR_gen_init(ctx);
-    MIR_gen_set_optimize_level(ctx, 2);
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
-
-    // Find and execute main function
-    main_func_t main_fn = (main_func_t)find_func(ctx, "main");
-    if (!main_fn) {
-        log_error("Failed to find main function");
-        // Return Input with error item
-        Pool* error_pool = pool_create();
-        Input* output = Input::create(error_pool, nullptr);
-        if (!output) {
-            log_error("Failed to create error output Input");
-            if (error_pool) pool_destroy(error_pool);
-            return nullptr;
-        }
-        output->root = ItemError;
-        return output;
-    }
-
-    // Create a context for execution with run_main set appropriately
-    EvalContext exec_ctx = {0};
-    exec_ctx.pool = script->pool;
-    exec_ctx.type_list = script->type_list;
-    exec_ctx.name_pool = name_pool_create(exec_ctx.pool, nullptr);
-    exec_ctx.type_info = type_info;
-    exec_ctx.consts = script->const_list->data;
-    exec_ctx.num_stack = num_stack_create(16);
-    exec_ctx.result = ItemNull;
-    exec_ctx.cwd = get_current_dir();
-    exec_ctx.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
-    exec_ctx.context_alloc = heap_alloc;
-    mpd_defaultcontext(exec_ctx.decimal_ctx);
-    exec_ctx.validator = schema_validator_create(exec_ctx.pool);
-    exec_ctx.run_main = run_main;
-    log_debug("MIR execution context run_main = %s", run_main ? "true" : "false");
-
-    // set thread-local context
-    extern __thread EvalContext* context;
-    EvalContext* saved_context = context;
-    context = &exec_ctx;
-    
-    // initialize heap for execution
-    heap_init();
-    exec_ctx.pool = exec_ctx.heap->pool;
-    frame_start();
-
-    Item result = main_fn(&exec_ctx);
-
-    // Create output Input that shares Script's pool (so they share memory resources)
-    log_debug("Creating output Input (sharing Script's pool)");
-    Input* output = Input::create(script->pool, nullptr);
-    if (!output) {
-        log_error("Failed to create output Input");
-        // Return Input with error item
-        Pool* error_pool = pool_create();
-        Input* error_output = Input::create(error_pool, nullptr);
-        if (!error_output) {
-            log_error("Failed to create error output Input");
-            if (error_pool) pool_destroy(error_pool);
-            return nullptr;
-        }
-        error_output->root = ItemError;
-        
-        // Clean up execution context before returning error
-        frame_end();
-        heap_destroy();
-        if (exec_ctx.num_stack) num_stack_destroy((num_stack_t*)exec_ctx.num_stack);
-        if (exec_ctx.decimal_ctx) free(exec_ctx.decimal_ctx);
-        if (exec_ctx.validator) schema_validator_destroy(exec_ctx.validator);
-        context = saved_context;
-        
-        return error_output;
-    }
-
-    // Set the result as root
-    output->root = result;
-
-    // Clean up only the execution context resources (keep the Script alive)
-    frame_end();
-    heap_destroy();
-    if (exec_ctx.num_stack) num_stack_destroy((num_stack_t*)exec_ctx.num_stack);
-    if (exec_ctx.decimal_ctx) free(exec_ctx.decimal_ctx);
-    if (exec_ctx.validator) schema_validator_destroy(exec_ctx.validator);
-
-    // Restore thread-local context
-    context = saved_context;
-    
-    log_debug("Result returned in output Input (shares Script's pool)");
-    return output;
-}
-
 // Main entry point for MIR compilation
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
     log_notice("Running script with MIR JIT compilation");
 
-    Script* script;
+    // Initialize runner with the same pattern as run_script()
+    Runner runner;
+    runner_init(runtime, &runner);
+    
+    // Load and parse script
     if (source) {
         // Parse and build AST from source string
-        script = load_script(runtime, script_path, source);
+        runner.script = load_script(runtime, script_path, source);
     } else {
         // Load script from file - pass script_path as both path and source (load_script will read file)
-        script = load_script(runtime, script_path, NULL);
+        runner.script = load_script(runtime, script_path, NULL);
     }
 
-    if (!script || !script->ast_root) {
+    if (!runner.script || !runner.script->ast_root) {
         log_error("Failed to parse script");
         // Return Input with error item instead of nullptr
         Pool* error_pool = pool_create();
@@ -530,10 +444,32 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     MIR_context_t ctx = jit_init();
 
     // Transpile to MIR
-    transpile_mir_ast(ctx, (AstScript*)script->ast_root);
+    transpile_mir_ast(ctx, (AstScript*)runner.script->ast_root);
 
-    // Use common helper to execute and create output
-    Input* output = execute_mir_script_and_create_output(ctx, script, run_main);
+    // Generate machine code and link
+    MIR_gen_init(ctx);
+    MIR_gen_set_optimize_level(ctx, 2);
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    // Find the main function and store it in the Script
+    runner.script->main_func = (main_func_t)find_func(ctx, "main");
+    if (!runner.script->main_func) {
+        log_error("Failed to find main function");
+        jit_cleanup(ctx);
+        // Return Input with error item
+        Pool* error_pool = pool_create();
+        Input* output = Input::create(error_pool, nullptr);
+        if (!output) {
+            log_error("Failed to create error output Input");
+            if (error_pool) pool_destroy(error_pool);
+            return nullptr;
+        }
+        output->root = ItemError;
+        return output;
+    }
+
+    // Now we can use the common execution path
+    Input* output = execute_script_and_create_output(&runner, run_main);
     
     // Cleanup MIR context
     jit_cleanup(ctx);

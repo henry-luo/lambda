@@ -275,8 +275,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     
     // Note: Do NOT destroy output_input->pool here!
     // The pool is shared with the Script, which is managed by the Runtime
-    // Just delete the output Input wrapper (it's a lightweight structure)
-    delete output_input;
+    // Also do NOT delete output_input - it was allocated from the pool
 }
 
 void run_assertions() {

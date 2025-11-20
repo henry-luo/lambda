@@ -398,7 +398,8 @@ void runner_cleanup(Runner* runner) {
 
 // Common helper function to execute a compiled script and wrap the result in an Input*
 // This handles the execution, result wrapping, and cleanup logic shared between run_script and run_script_with_run_main
-static Input* execute_script_and_create_output(Runner* runner, bool run_main) {
+// Made non-static so it can be used by MIR execution path in transpile-mir.cpp
+Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!runner->script || !runner->script->main_func) {
         log_error("Error: Failed to compile the function.");
         // Return Input with error item instead of nullptr
@@ -448,8 +449,19 @@ static Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     
     // note: we can't use MarkBuilder to deep copy here because Items contain pointers
     // to data in the runner's pool/arena/heap. We'll need to keep the runner context alive
-    
-    // Clean up only the EvalContext resources, keep the Script alive
+
+    // Clean up execution heap and context resources, but keep the Script alive
+    // if (runner->context.heap) {
+    //     frame_end();
+    //     heap_destroy();
+    //     if (runner->context.num_stack) {
+    //         num_stack_destroy((num_stack_t*)runner->context.num_stack);
+    //         runner->context.num_stack = NULL;
+    //     }
+    // }
+
+    // Clean up only some EvalContext resources, but keep heap/pool alive for the output
+    // The heap is needed because output Items may reference heap-allocated data
     if (runner->context.decimal_ctx) {
         free(runner->context.decimal_ctx);
         runner->context.decimal_ctx = NULL;
