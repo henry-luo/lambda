@@ -15,6 +15,7 @@ fi
 
 # Parse command line arguments
 TARGET_SUITE=""
+TARGET_CATEGORY=""
 RAW_OUTPUT=false
 PARALLEL_EXECUTION=true  # Default to parallel execution
 
@@ -26,6 +27,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --target)
             TARGET_SUITE="$2"
+            shift 2
+            ;;
+        --category=*)
+            TARGET_CATEGORY="${1#*=}"
+            shift
+            ;;
+        --category)
+            TARGET_CATEGORY="$2"
             shift 2
             ;;
         --raw)
@@ -41,12 +50,13 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [--target=SUITE] [--raw] [--sequential] [--parallel]"
-            echo "  --target=SUITE   Run only tests from specified suite (library, input, mir, lambda, validator, radiant)"
-            echo "  --raw           Show raw test output without formatting"
-            echo "  --sequential    Run tests sequentially (default: parallel)"
-            echo "  --parallel      Run tests in parallel (default)"
-            echo "  --help          Show this help message"
+            echo "Usage: $0 [--target=SUITE] [--category=CATEGORY] [--raw] [--sequential] [--parallel]"
+            echo "  --target=SUITE     Run only tests from specified suite (library, input, mir, lambda, validator, radiant)"
+            echo "  --category=CAT     Run only tests from specified category (baseline, extended)"
+            echo "  --raw              Show raw test output without formatting"
+            echo "  --sequential       Run tests sequentially (default: parallel)"
+            echo "  --parallel         Run tests in parallel (default)"
+            echo "  --help             Show this help message"
             exit 0
             ;;
         *)
@@ -67,6 +77,9 @@ fi
 echo "🚀 Enhanced Lambda Test Suite Runner - Test Results Breakdown"
 if [ -n "$TARGET_SUITE" ]; then
     echo "🎯 Target Suite: $TARGET_SUITE"
+fi
+if [ -n "$TARGET_CATEGORY" ]; then
+    echo "📁 Target Category: $TARGET_CATEGORY"
 fi
 if [ "$RAW_OUTPUT" = true ]; then
     echo "🔧 Raw Output Mode: Test failures will not stop execution"
@@ -719,6 +732,31 @@ if [ -n "$TARGET_SUITE" ]; then
     if [ ${#test_executables[@]} -eq 0 ]; then
         echo "❌ No test executables found for target suite: $TARGET_SUITE"
         echo "   Available suites: library, input, mir, lambda, lambda-std, validator, radiant"
+        exit 1
+    fi
+fi
+
+# Filter executables by category if specified
+if [ -n "$TARGET_CATEGORY" ]; then
+    filtered_executables=()
+    for test_exe in "${test_executables[@]}"; do
+        base_name=$(basename "$test_exe" .exe)
+        # Get the category from build configuration
+        test_category=$(jq -r --arg exe "$base_name.exe" '
+            .test.test_suites[] | 
+            select(.tests[]?.binary == $exe) | 
+            .category // "baseline"
+        ' build_lambda_config.json | head -n1)
+        
+        if [ "$test_category" = "$TARGET_CATEGORY" ]; then
+            filtered_executables+=("$test_exe")
+        fi
+    done
+    test_executables=("${filtered_executables[@]}")
+
+    if [ ${#test_executables[@]} -eq 0 ]; then
+        echo "❌ No test executables found for category: $TARGET_CATEGORY"
+        echo "   Available categories: baseline, extended"
         exit 1
     fi
 fi
