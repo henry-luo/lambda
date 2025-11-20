@@ -204,11 +204,17 @@ void run_repl(Runtime *runtime, bool use_mir) {
                 delete output_input;
             }
         } else {
-            Item result = run_script(runtime, repl_history->str, script_path, false);
-            StrBuf *output = strbuf_new_cap(256);
-            print_root_item(output, result);
-            printf("%s", output->str);
-            strbuf_free(output);
+            Input* output_input = run_script(runtime, repl_history->str, script_path, false);
+            if (output_input) {
+                StrBuf *output = strbuf_new_cap(256);
+                print_root_item(output, output_input->root);
+                printf("%s", output->str);
+                strbuf_free(output);
+                
+                // Note: Do NOT destroy output_input->pool here!
+                // The pool is shared with the Script, which is managed by the Runtime
+                delete output_input;
+            }
         }
 
         free(line);
