@@ -363,6 +363,11 @@ Item ElementBuilder::final() {
         TypeElmt* elmt_type = (TypeElmt*)elmt_->type;
         List* list = (List*)elmt_;
         elmt_type->content_length = list->length;
+        
+        // finalize shape before returning - deduplicate via shape pool
+        if (builder_->input()) {
+            elmt_finalize_shape(elmt_type, builder_->input());
+        }
     }
     return (Item){.element = elmt_};
 }
@@ -455,6 +460,10 @@ MapBuilder& MapBuilder::put(String* key, bool value) {
 }
 
 Item MapBuilder::final() {
+    // finalize shape before returning - deduplicate via shape pool
+    if (map_type_ && builder_->input()) {
+        map_finalize_shape(map_type_, builder_->input());
+    }
     return (Item){.map = map_};
 }
 
@@ -536,7 +545,7 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             String* copied_sym = builder->createSymbol(sym->chars, sym->len);
             return {.item = y2it(copied_sym)};
         }
-        
+
         case LMD_TYPE_STRING: {
             String* str = it2s(item);
             if (!str) return builder->createNull();
