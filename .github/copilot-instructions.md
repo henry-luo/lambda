@@ -77,7 +77,7 @@ let output = format(transform(doc), 'markdown')
 make build-test         # Build all the test executables
 make test               # Run all tests
 ```
-Test executables are located in the `./test/` directory.
+Test executables are located in the `./test/` directory, and ends with `.exe`.
 
 ## File Organization
 
@@ -87,6 +87,7 @@ Test executables are located in the `./test/` directory.
 - `test/input` - Test suites input data files
 - `test/lambda` - Tests in Lambda script
 - `test/*.cpp` - Tests in GTest C++ code
+- `test/*.exe` - Compiled GTest executables
 - `radiant/` - HTML/CSS rendering engine
 - `doc/` - Documentation and design notes
 - `utils/` - Build and utility scripts

@@ -184,6 +184,114 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     }
 }
 
+// ========== Shape Finalization ==========
+// These functions deduplicate map/element shapes by replacing the ShapeEntry chain
+// with a pooled version from the shape_pool.
+
+void map_finalize_shape(TypeMap* type_map, Input* input) {
+    if (!type_map || !input || !input->shape_pool) {
+        return;  // safety check
+    }
+    
+    if (!type_map->shape || type_map->length == 0) {
+        return;  // empty map, nothing to finalize
+    }
+
+    // collect field names and types from existing shape chain
+    size_t field_count = type_map->length;
+    const char** field_names = (const char**)pool_alloc(input->pool, field_count * sizeof(char*));
+    TypeId* field_types = (TypeId*)pool_alloc(input->pool, field_count * sizeof(TypeId));
+    
+    if (!field_names || !field_types) {
+        return;  // allocation failed
+    }
+
+    // traverse existing shape chain to collect info
+    ShapeEntry* entry = type_map->shape;
+    for (size_t i = 0; i < field_count && entry; i++) {
+        field_names[i] = entry->name->str;  // StrView has 'str' field, not 'chars'
+        field_types[i] = entry->type->type_id;
+        entry = entry->next;
+    }
+
+    // get or create pooled shape
+    struct ShapeEntry* pooled_shape = shape_pool_get_map_shape(
+        input->shape_pool,
+        field_names,
+        field_types,
+        field_count
+    );
+
+    if (pooled_shape) {
+        // replace the shape chain with pooled version
+        type_map->shape = pooled_shape;
+        
+        // find last entry in pooled chain
+        struct ShapeEntry* last = pooled_shape;
+        while (last->next) {
+            last = last->next;
+        }
+        type_map->last = last;
+    }
+
+    // free temporary arrays (field data stays in pool)
+    pool_free(input->pool, field_names);
+    pool_free(input->pool, field_types);
+}
+
+void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
+    if (!type_elmt || !input || !input->shape_pool) {
+        return;  // safety check
+    }
+    
+    if (!type_elmt->shape || type_elmt->length == 0) {
+        return;  // empty element, nothing to finalize
+    }
+
+    // collect attribute names and types from existing shape chain
+    size_t attr_count = type_elmt->length;
+    const char** attr_names = (const char**)pool_alloc(input->pool, attr_count * sizeof(char*));
+    TypeId* attr_types = (TypeId*)pool_alloc(input->pool, attr_count * sizeof(TypeId));
+    
+    if (!attr_names || !attr_types) {
+        return;  // allocation failed
+    }
+
+    // traverse existing shape chain to collect info
+    ShapeEntry* entry = type_elmt->shape;
+    for (size_t i = 0; i < attr_count && entry; i++) {
+        attr_names[i] = entry->name->str;  // StrView has 'str' field, not 'chars'
+        attr_types[i] = entry->type->type_id;
+        entry = entry->next;
+    }
+
+    // get or create pooled shape (includes element name)
+    const char* element_name = type_elmt->name.str ? type_elmt->name.str : "";
+    struct ShapeEntry* pooled_shape = shape_pool_get_element_shape(
+        input->shape_pool,
+        element_name,
+        attr_names,
+        attr_types,
+        attr_count
+    );
+
+    if (pooled_shape) {
+        // replace the shape chain with pooled version
+        type_elmt->shape = pooled_shape;
+        
+        // find last entry in pooled chain
+        struct ShapeEntry* last = pooled_shape;
+        while (last->next) {
+            last = last->next;
+        }
+        type_elmt->last = last;
+    }
+
+    // free temporary arrays
+    pool_free(input->pool, attr_names);
+    pool_free(input->pool, attr_types);
+}
+
 
 // Helper function to map MIME types to parser types
 static const char* mime_to_parser_type(const char* mime_type) {
@@ -648,6 +756,7 @@ Input* Input::create(Pool* pool, Url* abs_url) {
     input->pool = pool;
     input->arena = arena_create_default(pool);
     input->name_pool = name_pool_create(pool, NULL);  // Initialize name pool for string interning
+    input->shape_pool = shape_pool_create(pool, input->arena, NULL);  // Initialize shape pool
     input->type_list = arraylist_new(16);
     input->url = abs_url;
     input->path = nullptr;

@@ -42,6 +42,7 @@ class SchemaValidator;
 #undef min
 
 #include "name_pool.hpp"
+#include "shape_pool.hpp"
 // typedef struct NamePool NamePool;
 
 void *memcpy(void *dest, const void *src, size_t n);
@@ -400,6 +401,7 @@ typedef struct Input {
     Pool* pool;                 // memory pool
     Arena* arena;               // arena allocator
     NamePool* name_pool;        // centralized name management
+    ShapePool* shape_pool;      // shape deduplication (NEW)
     ArrayList* type_list;       // list of types
     Item root;
     // StringBuf* sb;
@@ -419,6 +421,10 @@ Element* elmt_pooled(Pool* pool);
 
 void map_put(Map* mp, String* key, Item value, Input *input);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
+
+// Shape finalization - deduplicate map/element shapes using shape pool
+void map_finalize_shape(TypeMap* type_map, Input* input);
+void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
 
 #ifdef __cplusplus
 }
