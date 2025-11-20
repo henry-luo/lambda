@@ -823,7 +823,7 @@ static String* create_string_key(InputContext& ctx, const char* key_str) {
         stringbuf_append_char(sb, key_str[i]);
     }
 
-    String* key = builder.createString(sb->str->chars, sb->length);
+    String* key = builder.createName(sb->str->chars, sb->length);
     return key;
 }
 

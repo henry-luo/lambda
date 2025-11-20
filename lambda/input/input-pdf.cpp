@@ -435,7 +435,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     if (!ref_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key = ctx.builder.createString("type");
+    String* type_key = ctx.builder.createName("type");
     if (type_key) {
         String* type_value = ctx.builder.createString("indirect_ref");
         if (type_value) {
@@ -445,7 +445,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     }
 
     // Store object number
-    String* obj_key = ctx.builder.createString("object_num");
+    String* obj_key = ctx.builder.createName("object_num");
     if (obj_key) {
         double* obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (obj_val) {
@@ -456,7 +456,7 @@ static Item parse_pdf_indirect_ref(InputContext& ctx, const char **pdf) {
     }
 
     // Store generation number
-    String* gen_key = ctx.builder.createString("gen_num");
+    String* gen_key = ctx.builder.createName("gen_num");
     if (gen_key) {
         double* gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
         if (gen_val) {
@@ -506,7 +506,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     if (!obj_map) return content; // return content if we can't create wrapper
 
     // Store type identifier
-    String* type_key = ctx.builder.createString("type");
+    String* type_key = ctx.builder.createName("type");
     if (type_key) {
         String* type_value = ctx.builder.createString("indirect_object");
         if (type_value) {
@@ -516,7 +516,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     }
 
     // Store object number
-    String* obj_key = ctx.builder.createString("object_num");
+    String* obj_key = ctx.builder.createName("object_num");
     if (obj_key) {
         double* obj_val;
         obj_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
@@ -528,7 +528,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf) {
     }
 
     // Store generation number
-    String* gen_key = ctx.builder.createString("gen_num");
+    String* gen_key = ctx.builder.createName("gen_num");
     if (gen_key) {
         double* gen_val;
         gen_val = (double*)pool_calloc(ctx.input()->pool, sizeof(double));
@@ -572,7 +572,7 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict) {
     if (!stream_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key = ctx.builder.createString("type");
+    String* type_key = ctx.builder.createName("type");
     if (type_key) {
         String* type_value = ctx.builder.createString("stream");
         if (type_value) {
@@ -646,7 +646,7 @@ static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf) {
     if (!xref_map) return {.item = ITEM_ERROR};
 
     // Store type identifier
-    String* type_key = ctx.builder.createString("type");
+    String* type_key = ctx.builder.createName("type");
     if (type_key) {
         String* type_value = ctx.builder.createString("xref_table");
         if (type_value) {
@@ -783,7 +783,7 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
     if (!trailer_map) return {.item = (uint64_t)trailer_dict};
 
     // Store type identifier
-    String* type_key = ctx.builder.createString("type");
+    String* type_key = ctx.builder.createName("type");
     if (type_key) {
         String* type_value = ctx.builder.createString("trailer");
         if (type_value) {
@@ -838,7 +838,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
     // Store analysis results
     MarkBuilder builder(input);
 
-    String* type_key = builder.createString("type");
+    String* type_key = builder.createName("type");
     if (type_key) {
         String* type_value = builder.createString("content_analysis");
         if (type_value) {
@@ -883,7 +883,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
     MarkBuilder builder(input);
 
     // Extract font information from the dictionary
-    String* type_key = builder.createString("type");
+    String* type_key = builder.createName("type");
     if (type_key) {
         String* type_value = builder.createString("font_analysis");
         if (type_value) {
@@ -911,7 +911,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
     MarkBuilder builder(input);
 
     // Store type
-    String* type_key = builder.createString("type");
+    String* type_key = builder.createName("type");
     if (type_key) {
         String* type_value = builder.createString("page_analysis");
         if (type_value) {
@@ -1235,7 +1235,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                             }
                         }
 
-                        String* objects_feature = builder.createString("indirect_objects");
+                        String* objects_feature = builder.createName("indirect_objects");
                         if (objects_feature) {
                             Item objects_feature_item = {.item = s2it(objects_feature)};
                             array_append(features_array, objects_feature_item, input->pool);

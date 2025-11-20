@@ -249,7 +249,7 @@ void parse_eml(Input* input, const char* eml_string) {
         if (strcmp(header_name->chars, "from") == 0) {
             String* from_email = extract_email_address(ctx, header_value->chars);
             if (from_email) {
-                String* from_key = ctx.builder.createString("from");
+                String* from_key = ctx.builder.createName("from");
                 Item from_value = {.item = s2it(from_email)};
                 ctx.builder.putToMap(email_map, from_key, from_value);
             }
@@ -257,26 +257,26 @@ void parse_eml(Input* input, const char* eml_string) {
         else if (strcmp(header_name->chars, "to") == 0) {
             String* to_email = extract_email_address(ctx, header_value->chars);
             if (to_email) {
-                String* to_key = ctx.builder.createString("to");
+                String* to_key = ctx.builder.createName("to");
                 Item to_value = {.item = s2it(to_email)};
                 ctx.builder.putToMap(email_map, to_key, to_value);
             }
         }
         else if (strcmp(header_name->chars, "subject") == 0) {
-            String* subject_key = ctx.builder.createString("subject");
+            String* subject_key = ctx.builder.createName("subject");
             Item subject_value = {.item = s2it(header_value)};
             ctx.builder.putToMap(email_map, subject_key, subject_value);
         }
         else if (strcmp(header_name->chars, "date") == 0) {
             String* date_parsed = parse_date_value(ctx, header_value->chars);
             if (date_parsed) {
-                String* date_key = ctx.builder.createString("date");
+                String* date_key = ctx.builder.createName("date");
                 Item date_value = {.item = s2it(date_parsed)};
                 ctx.builder.putToMap(email_map, date_key, date_value);
             }
         }
         else if (strcmp(header_name->chars, "message-id") == 0) {
-            String* msgid_key = ctx.builder.createString("message_id");
+            String* msgid_key = ctx.builder.createName("message_id");
             Item msgid_value = {.item = s2it(header_value)};
             ctx.builder.putToMap(email_map, msgid_key, msgid_value);
         }

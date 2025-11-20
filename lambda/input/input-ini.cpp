@@ -53,7 +53,7 @@ static String* parse_section_name(InputContext& ctx, const char **ini) {
     }
 
     if (sb->length > 0) {
-        return builder.createString(sb->str->chars, sb->length);
+        return builder.createName(sb->str->chars, sb->length);
     }
 
     ctx.addError(section_loc, "Empty section name");
@@ -79,7 +79,7 @@ static String* parse_key(InputContext& ctx, const char **ini) {
         return NULL;
     }
 
-    return builder.createString(sb->str->chars, sb->length);
+    return builder.createName(sb->str->chars, sb->length);
 }
 
 static String* parse_raw_value(InputContext& ctx, const char **ini) {

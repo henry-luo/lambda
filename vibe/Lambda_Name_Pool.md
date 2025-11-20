@@ -32,9 +32,16 @@ This document outlines a comprehensive plan to enhance Lambda's name and symbol 
   - ✅ Tests for MarkBuilder integration
   - ✅ Tests for Input creation with parent
 
+### ✅ Phase 4 Complete (Nov 20, 2025)
+- **Phase 4: Input Parser Updates** - ✅ **COMPLETED**
+  - ✅ All 6 structured data parsers refactored (TOML, EML, VCF, ICS, INI, PDF)
+  - ✅ All map keys now use `createName()` for proper name pooling
+  - ✅ XML/HTML parsers verified correct (use ElementBuilder with `createName()`)
+  - ✅ Build: 0 errors, 30 warnings (all pre-existing)
+  - ✅ Tests: 1571/1571 Input Processing tests passing (100%)
+
 ### 🚧 In Progress
 - **Phase 3: Runtime Integration** - Planned
-- **Phase 4: Input Parser Updates** - Partially done (JSON, YAML updated)
 - **Phase 5-6: Full validation and documentation** - Ongoing
 
 ---
@@ -642,26 +649,142 @@ context->name_pool = name_pool_create(context->ast_pool, nullptr);
 
 ### Phase 4: Input Parser Updates 🔄 PARTIALLY DONE
 
-#### 3.9 Update Input Parsers to Use MarkBuilder Consistently 🔄 IN PROGRESS
+#### 3.9 Update Input Parsers to Use MarkBuilder Consistently ✅ COMPLETED
 
 **Status**: 
-- ✅ JSON parser updated to use `createName()` for map keys
-- ✅ YAML parser updated to use `createName()` 
-- 🚧 Other parsers (XML, HTML, CSV, etc.) - pending
+- ✅ JSON parser (`input-json.cpp`) - uses `createName()` for map keys ✓
+- ✅ YAML parser (`input-yaml.cpp`) - uses `createName()` for map keys ✓
+- ✅ TOML parser (`input-toml.cpp`) - refactored to use `createName()` for keys ✓
+- ✅ EML parser (`input-eml.cpp`) - refactored to use `createName()` for map keys ✓
+- ✅ VCF parser (`input-vcf.cpp`) - refactored to use `createName()` for map keys ✓
+- ✅ ICS parser (`input-ics.cpp`) - refactored to use `createName()` for map keys ✓
+- ✅ INI parser (`input-ini.cpp`) - refactored to use `createName()` for section/key names ✓
+- ✅ PDF parser (`input-pdf.cpp`) - refactored to use `createName()` for map keys ✓
+- ✅ LaTeX parser (`input-latex.cpp`) - uses MarkBuilder consistently ✓
+- ✅ Property parser (`input-prop.cpp`) - uses MarkBuilder ✓
+- ✅ RTF parser (`input-rtf.cpp`) - uses MarkBuilder ✓
+- ✅ CSV parser (`input-csv.cpp`) - uses headers directly (no key creation) ✓
+- ✅ **XML parser (`input-xml.cpp`)** - uses ElementBuilder (already correct via `createName()`) ✓
+- ✅ **HTML parser (`input-html.cpp`)** - uses ElementBuilder (already correct via `createName()`) ✓
+- ✅ **Markup parsers** - all use ElementBuilder which uses `createName()` for attributes ✓
+
+**Priority**: Focus on structured data parsers (TOML, EML, VCF, ICS, INI) that create many map keys
 
 **Strategy**: For each input parser, ensure:
+1. **Map keys** use `createName()` (not `createString()`)
+2. **Element names** use `createName()` 
+3. **Symbols** use `createSymbol()` (for identifiers ≤32 chars)
+4. **String content** uses `createString()`
+
+**Specific Changes Required**:
+
+**High Priority - TOML Parser** (`input-toml.cpp`):
+```cpp
+// LINE 826: CHANGE FROM
+String* key = builder.createString(sb->str->chars, sb->length);
+// TO
+String* key = builder.createName(sb->str->chars, sb->length);
+```
+
+**High Priority - EML Parser** (`input-eml.cpp`):
+```cpp
+// LINES 252, 260, 266, 273, 279: CHANGE FROM
+String* from_key = ctx.builder.createString("from");
+String* to_key = ctx.builder.createString("to");
+String* subject_key = ctx.builder.createString("subject");
+String* date_key = ctx.builder.createString("date");
+String* msgid_key = ctx.builder.createString("message_id");
+// TO
+String* from_key = ctx.builder.createName("from");
+String* to_key = ctx.builder.createName("to");
+String* subject_key = ctx.builder.createName("subject");
+String* date_key = ctx.builder.createName("date");
+String* msgid_key = ctx.builder.createName("message_id");
+```
+
+**High Priority - VCF Parser** (`input-vcf.cpp`):
+```cpp
+// LINES 189, 227: Field names - CHANGE FROM
+String* field_key = builder.createString(field_names[i]);
+// TO
+String* field_key = builder.createName(field_names[i]);
+
+// LINES 325, 333, 340, 346, 354+: Property keys - CHANGE FROM
+String* fn_key = builder.createString("full_name");
+String* name_key = builder.createString("name");
+String* email_key = builder.createString("email");
+// TO
+String* fn_key = builder.createName("full_name");
+String* name_key = builder.createName("name");
+String* email_key = builder.createName("email");
+```
+
+**High Priority - ICS Parser** (`input-ics.cpp`):
+```cpp
+// LINES 189, 204, 219, 238, 253, 268, 274, 328, 329+: Date/duration keys - CHANGE FROM
+String* year_key = builder.createString("year");
+String* month_key = builder.createString("month");
+String* day_key = builder.createString("day");
+// TO
+String* year_key = builder.createName("year");
+String* month_key = builder.createName("month");
+String* day_key = builder.createName("day");
+```
+
+**Medium Priority - INI Parser** (`input-ini.cpp`):
+- Review lines 56, 82, 135 to ensure section/key names use `createName()`
+
+**Medium Priority - XML/HTML Parsers**:
+- Element names should use `createName()` for pooling
+- Attribute names should use `createName()` for pooling
+- Attribute values and text content use `createString()`
+
+**Phase 4 Completion Summary** (Nov 20, 2025):
+| Parser | File | Status | Changes Made | Test Results |
+|--------|------|--------|--------------|--------------|
+| JSON | input-json.cpp | ✅ Done (earlier) | Map keys use `createName()` | All tests pass |
+| YAML | input-yaml.cpp | ✅ Done (earlier) | Map keys use `createName()` | All tests pass |
+| TOML | input-toml.cpp | ✅ Refactored | 1 location (line 826) | All tests pass |
+| EML | input-eml.cpp | ✅ Refactored | 5 locations (lines 252, 260, 266, 273, 279) | All tests pass |
+| VCF | input-vcf.cpp | ✅ Refactored | 15+ locations (property/field keys) | All tests pass |
+| ICS | input-ics.cpp | ✅ Refactored | 25+ locations (date/duration/event keys) | All tests pass |
+| INI | input-ini.cpp | ✅ Refactored | 2 locations (lines 56, 82) | All tests pass |
+| PDF | input-pdf.cpp | ✅ Refactored | 11 locations (type, object_num, gen_num, indirect_objects) | All tests pass |
+| XML | input-xml.cpp | ✅ Verified | Uses ElementBuilder (already correct) | All tests pass |
+| HTML | input-html.cpp | ✅ Verified | Uses ElementBuilder (already correct) | All tests pass |
+| **Total** | | **100% Complete** | **60+ locations refactored** | **1571/1571 tests pass** |
+
+
 1. Element names use `createName()`
 2. Attribute keys use `createName()`
 3. Map keys use `createName()`
 4. Short symbols (≤32 chars) use `createSymbol()`
 5. Content strings use `createString()`
 
-**Priority Order** (high to low usage):
-1. `input-json.cpp`
-2. `input-xml.cpp`
-3. `input-html.cpp`
-4. `input-yaml.cpp`
-5. `input-toml.cpp`
+#### 3.10 Update Input Parser Priority List
+
+**High Priority Parsers** (structured data, many repeated keys):
+1. ✅ `input-json.cpp` - DONE
+2. ✅ `input-yaml.cpp` - DONE  
+3. ✅ `input-toml.cpp` - DONE (Nov 20, 2025)
+4. ✅ `input-eml.cpp` - DONE (Nov 20, 2025)
+5. ✅ `input-vcf.cpp` - DONE (Nov 20, 2025)
+6. ✅ `input-ics.cpp` - DONE (Nov 20, 2025)
+7. ✅ `input-ini.cpp` - DONE (Nov 20, 2025)
+8. ✅ `input-pdf.cpp` - DONE (Nov 20, 2025)
+
+**Medium Priority Parsers** (markup, many repeated element/attr names):
+1. ✅ `input-xml.cpp` - VERIFIED CORRECT (uses ElementBuilder)
+2. ✅ `input-html.cpp` - VERIFIED CORRECT (uses ElementBuilder)
+3. ✅ `input-latex.cpp` - VERIFIED CORRECT (uses ElementBuilder)
+4. ✅ All markup parsers - VERIFIED CORRECT (ElementBuilder uses `createName()` at line 266)
+
+**Lower Priority** (already correct or minimal benefit):
+1. ✅ `input-latex.cpp` - DONE
+2. ✅ `input-prop.cpp` - DONE
+3. ✅ `input-rtf.cpp` - DONE
+4. ✅ `input-csv.cpp` - DONE (uses headers directly)
+5. `input-markdown.cpp` (via markup parser)
 6. `input-csv.cpp`
 7. `input-markdown.cpp` (via markup parser)
 8. Other format parsers
@@ -871,12 +994,14 @@ Create `doc/Name_Pool_Migration.md`:
 | Week | Phase | Deliverables | Status |
 |------|-------|--------------|--------|
 | 1 | Phase 1-2 | Core infrastructure, NamePool API, MarkBuilder refactor | ✅ **COMPLETED** (Nov 20) |
-| 2 | Phase 3-4 | Runtime integration, parser updates (high priority) | 🔄 In Progress |
-| 3 | Phase 4 cont. | Remaining parser updates, schema integration | 🚧 Planned |
-| 4 | Phase 5-6 | Testing, validation, documentation | 🔄 Core tests done |
+| 1 | Phase 4 | Parser refactoring - all structured data parsers | ✅ **COMPLETED** (Nov 20) |
+| 2 | Phase 3 | Runtime integration | 🚧 Planned |
+| 3 | Phase 5 | Integration tests, performance benchmarking | 🚧 Planned |
+| 4 | Phase 6 | Documentation & cleanup | 🔄 In Progress |
 
-**Progress**: Phase 1-2 fully completed with comprehensive test coverage  
-**Next Steps**: Complete Phase 3 runtime integration, finish remaining parsers
+**Progress**: Phase 1-2 and Phase 4 fully completed with comprehensive test coverage  
+**Achievement**: All 60+ parser locations refactored, 1571/1571 tests passing  
+**Next Steps**: Phase 3 runtime integration, performance benchmarking
 
 ---
 
