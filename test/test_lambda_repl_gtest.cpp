@@ -99,10 +99,10 @@ TEST(LambdaReplTests, test_quit_command) {
 }
 
 TEST(LambdaReplTests, test_simple_expression) {
-    test_result result = run_lambda_repl("1 + 1");
+    test_result result = run_lambda_repl("1 + 1\n.quit");
     ASSERT_NE(result.output, nullptr);
-    // Should contain result or error message
-    ASSERT_GT(strlen(result.output), 0);
+    // Should contain the result "2"
+    ASSERT_TRUE(strstr(result.output, "2") != nullptr) << "Expected to find result '2' in output";
     free_test_result(&result);
 }
 
@@ -143,7 +143,9 @@ TEST(LambdaReplTests, test_startup_and_quit) {
 TEST(LambdaReplTests, test_multiple_commands) {
     test_result result = run_lambda_repl("1 + 1\n2 * 3\n.quit");
     ASSERT_NE(result.output, nullptr) << "Expected output from multiple commands";
-    ASSERT_GT(strlen(result.output), 0) << "Should show results from multiple expressions";
+    // Should contain both results
+    ASSERT_TRUE(strstr(result.output, "2") != nullptr) << "Expected to find result '2' for 1+1";
+    ASSERT_TRUE(strstr(result.output, "6") != nullptr) << "Expected to find result '6' for 2*3";
     free_test_result(&result);
 }
 
@@ -162,15 +164,20 @@ TEST(LambdaReplTests, test_quit_variations) {
 TEST(LambdaReplTests, test_complex_arithmetic) {
     test_result result = run_lambda_repl("5 * 7\n8 / 2\n.quit");
     ASSERT_NE(result.output, nullptr) << "Expected output from complex arithmetic";
-    ASSERT_GT(strlen(result.output), 0) << "Should show complex arithmetic results";
+    // Should contain both results
+    ASSERT_TRUE(strstr(result.output, "35") != nullptr) << "Expected to find result '35' for 5*7";
+    ASSERT_TRUE(strstr(result.output, "4") != nullptr) << "Expected to find result '4' for 8/2";
     free_test_result(&result);
 }
 
 TEST(LambdaReplTests, test_error_recovery) {
     test_result result = run_lambda_repl("2 +\n1 + 1\n.quit");
     ASSERT_NE(result.output, nullptr) << "Expected output from error recovery test";
-    // Should continue running despite syntax error
-    ASSERT_GT(strlen(result.output), 0) << "Should recover from syntax error";
+    // Should continue running despite syntax error and compute 1+1=2
+    ASSERT_TRUE(strstr(result.output, "error") != nullptr || 
+                strstr(result.output, "Error") != nullptr ||
+                strstr(result.output, "ERROR") != nullptr) << "Should show error for incomplete expression";
+    ASSERT_TRUE(strstr(result.output, "2") != nullptr) << "Should recover and compute 1+1=2";
     free_test_result(&result);
 }
 
@@ -196,7 +203,12 @@ TEST(LambdaReplTests, test_repl_functionality) {
 TEST(LambdaReplTests, test_command_sequence_stability) {
     test_result result = run_lambda_repl("1 + 1\n.help\n2 * 2\n.quit");
     ASSERT_NE(result.output, nullptr) << "Expected output from command sequence";
-    ASSERT_GT(strlen(result.output), 10) << "Should produce substantial output";
+    // Should contain help text and both computation results
+    ASSERT_TRUE(strstr(result.output, "help") != nullptr || 
+                strstr(result.output, "REPL") != nullptr ||
+                strstr(result.output, "Commands") != nullptr) << "Expected help output";
+    ASSERT_TRUE(strstr(result.output, "2") != nullptr) << "Expected to find result '2' for 1+1";
+    ASSERT_TRUE(strstr(result.output, "4") != nullptr) << "Expected to find result '4' for 2*2";
     free_test_result(&result);
 }
 
@@ -214,8 +226,8 @@ TEST(LambdaReplTests, test_prompt_display) {
 TEST(LambdaReplTests, test_prompt_with_expressions) {
     test_result result = run_lambda_repl("2 + 3\n.quit");
     ASSERT_NE(result.output, nullptr) << "Expected output from expressions";
-    // Should handle expressions even in non-interactive mode
-    ASSERT_GT(strlen(result.output), 0) << "Should show expression results or prompts";
+    // Should compute 2+3=5
+    ASSERT_TRUE(strstr(result.output, "5") != nullptr) << "Expected to find result '5' for 2+3";
     free_test_result(&result);
 }
 
@@ -230,7 +242,10 @@ TEST(LambdaReplTests, test_unicode_prompt_support) {
 TEST(LambdaReplTests, test_multiple_prompt_sequence) {
     test_result result = run_lambda_repl("1\n2\n3\n.quit");
     ASSERT_NE(result.output, nullptr) << "Expected output from multiple prompts";
-    ASSERT_GT(strlen(result.output), 0) << "Should handle multiple prompt sequence";
+    // Should echo back all three values
+    ASSERT_TRUE(strstr(result.output, "1") != nullptr) << "Expected to find value '1'";
+    ASSERT_TRUE(strstr(result.output, "2") != nullptr) << "Expected to find value '2'";
+    ASSERT_TRUE(strstr(result.output, "3") != nullptr) << "Expected to find value '3'";
     free_test_result(&result);
 }
 
