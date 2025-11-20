@@ -308,7 +308,7 @@ clean-tree-sitter-minimal:
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-test clean-grammar clean-radiant generate-grammar debug release rebuild test test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-test clean-grammar clean-radiant generate-grammar debug release rebuild test test-all test-baseline test-extended test-input run help install uninstall \
 	    lambda radiant window format lint check docs intellisense analyze-size \
 	    build-windows build-linux build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
@@ -366,7 +366,10 @@ help:
 	@echo "  clean-tree-sitter-minimal - Clean minimal tree-sitter build artifacts"
 	@echo ""
 	@echo "Development:"
-	@echo "  test          - Run comprehensive unit tests"
+	@echo "  test          - Run ALL test suites (baseline + extended, alias for test-all)"
+	@echo "  test-all      - Run ALL test suites (baseline + extended)"
+	@echo "  test-baseline - Run BASELINE test suites only (core functionality, must pass 100%)"
+	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
@@ -702,12 +705,36 @@ distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup finished."
 
 # Development targets
-test: build-test
+test: test-all
+
+test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
-	@echo "Running test suite ..."
+	@echo "Running ALL test suites (baseline + extended)..."
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-baseline: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running BASELINE test suites only..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --category=baseline --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-extended: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running EXTENDED test suites only..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --category=extended --parallel; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
@@ -1014,26 +1041,6 @@ test-typeset-workflow:
 	./test_workflow
 	@echo "Cleaning up test executable..."
 	rm -f test_workflow
-
-
-test-all:
-	@echo "Running complete test suite (all test types)..."
-	@echo "1. Unit Tests..."
-	@$(MAKE) test
-	@echo ""
-	@echo "2. Memory Tests..."
-	@$(MAKE) test-memory
-	@echo ""
-	@echo "3. Integration Tests..."
-	@$(MAKE) test-integration
-	@echo ""
-	@echo "4. Benchmark Tests..."
-	@$(MAKE) test-benchmark
-	@echo ""
-	@echo "5. Fuzz Tests..."
-	@$(MAKE) test-fuzz
-	@echo ""
-	@echo "🎉 Complete test suite finished!"
 
 # Phase 6: Build System Integration Targets
 validate-build:

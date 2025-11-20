@@ -871,6 +871,7 @@
             {
                 "suite": "library",
                 "name": "\ud83d\udcda Library Tests",
+                "category": "baseline",
                 "tests": [
                     {
                         "source": "test_strbuf_gtest.cpp",
@@ -1045,6 +1046,7 @@
             {
                 "suite": "input",
                 "name": "\ud83d\udcc4 Input Processing Tests",
+                "category": "baseline",
                 "tests": [
                     {
                         "source": "test_mime_detect_gtest.cpp",
@@ -1347,18 +1349,6 @@
                             "rpmalloc"
                         ],
                         "binary": "test_graph_formatter_gtest.exe"
-                    },
-                    {
-                        "source": "test/test_http_gtest.cpp",
-                        "name": "\ud83c\udf10 HTTP/HTTPS Tests (GTest)",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_http_gtest.exe"
                     },
                     {
                         "source": "test/test_sysinfo_gtest.cpp",
@@ -1741,8 +1731,8 @@
                         "binary": "test_jsx_roundtrip_gtest.exe"
                     },
                     {
-                        "source": "test/latex/test_latex_html_fixtures.cpp",
-                        "name": "\ud83d\udcc4 LaTeX to HTML Fixture Tests (GTest)",
+                        "source": "test/latex/test_latex_html_baseline.cpp",
+                        "name": "\ud83d\udcc4 LaTeX to HTML Baseline Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1751,7 +1741,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_latex_html_fixtures.exe",
+                        "binary": "test_latex_html_baseline.exe",
                         "additional_sources": [
                             "test/latex/fixture_loader.cpp",
                             "test/latex/html_comparison.cpp",
@@ -1770,6 +1760,7 @@
             {
                 "suite": "validator",
                 "name": "\ud83d\udd0d Validator Tests",
+                "category": "baseline",
                 "tests": [
                     {
                         "source": "test/test_validator_gtest.cpp",
@@ -1781,7 +1772,7 @@
                             "gtest",
                             "gtest_main"
                         ],
-                        "binary": "test/test_validator_gtest.exe",
+                        "binary": "test_validator_gtest.exe",
                         "disabled": false
                     },
                     {
@@ -1795,7 +1786,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test/test_ast_validator_gtest.exe",
+                        "binary": "test_ast_validator_gtest.exe",
                         "disabled": false
                     },
                     {
@@ -1809,7 +1800,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test/test_validator_path_reporting.exe",
+                        "binary": "test_validator_path_reporting.exe",
                         "disabled": false
                     }
                 ],
@@ -1826,12 +1817,13 @@
             {
                 "suite": "lambda",
                 "name": "\ud83d\udc11 Lambda Runtime Tests",
+                "category": "baseline",
                 "tests": [
                     {
                         "source": "test/test_lambda_gtest.cpp",
                         "name": "\ud83d\udc11 Lambda Runtime Tests (GTest)",
                         "dependencies": [],
-                        "binary": "test/test_lambda_gtest.exe",
+                        "binary": "test_lambda_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"
@@ -1841,7 +1833,7 @@
                         "source": "test/test_lambda_repl_gtest.cpp",
                         "name": "\ud83c\udfae Lambda REPL Interface Tests (GTest)",
                         "dependencies": [],
-                        "binary": "test/test_lambda_repl_gtest.exe",
+                        "binary": "test_lambda_repl_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"
@@ -1851,7 +1843,7 @@
                         "source": "test/test_lambda_proc_gtest.cpp",
                         "name": "\ud83d\udc11 Lambda Procedural Tests (GTest)",
                         "dependencies": [],
-                        "binary": "test/test_lambda_proc_gtest.exe",
+                        "binary": "test_lambda_proc_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"
@@ -1861,7 +1853,7 @@
                         "source": "test/test_js_gtest.cpp",
                         "name": "\ud83d\udfe8 JavaScript Transpiler Tests (GTest)",
                         "dependencies": [],
-                        "binary": "test/test_js_gtest.exe",
+                        "binary": "test_js_gtest.exe",
                         "libraries": [
                             "gtest",
                             "gtest_main"
@@ -1869,6 +1861,62 @@
                     }
                 ],
                 "type": "lambda",
+                "uses_build_config": true,
+                "requires_lambda_exe": true,
+                "parallel": true
+            },
+            {
+                "suite": "extended",
+                "name": "\ud83e\uddea Extended Development Tests",
+                "category": "extended",
+                "tests": [
+                    {
+                        "source": "test/test_http_gtest.cpp",
+                        "name": "\ud83c\udf10 HTTP/HTTPS Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_http_gtest.exe"
+                    },
+                    {
+                        "source": "test/latex/test_latex_html_extended.cpp",
+                        "name": "\ud83d\udcc4 LaTeX to HTML Extended Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_latex_html_extended.exe",
+                        "additional_sources": [
+                            "test/latex/fixture_loader.cpp",
+                            "test/latex/html_comparison.cpp",
+                            "lambda/input/input-latex.cpp"
+                        ],
+                        "includes": [
+                            "test/latex"
+                        ],
+                        "special_flags": "-std=c++17 -I/opt/homebrew/include"
+                    },
+                    {
+                        "source": "test/test_lambda_proc_extended_gtest.cpp",
+                        "name": "\ud83d\udc11 Lambda Procedural Extended Tests (GTest)",
+                        "dependencies": [],
+                        "binary": "test_lambda_proc_extended_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ]
+                    }
+                ],
+                "type": "extended",
+                "special_flags": "-fms-extensions",
                 "uses_build_config": true,
                 "requires_lambda_exe": true,
                 "parallel": true

@@ -237,10 +237,6 @@ TEST(LambdaProcTests, test_proc2) {
     test_lambda_proc_script_against_file("test/lambda/proc2.ls", "test/lambda/proc2.txt");
 }
 
-TEST(LambdaProcTests, test_proc_fetch) {
-    test_lambda_proc_script_against_file("test/lambda/proc_fetch.ls", "test/lambda/proc_fetch.txt");
-}
-
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
