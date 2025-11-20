@@ -2,7 +2,6 @@
 
 #include "js_ast.hpp"
 #include "../transpiler.hpp"
-#include "../name_pool.h"
 
 #ifdef __cplusplus
 extern "C" {

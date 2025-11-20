@@ -40,7 +40,9 @@ class SchemaValidator;
 #include "lambda.hpp"
 #undef max
 #undef min
-typedef struct NamePool NamePool;
+
+#include "name_pool.hpp"
+// typedef struct NamePool NamePool;
 
 void *memcpy(void *dest, const void *src, size_t n);
 void *memset(void *s, int c, size_t n);

@@ -1,9 +1,5 @@
-#include "transpiler.hpp"
-#include "../lib/log.h"
-#include "../lib/url.h"
-#include "name_pool.h"
 #include <time.h>
-#include <stdlib.h>
+#include "transpiler.hpp"
 
 #if _WIN32
 #include <windows.h>

@@ -24,15 +24,15 @@ void free_item(Item item, bool clear_entry);
 void expand_list(List *list);
 
 extern "C" {
-    #ifndef WASM_BUILD
-    #include <mir.h>
-    #include <mir-gen.h>
-    #include <c2mir.h>
-    #else
-    #include "../wasm-deps/include/mir.h"
-    #include "../wasm-deps/include/mir-gen.h"
-    #include "../wasm-deps/include/c2mir.h"
-    #endif
+#ifndef WASM_BUILD
+#include <mir.h>
+#include <mir-gen.h>
+#include <c2mir.h>
+#else
+#include "../wasm-deps/include/mir.h"
+#include "../wasm-deps/include/mir-gen.h"
+#include "../wasm-deps/include/c2mir.h"
+#endif
 }
 
 typedef struct Runner {

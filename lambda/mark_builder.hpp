@@ -2,7 +2,7 @@
 #define LAMBDA_MARK_BUILDER_HPP
 
 #include "lambda-data.hpp"
-#include "name_pool.h"
+#include "name_pool.hpp"
 #include "../lib/mempool.h"
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"

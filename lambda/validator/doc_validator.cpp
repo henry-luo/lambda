@@ -6,11 +6,8 @@
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/arraylist.h"
-#include "validator.hpp"
 #include "../transpiler.hpp"
-#include "../ast.hpp"
-#include "../lambda-data.hpp"
-#include "../name_pool.h"
+#include "validator.hpp"
 #include "../schema_ast.hpp"
 #include "../mark_reader.hpp"
 

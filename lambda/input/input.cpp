@@ -1,13 +1,13 @@
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/stat.h>
+
 #include "input.hpp"
 #include "../mark_builder.hpp"
-#include "../name_pool.h"
 #include "../../lib/url.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mime-detect.h"
 #include "../../lib/arena.h"
-#include <unistd.h>
-#include <stdio.h>
-#include <sys/stat.h>
 #include "../../lib/log.h"  // add logging support
 #include "../../lib/file.h"
 

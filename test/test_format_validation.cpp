@@ -14,7 +14,6 @@
 #include "../lib/log.h"
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
-#include "../lambda/name_pool.h"
 
 // test fixture for format validation tests
 class FormatValidationTest : public ::testing::Test {
