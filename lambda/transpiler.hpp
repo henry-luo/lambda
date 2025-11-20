@@ -88,6 +88,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
+Input* execute_script_and_create_output(Runner* runner, bool run_main);
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
