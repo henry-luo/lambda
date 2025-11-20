@@ -191,34 +191,24 @@ void run_repl(Runtime *runtime, bool use_mir) {
         snprintf(script_path, sizeof(script_path), "<repl-%d>", ++exec_count);
 
         // Run the accumulated script
+        Input* output_input = nullptr;
         if (use_mir) {
             // transpile using MIR
-            Input* output_input = run_script_mir(runtime, repl_history->str, script_path, false);  // false for run_main in REPL
-            if (output_input) {
-                StrBuf *output = strbuf_new_cap(256);
-                print_root_item(output, output_input->root);
-                printf("%s", output->str);
-                strbuf_free(output);
-                
-                // Note: Do NOT destroy output_input->pool here!
-                // The pool is shared with the Script, which is managed by the Runtime
-                delete output_input;
-            }
+            output_input = run_script_mir(runtime, repl_history->str, script_path, false);  // false for run_main in REPL
         } else {
             // transpile using C2MIR
-            Input* output_input = run_script(runtime, repl_history->str, script_path, false);
-            if (output_input) {
-                StrBuf *output = strbuf_new_cap(256);
-                print_root_item(output, output_input->root);
-                printf("%s", output->str);
-                strbuf_free(output);
-                
-                // Note: Do NOT destroy output_input->pool here!
-                // The pool is shared with the Script, which is managed by the Runtime
-                delete output_input;
-            }
+            output_input = run_script(runtime, repl_history->str, script_path, false);
         }
-
+        if (output_input) {
+            StrBuf *output = strbuf_new_cap(256);
+            print_root_item(output, output_input->root);
+            printf("%s", output->str);
+            strbuf_free(output);
+            
+            // Note: Do NOT destroy output_input->pool here!
+            // The pool is shared with the Script, which is managed by the Runtime
+            // todo: free up output_input;
+        }
         free(line);
     }
     printf("\n");  // print one last '\n', otherwise, may see '%' at the end of the line
