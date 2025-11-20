@@ -1,13 +1,15 @@
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 #include <string.h>
-#include "cmdedit.h"
-#include "cmdedit_utf8.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <stdint.h>
+#include "cmdedit.h"
+#include "cmdedit_utf8.h"
+#include "log.h"
 
 // Platform-specific includes
 #ifdef _WIN32
@@ -536,10 +538,9 @@ int repl_init(void) {
 }
 
 void repl_cleanup(void) {
-    if (!g_initialized) {
-        return;
-    }
+    if (!g_initialized) { return; }
     
+    log_debug("Cleaning up command line editor");
     terminal_cleanup(&g_terminal);
     
     // Cleanup editor

@@ -463,10 +463,12 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // Clean up only some EvalContext resources, but keep heap/pool alive for the output
     // The heap is needed because output Items may reference heap-allocated data
     if (runner->context.decimal_ctx) {
+        log_debug("freeing decimal context");
         free(runner->context.decimal_ctx);
         runner->context.decimal_ctx = NULL;
     }
     if (runner->context.validator) {
+        log_debug("freeing schema validator");
         schema_validator_destroy(runner->context.validator);
         runner->context.validator = NULL;
     }
