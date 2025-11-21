@@ -12,7 +12,7 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 SysFuncInfo sys_funcs[] = {
     {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false},
     {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false},
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false}, // return ANY, as there can be error
     {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false},
     {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false, false},
     {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false, false},

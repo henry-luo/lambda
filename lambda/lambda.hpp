@@ -17,6 +17,7 @@ typedef struct Item {
         };
         // uses the high byte to tag the item/pointer, defined for little-endian
         struct {
+            // don't use pointer to access containers like list, map, element, use direct container* instead
             uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
             uint64_t _type_id : 8;
         };

@@ -1267,11 +1267,33 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     strbuf_append_char(tp->code_buf, ')');
                 }
                 else {
-                    // todo: raise error
+                    log_error("Error: incompatible argument type for int64 parameter");
                     strbuf_append_str(tp->code_buf, "null");
                 }
             }
-            else transpile_box_item(tp, arg);
+            else if (param_type->type_id == LMD_TYPE_INT) {
+                if (arg->type->type_id == LMD_TYPE_INT) {
+                    transpile_expr(tp, arg);
+                }
+                else if (arg->type->type_id == LMD_TYPE_INT64 || arg->type->type_id == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "((int32_t)");  // downcast
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else if (arg->type->type_id == LMD_TYPE_ANY) {
+                    // todo: check it2i, as it may return error
+                    strbuf_append_str(tp->code_buf, "it2i(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else {
+                    log_error("Error: incompatible argument type for int64 parameter");
+                    strbuf_append_str(tp->code_buf, "null");
+                }
+            }
+            else { // all other types, pass as item
+                transpile_box_item(tp, arg);
+            }
         }
         else transpile_box_item(tp, arg);
         if (arg->next) {
