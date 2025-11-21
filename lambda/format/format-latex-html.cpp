@@ -736,12 +736,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             stringbuf_append_str(html_buf, "<span class=\"vspace bigskip\"></span>");
             return;
         }
-        // Font declaration commands - DISABLED to restore baseline compatibility
-        // The LaTeX parser appears to convert \textbf{} to {\bfseries} internally,
-        // which causes these handlers to be called instead of the textbf handler.
-        // This results in wrong CSS classes (.bf instead of .latex-textbf).
-        // Disabling these handlers restores baseline test expectations.
-        /*
+        // Font declaration commands - change font state for subsequent text
         else if (strcmp(cmd_name, "bfseries") == 0) {
             font_ctx->series = FONT_SERIES_BOLD;
             return;
@@ -779,6 +774,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "em") == 0) {
+            // Toggle between italic and upright
             if (font_ctx->shape == FONT_SHAPE_UPRIGHT) {
                 font_ctx->shape = FONT_SHAPE_ITALIC;
                 font_ctx->em_active = true;
@@ -795,7 +791,6 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             font_ctx->em_active = false;
             return;
         }
-        */
         else {
             // Generic element - process children
             // printf("DEBUG: Processing generic element: '%s' (length: %d)\n", cmd_name, name_len);
@@ -873,11 +868,36 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
         return;
     }
 
-    // Process element items directly without paragraph wrapping
+    // Process element items, wrapping text in font spans as needed
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
+        bool font_span_open = false;
+        
         for (int i = 0; i < elem->length; i++) {
             Item content_item = elem->items[i];
+            TypeId item_type = get_type_id(content_item);
+            
+            // Before processing, check if we need to open a font span for text/textblocks
+            if (needs_font_span(font_ctx) && !font_span_open && item_type == LMD_TYPE_STRING) {
+                const char* css_class = get_font_css_class(font_ctx);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, css_class);
+                stringbuf_append_str(html_buf, "\">");
+                font_span_open = true;
+            }
+            
+            // If font returned to default and span is open, close it
+            if (!needs_font_span(font_ctx) && font_span_open) {
+                stringbuf_append_str(html_buf, "</span>");
+                font_span_open = false;
+            }
+            
+            // Process the item (this may change font_ctx for declarations)
             process_latex_element(html_buf, content_item, pool, depth, font_ctx);
+        }
+        
+        // Close any open font span at the end
+        if (font_span_open) {
+            stringbuf_append_str(html_buf, "</span>");
         }
     }
 }
