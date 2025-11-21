@@ -330,7 +330,7 @@ TEST_F(LatexHtmlFixtureTest, BasicTextFormatting) {
     fixture.id = 1;
     fixture.header = "basic text formatting";
     fixture.latex_source = R"(\textbf{Bold text} and \textit{italic text})";
-    fixture.expected_html = R"(<div class="body"><p><span class="latex-textbf">Bold text</span> and <span class="latex-textit">italic text</span></p></div>)";
+    fixture.expected_html = R"(<div class="body"><p><span class="bf">Bold text</span> and <span class="it">italic text</span></p></div>)";
     fixture.skip_test = false;
 
     run_fixture_test(fixture);
