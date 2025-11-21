@@ -405,24 +405,19 @@ public:
      */
     MapBuilder& put(String* key, Item value);
 
-    /**
-     * Put key-value pair with string value (convenience)
-     */
+    // Put key-value pair with string value
     MapBuilder& put(const char* key, const char* value);
 
-    /**
-     * Put key-value pair with integer value (convenience)
-     */
+    // Put key-value pair with int64_t value
     MapBuilder& put(const char* key, int64_t value);
 
-    /**
-     * Put key-value pair with float value (convenience)
-     */
+    // Put key-value pair with int32_t value
+    MapBuilder& put(const char* key, int32_t value);
+
+    // Put key-value pair with float value
     MapBuilder& put(const char* key, double value);
 
-    /**
-     * Put key-value pair with boolean value (convenience)
-     */
+    // Put key-value pair with boolean value
     MapBuilder& put(const char* key, bool value);
 
     /**

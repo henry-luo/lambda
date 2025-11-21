@@ -295,10 +295,10 @@ int it2i(Item itm) {
     else if (itm._type_id == LMD_TYPE_FLOAT) {
         return (int)*(double*)itm.pointer;
     }
-    else if (itm._type_id == LMD_TYPE_BOOL) {
+    else if (itm._type_id == LMD_TYPE_BOOL) { // should bool be convertible to int?
         return itm.bool_val ? 1 : 0;
     }
-    return 0;
+    return INT_ERROR;
 }
 
 String* it2s(Item itm) {

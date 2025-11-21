@@ -178,7 +178,7 @@ class MathRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Initialize logging
-        log_init("log.conf");
+        log_init(NULL);
     }
 
     void TearDown() override {

@@ -426,8 +426,12 @@ MapBuilder& MapBuilder::put(const char* key, const char* value) {
     return put(key, builder_->createStringItem(value));
 }
 
+MapBuilder& MapBuilder::put(const char* key, int32_t value) {
+    return put(key, {.item = i2it(value)});
+}
+
 MapBuilder& MapBuilder::put(const char* key, int64_t value) {
-    return put(key, builder_->createInt(value));
+    return put(key, builder_->createLong(value));
 }
 
 MapBuilder& MapBuilder::put(const char* key, double value) {
@@ -439,7 +443,7 @@ MapBuilder& MapBuilder::put(const char* key, bool value) {
 }
 
 MapBuilder& MapBuilder::putNull(const char* key) {
-    return put(key, builder_->createNull());
+    return put(key, ItemNull);
 }
 
 // String* key overloads

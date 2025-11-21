@@ -75,8 +75,7 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "bool");
         break;
     case LMD_TYPE_INT:
-        // Lambda int computed as int64 under C
-        strbuf_append_str(code_buf, "int64_t");
+        strbuf_append_str(code_buf, "int32_t");
         break;
     case LMD_TYPE_INT64:
         strbuf_append_str(code_buf, "int64_t");
@@ -636,9 +635,9 @@ char* format_type(Type *type) {
     case LMD_TYPE_BOOL:
         return "bool";
     case LMD_TYPE_INT:
-        return "int^";
-    case LMD_TYPE_INT64:
         return "int";
+    case LMD_TYPE_INT64:
+        return "int64";
     case LMD_TYPE_FLOAT:
         return "float";
     case LMD_TYPE_DECIMAL:

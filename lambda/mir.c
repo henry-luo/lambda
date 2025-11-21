@@ -96,6 +96,7 @@ func_obj_t func_list[] = {
     {"op_or", (fn_ptr) op_or},
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
+    {"it2i", (fn_ptr) it2i},
     {"to_fn", (fn_ptr) to_fn},
     {"fn_is", (fn_ptr) fn_is},
     {"fn_in", (fn_ptr) fn_in},
