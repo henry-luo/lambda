@@ -432,7 +432,7 @@ TEST_F(StringBufTest, TestDualStringBufMemoryCorruption) {
 
     // Phase 1: HTML content generation (like process_latex_element)
     printf("DEBUG: Phase 1 - HTML generation\n");
-    stringbuf_append_str(html_buf, "<div class=\"latex-document\">\n");
+    stringbuf_append_str(html_buf, "<div class=\"body\">\n");
     stringbuf_append_str(html_buf, "<h1>Test Document</h1>\n");
     stringbuf_append_str(html_buf, "<p>This is some content that will cause ");
     stringbuf_append_str(html_buf, "the HTML StringBuf to grow and allocate memory.</p>\n");
@@ -448,7 +448,7 @@ TEST_F(StringBufTest, TestDualStringBufMemoryCorruption) {
     // Simulate the CSS generation that causes the crash
     for (int i = 0; i < 100; i++) {
         // These are the exact CSS strings from the LaTeX formatter
-        stringbuf_append_str(css_buf, ".latex-document {\n");
+        stringbuf_append_str(css_buf, ".body {\n");
         stringbuf_append_str(css_buf, "  font-family: 'Computer Modern', 'Latin Modern', serif;\n");
         stringbuf_append_str(css_buf, "  max-width: 800px;\n");
         stringbuf_append_str(css_buf, "  margin: 0 auto;\n");

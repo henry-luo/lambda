@@ -123,7 +123,7 @@ TEST_F(LatexHtmlTest, CSSGeneration) {
     generate_typography_css(css_gen);
 
     String* css_result = stringbuf_to_string(&css_buf);
-    EXPECT_TRUE(strstr(css_result->chars, ".latex-document"));
+    EXPECT_TRUE(strstr(css_result->chars, ".body"));
     EXPECT_TRUE(strstr(css_result->chars, "--latex-font-size"));
     EXPECT_TRUE(strstr(css_result->chars, ".textbf"));
     EXPECT_TRUE(strstr(css_result->chars, "font-weight: bold"));
