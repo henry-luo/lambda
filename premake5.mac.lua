@@ -1296,6 +1296,8 @@ project "test_arena_gtest"
     }
     
     links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -1307,12 +1309,50 @@ project "test_arena_gtest"
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-fno-omit-frame-pointer",
         "-g",
         "-O2",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
     -- AddressSanitizer for test projects only

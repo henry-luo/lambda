@@ -415,10 +415,16 @@ typedef struct Input {
 extern "C" {
 #endif
 
+// Pool-based allocation (for runtime)
 Array* array_pooled(Pool* pool);
-void array_append(Array* arr, Item itm, Pool* pool);
+void array_append(Array* arr, Item itm, Pool* pool, Arena* arena = nullptr);
 Map* map_pooled(Pool* pool);
 Element* elmt_pooled(Pool* pool);
+
+// Arena-based allocation (for MarkBuilder)
+Array* array_arena(Arena* arena);
+Map* map_arena(Arena* arena);
+Element* elmt_arena(Arena* arena);
 
 void map_put(Map* mp, String* key, Item value, Input *input);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);

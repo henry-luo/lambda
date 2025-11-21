@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "../lib/arena.h"
 #include "../lib/mempool.h"
+#include "../lambda/lambda-data.hpp"  // For container types and functions
 #include <string.h>
 
 // Test suite for arena allocator using GTest
@@ -1328,3 +1329,276 @@ TEST(ArenaIntegrationTest, LargeRealloc) {
     arena_destroy(arena);
     pool_destroy(pool);
 }
+
+//==============================================================================
+// Container Arena Allocation Tests (Phase 5a)
+//==============================================================================
+
+TEST(ArenaContainerTest, ArrayArenaAllocation) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create array from arena
+    Array* arr = array_arena(arena);
+    ASSERT_NE(arr, nullptr);
+    
+    // Verify array struct is arena-allocated
+    EXPECT_TRUE(arena_owns(arena, arr));
+    
+    // Verify proper initialization (the bug we fixed!)
+    EXPECT_EQ(arr->type_id, LMD_TYPE_ARRAY);
+    EXPECT_EQ(arr->items, nullptr);  // Must be NULL, not garbage
+    EXPECT_EQ(arr->length, 0);
+    EXPECT_EQ(arr->capacity, 0);
+    EXPECT_EQ(arr->extra, 0);
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, MapArenaAllocation) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create map from arena
+    Map* map = map_arena(arena);
+    ASSERT_NE(map, nullptr);
+    
+    // Verify map struct is arena-allocated
+    EXPECT_TRUE(arena_owns(arena, map));
+    
+    // Verify proper initialization (the bug we fixed!)
+    EXPECT_EQ(map->type_id, LMD_TYPE_MAP);
+    EXPECT_EQ(map->data, nullptr);  // Must be NULL, not garbage
+    EXPECT_NE(map->type, nullptr);  // Should point to EmptyMap
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, ElementArenaAllocation) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create element from arena
+    Element* elmt = elmt_arena(arena);
+    ASSERT_NE(elmt, nullptr);
+    
+    // Verify element struct is arena-allocated
+    EXPECT_TRUE(arena_owns(arena, elmt));
+    
+    // Verify proper initialization (the bug we fixed!)
+    EXPECT_EQ(elmt->type_id, LMD_TYPE_ELEMENT);
+    EXPECT_EQ(elmt->items, nullptr);  // Must be NULL, not garbage
+    EXPECT_EQ(elmt->length, 0);
+    EXPECT_EQ(elmt->capacity, 0);
+    EXPECT_EQ(elmt->extra, 0);
+    EXPECT_NE(elmt->type, nullptr);  // Should point to EmptyElmt
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, ArrayArenaVsPoolAllocation) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create arrays from different allocators
+    Array* arena_arr = array_arena(arena);
+    Array* pool_arr = array_pooled(pool);
+    
+    ASSERT_NE(arena_arr, nullptr);
+    ASSERT_NE(pool_arr, nullptr);
+    
+    // Arena array should be owned by arena
+    EXPECT_TRUE(arena_owns(arena, arena_arr));
+    
+    // Pool array should NOT be owned by arena
+    EXPECT_FALSE(arena_owns(arena, pool_arr));
+    
+    // Both should be properly initialized
+    EXPECT_EQ(arena_arr->items, nullptr);
+    EXPECT_EQ(pool_arr->items, nullptr);
+    EXPECT_EQ(arena_arr->length, 0);
+    EXPECT_EQ(pool_arr->length, 0);
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, MapArenaVsPoolAllocation) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create maps from different allocators
+    Map* arena_map = map_arena(arena);
+    Map* pool_map = map_pooled(pool);
+    
+    ASSERT_NE(arena_map, nullptr);
+    ASSERT_NE(pool_map, nullptr);
+    
+    // Arena map should be owned by arena
+    EXPECT_TRUE(arena_owns(arena, arena_map));
+    
+    // Pool map should NOT be owned by arena
+    EXPECT_FALSE(arena_owns(arena, pool_map));
+    
+    // Both should be properly initialized
+    EXPECT_EQ(arena_map->data, nullptr);
+    EXPECT_EQ(pool_map->data, nullptr);
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, ElementArenaVsPoolAllocation) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create elements from different allocators
+    Element* arena_elmt = elmt_arena(arena);
+    Element* pool_elmt = elmt_pooled(pool);
+    
+    ASSERT_NE(arena_elmt, nullptr);
+    ASSERT_NE(pool_elmt, nullptr);
+    
+    // Arena element should be owned by arena
+    EXPECT_TRUE(arena_owns(arena, arena_elmt));
+    
+    // Pool element should NOT be owned by arena
+    EXPECT_FALSE(arena_owns(arena, pool_elmt));
+    
+    // Both should be properly initialized
+    EXPECT_EQ(arena_elmt->items, nullptr);
+    EXPECT_EQ(pool_elmt->items, nullptr);
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, MultipleContainersInSameArena) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create multiple containers from same arena
+    Array* arr1 = array_arena(arena);
+    Array* arr2 = array_arena(arena);
+    Map* map1 = map_arena(arena);
+    Map* map2 = map_arena(arena);
+    Element* elmt1 = elmt_arena(arena);
+    Element* elmt2 = elmt_arena(arena);
+    
+    // All should be valid
+    ASSERT_NE(arr1, nullptr);
+    ASSERT_NE(arr2, nullptr);
+    ASSERT_NE(map1, nullptr);
+    ASSERT_NE(map2, nullptr);
+    ASSERT_NE(elmt1, nullptr);
+    ASSERT_NE(elmt2, nullptr);
+    
+    // All should be owned by the same arena
+    EXPECT_TRUE(arena_owns(arena, arr1));
+    EXPECT_TRUE(arena_owns(arena, arr2));
+    EXPECT_TRUE(arena_owns(arena, map1));
+    EXPECT_TRUE(arena_owns(arena, map2));
+    EXPECT_TRUE(arena_owns(arena, elmt1));
+    EXPECT_TRUE(arena_owns(arena, elmt2));
+    
+    // All should be properly initialized
+    EXPECT_EQ(arr1->items, nullptr);
+    EXPECT_EQ(arr2->items, nullptr);
+    EXPECT_EQ(map1->data, nullptr);
+    EXPECT_EQ(map2->data, nullptr);
+    EXPECT_EQ(elmt1->items, nullptr);
+    EXPECT_EQ(elmt2->items, nullptr);
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, ContainerAllocationAcrossArenas) {
+    Pool* pool = pool_create();
+    Arena* arena1 = arena_create_default(pool);
+    Arena* arena2 = arena_create_default(pool);
+    
+    // Create containers in different arenas
+    Array* arr1 = array_arena(arena1);
+    Array* arr2 = array_arena(arena2);
+    
+    ASSERT_NE(arr1, nullptr);
+    ASSERT_NE(arr2, nullptr);
+    
+    // Each array should only be owned by its own arena
+    EXPECT_TRUE(arena_owns(arena1, arr1));
+    EXPECT_FALSE(arena_owns(arena1, arr2));
+    EXPECT_FALSE(arena_owns(arena2, arr1));
+    EXPECT_TRUE(arena_owns(arena2, arr2));
+    
+    arena_destroy(arena1);
+    arena_destroy(arena2);
+    pool_destroy(pool);
+}
+
+TEST(ArenaContainerTest, NullArenaHandling) {
+    // Test that passing NULL arena doesn't crash
+    Array* arr = array_arena(nullptr);
+    Map* map = map_arena(nullptr);
+    Element* elmt = elmt_arena(nullptr);
+    
+    // All should return NULL gracefully
+    EXPECT_EQ(arr, nullptr);
+    EXPECT_EQ(map, nullptr);
+    EXPECT_EQ(elmt, nullptr);
+}
+
+// Test the regression bug: uninitialized memory causing crashes
+TEST(ArenaContainerRegressionTest, UninitializedMemoryBug) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create element from arena
+    Element* elmt = elmt_arena(arena);
+    ASSERT_NE(elmt, nullptr);
+    
+    // This is the critical test - items MUST be NULL, not garbage
+    // If items is garbage, realloc(garbage) will crash
+    EXPECT_EQ(elmt->items, nullptr);
+    EXPECT_EQ(elmt->capacity, 0);
+    EXPECT_EQ(elmt->length, 0);
+    
+    // Simulate what list_push() does - should not crash
+    // This would crash before the fix if items was garbage
+    if (elmt->length + 1 > elmt->capacity) {
+        elmt->capacity = 8;
+        // This realloc MUST work with NULL items
+        elmt->items = (Item*)realloc(elmt->items, elmt->capacity * sizeof(Item));
+        EXPECT_NE(elmt->items, nullptr);
+    }
+    
+    // Clean up the heap-allocated buffer
+    free(elmt->items);
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+
+// Test the regression bug: uninitialized memory causing crashes
+TEST(ArenaContainerRegressionTest, MapDataInitialization) {
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default(pool);
+    
+    // Create map from arena
+    Map* map = map_arena(arena);
+    ASSERT_NE(map, nullptr);
+    
+    // Critical: data field MUST be NULL, not garbage
+    EXPECT_EQ(map->data, nullptr);
+    
+    // Map should be properly initialized and usable
+    // (Internal fields like capacity/length are managed internally)
+    EXPECT_TRUE(arena_owns(arena, map));
+    
+    arena_destroy(arena);
+    pool_destroy(pool);
+}
+

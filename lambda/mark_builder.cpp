@@ -233,7 +233,7 @@ ElementBuilder::ElementBuilder(MarkBuilder* builder, const char* tag_name)
     , parent_(nullptr)
 {
     Input* input = builder_->input();
-    Element* element = elmt_pooled(input->pool);
+    Element* element = elmt_arena(input->arena);  // Use arena allocation for MarkBuilder
     if (element) {
         TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
         if (element_type) {
@@ -314,7 +314,7 @@ ElementBuilder& ElementBuilder::attr(String* key, bool value) {
 //------------------------------------------------------------------------------
 
 ElementBuilder& ElementBuilder::child(Item item) {
-    array_append((Array*)elmt_, item, builder_->pool());
+    array_append((Array*)elmt_, item, builder_->pool(), builder_->arena());
     return *this;
 }
 
@@ -481,17 +481,17 @@ ArrayBuilder::ArrayBuilder(MarkBuilder* builder)
     : builder_(builder)
     , array_(nullptr)
 {
-    // allocate Array directly from pool
-    array_ = array_pooled(builder_->pool());
+    // allocate Array from arena for MarkBuilder
+    array_ = array_arena(builder_->arena());
 }
 
 ArrayBuilder::~ArrayBuilder() {
-    // array_ is pool-allocated, no cleanup needed
+    // array_ is arena-allocated, no cleanup needed
 }
 
 ArrayBuilder& ArrayBuilder::append(Item item) {
     if (array_) {
-        array_append(array_, item, builder_->pool());
+        array_append(array_, item, builder_->pool(), builder_->arena());
     }
     return *this;
 }
@@ -615,14 +615,16 @@ bool MarkBuilder::is_in_arena(Item item) const {
             Array* arr = item.array;
             if (!arr) return true;  // Null array
             
-            // Note: Array struct is from pool (Phase 5 TODO)
-            // Check if all array elements are in our arena
+            // Phase 5a: For arrays, check BOTH struct ownership AND content ownership
+            // Even if Array struct is in our arena, it might contain external values
             ArrayReader reader(arr);
             for (int i = 0; i < arr->length; i++) {
                 Item child = reader.get(i).item();
-                if (!is_in_arena(child)) return false;
+                if (!is_in_arena(child)) return false;  // External element found
             }
-            return true;  // All elements in arena
+            
+            // All elements in arena - now check if Array struct itself is in arena
+            return is_pointer_in_arena_chain(arr);
         }
         
         case LMD_TYPE_LIST: {
@@ -641,8 +643,8 @@ bool MarkBuilder::is_in_arena(Item item) const {
             Map* map = item.map;
             if (!map || !map->type || !map->data) return true;  // Null/empty map
             
-            // Note: Map struct and data are from pool, not arena (Phase 5 TODO)
-            // Check if all map field values are in arena - if so, likely from same Input
+            // Phase 5a: For maps, we need to check BOTH struct ownership AND content ownership
+            // Even if the Map struct is in our arena, it might contain external values
             TypeMap* map_type = (TypeMap*)map->type;
             if (!map_type->shape) return true;  // No fields
             
@@ -652,19 +654,20 @@ bool MarkBuilder::is_in_arena(Item item) const {
                 if (field->name && field->name->str) {
                     ItemReader field_reader = reader.get(field->name->str);
                     Item field_item = field_reader.item();
-                    if (!is_in_arena(field_item)) return false;
+                    if (!is_in_arena(field_item)) return false;  // External value found
                 }
                 field = field->next;
             }
-            return true;  // All fields in arena, assume map is local
+            
+            // All fields are in arena - now check if Map struct itself is in arena
+            return is_pointer_in_arena_chain(map);
         }
         
         case LMD_TYPE_ELEMENT: {
             Element* elem = item.element;
             if (!elem || !elem->type) return true;  // Null/empty element
             
-            // Note: Element struct itself is from pool, not arena (Phase 5 TODO)
-            // Check if element attributes and children are in arena - if so, likely from same Input
+            // Phase 5a: For elements, check BOTH struct ownership AND content ownership
             TypeElmt* elem_type = (TypeElmt*)elem->type;
             
             // Check all attributes
@@ -674,7 +677,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
                     if (attr->name) {
                         void* attr_data = (char*)elem->data + attr->byte_offset;
                         Item attr_item = *(Item*)attr_data;
-                        if (!is_in_arena(attr_item)) return false;
+                        if (!is_in_arena(attr_item)) return false;  // External attribute found
                     }
                     attr = attr->next;
                 }
@@ -682,9 +685,11 @@ bool MarkBuilder::is_in_arena(Item item) const {
             
             // Check all children
             for (int i = 0; i < elem->length; i++) {
-                if (!is_in_arena(elem->items[i])) return false;
+                if (!is_in_arena(elem->items[i])) return false;  // External child found
             }
-            return true;  // All content in arena, assume element is local
+            
+            // All content in arena - now check if Element struct itself is in arena
+            return is_pointer_in_arena_chain(elem);
         }
         
         default:

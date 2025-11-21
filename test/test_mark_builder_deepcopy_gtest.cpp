@@ -519,3 +519,80 @@ TEST_F(MarkBuilderDeepCopyTest, DeepCopyCopiesExternalData) {
     // Should be different pointer
     EXPECT_NE(copied.map, map.map);
 }
+
+//==============================================================================
+// Phase 5a Tests: Arena Container Allocation
+//==============================================================================
+
+TEST_F(MarkBuilderDeepCopyTest, ArrayStructIsArenaAllocated) {
+    MarkBuilder builder(input1);
+    
+    // Create an array
+    ArrayBuilder array_builder = builder.array();
+    array_builder.append((int64_t)42);
+    array_builder.append((int64_t)100);
+    Item array = array_builder.final();
+    
+    // Verify the Array struct itself is arena-allocated
+    EXPECT_TRUE(arena_owns(input1->arena, array.array));
+}
+
+TEST_F(MarkBuilderDeepCopyTest, MapStructIsArenaAllocated) {
+    MarkBuilder builder(input1);
+    
+    // Create a map
+    MapBuilder map_builder = builder.map();
+    map_builder.put("key", "value");
+    Item map = map_builder.final();
+    
+    // Verify the Map struct itself is arena-allocated
+    EXPECT_TRUE(arena_owns(input1->arena, map.map));
+}
+
+TEST_F(MarkBuilderDeepCopyTest, ElementStructIsArenaAllocated) {
+    MarkBuilder builder(input1);
+    
+    // Create an element
+    ElementBuilder elmt_builder = builder.element("div");
+    elmt_builder.attr("class", "container");
+    Item elmt = elmt_builder.final();
+    
+    // Verify the Element struct itself is arena-allocated
+    EXPECT_TRUE(arena_owns(input1->arena, elmt.element));
+}
+
+TEST_F(MarkBuilderDeepCopyTest, IsInArenaDetectsContainerOwnership) {
+    MarkBuilder builder1(input1);
+    MarkBuilder builder2(input2);
+    
+    // Create array in input1
+    ArrayBuilder array_builder = builder1.array();
+    array_builder.append((int64_t)42);
+    Item array = array_builder.final();
+    
+    // builder1 should recognize the array as owned
+    EXPECT_TRUE(builder1.is_in_arena(array));
+    
+    // builder2 should NOT recognize it as owned (different arena)
+    EXPECT_FALSE(builder2.is_in_arena(array));
+}
+
+TEST_F(MarkBuilderDeepCopyTest, DeepCopyNowRecognizesContainerOwnership) {
+    MarkBuilder builder1(input1);
+    MarkBuilder builder2(input2);
+    
+    // Create nested structure in input1
+    ElementBuilder elmt_builder = builder1.element("div");
+    elmt_builder.child(builder1.createStringItem("content"));
+    Item elmt = elmt_builder.final();
+    
+    // Deep copy to same arena should return original
+    Item same = builder1.deep_copy(elmt);
+    EXPECT_EQ(same.element, elmt.element);  // Same pointer (no copy)
+    
+    // Deep copy to different arena should make new copy
+    Item different = builder2.deep_copy(elmt);
+    EXPECT_NE(different.element, elmt.element);  // Different pointer (copied)
+    EXPECT_TRUE(builder2.is_in_arena(different));  // Now owned by input2
+}
+

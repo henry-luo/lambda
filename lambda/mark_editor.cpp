@@ -348,6 +348,12 @@ Item MarkEditor::map_update(Item map, String* key, Item value) {
         return ItemError;
     }
     
+    // Ensure value is in target arena (deep copy if external)
+    if (!builder_->is_in_arena(value)) {
+        log_debug("map_update: value not in arena, deep copying");
+        value = builder_->deep_copy(value);
+    }
+    
     if (mode_ == EDIT_MODE_INLINE) {
         return map_update_inline(map.map, key, value);
     } else {
@@ -655,6 +661,13 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
         UpdateEntry entry;
         entry.key = va_arg(args, const char*);
         entry.value = va_arg(args, Item);
+        
+        // Ensure value is in target arena (deep copy if external)
+        if (!builder_->is_in_arena(entry.value)) {
+            log_debug("map_update_batch: value for key '%s' not in arena, deep copying", entry.key);
+            entry.value = builder_->deep_copy(entry.value);
+        }
+        
         entry.value_type = get_type_id(entry.value);
         updates.push_back(entry);
     }
@@ -890,6 +903,12 @@ Item MarkEditor::elmt_update_attr(Item element, String* attr_name, Item value) {
         return ItemError;
     }
     
+    // Ensure value is in target arena (deep copy if external)
+    if (!builder_->is_in_arena(value)) {
+        log_debug("elmt_update_attr: value not in arena, deep copying");
+        value = builder_->deep_copy(value);
+    }
+    
     if (mode_ == EDIT_MODE_INLINE) {
         return elmt_update_attr_inline(element.element, attr_name, value);
     } else {
@@ -1117,18 +1136,36 @@ Item MarkEditor::elmt_update_attr_batch(Item element, int count, ...) {
     ShapeBuilder builder = shape_builder_init_element(shape_pool_, elmt_type->name.str);
     shape_builder_import_shape(&builder, elmt_type->shape);
     
+    // First pass: collect and deep copy values
+    struct AttrUpdate {
+        const char* attr_name;
+        Item value;
+        TypeId value_type;
+    };
+    std::vector<AttrUpdate> updates;
+    updates.reserve(count);
+    
     va_list args;
     va_start(args, count);
     
     for (int i = 0; i < count; i++) {
-        const char* attr_name = va_arg(args, const char*);
-        Item value = va_arg(args, Item);
-        TypeId value_type = get_type_id(value);
+        AttrUpdate update;
+        update.attr_name = va_arg(args, const char*);
+        update.value = va_arg(args, Item);
         
-        if (shape_builder_has_field(&builder, attr_name)) {
-            shape_builder_remove_field(&builder, attr_name);
+        // Ensure value is in target arena (deep copy if external)
+        if (!builder_->is_in_arena(update.value)) {
+            log_debug("elmt_update_attr_batch: value for attr '%s' not in arena, deep copying", update.attr_name);
+            update.value = builder_->deep_copy(update.value);
         }
-        shape_builder_add_field(&builder, attr_name, value_type);
+        
+        update.value_type = get_type_id(update.value);
+        updates.push_back(update);
+        
+        if (shape_builder_has_field(&builder, update.attr_name)) {
+            shape_builder_remove_field(&builder, update.attr_name);
+        }
+        shape_builder_add_field(&builder, update.attr_name, update.value_type);
     }
     
     va_end(args);
@@ -1230,6 +1267,12 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
         return ItemError;
     }
     
+    // Ensure child is in target arena (deep copy if external)
+    if (!builder_->is_in_arena(child)) {
+        log_debug("elmt_insert_child: child not in arena, deep copying");
+        child = builder_->deep_copy(child);
+    }
+    
     if (mode_ == EDIT_MODE_INLINE) {
         // Inline mode - resize and insert in-place
         int64_t new_length = elmt->length + 1;
@@ -1306,6 +1349,19 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
         return ItemError;
     }
     
+    // Deep copy external children
+    Item* copied_children = (Item*)arena_alloc(arena_, count * sizeof(Item));
+    if (!copied_children) return ItemError;
+    
+    for (int i = 0; i < count; i++) {
+        if (!builder_->is_in_arena(children[i])) {
+            log_debug("elmt_insert_children: child %d not in arena, deep copying", i);
+            copied_children[i] = builder_->deep_copy(children[i]);
+        } else {
+            copied_children[i] = children[i];
+        }
+    }
+    
     if (mode_ == EDIT_MODE_INLINE) {
         int64_t new_length = elmt->length + count;
         
@@ -1325,9 +1381,9 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
             elmt->items[i + count] = elmt->items[i];
         }
         
-        // Insert new children
+        // Insert new children (use copied versions)
         for (int i = 0; i < count; i++) {
-            elmt->items[index + i] = children[i];
+            elmt->items[index + i] = copied_children[i];
         }
         
         elmt->length = new_length;
@@ -1347,9 +1403,9 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
             new_items[i] = elmt->items[i];
         }
         
-        // Insert new
+        // Insert new (use copied versions)
         for (int i = 0; i < count; i++) {
-            new_items[index + i] = children[i];
+            new_items[index + i] = copied_children[i];
         }
         
         // Copy after
@@ -1563,6 +1619,12 @@ Item MarkEditor::array_set(Item array, int index, Item value) {
             return ItemError;
         }
         
+        // Ensure value is in target arena (deep copy if external)
+        if (!builder_->is_in_arena(value)) {
+            log_debug("array_set: value not in arena, deep copying");
+            value = builder_->deep_copy(value);
+        }
+        
         if (mode_ == EDIT_MODE_INLINE) {
             arr->items[index] = value;
             return {.array = arr};
@@ -1600,6 +1662,12 @@ Item MarkEditor::array_insert(Item array, int index, Item value) {
         if (index > arr->length) {
             log_error("array_insert: index out of bounds");
             return ItemError;
+        }
+        
+        // Ensure value is in target arena (deep copy if external)
+        if (!builder_->is_in_arena(value)) {
+            log_debug("array_insert: value not in arena, deep copying");
+            value = builder_->deep_copy(value);
         }
         
         if (mode_ == EDIT_MODE_INLINE) {

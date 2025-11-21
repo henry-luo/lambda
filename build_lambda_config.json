@@ -1022,7 +1022,7 @@
                         "source": "test_arena_gtest.cpp",
                         "name": "\ud83c\udfdf\ufe0f  Arena Allocator Tests (GTest)",
                         "dependencies": [
-                            "lambda-lib"
+                            "lambda-input-full"
                         ],
                         "libraries": [
                             "gtest",
