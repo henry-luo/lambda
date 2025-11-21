@@ -139,7 +139,7 @@ TEST_F(LatexHtmlFixtureTest, FixtureLoaderBasic) {
 .
 Hello world
 .
-<div class="latex-document"><p>Hello world</p></div>
+<div class="body"><p>Hello world</p></div>
 .
 )";
 
@@ -330,7 +330,7 @@ TEST_F(LatexHtmlFixtureTest, BasicTextFormatting) {
     fixture.id = 1;
     fixture.header = "basic text formatting";
     fixture.latex_source = R"(\textbf{Bold text} and \textit{italic text})";
-    fixture.expected_html = R"(<div class="latex-document"><p><span class="latex-textbf">Bold text</span> and <span class="latex-textit">italic text</span></p></div>)";
+    fixture.expected_html = R"(<div class="body"><p><span class="latex-textbf">Bold text</span> and <span class="latex-textit">italic text</span></p></div>)";
     fixture.skip_test = false;
 
     run_fixture_test(fixture);
@@ -344,7 +344,7 @@ TEST_F(LatexHtmlFixtureTest, SectioningCommands) {
 This is the introduction.
 \subsection{Background}
 This is background information.)";
-    fixture.expected_html = R"(<div class="latex-document">
+    fixture.expected_html = R"(<div class="body">
 <div class="latex-section">Introduction</div>
 <p>This is the introduction.</p>
 <div class="latex-subsection">Background</div>
@@ -363,7 +363,7 @@ TEST_F(LatexHtmlFixtureTest, ListEnvironments) {
 \item First item
 \item Second item
 \end{itemize})";
-    fixture.expected_html = R"(<div class="latex-document">
+    fixture.expected_html = R"(<div class="body">
 <ul class="latex-itemize">
 <li>First item</li>
 <li>Second item</li>

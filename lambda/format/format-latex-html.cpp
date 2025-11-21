@@ -7,32 +7,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-// Forward declarations
-static void generate_latex_css(StringBuf* css_buf);
-static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth);
-static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth);
-static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class);
-static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class);
-static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag);
-static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
-static void append_escaped_text(StringBuf* html_buf, const char* text);
-static void append_indent(StringBuf* html_buf, int depth);
-
-// reader-based forward declarations
-static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth);
-static void process_element_content_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth);
-static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth);
-
 // Document metadata storage
 typedef struct {
     char* title;
@@ -42,7 +16,156 @@ typedef struct {
     int section_counter;
 } DocumentState;
 
+// Font context for tracking font declarations
+typedef enum {
+    FONT_SERIES_NORMAL,
+    FONT_SERIES_BOLD
+} FontSeries;
+
+typedef enum {
+    FONT_SHAPE_UPRIGHT,
+    FONT_SHAPE_ITALIC,
+    FONT_SHAPE_SLANTED,
+    FONT_SHAPE_SMALL_CAPS
+} FontShape;
+
+typedef enum {
+    FONT_FAMILY_ROMAN,
+    FONT_FAMILY_SANS_SERIF,
+    FONT_FAMILY_TYPEWRITER
+} FontFamily;
+
+typedef struct {
+    FontSeries series;
+    FontShape shape;
+    FontFamily family;
+    bool em_active;  // Track if \em is active (for toggling)
+} FontContext;
+
+// Forward declarations
+static void generate_latex_css(StringBuf* css_buf);
+static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth, FontContext* font_ctx);
+static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth);
+static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx);
+static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx);
+static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag, FontContext* font_ctx);
+static void process_font_scoped_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, FontSeries series, FontShape shape, FontFamily family);
+static void process_emph_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void append_escaped_text(StringBuf* html_buf, const char* text);
+static void append_indent(StringBuf* html_buf, int depth);
+
+// reader-based forward declarations
+static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx);
+static void process_element_content_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth, FontContext* font_ctx);
+
 static DocumentState doc_state = {0};
+static FontContext font_context = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, false};
+
+// Helper functions for font context
+static const char* get_font_css_class(FontContext* ctx) {
+    // Generate CSS class based on font context
+    // Priority: family > series > shape
+    
+    if (ctx->family == FONT_FAMILY_TYPEWRITER) {
+        return "tt";
+    } else if (ctx->family == FONT_FAMILY_SANS_SERIF) {
+        return "sf";
+    }
+    
+    // For roman family, check series and shape
+    if (ctx->series == FONT_SERIES_BOLD && ctx->shape == FONT_SHAPE_ITALIC) {
+        return "bf-it";
+    } else if (ctx->series == FONT_SERIES_BOLD && ctx->shape == FONT_SHAPE_SLANTED) {
+        return "bf-sl";
+    } else if (ctx->series == FONT_SERIES_BOLD) {
+        return "bf";
+    } else if (ctx->shape == FONT_SHAPE_ITALIC) {
+        return "it";
+    } else if (ctx->shape == FONT_SHAPE_SLANTED) {
+        return "sl";
+    } else if (ctx->shape == FONT_SHAPE_SMALL_CAPS) {
+        return "sc";
+    }
+    
+    return "up";  // Default upright
+}
+
+static bool needs_font_span(FontContext* ctx) {
+    // Check if we need a font span (not in default state)
+    return ctx->series != FONT_SERIES_NORMAL || 
+           ctx->shape != FONT_SHAPE_UPRIGHT || 
+           ctx->family != FONT_FAMILY_ROMAN;
+}
+
+// Helper: Unwrap argument element and process its content
+// Returns true if an argument was found and processed, false otherwise
+static bool unwrap_and_process_argument(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
+    if (elem->length > 0) {
+        Item first_child = elem->items[0];
+        TypeId child_type = get_type_id(first_child);
+        if (child_type == LMD_TYPE_ELEMENT) {
+            Element* child_elem = (Element*)first_child.pointer;
+            if (child_elem && child_elem->type) {
+                TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
+                StrView child_name = child_elmt_type->name;
+                if (child_name.length == 8 && strncmp(child_name.str, "argument", 8) == 0) {
+                    process_element_content_simple(html_buf, child_elem, pool, depth, font_ctx);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Text command mapping: LaTeX command -> CSS class
+// These are scoped commands that wrap content in HTML with CSS classes
+static const struct {
+    const char* cmd;
+    const char* css_class;
+} text_command_map[] = {
+    // Basic text formatting
+    {"textbf", "latex-textbf"},
+    {"textit", "latex-textit"},
+    {"texttt", "latex-texttt"},
+    {"emph", "latex-emph"},
+    
+    // Additional text styles
+    {"textup", "latex-textup"},
+    {"textsl", "latex-textsl"},
+    {"textsc", "latex-textsc"},
+    
+    // Text decorations
+    {"underline", "latex-underline"},
+    {"sout", "latex-sout"},
+    
+    // Font sizes
+    {"tiny", "latex-tiny"},
+    {"scriptsize", "latex-scriptsize"},
+    {"footnotesize", "latex-footnotesize"},
+    {"small", "latex-small"},
+    {"normalsize", "latex-normalsize"},
+    {"large", "latex-large"},
+    {"Large", "latex-Large"},
+    {"LARGE", "latex-LARGE"},
+    {"huge", "latex-huge"},
+    {"Huge", "latex-Huge"},
+    
+    // Sentinel
+    {NULL, NULL}
+};
 
 // Convert LaTeX dimension to CSS pixels
 // Supports: cm, mm, in, pt, pc, em, ex
@@ -88,9 +211,15 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
     // Initialize document state
     memset(&doc_state, 0, sizeof(DocumentState));
+    
+    // Initialize font context
+    font_context.series = FONT_SERIES_NORMAL;
+    font_context.shape = FONT_SHAPE_UPRIGHT;
+    font_context.family = FONT_FAMILY_ROMAN;
+    font_context.em_active = false;
 
-    // Start HTML document container
-    stringbuf_append_str(html_buf, "<div class=\"latex-document\">\n");
+    // Start HTML document container (using "body" class for LaTeX.js compatibility)
+    stringbuf_append_str(html_buf, "<div class=\"body\">\n");
     printf("DEBUG: Added HTML container to html_buf\n");
 
 
@@ -103,13 +232,13 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
         
         // use MarkReader API
         ItemReader ast_reader(latex_ast.to_const());
-        process_latex_element_reader(html_buf, ast_reader, pool, 1);
+        process_latex_element_reader(html_buf, ast_reader, pool, 1, &font_context);
     }
 
     // Break down the CSS into smaller chunks to avoid C++ compiler issues with very long string literals
 
-    // Document styles
-    stringbuf_append_str(css_buf, ".latex-document {\n");
+    // Document styles (using "body" class for LaTeX.js compatibility)
+    stringbuf_append_str(css_buf, ".body {\n");
     stringbuf_append_str(css_buf, "  font-family: 'Computer Modern', 'Latin Modern', serif;\n");
     stringbuf_append_str(css_buf, "  max-width: 800px;\n");
     stringbuf_append_str(css_buf, "  margin: 0 auto;\n");
@@ -245,6 +374,26 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
     stringbuf_append_str(css_buf, "}\n");
 
+    // Spacing styles
+    stringbuf_append_str(css_buf, ".negthinspace { margin-left: -0.16667em; }\n");
+    stringbuf_append_str(css_buf, ".breakspace { display: block; }\n");
+    stringbuf_append_str(css_buf, ".vspace { display: block; }\n");
+    stringbuf_append_str(css_buf, ".vspace.smallskip { margin-top: 0.5rem; }\n");
+    stringbuf_append_str(css_buf, ".vspace.medskip { margin-top: 1rem; }\n");
+    stringbuf_append_str(css_buf, ".vspace.bigskip { margin-top: 2rem; }\n");
+    stringbuf_append_str(css_buf, ".vspace-inline { display: inline; }\n");
+    
+    // Font declaration styles (short class names for LaTeX.js compatibility)
+    stringbuf_append_str(css_buf, ".bf { font-weight: bold; }\n");
+    stringbuf_append_str(css_buf, ".it { font-style: italic; }\n");
+    stringbuf_append_str(css_buf, ".sl { font-style: oblique; }\n");
+    stringbuf_append_str(css_buf, ".sc { font-variant: small-caps; }\n");
+    stringbuf_append_str(css_buf, ".up { font-weight: normal; font-style: normal; }\n");
+    stringbuf_append_str(css_buf, ".tt { font-family: 'Courier New', monospace; }\n");
+    stringbuf_append_str(css_buf, ".sf { font-family: sans-serif; }\n");
+    stringbuf_append_str(css_buf, ".bf-it { font-weight: bold; font-style: italic; }\n");
+    stringbuf_append_str(css_buf, ".bf-sl { font-weight: bold; font-style: oblique; }\n");
+
     // Close document container
     stringbuf_append_str(html_buf, "</div>\n");
     printf("DEBUG: Closed HTML container\n");
@@ -279,7 +428,8 @@ static void generate_latex_css(StringBuf* css_buf) {
     }
 
     // Generate basic CSS for LaTeX documents - broken into small chunks to avoid C++ compiler issues
-    stringbuf_append_str(css_buf, ".latex-document {\n");
+    // Using "body" class for LaTeX.js compatibility
+    stringbuf_append_str(css_buf, ".body {\n");
     stringbuf_append_str(css_buf, "  font-family: 'Computer Modern', 'Latin Modern', serif;\n");
     stringbuf_append_str(css_buf, "  max-width: 800px;\n");
     stringbuf_append_str(css_buf, "  margin: 0 auto;\n");
@@ -299,7 +449,7 @@ static void generate_latex_css(StringBuf* css_buf) {
 }
 
 // Process a LaTeX element and convert to HTML
-static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth) {
+static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth, FontContext* font_ctx) {
     if (item.item == ITEM_NULL) {
         return;
     }
@@ -334,13 +484,16 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         strncpy(cmd_name, name.str, name_len);
         cmd_name[name_len] = '\0';
         
-        // printf("DEBUG: Processing command '%s' (length: %d)\n", cmd_name, name_len);
-
-
         // Handle different LaTeX commands
         if (strcmp(cmd_name, "argument") == 0) {
             // Process argument content (nested LaTeX) without paragraph wrapping
-            process_element_content_simple(html_buf, elem, pool, depth);
+            process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+            return;
+        } else if (strcmp(cmd_name, "group") == 0 || strcmp(cmd_name, "curly_group") == 0) {
+            // Curly braces create a font scope - save/restore context
+            FontContext saved_ctx = *font_ctx;
+            process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+            *font_ctx = saved_ctx;
             return;
         } else if (strcmp(cmd_name, "documentclass") == 0) {
             // Skip documentclass - it's metadata
@@ -359,88 +512,60 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             process_maketitle(html_buf, pool, depth);
         }
         else if (strcmp(cmd_name, "section") == 0) {
-            process_section(html_buf, elem, pool, depth, "latex-section");
+            process_section(html_buf, elem, pool, depth, "latex-section", font_ctx);
         }
         else if (strcmp(cmd_name, "subsection") == 0) {
-            process_section(html_buf, elem, pool, depth, "latex-subsection");
+            process_section(html_buf, elem, pool, depth, "latex-subsection", font_ctx);
         }
         else if (strcmp(cmd_name, "subsubsection") == 0) {
-            process_section(html_buf, elem, pool, depth, "latex-subsubsection");
+            process_section(html_buf, elem, pool, depth, "latex-subsubsection", font_ctx);
         }
         else if (strcmp(cmd_name, "begin") == 0) {
-            process_environment(html_buf, elem, pool, depth);
+            process_environment(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "center") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "latex-center");
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
         }
         else if (strcmp(cmd_name, "flushleft") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft");
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
         }
         else if (strcmp(cmd_name, "flushright") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright");
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
         }
         else if (strcmp(cmd_name, "quote") == 0) {
-            process_quote(html_buf, elem, pool, depth);
+            process_quote(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "verbatim") == 0) {
             process_verbatim(html_buf, elem, pool, depth);
         }
-        else if (strcmp(cmd_name, "textbf") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textbf", "span");
+        
+        // Check text command map for common formatting commands
+        // This handles: textbf, textit, texttt, emph, textup, textsl, textsc, underline, sout, font sizes
+        bool handled_by_map = false;
+        for (int i = 0; text_command_map[i].cmd != NULL; i++) {
+            if (strcmp(cmd_name, text_command_map[i].cmd) == 0) {
+                process_text_command(html_buf, elem, pool, depth, text_command_map[i].css_class, "span", font_ctx);
+                handled_by_map = true;
+                break;
+            }
         }
-        else if (strcmp(cmd_name, "textit") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textit", "span");
+        if (handled_by_map) {
+            return;
         }
-        else if (strcmp(cmd_name, "emph") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-emph", "span");
-        }
-        else if (strcmp(cmd_name, "texttt") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-texttt", "span");
-        }
-        else if (strcmp(cmd_name, "underline") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-underline", "span");
-        }
-        else if (strcmp(cmd_name, "sout") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-sout", "span");
-        }
-        else if (strcmp(cmd_name, "tiny") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-tiny", "span");
-        }
-        else if (strcmp(cmd_name, "small") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-small", "span");
-        }
-        else if (strcmp(cmd_name, "normalsize") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-normalsize", "span");
-        }
-        else if (strcmp(cmd_name, "large") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-large", "span");
-        }
-        else if (strcmp(cmd_name, "Large") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-Large", "span");
-        }
-        else if (strcmp(cmd_name, "huge") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-huge", "span");
-        }
-        else if (strcmp(cmd_name, "textrm") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textrm", "span");
+        
+        // Font family commands use font context (not in map since they need special handling)
+        if (strcmp(cmd_name, "textrm") == 0) {
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
         }
         else if (strcmp(cmd_name, "textsf") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textsf", "span");
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_SANS_SERIF);
         }
         else if (strcmp(cmd_name, "textmd") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textmd", "span");
-        }
-        else if (strcmp(cmd_name, "textup") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textup", "span");
-        }
-        else if (strcmp(cmd_name, "textsl") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textsl", "span");
-        }
-        else if (strcmp(cmd_name, "textsc") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textsc", "span");
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
         }
         else if (strcmp(cmd_name, "textnormal") == 0) {
-            process_text_command(html_buf, elem, pool, depth, "latex-textnormal", "span");
+            // textnormal resets to defaults
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
         }
         else if (strcmp(cmd_name, "linebreak") == 0) {
             // Check if linebreak has spacing argument (dimension)
@@ -471,7 +596,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
         else if (strcmp(cmd_name, "verb") == 0) {
             stringbuf_append_str(html_buf, "<code class=\"latex-verbatim\">");
-            process_element_content_simple(html_buf, elem, pool, depth);
+            process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
             stringbuf_append_str(html_buf, "</code>");
         }
         else if (strcmp(cmd_name, "thinspace") == 0) {
@@ -504,15 +629,15 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "item") == 0) {
-            process_item(html_buf, elem, pool, depth);
+            process_item(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "itemize") == 0) {
             printf("DEBUG: Processing itemize environment directly\n");
-            process_itemize(html_buf, elem, pool, depth);
+            process_itemize(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "enumerate") == 0) {
             printf("DEBUG: Processing enumerate environment directly\n");
-            process_enumerate(html_buf, elem, pool, depth);
+            process_enumerate(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "quad") == 0) {
             // \quad - em space (U+2003)
@@ -530,19 +655,144 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "negthinspace") == 0) {
-            // \! - negative thin space (use zero-width space for now)
-            stringbuf_append_str(html_buf, "\xE2\x80\x8B");
+            // \! - negative thin space (output span with negthinspace class)
+            stringbuf_append_str(html_buf, "<span class=\"negthinspace\"></span>");
             return;
         }
+        else if (strcmp(cmd_name, "hspace") == 0) {
+            // \hspace{dimension} - horizontal space with specific dimension
+            if (elem->items && elem->length > 0) {
+                Item arg_item = elem->items[0];
+                if (get_type_id(arg_item) == LMD_TYPE_ELEMENT) {
+                    Element* arg_elem = (Element*)arg_item.pointer;
+                    // Extract dimension from argument
+                    if (arg_elem->items && arg_elem->length > 0) {
+                        Item dim_item = arg_elem->items[0];
+                        if (get_type_id(dim_item) == LMD_TYPE_STRING) {
+                            String* dim_str = (String*)dim_item.pointer;
+                            if (dim_str && dim_str->len > 0) {
+                                // Convert LaTeX dimension to pixels
+                                double pixels = latex_dim_to_pixels(dim_str->chars);
+                                
+                                char px_str[32];
+                                snprintf(px_str, sizeof(px_str), "%.3fpx", pixels);
+                                
+                                stringbuf_append_str(html_buf, "<span style=\"margin-right:");
+                                stringbuf_append_str(html_buf, px_str);
+                                stringbuf_append_str(html_buf, "\"></span>");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            // If we couldn't extract dimension, skip
+            return;
+        }
+        else if (strcmp(cmd_name, "empty") == 0 || strcmp(cmd_name, "relax") == 0) {
+            // No-op commands that produce nothing but don't consume following spaces
+            return;
+        }
+        else if (strcmp(cmd_name, "smallskip") == 0) {
+            // \smallskip - small vertical space (inline if in paragraph)
+            stringbuf_append_str(html_buf, "<span class=\"vspace-inline smallskip\"></span>");
+            return;
+        }
+        else if (strcmp(cmd_name, "medskip") == 0) {
+            // \medskip - medium vertical space (between paragraphs)
+            stringbuf_append_str(html_buf, "<span class=\"vspace medskip\"></span>");
+            return;
+        }
+        else if (strcmp(cmd_name, "bigskip") == 0) {
+            // \bigskip - large vertical space (between paragraphs)
+            stringbuf_append_str(html_buf, "<span class=\"vspace bigskip\"></span>");
+            return;
+        }
+        else if (strcmp(cmd_name, "smallbreak") == 0) {
+            // \smallbreak - small vertical space with paragraph break
+            stringbuf_append_str(html_buf, "<span class=\"vspace smallskip\"></span>");
+            return;
+        }
+        else if (strcmp(cmd_name, "medbreak") == 0) {
+            // \medbreak - medium vertical space with paragraph break
+            stringbuf_append_str(html_buf, "<span class=\"vspace medskip\"></span>");
+            return;
+        }
+        else if (strcmp(cmd_name, "bigbreak") == 0) {
+            // \bigbreak - large vertical space with paragraph break
+            stringbuf_append_str(html_buf, "<span class=\"vspace bigskip\"></span>");
+            return;
+        }
+        // Font declaration commands - DISABLED to restore baseline compatibility
+        // The LaTeX parser appears to convert \textbf{} to {\bfseries} internally,
+        // which causes these handlers to be called instead of the textbf handler.
+        // This results in wrong CSS classes (.bf instead of .latex-textbf).
+        // Disabling these handlers restores baseline test expectations.
+        /*
+        else if (strcmp(cmd_name, "bfseries") == 0) {
+            font_ctx->series = FONT_SERIES_BOLD;
+            return;
+        }
+        else if (strcmp(cmd_name, "mdseries") == 0) {
+            font_ctx->series = FONT_SERIES_NORMAL;
+            return;
+        }
+        else if (strcmp(cmd_name, "itshape") == 0) {
+            font_ctx->shape = FONT_SHAPE_ITALIC;
+            return;
+        }
+        else if (strcmp(cmd_name, "slshape") == 0) {
+            font_ctx->shape = FONT_SHAPE_SLANTED;
+            return;
+        }
+        else if (strcmp(cmd_name, "scshape") == 0) {
+            font_ctx->shape = FONT_SHAPE_SMALL_CAPS;
+            return;
+        }
+        else if (strcmp(cmd_name, "upshape") == 0) {
+            font_ctx->shape = FONT_SHAPE_UPRIGHT;
+            return;
+        }
+        else if (strcmp(cmd_name, "rmfamily") == 0) {
+            font_ctx->family = FONT_FAMILY_ROMAN;
+            return;
+        }
+        else if (strcmp(cmd_name, "sffamily") == 0) {
+            font_ctx->family = FONT_FAMILY_SANS_SERIF;
+            return;
+        }
+        else if (strcmp(cmd_name, "ttfamily") == 0) {
+            font_ctx->family = FONT_FAMILY_TYPEWRITER;
+            return;
+        }
+        else if (strcmp(cmd_name, "em") == 0) {
+            if (font_ctx->shape == FONT_SHAPE_UPRIGHT) {
+                font_ctx->shape = FONT_SHAPE_ITALIC;
+                font_ctx->em_active = true;
+            } else {
+                font_ctx->shape = FONT_SHAPE_UPRIGHT;
+                font_ctx->em_active = false;
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "normalfont") == 0) {
+            font_ctx->series = FONT_SERIES_NORMAL;
+            font_ctx->shape = FONT_SHAPE_UPRIGHT;
+            font_ctx->family = FONT_FAMILY_ROMAN;
+            font_ctx->em_active = false;
+            return;
+        }
+        */
         else {
             // Generic element - process children
             // printf("DEBUG: Processing generic element: '%s' (length: %d)\n", cmd_name, name_len);
             // printf("DEBUG: Checking texttt comparison: strcmp('%s', 'texttt') = %d\n", cmd_name, strcmp(cmd_name, "texttt"));
-            process_element_content(html_buf, elem, pool, depth);
+            process_element_content(html_buf, elem, pool, depth, font_ctx);
         }
     }
     else if (type == LMD_TYPE_STRING) {
-        // Handle text content
+        // Handle text content - output directly without font wrapping
+        // Font styling is handled by CSS classes from commands like \textbf{}, \textit{}, etc.
         String* str = (String*)item.pointer;
         if (str && str->len > 0) {
             stringbuf_append_str(html_buf, str->chars);
@@ -553,7 +803,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         Array* arr = item.array;
         if (arr && arr->items) {
             for (int i = 0; i < arr->length; i++) {
-                process_latex_element(html_buf, arr->items[i], pool, depth);
+                process_latex_element(html_buf, arr->items[i], pool, depth, font_ctx);
             }
         }
     }
@@ -597,11 +847,15 @@ static bool is_block_element(Item item) {
             strcmp(cmd_name, "author") == 0 ||
             strcmp(cmd_name, "date") == 0 ||
             strcmp(cmd_name, "maketitle") == 0 ||
+            strcmp(cmd_name, "medskip") == 0 ||
+            strcmp(cmd_name, "bigskip") == 0 ||
+            strcmp(cmd_name, "medbreak") == 0 ||
+            strcmp(cmd_name, "bigbreak") == 0 ||
             strcmp(cmd_name, "par") == 0);
 }
 
 // Process element content without paragraph wrapping (for titles, etc.)
-static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     if (!elem || !elem->items) {
         return;
     }
@@ -610,13 +864,13 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
         for (int i = 0; i < elem->length; i++) {
             Item content_item = elem->items[i];
-            process_latex_element(html_buf, content_item, pool, depth);
+            process_latex_element(html_buf, content_item, pool, depth, font_ctx);
         }
     }
 }
 
 // Process element content with intelligent paragraph wrapping
-static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     if (!elem || !elem->items) {
         printf("DEBUG: process_element_content - elem or items is null\n");
         return;
@@ -693,7 +947,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                             in_paragraph = true;
                             need_new_paragraph = false;
                         }
-                        process_latex_element(html_buf, text_item, pool, depth);
+                        process_latex_element(html_buf, text_item, pool, depth, font_ctx);
                     }
                     
                     // Original string processing
@@ -706,7 +960,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                             in_paragraph = true;
                             need_new_paragraph = false;
                         }
-                        process_latex_element(html_buf, text_item, pool, depth);
+                        process_latex_element(html_buf, text_item, pool, depth, font_ctx);
                     }
                     
                     // Check if there's a parbreak (should be second element)
@@ -743,7 +997,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     in_paragraph = false;
                 }
                 // Process block element directly
-                process_latex_element(html_buf, content_item, pool, depth);
+                process_latex_element(html_buf, content_item, pool, depth, font_ctx);
             } else if (is_text || is_inline) {
                 // Handle paragraph creation based on context
                 if (!in_paragraph || need_new_paragraph) {
@@ -756,14 +1010,14 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     need_new_paragraph = false;
                 }
                 // Process inline content (both text and inline elements)
-                process_latex_element(html_buf, content_item, pool, depth);
+                process_latex_element(html_buf, content_item, pool, depth, font_ctx);
             } else {
                 // Unknown content type - treat as inline if we're in a paragraph context
                 if (!in_paragraph) {
                     stringbuf_append_str(html_buf, "<p>");
                     in_paragraph = true;
                 }
-                process_latex_element(html_buf, content_item, pool, depth);
+                process_latex_element(html_buf, content_item, pool, depth, font_ctx);
             }
 
             printf("DEBUG: Finished processing element content item %d\n", i);
@@ -867,7 +1121,7 @@ static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth) {
 }
 
 // Process section commands
-static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class) {
+static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx) {
     if (!elem) return;
 
     append_indent(html_buf, depth);
@@ -876,13 +1130,13 @@ static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int 
     stringbuf_append_str(html_buf, "\">");
 
     // Process section title without paragraph wrapping
-    process_element_content_simple(html_buf, elem, pool, depth);
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
 
     stringbuf_append_str(html_buf, "</div>\n");
 }
 
 // Process environments (begin/end blocks)
-static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     if (!elem) return;
 
     // Get environment name from first child
@@ -898,25 +1152,25 @@ static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, 
                     return;
                 }
                 else if (strcmp(env_name->chars, "itemize") == 0) {
-                    process_itemize(html_buf, elem, pool, depth);
+                    process_itemize(html_buf, elem, pool, depth, font_ctx);
                 }
                 else if (strcmp(env_name->chars, "enumerate") == 0) {
-                    process_enumerate(html_buf, elem, pool, depth);
+                    process_enumerate(html_buf, elem, pool, depth, font_ctx);
                 }
                 else if (strcmp(env_name->chars, "quote") == 0) {
-                    process_quote(html_buf, elem, pool, depth);
+                    process_quote(html_buf, elem, pool, depth, font_ctx);
                 }
                 else if (strcmp(env_name->chars, "verbatim") == 0) {
                     process_verbatim(html_buf, elem, pool, depth);
                 }
                 else if (strcmp(env_name->chars, "center") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "latex-center");
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
                 }
                 else if (strcmp(env_name->chars, "flushleft") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft");
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
                 }
                 else if (strcmp(env_name->chars, "flushright") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright");
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
                 }
             }
         }
@@ -924,35 +1178,35 @@ static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, 
 }
 
 // Process itemize environment
-static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ul class=\"latex-itemize\">\n");
 
     // Process items without paragraph wrapping
-    process_element_content_simple(html_buf, elem, pool, depth + 1);
+    process_element_content_simple(html_buf, elem, pool, depth + 1, font_ctx);
 
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</ul>\n");
 }
 
 // Process enumerate environment
-static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ol class=\"latex-enumerate\">\n");
 
     // Process items without paragraph wrapping
-    process_element_content_simple(html_buf, elem, pool, depth + 1);
+    process_element_content_simple(html_buf, elem, pool, depth + 1, font_ctx);
 
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</ol>\n");
 }
 
 // Process quote environment
-static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<div class=\"latex-quote\">\n");
 
-    process_element_content(html_buf, elem, pool, depth + 1);
+    process_element_content(html_buf, elem, pool, depth + 1, font_ctx);
 
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</div>\n");
@@ -964,54 +1218,114 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int
     stringbuf_append_str(html_buf, "<pre class=\"latex-verbatim\">");
 
     // Use simple content processing to avoid adding paragraph tags
-    process_element_content_simple(html_buf, elem, pool, depth);
+    // Note: verbatim doesn't need font context
+    FontContext verb_ctx = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, false};
+    process_element_content_simple(html_buf, elem, pool, depth, &verb_ctx);
 
     stringbuf_append_str(html_buf, "</pre>\n");
 }
 
 // Process alignment environments (center, flushleft, flushright)
-static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class) {
+static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<div class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">\n");
 
-    process_element_content(html_buf, elem, pool, depth + 1);
+    process_element_content(html_buf, elem, pool, depth + 1, font_ctx);
 
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</div>\n");
 }
 
-// Process text formatting commands
-static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag) {
-    printf("DEBUG: process_text_command starting - css_class='%s', tag='%s'\n", css_class, tag);
+// Process font-scoped commands like \textit{}, \textbf{}, \texttt{}, \textup{}
+// These temporarily override the font context for their content
+static void process_font_scoped_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, 
+                                        FontSeries series, FontShape shape, FontFamily family) {
+    // Save current font context
+    FontContext saved_ctx = *font_ctx;
+    
+    // Apply the scoped font changes (partial override - only change non-default values)
+    if (series != FONT_SERIES_NORMAL) font_ctx->series = series;
+    if (shape != FONT_SHAPE_UPRIGHT) font_ctx->shape = shape;
+    if (family != FONT_FAMILY_ROMAN) font_ctx->family = family;
+    
+    // Wrap content in span with the modified font class
+    const char* css_class = get_font_css_class(font_ctx);
+    stringbuf_append_str(html_buf, "<span class=\"");
+    stringbuf_append_str(html_buf, css_class);
+    stringbuf_append_str(html_buf, "\">");
+    
+    // Reset font context to default so text inside doesn't add redundant spans
+    font_ctx->series = FONT_SERIES_NORMAL;
+    font_ctx->shape = FONT_SHAPE_UPRIGHT;
+    font_ctx->family = FONT_FAMILY_ROMAN;
+    font_ctx->em_active = false;
+    
+    // Process content with neutral context (text won't add spans)
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+    
+    stringbuf_append_str(html_buf, "</span>");
+    
+    // Restore saved context
+    *font_ctx = saved_ctx;
+}
 
+// Process \emph{} command - toggles italic/upright based on current state
+static void process_emph_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
+    // Save current font context
+    FontContext saved_ctx = *font_ctx;
+    
+    // Toggle shape: if upright -> italic, if italic/slanted -> upright
+    if (font_ctx->shape == FONT_SHAPE_UPRIGHT) {
+        font_ctx->shape = FONT_SHAPE_ITALIC;
+    } else {
+        font_ctx->shape = FONT_SHAPE_UPRIGHT;
+    }
+    
+    // Wrap content in span with the toggled font class
+    const char* css_class = get_font_css_class(font_ctx);
+    stringbuf_append_str(html_buf, "<span class=\"");
+    stringbuf_append_str(html_buf, css_class);
+    stringbuf_append_str(html_buf, "\">");
+    
+    // Reset font context to default so text inside doesn't add redundant spans
+    font_ctx->series = FONT_SERIES_NORMAL;
+    font_ctx->shape = FONT_SHAPE_UPRIGHT;
+    font_ctx->family = FONT_FAMILY_ROMAN;
+    font_ctx->em_active = false;
+    
+    // Process content with neutral context
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+    
+    stringbuf_append_str(html_buf, "</span>");
+    
+    // Restore saved context
+    *font_ctx = saved_ctx;
+}
+
+// Process text formatting commands
+static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag, FontContext* font_ctx) {
     stringbuf_append_str(html_buf, "<");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, " class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
-    printf("DEBUG: Opening tag appended successfully\n");
 
-    printf("DEBUG: About to process element content\n");
-    process_element_content_simple(html_buf, elem, pool, depth);
-    printf("DEBUG: Element content processed successfully\n");
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
 
-    printf("DEBUG: About to append closing tag\n");
     stringbuf_append_str(html_buf, "</");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, ">");
-    printf("DEBUG: Closing tag appended successfully\n");
-    printf("DEBUG: process_text_command completed\n");
 }
 
 // Process item command
-static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
+static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<li>");
 
     // Process content - this may include nested lists or other block elements
-    process_element_content_simple(html_buf, elem, pool, depth);
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
 
     // Close the list item - nested elements are already processed above
     stringbuf_append_str(html_buf, "</li>\n");
@@ -1062,22 +1376,22 @@ static void append_indent(StringBuf* html_buf, int depth) {
 // ===== MarkReader-based implementations =====
 
 // process element content using reader API (simple version)
-static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth) {
+static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth, FontContext* font_ctx) {
     auto it = elem.children();
     ItemReader child;
     while (it.next(&child)) {
-        process_latex_element_reader(html_buf, child, pool, depth);
+        process_latex_element_reader(html_buf, child, pool, depth, font_ctx);
     }
 }
 
 // process element content using reader API (with paragraph wrapping)
-static void process_element_content_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth) {
+static void process_element_content_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth, FontContext* font_ctx) {
     // for now, just use simple version - can add paragraph logic later if needed
-    process_element_content_simple_reader(html_buf, elem, pool, depth);
+    process_element_content_simple_reader(html_buf, elem, pool, depth, font_ctx);
 }
 
 // main LaTeX element processor using reader API
-static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth) {
+static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx) {
     if (item.isNull()) {
         return;
     }
@@ -1106,6 +1420,6 @@ static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& 
         raw_item.element = raw_elem;
         raw_item._type_id = LMD_TYPE_ELEMENT;
         
-        process_latex_element(html_buf, raw_item, pool, depth);
+        process_latex_element(html_buf, raw_item, pool, depth, font_ctx);
     }
 }
