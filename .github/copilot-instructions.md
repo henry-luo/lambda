@@ -97,4 +97,4 @@ Test executables are located in the `./test/` directory, and ends with `.exe`.
 - `temp/` - Temporary files (auto-generated)
 
 ## Notes
-- Token limit for each session: 1000000 tokens.
+- Token limit for each session: 1,000,000 tokens.

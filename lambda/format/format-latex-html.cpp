@@ -132,36 +132,37 @@ static bool unwrap_and_process_argument(StringBuf* html_buf, Element* elem, Pool
 
 // Text command mapping: LaTeX command -> CSS class
 // These are scoped commands that wrap content in HTML with CSS classes
+// Using short class names for compatibility with LaTeX.js
 static const struct {
     const char* cmd;
     const char* css_class;
 } text_command_map[] = {
-    // Basic text formatting
-    {"textbf", "latex-textbf"},
-    {"textit", "latex-textit"},
-    {"texttt", "latex-texttt"},
-    {"emph", "latex-emph"},
+    // Basic text formatting - using short names matching LaTeX.js
+    {"textbf", "bf"},
+    {"textit", "it"},
+    {"texttt", "tt"},
+    {"emph", "it"},     // emphasis defaults to italic (TODO: toggle based on context)
     
     // Additional text styles
-    {"textup", "latex-textup"},
-    {"textsl", "latex-textsl"},
-    {"textsc", "latex-textsc"},
+    {"textup", "up"},
+    {"textsl", "sl"},
+    {"textsc", "sc"},
     
     // Text decorations
-    {"underline", "latex-underline"},
-    {"sout", "latex-sout"},
+    {"underline", "underline"},
+    {"sout", "sout"},
     
-    // Font sizes
-    {"tiny", "latex-tiny"},
-    {"scriptsize", "latex-scriptsize"},
-    {"footnotesize", "latex-footnotesize"},
-    {"small", "latex-small"},
-    {"normalsize", "latex-normalsize"},
-    {"large", "latex-large"},
-    {"Large", "latex-Large"},
-    {"LARGE", "latex-LARGE"},
-    {"huge", "latex-huge"},
-    {"Huge", "latex-Huge"},
+    // Font sizes - using LaTeX.js naming convention
+    {"tiny", "tiny"},
+    {"scriptsize", "scriptsize"},
+    {"footnotesize", "footnotesize"},
+    {"small", "small"},
+    {"normalsize", "normalsize"},
+    {"large", "large"},
+    {"Large", "Large"},
+    {"LARGE", "LARGE"},
+    {"huge", "huge"},
+    {"Huge", "Huge"},
     
     // Sentinel
     {NULL, NULL}
@@ -915,6 +916,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
         bool in_paragraph = false;
         bool need_new_paragraph = false;
+        bool font_span_open = false;
 
         for (int i = 0; i < elem->length; i++) {
             printf("DEBUG: Processing element content item %d\n", i);
@@ -987,12 +989,33 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     if (get_type_id(text_item) == LMD_TYPE_STRING) {
                         if (!in_paragraph || need_new_paragraph) {
                             if (need_new_paragraph && in_paragraph) {
+                                // Close font span before closing paragraph
+                                if (font_span_open) {
+                                    stringbuf_append_str(html_buf, "</span>");
+                                    font_span_open = false;
+                                }
                                 stringbuf_append_str(html_buf, "</p>\n");
                             }
                             stringbuf_append_str(html_buf, "<p>");
                             in_paragraph = true;
                             need_new_paragraph = false;
                         }
+                        
+                        // Check if we need to open a font span for text
+                        if (needs_font_span(font_ctx) && !font_span_open) {
+                            const char* css_class = get_font_css_class(font_ctx);
+                            stringbuf_append_str(html_buf, "<span class=\"");
+                            stringbuf_append_str(html_buf, css_class);
+                            stringbuf_append_str(html_buf, "\">");
+                            font_span_open = true;
+                        }
+                        
+                        // If font returned to default and span is open, close it
+                        if (!needs_font_span(font_ctx) && font_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            font_span_open = false;
+                        }
+                        
                         process_latex_element(html_buf, text_item, pool, depth, font_ctx);
                     }
                     
@@ -1004,6 +1027,11 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                             if (parbreak_elem && parbreak_elem->type) {
                                 StrView parbreak_name = ((TypeElmt*)parbreak_elem->type)->name;
                                 if (parbreak_name.length == 8 && strncmp(parbreak_name.str, "parbreak", 8) == 0) {
+                                    // Close font span before closing paragraph
+                                    if (font_span_open) {
+                                        stringbuf_append_str(html_buf, "</span>");
+                                        font_span_open = false;
+                                    }
                                     // Close current paragraph and force new paragraph for next content
                                     if (in_paragraph) {
                                         stringbuf_append_str(html_buf, "</p>\n");
@@ -1016,6 +1044,11 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     }
                 }
             } else if (is_par_break) {
+                // Close font span before closing paragraph
+                if (font_span_open) {
+                    stringbuf_append_str(html_buf, "</span>");
+                    font_span_open = false;
+                }
                 // Close current paragraph and force new paragraph for next content
                 if (in_paragraph) {
                     stringbuf_append_str(html_buf, "</p>\n");
@@ -1024,6 +1057,11 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 need_new_paragraph = true;
                 // Don't process the par element itself, just use it as a break marker
             } else if (is_block) {
+                // Close font span before block element
+                if (font_span_open) {
+                    stringbuf_append_str(html_buf, "</span>");
+                    font_span_open = false;
+                }
                 // Close any open paragraph before block element
                 if (in_paragraph) {
                     stringbuf_append_str(html_buf, "</p>\n");
@@ -1035,6 +1073,11 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Handle paragraph creation based on context
                 if (!in_paragraph || need_new_paragraph) {
                     if (need_new_paragraph && in_paragraph) {
+                        // Close font span before closing paragraph
+                        if (font_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            font_span_open = false;
+                        }
                         // This shouldn't happen since par breaks close paragraphs
                         stringbuf_append_str(html_buf, "</p>\n");
                     }
@@ -1042,6 +1085,22 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     in_paragraph = true;
                     need_new_paragraph = false;
                 }
+                
+                // Check if we need to open a font span for text
+                if (is_text && needs_font_span(font_ctx) && !font_span_open) {
+                    const char* css_class = get_font_css_class(font_ctx);
+                    stringbuf_append_str(html_buf, "<span class=\"");
+                    stringbuf_append_str(html_buf, css_class);
+                    stringbuf_append_str(html_buf, "\">");
+                    font_span_open = true;
+                }
+                
+                // If font returned to default and span is open, close it
+                if (!needs_font_span(font_ctx) && font_span_open) {
+                    stringbuf_append_str(html_buf, "</span>");
+                    font_span_open = false;
+                }
+                
                 // Process inline content (both text and inline elements)
                 process_latex_element(html_buf, content_item, pool, depth, font_ctx);
             } else {
@@ -1056,6 +1115,11 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             printf("DEBUG: Finished processing element content item %d\n", i);
         }
 
+        // Close any open font span before closing paragraph
+        if (font_span_open) {
+            stringbuf_append_str(html_buf, "</span>");
+        }
+        
         // Close any remaining open paragraph
         if (in_paragraph) {
             stringbuf_append_str(html_buf, "</p>\n");
