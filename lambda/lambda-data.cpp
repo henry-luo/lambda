@@ -1,6 +1,7 @@
 #include "ast.hpp"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
+#include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
@@ -257,15 +258,27 @@ String* it2s(Item itm) {
 
 } // extern "C"
 
-void expand_list(List *list) {
+void expand_list(List *list, Arena* arena = nullptr) {
     log_debug("expand list:: %p, length: %ld, extra: %ld, capacity: %ld", list, list->length, list->extra, list->capacity);
     log_item({.list = list}, "list to expand");
     list->capacity = list->capacity ? list->capacity * 2 : 8;
-    // list items are allocated from C heap, instead of Lambda heap
-    // to consider: could also alloc directly from Lambda heap without the heap entry
-    // need to profile to see which is faster
+    
+    // Determine which allocator to use
     Item* old_items = list->items;
-    list->items = (Item*)realloc(list->items, list->capacity * sizeof(Item));
+    bool use_arena = (arena != nullptr && old_items != nullptr && arena_owns(arena, old_items));
+    
+    if (use_arena) {
+        // Use arena realloc for arena-allocated buffers (MarkBuilder path)
+        list->items = (Item*)arena_realloc(arena, list->items, 
+                                           (list->capacity/2) * sizeof(Item),
+                                           list->capacity * sizeof(Item));
+        log_debug("arena_realloc used for list expansion");
+    } else {
+        // Use C heap realloc for pool-allocated/runtime containers
+        list->items = (Item*)realloc(list->items, list->capacity * sizeof(Item));
+        log_debug("C heap realloc used for list expansion");
+    }
+    
     // copy extra items to the end of the list
     if (list->extra) {
         memcpy(list->items + (list->capacity - list->extra),
@@ -294,6 +307,15 @@ void expand_list(List *list) {
 
 Array* array_pooled(Pool *pool) {
     Array* arr = (Array*)pool_calloc(pool, sizeof(Array));
+    if (arr == NULL) return NULL;
+    memset(arr, 0, sizeof(Array));
+    arr->type_id = LMD_TYPE_ARRAY;
+    return arr;
+}
+
+// Arena-based allocation for MarkBuilder
+Array* array_arena(Arena* arena) {
+    Array* arr = (Array*)arena_alloc(arena, sizeof(Array));
     if (arr == NULL) return NULL;
     memset(arr, 0, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
@@ -348,8 +370,8 @@ void array_set(Array* arr, int index, Item itm) {
     }
 }
 
-void array_append(Array* arr, Item itm, Pool *pool) {
-    if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
+void array_append(Array* arr, Item itm, Pool *pool, Arena* arena) {
+    if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr, arena); }
     // no need to call array_set() as the item data is pooled
     // array_set(arr, arr->length, itm, pool);
     arr->items[arr->length] = itm;
@@ -632,6 +654,16 @@ Map* map_pooled(Pool *pool) {
     return map;
 }
 
+// Arena-based allocation for MarkBuilder
+Map* map_arena(Arena* arena) {
+    Map *map = (Map *)arena_alloc(arena, sizeof(Map));
+    if (map == NULL) return NULL;
+    memset(map, 0, sizeof(Map));
+    map->type_id = LMD_TYPE_MAP;
+    map->type = &EmptyMap;
+    return map;
+}
+
 Item typeditem_to_item(TypedItem *titem) {
     switch (titem->type_id) {
     case LMD_TYPE_NULL:  return ItemNull;
@@ -781,6 +813,16 @@ bool Map::has_field(const char* field_name) const {
 
 Element* elmt_pooled(Pool *pool) {
     Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
+    elmt->type_id = LMD_TYPE_ELEMENT;
+    elmt->type = &EmptyElmt;
+    return elmt;
+}
+
+// Arena-based allocation for MarkBuilder
+Element* elmt_arena(Arena* arena) {
+    Element *elmt = (Element *)arena_alloc(arena, sizeof(Element));
+    if (elmt == NULL) return NULL;
+    memset(elmt, 0, sizeof(Element));
     elmt->type_id = LMD_TYPE_ELEMENT;
     elmt->type = &EmptyElmt;
     return elmt;
