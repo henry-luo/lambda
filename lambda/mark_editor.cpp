@@ -2,6 +2,7 @@
 #include "../lib/log.h"
 #include <string.h>
 #include <stdlib.h>
+#include <vector>
 
 // Forward declarations of helper functions from input.cpp
 extern void map_put(Map* mp, String* key, Item value, Input *input);
@@ -634,6 +635,28 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
     
     log_debug("map_update_batch: updating %d fields", count);
     
+    // First, collect all key-value pairs (we need them twice: for shape and for storing)
+    struct UpdateEntry {
+        const char* key;
+        Item value;
+        TypeId value_type;
+    };
+    std::vector<UpdateEntry> updates;
+    updates.reserve(count);
+    
+    va_list args;
+    va_start(args, count);
+    
+    for (int i = 0; i < count; i++) {
+        UpdateEntry entry;
+        entry.key = va_arg(args, const char*);
+        entry.value = va_arg(args, Item);
+        entry.value_type = get_type_id(entry.value);
+        updates.push_back(entry);
+    }
+    
+    va_end(args);
+    
     // Build new shape with all updates
     Map* target_map = map.map;
     TypeMap* map_type = (TypeMap*)target_map->type;
@@ -641,34 +664,40 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
     ShapeBuilder builder = shape_builder_init_map(shape_pool_);
     shape_builder_import_shape(&builder, map_type->shape);
     
-    // Process variadic arguments
-    va_list args;
-    va_start(args, count);
-    
     for (int i = 0; i < count; i++) {
-        const char* key = va_arg(args, const char*);
-        Item value = va_arg(args, Item);
-        TypeId value_type = get_type_id(value);
-        
         // Update or add field in builder
-        if (shape_builder_has_field(&builder, key)) {
-            shape_builder_remove_field(&builder, key);
+        if (shape_builder_has_field(&builder, updates[i].key)) {
+            shape_builder_remove_field(&builder, updates[i].key);
         }
-        shape_builder_add_field(&builder, key, value_type);
+        shape_builder_add_field(&builder, updates[i].key, updates[i].value_type);
     }
     
-    va_end(args);
-    
     // Rebuild map with new shape
+    Item rebuilt;
     if (mode_ == EDIT_MODE_INLINE) {
-        return map_rebuild_with_new_shape(target_map, &builder, true);
+        rebuilt = map_rebuild_with_new_shape(target_map, &builder, true);
     } else {
         Map* new_map = (Map*)arena_alloc(arena_, sizeof(Map));
         if (!new_map) return ItemError;
         memcpy(new_map, target_map, sizeof(Map));
         new_map->ref_cnt = 0;
-        return map_rebuild_with_new_shape(new_map, &builder, false);
+        rebuilt = map_rebuild_with_new_shape(new_map, &builder, false);
     }
+    
+    // Now store all the new values in the rebuilt map
+    if (rebuilt.map && rebuilt.map->type_id == LMD_TYPE_MAP) {
+        TypeMap* rebuilt_type = (TypeMap*)rebuilt.map->type;
+        for (int i = 0; i < count; i++) {
+            TypeId field_type;
+            int64_t field_offset;
+            if (find_field_in_shape(rebuilt_type->shape, updates[i].key, &field_type, &field_offset)) {
+                void* field_ptr = (char*)rebuilt.map->data + field_offset;
+                store_value_at_offset(field_ptr, updates[i].value, updates[i].value_type);
+            }
+        }
+    }
+    
+    return rebuilt;
 }
 
 Item MarkEditor::map_delete(Item map, const char* key) {
