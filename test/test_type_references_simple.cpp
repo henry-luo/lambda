@@ -54,7 +54,7 @@ TEST_F(TypeReferenceTest, TypeAliasToInt) {
 
     Type* age_type = schema_validator_find_type(validator, "Age");
     ASSERT_NE(age_type, nullptr) << "Age type should be registered";
-    EXPECT_EQ(age_type->type_id, LMD_TYPE_INT64) << "Age should resolve to int64 type (int maps to int64 in Lambda)";
+    EXPECT_EQ(age_type->type_id, LMD_TYPE_INT) << "Age should resolve to int type";
 }
 
 TEST_F(TypeReferenceTest, MultipleTypeDefinitions) {
@@ -77,7 +77,7 @@ TEST_F(TypeReferenceTest, MultipleTypeDefinitions) {
     ASSERT_NE(email_type, nullptr);
 
     EXPECT_EQ(username_type->type_id, LMD_TYPE_STRING);
-    EXPECT_EQ(age_type->type_id, LMD_TYPE_INT64);  // "int" maps to int64 in Lambda
+    EXPECT_EQ(age_type->type_id, LMD_TYPE_INT);  // "int" maps to LMD_TYPE_INT in Lambda
     EXPECT_EQ(email_type->type_id, LMD_TYPE_STRING);
 }
 
@@ -110,7 +110,7 @@ TEST_F(TypeReferenceTest, TypeResolutionWithCircularCheck) {
 
     Type* id_type = schema_validator_resolve_type_reference(validator, "ID");
     ASSERT_NE(id_type, nullptr);
-    EXPECT_EQ(id_type->type_id, LMD_TYPE_INT64);  // "int" maps to int64 in Lambda
+    EXPECT_EQ(id_type->type_id, LMD_TYPE_INT);  // "int" maps to LMD_TYPE_INT in Lambda
 
     // Non-existent type should return nullptr
     Type* invalid = schema_validator_resolve_type_reference(validator, "Invalid");
