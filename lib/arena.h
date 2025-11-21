@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 #include <stdlib.h>
+#include <stdbool.h>
 #include "mempool.h"
 
 /**
@@ -151,6 +152,41 @@ size_t arena_waste(Arena* arena);
  * @return Number of chunks
  */
 size_t arena_chunk_count(Arena* arena);
+
+/**
+ * Check if a pointer belongs to this arena
+ * Useful for determining if data needs to be copied during deep copy operations
+ * @param arena Arena to check ownership
+ * @param ptr Pointer to check
+ * @return true if ptr was allocated from this arena, false otherwise
+ */
+bool arena_owns(Arena* arena, const void* ptr);
+
+/**
+ * Reallocate memory in arena with free-list support
+ * Similar to realloc() but works within arena memory management
+ * - If ptr is NULL, allocates new memory (like arena_alloc)
+ * - If new_size is 0, frees memory to free-list (like arena_free)
+ * - If shrinking, excess space added to free-list for reuse
+ * - If growing at end of chunk, extends in-place if possible
+ * - Otherwise allocates new, copies old data, and frees old block
+ * @param arena Arena to reallocate from
+ * @param ptr Pointer to existing allocation (or NULL for new allocation)
+ * @param old_size Size of existing allocation in bytes (or 0 if ptr is NULL)
+ * @param new_size Desired new size in bytes
+ * @return Pointer to reallocated memory, or NULL on failure
+ */
+void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size);
+
+/**
+ * Free memory back to arena's free-list for reuse
+ * Memory is not returned to pool, but added to internal free-list
+ * for future arena_alloc() or arena_realloc() calls
+ * @param arena Arena that owns the memory
+ * @param ptr Pointer to free (must be from this arena)
+ * @param size Size of allocation to free in bytes
+ */
+void arena_free(Arena* arena, void* ptr, size_t size);
 
 #ifdef __cplusplus
 }

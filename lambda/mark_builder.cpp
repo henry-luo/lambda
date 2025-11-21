@@ -19,6 +19,8 @@
 
 #include "mark_builder.hpp"
 #include "lambda-data.hpp"
+#include "lambda.h"  // for it2l, it2s, it2b, it2i, it2d, etc.
+#include "mark_reader.hpp"  // for ArrayReader
 #include "input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
@@ -522,46 +524,237 @@ Item ArrayBuilder::final() {
     return (Item){.array = array_};
 }
 
-// Deep copy an Item using MarkBuilder to a new Input's arena
-// This recursively copies all nested structures (Arrays, Maps, Elements) and their data
-static Item copy_item_deep(MarkBuilder* builder, Item item) {
+// ============================================================================
+// Deep Copy Implementation (MarkBuilder)
+// ============================================================================
+
+/**
+ * Check if a pointer is owned by this Input's arena chain
+ * Traverses parent Input chain to check all arenas
+ */
+bool MarkBuilder::is_pointer_in_arena_chain(const void* ptr) const {
+    if (!ptr) return false;
+    
+    // Traverse the Input parent chain
+    Input* current = input_;
+    while (current) {
+        if (arena_owns(current->arena, ptr)) {
+            return true;
+        }
+        current = current->parent;
+    }
+    
+    return false;
+}
+
+/**
+ * Check if an Item's data is in this Input's arena chain
+ * Returns true if all pointer data is owned by an arena in the chain
+ */
+bool MarkBuilder::is_in_arena(Item item) const {
     TypeId type_id = get_type_id(item);
-    log_debug("copy_item_deep: type_id=%d", type_id);
+    
+    switch (type_id) {
+        // Inline types - always safe to reuse
+        case LMD_TYPE_NULL:
+        case LMD_TYPE_BOOL:
+        case LMD_TYPE_INT:
+            return true;
+        
+        // Pointer types - check arena ownership
+        case LMD_TYPE_INT64:
+            return is_pointer_in_arena_chain((void*)item.pointer);
+        
+        case LMD_TYPE_FLOAT:
+            return is_pointer_in_arena_chain((void*)item.pointer);
+        
+        case LMD_TYPE_STRING: {
+            String* str = it2s(item);
+            return is_pointer_in_arena_chain(str);
+        }
+        
+        case LMD_TYPE_SYMBOL: {
+            String* sym = get_symbol(item);
+            if (!sym) return true;
+            
+            // Check if in NamePool chain (includes parent pools)
+            String* pooled = name_pool_lookup_string(name_pool_, sym);
+            if (pooled == sym) return true;  // Found in name pool chain
+            
+            // Check arena ownership
+            return is_pointer_in_arena_chain(sym);
+        }
+        
+        case LMD_TYPE_BINARY: {
+            String* bin = get_binary(item);
+            return is_pointer_in_arena_chain(bin);
+        }
+        
+        case LMD_TYPE_DTIME: {
+            return is_pointer_in_arena_chain((void*)item.pointer);
+        }
+        
+        case LMD_TYPE_DECIMAL: {
+            Decimal* dec = get_decimal(item);
+            return is_pointer_in_arena_chain(dec);
+        }
+        
+        case LMD_TYPE_NUMBER: {
+            // NUMBER is a double, check if pointer is in arena
+            return is_pointer_in_arena_chain((void*)item.pointer);
+        }
+        
+        // Container types - check container and all contents
+        case LMD_TYPE_ARRAY_INT:
+        case LMD_TYPE_ARRAY_INT64:
+        case LMD_TYPE_ARRAY_FLOAT: {
+            return is_pointer_in_arena_chain((void*)item.pointer);
+        }
+        
+        case LMD_TYPE_ARRAY: {
+            Array* arr = item.array;
+            if (!arr) return true;  // Null array
+            
+            // Note: Array struct is from pool (Phase 5 TODO)
+            // Check if all array elements are in our arena
+            ArrayReader reader(arr);
+            for (int i = 0; i < arr->length; i++) {
+                Item child = reader.get(i).item();
+                if (!is_in_arena(child)) return false;
+            }
+            return true;  // All elements in arena
+        }
+        
+        case LMD_TYPE_LIST: {
+            List* list = item.list;
+            if (!list) return true;  // Null list
+            
+            // Note: List struct itself may be from pool (Phase 5 TODO)
+            // Check if list items are in arena
+            for (int i = 0; i < list->length; i++) {
+                if (!is_in_arena(list->items[i])) return false;
+            }
+            return true;
+        }
+        
+        case LMD_TYPE_MAP: {
+            Map* map = item.map;
+            if (!map || !map->type || !map->data) return true;  // Null/empty map
+            
+            // Note: Map struct and data are from pool, not arena (Phase 5 TODO)
+            // Check if all map field values are in arena - if so, likely from same Input
+            TypeMap* map_type = (TypeMap*)map->type;
+            if (!map_type->shape) return true;  // No fields
+            
+            MapReader reader(map);
+            ShapeEntry* field = map_type->shape;
+            while (field) {
+                if (field->name && field->name->str) {
+                    ItemReader field_reader = reader.get(field->name->str);
+                    Item field_item = field_reader.item();
+                    if (!is_in_arena(field_item)) return false;
+                }
+                field = field->next;
+            }
+            return true;  // All fields in arena, assume map is local
+        }
+        
+        case LMD_TYPE_ELEMENT: {
+            Element* elem = item.element;
+            if (!elem || !elem->type) return true;  // Null/empty element
+            
+            // Note: Element struct itself is from pool, not arena (Phase 5 TODO)
+            // Check if element attributes and children are in arena - if so, likely from same Input
+            TypeElmt* elem_type = (TypeElmt*)elem->type;
+            
+            // Check all attributes
+            if (elem_type->length > 0) {
+                ShapeEntry* attr = elem_type->shape;
+                while (attr) {
+                    if (attr->name) {
+                        void* attr_data = (char*)elem->data + attr->byte_offset;
+                        Item attr_item = *(Item*)attr_data;
+                        if (!is_in_arena(attr_item)) return false;
+                    }
+                    attr = attr->next;
+                }
+            }
+            
+            // Check all children
+            for (int i = 0; i < elem->length; i++) {
+                if (!is_in_arena(elem->items[i])) return false;
+            }
+            return true;  // All content in arena, assume element is local
+        }
+        
+        default:
+            // Unknown types - assume external
+            return false;
+    }
+}
+
+/**
+ * Deep copy with smart ownership checking
+ * Only copies if data is external to arena chain
+ */
+Item MarkBuilder::deep_copy(Item item) {
+    // Quick check: if item contains no pointers (null, bool, int), just return it
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_NULL || type_id == LMD_TYPE_BOOL || type_id == LMD_TYPE_INT) {
+        return item;  // Inline types - always safe
+    }
+    
+    // Optimization: if data already in our arena chain, return as-is
+    if (is_in_arena(item)) {
+        return item;
+    }
+    
+    // Data is external - perform deep copy
+    return deep_copy_internal(item);
+}
+
+/**
+ * Internal deep copy implementation (renamed from copy_item_deep)
+ * This is the actual recursive copy logic
+ */
+Item MarkBuilder::deep_copy_internal(Item item) {
+    TypeId type_id = get_type_id(item);
+    log_debug("deep_copy_internal: type_id=%d", type_id);
     
     switch (type_id) {
         case LMD_TYPE_NULL:
-            return builder->createNull();
+            return createNull();
             
         case LMD_TYPE_BOOL:
-            return builder->createBool(it2b(item));
+            return createBool(it2b(item));
             
         case LMD_TYPE_INT:
-            return builder->createInt(it2i(item));
+            return createInt(it2i(item));
             
         case LMD_TYPE_INT64:
-            return builder->createLong(it2l(item));
+            return createLong(it2l(item));
             
         case LMD_TYPE_FLOAT:
-            return builder->createFloat(it2d(item));
+            return createFloat(it2d(item));
         
         case LMD_TYPE_SYMBOL: {
             String* sym = (String*)item.pointer;
-            String* copied_sym = builder->createSymbol(sym->chars, sym->len);
+            String* copied_sym = createSymbol(sym->chars, sym->len);
             return {.item = y2it(copied_sym)};
         }
 
         case LMD_TYPE_STRING: {
             String* str = it2s(item);
-            if (!str) return builder->createNull();
-            return builder->createStringItem(str->chars, str->len);
+            if (!str) return createNull();
+            return createStringItem(str->chars, str->len);
         }
             
         case LMD_TYPE_BINARY: {
             String* bin = get_binary(item);
-            if (!bin) return builder->createNull();
+            if (!bin) return createNull();
             // Binary data is stored like String but with different type_id
-            String* copied = builder->createString(bin->chars, bin->len);
-            if (!copied) return builder->createNull();
+            String* copied = createString(bin->chars, bin->len);
+            if (!copied) return createNull();
             Item result = {.item = x2it(copied)};
             return result;
         }
@@ -569,8 +762,8 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
         case LMD_TYPE_DTIME: {
             DateTime dt = get_datetime(item);
             // DateTime is uint64_t bitfield, allocate from arena
-            DateTime* dt_ptr = (DateTime*)arena_alloc(builder->input()->arena, sizeof(DateTime));
-            if (!dt_ptr) return builder->createNull();
+            DateTime* dt_ptr = (DateTime*)arena_alloc(arena_, sizeof(DateTime));
+            if (!dt_ptr) return createNull();
             *dt_ptr = dt;
             Item result = {.item = k2it(dt_ptr)};
             return result;
@@ -578,23 +771,23 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         case LMD_TYPE_DECIMAL: {
             Decimal* src_dec = get_decimal(item);
-            if (!src_dec || !src_dec->dec_val) return builder->createNull();
+            if (!src_dec || !src_dec->dec_val) return createNull();
             
             // Allocate new Decimal structure from arena
-            Decimal* new_dec = (Decimal*)arena_alloc(builder->input()->arena, sizeof(Decimal));
-            if (!new_dec) return builder->createNull();
+            Decimal* new_dec = (Decimal*)arena_alloc(arena_, sizeof(Decimal));
+            if (!new_dec) return createNull();
             
             // Create new mpd_t and copy the value by converting to string and back
             // This is the safest way to deep copy mpdecimal values
             char* dec_str = mpd_to_sci(src_dec->dec_val, 1);
-            if (!dec_str) return builder->createNull();
+            if (!dec_str) return createNull();
             
             mpd_context_t ctx;
             mpd_maxcontext(&ctx);
             mpd_t* new_dec_val = mpd_qnew();
             if (!new_dec_val) {
                 free(dec_str);
-                return builder->createNull();
+                return createNull();
             }
             
             mpd_set_string(new_dec_val, dec_str, &ctx);
@@ -610,14 +803,14 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
         case LMD_TYPE_NUMBER: {
             // NUMBER type is stored as double
             double val = get_double(item);
-            return builder->createFloat(val);
+            return createFloat(val);
         }
             
         case LMD_TYPE_ARRAY_INT: {
             ArrayInt* arr = item.array_int;
-            if (!arr) return builder->createArray();
+            if (!arr) return createArray();
             
-            ArrayBuilder arr_builder = builder->array();
+            ArrayBuilder arr_builder = array();
             for (int i = 0; i < arr->length; i++) {
                 int32_t val = arr->items[i];
                 arr_builder.append((int64_t)val);
@@ -627,9 +820,9 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         case LMD_TYPE_ARRAY_INT64: {
             ArrayInt64* arr = item.array_int64;
-            if (!arr) return builder->createArray();
+            if (!arr) return createArray();
             
-            ArrayBuilder arr_builder = builder->array();
+            ArrayBuilder arr_builder = array();
             for (int i = 0; i < arr->length; i++) {
                 int64_t val = arr->items[i];
                 arr_builder.append(val);
@@ -639,9 +832,9 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         case LMD_TYPE_ARRAY_FLOAT: {
             ArrayFloat* arr = item.array_float;
-            if (!arr) return builder->createArray();
+            if (!arr) return createArray();
             
-            ArrayBuilder arr_builder = builder->array();
+            ArrayBuilder arr_builder = array();
             for (int i = 0; i < arr->length; i++) {
                 double val = arr->items[i];
                 arr_builder.append(val);
@@ -651,12 +844,13 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         case LMD_TYPE_ARRAY: {
             Array* arr = item.array;
-            if (!arr) return builder->createArray();
+            if (!arr) return createArray();
             
-            ArrayBuilder arr_builder = builder->array();
+            ArrayBuilder arr_builder = array();
+            ArrayReader reader(arr);
             for (int i = 0; i < arr->length; i++) {
-                Item child = array_get(arr, i);
-                Item copied_child = copy_item_deep(builder, child);
+                Item child = reader.get(i).item();
+                Item copied_child = deep_copy_internal(child);
                 arr_builder.append(copied_child);
             }
             return arr_builder.final();
@@ -664,46 +858,40 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         case LMD_TYPE_LIST: {
             List* list = item.list;
-            if (!list) return builder->createArray();
+            if (!list) return createArray();
             
-            ArrayBuilder arr_builder = builder->array();
+            ArrayBuilder arr_builder = array();
             for (int i = 0; i < list->length; i++) {
                 Item child = list->items[i];
-                Item copied_child = copy_item_deep(builder, child);
+                Item copied_child = deep_copy_internal(child);
                 arr_builder.append(copied_child);
             }
             return arr_builder.final();
         }
             
         case LMD_TYPE_MAP: {
-            Map* map = item.map;
-            log_debug("copy_item_deep: MAP map=%p, type=%p, data=%p", map, map ? map->type : nullptr, map ? map->data : nullptr);
-            if (!map || !map->type || !map->data) {
-                log_debug("copy_item_deep: MAP returning empty map (null data)");
-                return builder->createMap();
+            Map* src_map = item.map;
+            if (!src_map || !src_map->type || !src_map->data) {
+                return createMap();
             }
-            TypeMap* map_type = (TypeMap*)map->type;
-            log_debug("copy_item_deep: MAP map_type=%p, shape=%p", map_type, map_type->shape);
-            MapBuilder map_builder = builder->map();
             
-            // Iterate over map fields
+            TypeMap* map_type = (TypeMap*)src_map->type;
+            MapBuilder map_builder = map();
+            MapReader reader(src_map);
+            
+            // Iterate over map fields using MapReader
             ShapeEntry* field = map_type->shape;
             while (field) {
-                log_debug("copy_item_deep: MAP field=%p, name=%p", field, field->name);
                 if (field->name && field->name->str) {
-                    log_debug("copy_item_deep: MAP field name=%.*s (len=%zu), byte_offset=%d", 
-                        (int)field->name->length, field->name->str, field->name->length, field->byte_offset);
-                    // Get field value - it's stored as an Item!
-                    void* field_data = (char*)map->data + field->byte_offset;
-                    log_debug("copy_item_deep: MAP field_data=%p, about to dereference", field_data);
-                    Item field_item = *(Item*)field_data;
-                    log_debug("copy_item_deep: MAP field item type=%d", get_type_id(field_item));
+                    // Use MapReader to safely get field value
+                    ItemReader field_reader = reader.get(field->name->str);
+                    Item field_item = field_reader.item();
                     
                     // Recursively deep copy the field value
-                    Item copied_field = copy_item_deep(builder, field_item);
+                    Item copied_field = deep_copy_internal(field_item);
                     
-                    // Add to map - use str and length from StrView
-                    String* key_name = builder->createName(field->name->str, field->name->length);
+                    // Add to map
+                    String* key_name = createName(field->name->str, field->name->length);
                     map_builder.put(key_name, copied_field);
                 }
                 field = field->next;
@@ -714,7 +902,7 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         case LMD_TYPE_ELEMENT: {
             Element* elem = item.element;
-            if (!elem || !elem->type) return builder->createElement("div");
+            if (!elem || !elem->type) return createElement("div");
             
             TypeElmt* elem_type = (TypeElmt*)elem->type;
             // Use str and length from StrView
@@ -722,7 +910,7 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             size_t tag_len = elem_type->name.length < 255 ? elem_type->name.length : 255;
             memcpy(tag_name, elem_type->name.str, tag_len);
             tag_name[tag_len] = '\0';
-            ElementBuilder elem_builder = builder->element(tag_name);
+            ElementBuilder elem_builder = element(tag_name);
             
             // Copy attributes
             if (elem_type->length > 0) {
@@ -734,10 +922,10 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
                         Item attr_item = *(Item*)attr_data;
                         
                         // Recursively deep copy the attribute value
-                        Item copied_attr = copy_item_deep(builder, attr_item);
+                        Item copied_attr = deep_copy_internal(attr_item);
                         
                         // Use str and length from StrView
-                        String* attr_name = builder->createName(attr->name->str, attr->name->length);
+                        String* attr_name = createName(attr->name->str, attr->name->length);
                         elem_builder.attr(attr_name, copied_attr);
                     }
                     attr = attr->next;
@@ -747,7 +935,7 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             // Copy children
             for (int i = 0; i < elem->length; i++) {
                 Item child = elem->items[i];
-                Item copied_child = copy_item_deep(builder, child);
+                Item copied_child = deep_copy_internal(child);
                 elem_builder.child(copied_child);
             }
             
@@ -756,7 +944,7 @@ static Item copy_item_deep(MarkBuilder* builder, Item item) {
             
         default:
             // For unsupported types, return null
-            log_debug("copy_item_deep: unsupported type_id=%d, returning null", type_id);
-            return builder->createNull();
+            log_debug("deep_copy_internal: unsupported type_id=%d, returning null", type_id);
+            return createNull();
     }
 }

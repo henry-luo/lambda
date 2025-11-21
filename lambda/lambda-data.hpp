@@ -404,10 +404,11 @@ typedef struct Input {
     ShapePool* shape_pool;      // shape deduplication (NEW)
     ArrayList* type_list;       // list of types
     Item root;
+    Input* parent;              // parent Input for hierarchical ownership (nullable)
     // StringBuf* sb;
 
     // member functions
-    static Input* create(Pool* pool, Url* abs_url = nullptr);
+    static Input* create(Pool* pool, Url* abs_url = nullptr, Input* parent = nullptr);
 } Input;
 
 #ifdef __cplusplus
