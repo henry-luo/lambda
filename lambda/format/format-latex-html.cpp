@@ -501,42 +501,55 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
         else if (strcmp(cmd_name, "title") == 0) {
             process_title(html_buf, elem, pool, depth);
+            return;
         }
         else if (strcmp(cmd_name, "author") == 0) {
             process_author(html_buf, elem, pool, depth);
+            return;
         }
         else if (strcmp(cmd_name, "date") == 0) {
             process_date(html_buf, elem, pool, depth);
+            return;
         }
         else if (strcmp(cmd_name, "maketitle") == 0) {
             process_maketitle(html_buf, pool, depth);
+            return;
         }
         else if (strcmp(cmd_name, "section") == 0) {
             process_section(html_buf, elem, pool, depth, "latex-section", font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "subsection") == 0) {
             process_section(html_buf, elem, pool, depth, "latex-subsection", font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "subsubsection") == 0) {
             process_section(html_buf, elem, pool, depth, "latex-subsubsection", font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "begin") == 0) {
             process_environment(html_buf, elem, pool, depth, font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "center") == 0) {
             process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "flushleft") == 0) {
             process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "flushright") == 0) {
             process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "quote") == 0) {
             process_quote(html_buf, elem, pool, depth, font_ctx);
+            return;
         }
         else if (strcmp(cmd_name, "verbatim") == 0) {
             process_verbatim(html_buf, elem, pool, depth);
+            return;
         }
         
         // Check text command map for common formatting commands
