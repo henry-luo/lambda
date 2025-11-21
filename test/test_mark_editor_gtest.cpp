@@ -3,6 +3,7 @@
 #include "../lambda/mark_editor.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/format/format.h"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
 
@@ -797,6 +798,127 @@ TEST_F(MarkEditorTest, ImmutableModePreservesOriginal) {
     
     // Should be different instances
     ASSERT_NE(doc.map, updated.map);
+}
+
+TEST_F(MarkEditorTest, ImmutableModeSerializationVerification) {
+    // Create a complex document with nested structures
+    MarkBuilder builder(input);
+    
+    Item address = builder.map()
+        .put("street", "123 Main St")
+        .put("city", "Boston")
+        .put("zip", "02101")
+        .final();
+    
+    Item tags = builder.array()
+        .append("developer")
+        .append("engineer")
+        .final();
+    
+    Item doc = builder.map()
+        .put("name", "Alice")
+        .put("age", (int64_t)30)
+        .put("address", address)
+        .put("tags", tags)
+        .final();
+    
+    input->root = doc;
+    
+    // Serialize v1 to string s1
+    String* s1 = format_json(pool, doc);
+    ASSERT_NE(s1, nullptr);
+    ASSERT_GT(s1->len, 0);
+    
+    // Edit in immutable mode
+    MarkEditor editor(input, EDIT_MODE_IMMUTABLE);
+    
+    // Perform multiple edits
+    Item updated1 = editor.map_update(doc, "age", editor.builder()->createLong(31));
+    Item updated2 = editor.map_update(updated1, "name", editor.builder()->createStringItem("Alice Updated"));
+    
+    Item new_address = editor.builder()->map()
+        .put("street", "456 Elm St")
+        .put("city", "Cambridge")
+        .put("zip", "02139")
+        .final();
+    Item updated3 = editor.map_update(updated2, "address", new_address);
+    
+    // Serialize original doc again to string s2
+    String* s2 = format_json(pool, doc);
+    ASSERT_NE(s2, nullptr);
+    ASSERT_GT(s2->len, 0);
+    
+    // Verify that s1 == s2 (original unchanged)
+    ASSERT_EQ(s1->len, s2->len);
+    ASSERT_EQ(strncmp(s1->chars, s2->chars, s1->len), 0);
+    
+    // Verify that updated document is different
+    String* s3 = format_json(pool, updated3);
+    ASSERT_NE(s3, nullptr);
+    ASSERT_GT(s3->len, 0);
+    ASSERT_NE(strncmp(s1->chars, s3->chars, s1->len), 0);  // s1 != s3
+}
+
+TEST_F(MarkEditorTest, ImmutableModeElementSerializationVerification) {
+    // Create a complex element structure with nested children
+    MarkBuilder builder(input);
+    
+    Item child1 = builder.element("span")
+        .attr("class", "highlight")
+        .text("Hello")
+        .final();
+    
+    Item child2 = builder.element("strong")
+        .text("World")
+        .final();
+    
+    Item doc = builder.element("div")
+        .attr("id", "container")
+        .attr("class", "box")
+        .child(child1)
+        .child(child2)
+        .final();
+    
+    input->root = doc;
+    
+    // Serialize v1 to string s1
+    String* s1 = format_html(pool, doc);
+    ASSERT_NE(s1, nullptr);
+    ASSERT_GT(s1->len, 0);
+    
+    // Edit in immutable mode
+    MarkEditor editor(input, EDIT_MODE_IMMUTABLE);
+    
+    // Perform multiple element edits
+    Item updated1 = editor.elmt_update_attr(doc, "class", editor.builder()->createStringItem("container"));
+    Item updated2 = editor.elmt_update_attr(updated1, "data-value", editor.builder()->createInt(42));
+    
+    Item new_child = editor.builder()->element("em")
+        .text("New Text")
+        .final();
+    Item updated3 = editor.elmt_insert_child(updated2, 1, new_child);
+    
+    // Serialize original doc again to string s2
+    String* s2 = format_html(pool, doc);
+    ASSERT_NE(s2, nullptr);
+    ASSERT_GT(s2->len, 0);
+    
+    // Verify that s1 == s2 (original unchanged)
+    ASSERT_EQ(s1->len, s2->len);
+    ASSERT_EQ(strncmp(s1->chars, s2->chars, s1->len), 0);
+    
+    // Verify that updated document is different
+    String* s3 = format_html(pool, updated3);
+    ASSERT_NE(s3, nullptr);
+    ASSERT_GT(s3->len, 0);
+    ASSERT_NE(strncmp(s1->chars, s3->chars, s1->len), 0);  // s1 != s3
+    
+    // Verify original element structure is intact
+    MarkReader orig_reader(doc);
+    ElementReader orig_elem = orig_reader.getRoot().asElement();
+    ASSERT_EQ(orig_elem.get_attr("class").cstring(), std::string("box"));
+    ASSERT_FALSE(orig_elem.has_attr("data-value"));
+    ASSERT_EQ(orig_elem.childCount(), 2);  // Still 2 children, not 3
 }
 
 //==============================================================================
