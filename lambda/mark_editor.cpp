@@ -320,8 +320,10 @@ void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
 //==============================================================================
 
 Item MarkEditor::map_update(Item map, const char* key, Item value) {
-    if (!map.map || map.map->type_id != LMD_TYPE_MAP) {
-        log_error("map_update: not a map (type=%d)", map.map ? map.map->type_id : 0);
+    // Check type_id first before accessing union fields
+    TypeId map_type_id = get_type_id(map);
+    if (map_type_id != LMD_TYPE_MAP || !map.map) {
+        log_error("map_update: not a map (type=%d)", map_type_id);
         return ItemError;
     }
     
@@ -335,8 +337,9 @@ Item MarkEditor::map_update(Item map, const char* key, Item value) {
 }
 
 Item MarkEditor::map_update(Item map, String* key, Item value) {
-    if (!map.map || map.map->type_id != LMD_TYPE_MAP) {
-        log_error("map_update: not a map");
+    TypeId map_type_id = get_type_id(map);
+    if (map_type_id != LMD_TYPE_MAP || !map.map) {
+        log_error("map_update: not a map (type=%d)", map_type_id);
         return ItemError;
     }
     
@@ -623,8 +626,9 @@ Item MarkEditor::map_update_immutable(Map* old_map, String* key, Item value) {
 }
 
 Item MarkEditor::map_update_batch(Item map, int count, ...) {
-    if (!map.map || map.map->type_id != LMD_TYPE_MAP) {
-        log_error("map_update_batch: not a map");
+    TypeId map_type_id = get_type_id(map);
+    if (map_type_id != LMD_TYPE_MAP || !map.map) {
+        log_error("map_update_batch: not a map (type=%d)", map_type_id);
         return ItemError;
     }
     
@@ -701,8 +705,9 @@ Item MarkEditor::map_update_batch(Item map, int count, ...) {
 }
 
 Item MarkEditor::map_delete(Item map, const char* key) {
-    if (!map.map || map.map->type_id != LMD_TYPE_MAP) {
-        log_error("map_delete: not a map");
+    TypeId map_type_id = get_type_id(map);
+    if (map_type_id != LMD_TYPE_MAP || !map.map) {
+        log_error("map_delete: not a map (type=%d)", map_type_id);
         return ItemError;
     }
     
