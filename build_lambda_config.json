@@ -1080,6 +1080,19 @@
                         "binary": "test_mark_builder_gtest.exe"
                     },
                     {
+                        "source": "test_mark_builder_deepcopy_gtest.cpp",
+                        "name": "🔄 MarkBuilder Deep Copy Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_mark_builder_deepcopy_gtest.exe"
+                    },
+                    {
                         "source": "test_mark_editor_gtest.cpp",
                         "name": "✏️  MarkEditor CRUD Tests (GTest)",
                         "dependencies": [

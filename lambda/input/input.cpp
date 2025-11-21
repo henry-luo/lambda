@@ -751,7 +751,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     }
 }
 
-Input* Input::create(Pool* pool, Url* abs_url) {
+Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
     Input* input = (Input*)pool_alloc(pool, sizeof(Input));
     input->pool = pool;
     input->arena = arena_create_default(pool);
@@ -760,6 +760,7 @@ Input* Input::create(Pool* pool, Url* abs_url) {
     input->type_list = arraylist_new(16);
     input->url = abs_url;
     input->path = nullptr;
+    input->parent = parent;     // Set parent Input for hierarchical ownership
     input->root = (Item){.item = ITEM_NULL};
     return input;
 }

@@ -201,6 +201,53 @@ public:
     bool autoStringMerge() const { return auto_string_merge_; }
 
     // ============================================================================
+    // Deep Copy Methods (with smart ownership checking)
+    // ============================================================================
+
+    /**
+     * Deep copy an Item to this builder's Input arena
+     * 
+     * Performs smart ownership checking:
+     * - If item data is already in this Input's arena chain, returns original (no copy)
+     * - If item data is in parent Input's arena chain, returns original (no copy)
+     * - If item data is external, performs deep recursive copy
+     * 
+     * This enables efficient cross-Input data sharing while ensuring memory safety.
+     * 
+     * @param item The item to potentially copy
+     * @return Original item if already owned, or a deep copy if external
+     */
+    Item deep_copy(Item item);
+
+    /**
+     * Check if an Item's data is in this Input's arena chain
+     * 
+     * Traverses the parent chain: current Input -> parent -> parent -> ...
+     * Returns true if all pointer data is owned by an arena in the chain.
+     * 
+     * @param item The item to check
+     * @return true if item data is in arena chain, false if external
+     */
+    bool is_in_arena(Item item) const;
+
+private:
+    /**
+     * Check if a pointer is owned by this Input's arena chain
+     * Traverses: current arena -> parent Input's arena -> parent's parent -> ...
+     * 
+     * @param ptr Pointer to check
+     * @return true if ptr is in arena chain, false otherwise
+     */
+    bool is_pointer_in_arena_chain(const void* ptr) const;
+
+    /**
+     * Internal implementation of deep_copy (recursive)
+     * Called by public deep_copy() after ownership check
+     */
+    Item deep_copy_internal(Item item);
+
+public:
+    // ============================================================================
     // Internal Helpers (for ElementBuilder/MapBuilder to call legacy functions)
     // ============================================================================
 

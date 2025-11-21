@@ -159,6 +159,104 @@ Type* alloc_type(Pool* pool, TypeId type, size_t size) {
     return t;
 }
 
+extern "C" {
+
+int64_t it2l(Item itm) {
+    if (itm._type_id == LMD_TYPE_INT) {
+        return itm.int_val;
+    }
+    else if (itm._type_id == LMD_TYPE_INT64) {
+        return *(int64_t*)itm.pointer;
+    }
+    else if (itm._type_id == LMD_TYPE_FLOAT) {
+        return (int64_t)*(double*)itm.pointer;
+    }
+    log_debug("invalid type %d", itm._type_id);
+    // todo: push error
+    return 0;
+}
+
+double it2d(Item itm) {
+    if (itm._type_id == LMD_TYPE_INT) {
+        return itm.int_val;
+    }
+    else if (itm._type_id == LMD_TYPE_INT64) {
+        return *(int64_t*)itm.pointer;
+    }
+    else if (itm._type_id == LMD_TYPE_FLOAT) {
+        return *(double*)itm.pointer;
+    }
+    else if (itm._type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec = (Decimal*)itm.pointer;
+        char* endptr;
+        char* dec_str = mpd_to_sci(dec->dec_val, 0);
+        double val = strtod(dec_str, &endptr);
+        if (!dec_str || endptr == dec_str) {
+            log_error("it2d: failed to convert decimal to double");
+            return NAN; // conversion error
+        }
+        return val;
+    }
+    log_debug("invalid type %d", itm._type_id);
+    // todo: push error
+    return 0;
+}
+
+bool it2b(Item itm) {
+    if (itm._type_id == LMD_TYPE_BOOL) {
+        return itm.bool_val != 0;
+    }
+    // Convert other types to boolean following JavaScript rules
+    else if (itm._type_id == LMD_TYPE_NULL) {
+        return false;
+    }
+    else if (itm._type_id == LMD_TYPE_INT) {
+        return itm.int_val != 0;
+    }
+    else if (itm._type_id == LMD_TYPE_FLOAT) {
+        double d = *(double*)itm.pointer;
+        return !isnan(d) && d != 0.0;
+    }
+    else if (itm._type_id == LMD_TYPE_STRING) {
+        String* str = (String*)itm.pointer;
+        return str && str->len > 0;
+    }
+    // Objects are truthy
+    return true;
+}
+
+int it2i(Item itm) {
+    if (itm._type_id == LMD_TYPE_INT) {
+        return itm.int_val;
+    }
+    else if (itm._type_id == LMD_TYPE_INT64) {
+        return (int)*(int64_t*)itm.pointer;
+    }
+    else if (itm._type_id == LMD_TYPE_FLOAT) {
+        return (int)*(double*)itm.pointer;
+    }
+    else if (itm._type_id == LMD_TYPE_BOOL) { // should bool be convertible to int?
+        return itm.bool_val ? 1 : 0;
+    }
+    return INT_ERROR;
+}
+
+String* it2s(Item itm) {
+    if (itm._type_id == LMD_TYPE_STRING) {
+        return (String*)itm.pointer;
+    }
+    // For other types, we'd need to convert to string
+    // For now, return a default string
+    // static String* null_str = nullptr;
+    // if (!null_str) {
+    //     null_str = heap_strcpy("null", 4);
+    // }
+    // return null_str;
+    return nullptr;
+}
+
+} // extern "C"
+
 void expand_list(List *list) {
     log_debug("expand list:: %p, length: %ld, extra: %ld, capacity: %ld", list, list->length, list->extra, list->capacity);
     log_item({.list = list}, "list to expand");
