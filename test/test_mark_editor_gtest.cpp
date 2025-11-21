@@ -410,6 +410,396 @@ TEST_F(MarkEditorTest, ArrayAppend) {
 }
 
 //==============================================================================
+// COMPOSITE VALUE TESTS
+//==============================================================================
+
+TEST_F(MarkEditorTest, MapWithNestedMap) {
+    MarkBuilder builder(input);
+    
+    // Create nested map
+    Item address = builder.map()
+        .put("street", "123 Main St")
+        .put("city", "Boston")
+        .final();
+    
+    // Create parent map with nested map
+    Item doc = builder.map()
+        .put("name", "Alice")
+        .put("address", address)
+        .final();
+    
+    input->root = doc;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Update nested map
+    Item new_address = editor.builder()->map()
+        .put("street", "456 Elm St")
+        .put("city", "Cambridge")
+        .put("zip", "02139")
+        .final();
+    
+    Item updated = editor.map_update(doc, "address", new_address);
+    
+    ASSERT_NE(updated.map, nullptr);
+    ASSERT_EQ(updated.map->type_id, LMD_TYPE_MAP);
+    
+    // Verify nested map using MarkReader
+    MarkReader reader(updated);
+    MapReader map_reader = reader.getRoot().asMap();
+    ItemReader addr_reader = map_reader.get("address");
+    ASSERT_TRUE(addr_reader.isMap());
+    
+    MapReader addr_map = addr_reader.asMap();
+    ASSERT_EQ(addr_map.get("city").cstring(), std::string("Cambridge"));
+    ASSERT_EQ(addr_map.get("zip").cstring(), std::string("02139"));
+}
+
+TEST_F(MarkEditorTest, MapWithArray) {
+    MarkBuilder builder(input);
+    
+    // Create array
+    Item tags = builder.array()
+        .append("cpp")
+        .append("lambda")
+        .append("functional")
+        .final();
+    
+    // Create map with array
+    Item doc = builder.map()
+        .put("name", "Project")
+        .put("tags", tags)
+        .final();
+    
+    input->root = doc;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Update the array
+    Item new_tags = editor.builder()->array()
+        .append("cpp")
+        .append("lambda")
+        .append("scripting")
+        .final();
+    
+    Item updated = editor.map_update(doc, "tags", new_tags);
+    
+    ASSERT_NE(updated.map, nullptr);
+    ASSERT_EQ(updated.map->type_id, LMD_TYPE_MAP);
+    
+    // Verify array using MarkReader
+    MarkReader reader(updated);
+    MapReader map_reader = reader.getRoot().asMap();
+    ItemReader tags_reader = map_reader.get("tags");
+    ASSERT_TRUE(tags_reader.isArray());
+    
+    ArrayReader arr = tags_reader.asArray();
+    ASSERT_EQ(arr.length(), 3);
+}
+
+TEST_F(MarkEditorTest, ArrayOfMaps) {
+    MarkBuilder builder(input);
+    
+    // Create array of maps
+    Item user1 = builder.map().put("name", "Alice").put("age", (int64_t)30).final();
+    Item user2 = builder.map().put("name", "Bob").put("age", (int64_t)25).final();
+    
+    Item arr = builder.array()
+        .append(user1)
+        .append(user2)
+        .final();
+    
+    input->root = arr;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Update first element
+    Item new_user = editor.builder()->map()
+        .put("name", "Alice Updated")
+        .put("age", (int64_t)31)
+        .final();
+    
+    Item updated = editor.array_set(arr, 0, new_user);
+    
+    ASSERT_NE(updated.array, nullptr);
+    ASSERT_EQ(updated.array->type_id, LMD_TYPE_ARRAY);
+    ASSERT_EQ(updated.array->length, 2);
+    
+    // Verify using MarkReader
+    MarkReader reader(updated);
+    ArrayReader arr_reader = reader.getRoot().asArray();
+    ItemReader first = arr_reader.get(0);
+    ASSERT_TRUE(first.isMap());
+    
+    MapReader first_map = first.asMap();
+    ASSERT_EQ(first_map.get("name").cstring(), std::string("Alice Updated"));
+    ASSERT_EQ(first_map.get("age").asInt(), 31);
+}
+
+TEST_F(MarkEditorTest, DeepNestedStructure) {
+    MarkBuilder builder(input);
+    
+    // Create deeply nested structure: map -> array -> map -> array
+    Item inner_array = builder.array()
+        .append((int64_t)1)
+        .append((int64_t)2)
+        .final();
+    
+    Item inner_map = builder.map()
+        .put("values", inner_array)
+        .final();
+    
+    Item outer_array = builder.array()
+        .append(inner_map)
+        .final();
+    
+    Item doc = builder.map()
+        .put("data", outer_array)
+        .final();
+    
+    input->root = doc;
+    
+    MarkEditor editor(input, EDIT_MODE_IMMUTABLE);
+    
+    // Update the nested structure
+    Item new_inner_array = editor.builder()->array()
+        .append((int64_t)10)
+        .append((int64_t)20)
+        .append((int64_t)30)
+        .final();
+    
+    Item new_inner_map = editor.builder()->map()
+        .put("values", new_inner_array)
+        .put("count", (int64_t)3)
+        .final();
+    
+    Item new_outer_array = editor.builder()->array()
+        .append(new_inner_map)
+        .final();
+    
+    Item updated = editor.map_update(doc, "data", new_outer_array);
+    
+    ASSERT_NE(updated.map, nullptr);
+    ASSERT_NE(updated.map, doc.map);  // Immutable mode creates new instance
+    
+    // Verify deep structure
+    MarkReader reader(updated);
+    MapReader root = reader.getRoot().asMap();
+    ItemReader data = root.get("data");
+    ASSERT_TRUE(data.isArray());
+    
+    ArrayReader outer_arr = data.asArray();
+    ASSERT_EQ(outer_arr.length(), 1);
+    
+    ItemReader first_elem = outer_arr.get(0);
+    ASSERT_TRUE(first_elem.isMap());
+    
+    MapReader inner = first_elem.asMap();
+    ASSERT_EQ(inner.get("count").asInt(), 3);
+}
+
+//==============================================================================
+// NEGATIVE TESTS
+//==============================================================================
+
+TEST_F(MarkEditorTest, MapUpdateNullMap) {
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    Item null_map = ItemNull;  // Use predefined null item
+    Item result = editor.map_update(null_map, "key", editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, MapUpdateWrongType) {
+    MarkBuilder builder(input);
+    
+    // Create array, not map
+    Item arr = builder.array().append((int64_t)1).final();
+    input->root = arr;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Try to update as map
+    Item result = editor.map_update(arr, "key", editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, MapDeleteNonexistentField) {
+    MarkBuilder builder(input);
+    Item doc = builder.map()
+        .put("name", "Alice")
+        .final();
+    
+    input->root = doc;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Delete non-existent field
+    Item result = editor.map_delete(doc, "nonexistent");
+    
+    // Should succeed but return unchanged map
+    ASSERT_NE(result.map, nullptr);
+    ASSERT_EQ(result.map->type_id, LMD_TYPE_MAP);
+    
+    MarkReader reader(result);
+    MapReader map_reader = reader.getRoot().asMap();
+    ASSERT_TRUE(map_reader.has("name"));
+    ASSERT_FALSE(map_reader.has("nonexistent"));
+}
+
+TEST_F(MarkEditorTest, MapBatchUpdateZeroCount) {
+    MarkBuilder builder(input);
+    Item doc = builder.map()
+        .put("name", "Alice")
+        .final();
+    
+    input->root = doc;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Batch update with count=0
+    Item result = editor.map_update_batch(doc, 0);
+    
+    // Should return original map unchanged
+    ASSERT_EQ(result.map, doc.map);
+}
+
+TEST_F(MarkEditorTest, ArraySetOutOfBounds) {
+    MarkBuilder builder(input);
+    Item arr = builder.array()
+        .append((int64_t)1)
+        .append((int64_t)2)
+        .final();
+    
+    input->root = arr;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Try to set element beyond bounds
+    Item result = editor.array_set(arr, 10, editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, ArraySetNegativeIndex) {
+    MarkBuilder builder(input);
+    Item arr = builder.array()
+        .append((int64_t)1)
+        .final();
+    
+    input->root = arr;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Try negative index
+    Item result = editor.array_set(arr, -1, editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, ArrayInsertOutOfBounds) {
+    MarkBuilder builder(input);
+    Item arr = builder.array()
+        .append((int64_t)1)
+        .final();
+    
+    input->root = arr;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Insert at index > length should fail
+    Item result = editor.array_insert(arr, 10, editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, ArrayDeleteOutOfBounds) {
+    MarkBuilder builder(input);
+    Item arr = builder.array()
+        .append((int64_t)1)
+        .final();
+    
+    input->root = arr;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Delete beyond bounds
+    Item result = editor.array_delete(arr, 5);
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, ArrayAppendToNonArray) {
+    MarkBuilder builder(input);
+    
+    // Create map, not array
+    Item map = builder.map().put("key", "value").final();
+    input->root = map;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Try to append to map
+    Item result = editor.array_append(map, editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, ElementUpdateAttributeNonElement) {
+    MarkBuilder builder(input);
+    
+    // Create map, not element
+    Item map = builder.map().put("key", "value").final();
+    input->root = map;
+    
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    
+    // Try to update attribute on map
+    Item result = editor.elmt_update_attr(map, "attr", editor.builder()->createInt(42));
+    
+    // Should return error
+    ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);
+}
+
+TEST_F(MarkEditorTest, ImmutableModePreservesOriginal) {
+    MarkBuilder builder(input);
+    Item doc = builder.map()
+        .put("count", (int64_t)10)
+        .final();
+    
+    input->root = doc;
+    
+    MarkEditor editor(input, EDIT_MODE_IMMUTABLE);
+    
+    // Save original value
+    MarkReader orig_reader(doc);
+    int64_t orig_value = orig_reader.getRoot().asMap().get("count").asInt();
+    ASSERT_EQ(orig_value, 10);
+    
+    // Update in immutable mode
+    Item updated = editor.map_update(doc, "count", editor.builder()->createLong(20));
+    
+    // Original should be unchanged
+    MarkReader check_orig(doc);
+    ASSERT_EQ(check_orig.getRoot().asMap().get("count").asInt(), 10);
+    
+    // Updated should have new value
+    MarkReader check_updated(updated);
+    ASSERT_EQ(check_updated.getRoot().asMap().get("count").asInt(), 20);
+    
+    // Should be different instances
+    ASSERT_NE(doc.map, updated.map);
+}
+
+//==============================================================================
 // MAIN
 //==============================================================================
 
