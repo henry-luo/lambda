@@ -28,6 +28,7 @@
 #include "../lib/stringbuf.h"
 #include "../lib/arraylist.h"
 #include "../lib/hashmap.h"
+#include "../lib/log.h"
 #include <cstring>
 #include <cassert>
 
@@ -569,8 +570,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
             return is_pointer_in_arena_chain((void*)item.pointer);
         
         case LMD_TYPE_STRING: {
-            String* str = it2s(item);
-            return is_pointer_in_arena_chain(str);
+            return is_pointer_in_arena_chain((void*)item.pointer);
         }
         
         case LMD_TYPE_SYMBOL: {
@@ -585,20 +585,9 @@ bool MarkBuilder::is_in_arena(Item item) const {
             return is_pointer_in_arena_chain(sym);
         }
         
-        case LMD_TYPE_BINARY: {
-            String* bin = get_binary(item);
-            return is_pointer_in_arena_chain(bin);
-        }
-        
-        case LMD_TYPE_DTIME: {
+        case LMD_TYPE_BINARY: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL: {
             return is_pointer_in_arena_chain((void*)item.pointer);
         }
-        
-        case LMD_TYPE_DECIMAL: {
-            Decimal* dec = get_decimal(item);
-            return is_pointer_in_arena_chain(dec);
-        }
-        
         case LMD_TYPE_NUMBER: {
             // NUMBER is a double, check if pointer is in arena
             return is_pointer_in_arena_chain((void*)item.pointer);
@@ -608,7 +597,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
         case LMD_TYPE_ARRAY_INT:
         case LMD_TYPE_ARRAY_INT64:
         case LMD_TYPE_ARRAY_FLOAT: {
-            return is_pointer_in_arena_chain((void*)item.pointer);
+            return is_pointer_in_arena_chain(item.array);
         }
         
         case LMD_TYPE_ARRAY: {
@@ -909,27 +898,33 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             Element* elem = item.element;
             if (!elem || !elem->type) return createElement("div");
             
-            TypeElmt* elem_type = (TypeElmt*)elem->type;
-            // Use str and length from StrView
-            char tag_name[256];
-            size_t tag_len = elem_type->name.length < 255 ? elem_type->name.length : 255;
-            memcpy(tag_name, elem_type->name.str, tag_len);
-            tag_name[tag_len] = '\0';
+            // Use ElementReader to safely access element data
+            // CRITICAL: ElementReader.get_attr() properly reconstructs Items from stored data,
+            // handling the fact that STRING/SYMBOL/BINARY are stored as raw pointers without type_id.
+            // Direct memory access via *(Item*)attr_data would read garbage type_id from pointer bits.
+            ElementReader reader(elem);
+            
+            // Get tag name via reader (returns const char*)
+            const char* tag_name = reader.tagName();
+            if (!tag_name) tag_name = "div";
+            
             ElementBuilder elem_builder = element(tag_name);
             
-            // Copy attributes
+            // Copy attributes using ElementReader
+            // ElementReader.get_attr() handles proper Item reconstruction from stored data
+            TypeElmt* elem_type = (TypeElmt*)elem->type;
             if (elem_type->length > 0) {
                 ShapeEntry* attr = elem_type->shape;
                 while (attr) {
-                    if (attr->name) {
-                        void* attr_data = (char*)elem->data + attr->byte_offset;
-                        // Attributes are stored as Items
-                        Item attr_item = *(Item*)attr_data;
+                    if (attr->name && attr->name->str) {
+                        // Use reader to get attribute with proper type reconstruction
+                        ItemReader attr_reader = reader.get_attr(attr->name->str);
+                        Item attr_item = attr_reader.item();
                         
                         // Recursively deep copy the attribute value
                         Item copied_attr = deep_copy_internal(attr_item);
                         
-                        // Use str and length from StrView
+                        // Copy attribute name bytes from external NamePool
                         String* attr_name = createName(attr->name->str, attr->name->length);
                         elem_builder.attr(attr_name, copied_attr);
                     }
@@ -937,9 +932,10 @@ Item MarkBuilder::deep_copy_internal(Item item) {
                 }
             }
             
-            // Copy children
-            for (int i = 0; i < elem->length; i++) {
-                Item child = elem->items[i];
+            // Copy children using childAt() reader method
+            for (int i = 0; i < reader.childCount(); i++) {
+                ItemReader child_reader = reader.childAt(i);
+                Item child = child_reader.item();
                 Item copied_child = deep_copy_internal(child);
                 elem_builder.child(copied_child);
             }

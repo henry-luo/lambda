@@ -1156,6 +1156,69 @@ TEST_F(MarkEditorTest, NestedExternalStructureDeepCopy) {
 }
 
 //==============================================================================
+// EXTERNAL INPUT TESTS - Deep copy with NamePool/ShapePool lifecycle
+//==============================================================================
+
+// Test deep copying an element from external Input that gets destroyed
+TEST(ExternalInputTest, DeepCopyExternalElement) {
+    // Initialize logging
+    log_init(NULL);
+    
+    // Create parent pool (will remain alive)
+    Pool* parent_pool = pool_create();
+    ASSERT_NE(parent_pool, nullptr);
+    Input* parent_input = Input::create(parent_pool);
+    
+    // Create external Input with a simple element
+    Pool* external_pool = pool_create();
+    Input* external_input = Input::create(external_pool);
+    MarkBuilder external_builder(external_input);
+    
+    // Build an element in the external Input
+    Item external_elem = external_builder
+        .element("div")
+            .attr("class", "container")
+            .attr("id", "main")
+        .final();
+    
+    ASSERT_EQ(external_elem.type_id(), LMD_TYPE_ELEMENT);
+    ASSERT_NE(external_elem.element, nullptr);
+    
+    // Create target Input (where we'll deep copy)
+    Pool* target_pool = pool_create();
+    Input* target_input = Input::create(target_pool);
+    MarkBuilder target_builder(target_input);
+    
+    // Deep copy the external element into target Input
+    Item copied_elem = target_builder.deep_copy(external_elem);
+    
+    ASSERT_EQ(copied_elem.type_id(), LMD_TYPE_ELEMENT);
+    ASSERT_NE(copied_elem.element, nullptr);
+    
+    // CRITICAL: Destroy the external pool (frees its NamePool and shape_pool)
+    pool_destroy(external_pool);
+    
+    // Now try to access the copied element's attributes
+    // This MUST NOT crash - the copied element should have all its data
+    // stored in target_input's pools, not the external pool
+    Element* elem = copied_elem.element;
+    TypeElmt* elem_type = (TypeElmt*)elem->type;
+    
+    // Check tag name - should be accessible
+    ASSERT_NE(elem_type->name.str, nullptr);
+    ASSERT_STREQ(elem_type->name.str, "div");
+    
+    // Try to get attributes via ElementReader - this should work now with the fix
+    ElementReader copied_reader(elem);
+    EXPECT_EQ(copied_reader.get_attr("class").cstring(), std::string("container"));
+    EXPECT_EQ(copied_reader.get_attr("id").cstring(), std::string("main"));
+    
+    // Cleanup
+    pool_destroy(target_pool);
+    pool_destroy(parent_pool);
+}
+
+//==============================================================================
 // MAIN
 //==============================================================================
 
