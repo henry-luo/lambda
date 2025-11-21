@@ -1,11 +1,11 @@
 # LaTeX to HTML - Phase 2: Comprehensive LaTeX.js Compatibility
 
-**Date**: November 20, 2025  
+**Date**: November 21, 2025  
 **Current Status**: 30/103 tests passing (29.1%)  
 **Phase 1 Status**: ✅ Complete - 25/25 baseline tests (100%)  
 **Phase 2 Goal**: Achieve 80-90% compatibility with LaTeX.js test suite  
 **Estimated Effort**: 20-30 hours over 4-6 weeks  
-**Phase 2.2 Status**: ⚡ In Progress - Spacing commands implemented
+**Phase 2.3 Status**: 🔄 In Progress - Font declarations partially implemented
 
 ---
 
@@ -18,13 +18,15 @@ Lambda has successfully achieved 100% pass rate (25/25 tests) on core document s
 - 🔄 **OngoingFixtures**: 5/78 passing (6.4%) - Development tests, expected to improve over time
 - **Total**: 30/103 tests passing (29.1%)
 
-**Recent Progress (Phase 2.1-2.2)**:
+**Recent Progress (Phase 2.1-2.3)**:
 - ✅ Core whitespace normalization implemented
 - ✅ Tilde to nbsp conversion restored (~ → U+00A0)
 - ✅ Spacing commands: \quad, \qquad, \enspace, \,, \! (Unicode output)
 - ✅ Linebreak with dimensions: \\[1cm] with CSS conversion
 - ✅ Dimension converter: latex_dim_to_pixels() supporting 7 LaTeX units
 - ✅ Test suite split into BaselineFixtures and OngoingFixtures
+- ✅ Short CSS class names: `bf`, `it`, `tt` (matching LaTeX.js conventions)
+- 🔄 Font declarations: 2/8 font tests passing (25%), basic declarations working
 
 **Strategic Approach**: Prioritize features by ROI (implementation effort vs. feature coverage) and skip features that are out of scope for Lambda's document processing mission.
 
@@ -157,7 +159,7 @@ Features that require state management or are beyond document processing:
 
 **Current Progress**: Phase 2.1-2.2 in progress
 
-### ✅ Completed Work (Nov 20, 2025)
+### ✅ Completed Work (Nov 21, 2025)
 
 1. **Test Suite Structure**
    - Split tests into BaselineFixtures (25 tests, must 100% pass) and OngoingFixtures (78 tests, development)
@@ -182,7 +184,32 @@ Features that require state management or are beyond document processing:
    - Implemented `latex_dim_to_pixels()` supporting 7 LaTeX units
    - Accurate conversions: 1cm=37.795px, 1mm=3.7795px, 1in=96px, etc.
 
+5. **CSS Class Names**
+   - Migrated from `latex-*` prefix to short names (matching LaTeX.js)
+   - `textbf` → `bf`, `textit` → `it`, `texttt` → `tt`, etc.
+   - Updated all baseline and formatting fixture files
+   - All 30 baseline tests still passing ✅
+
+6. **Font Declaration System** (Partial)
+   - Font context tracking (series, shape, family)
+   - Helper functions: `get_font_css_class()`, `needs_font_span()`
+   - Font span wrapping in content processors
+   - Declaration handlers: `\bfseries`, `\itshape`, `\slshape`, etc.
+   - **Status**: 2/8 font tests passing (fonts_tex_1, fonts_tex_5)
+   - **Issues**: Group scoping, `\emph` toggle logic, ligatures in monospace
+
 ### 🔄 In Progress
+
+**Phase 2.3: Font Declarations** (Partial)
+- ✅ Font context tracking system
+- ✅ CSS class generation (short names: bf, it, tt)
+- ✅ Font span wrapping for declarations
+- ✅ Declaration handlers enabled (bfseries, itshape, etc.)
+- ✅ 2/8 font tests passing (fonts_tex_1, fonts_tex_5)
+- ⏳ Group scoping for font context save/restore
+- ⏳ `\emph` toggle logic (italic ↔ upright)
+- ⏳ Ligature suppression in monospace fonts
+- ⏳ Text command vs declaration distinction
 
 **Phase 2.1: Whitespace** (Partial)
 - ✅ Core normalization
@@ -400,86 +427,137 @@ else if (strcmp(cmd_name, "vspace") == 0) {
 
 **Priority**: P2 - Important for text styling  
 **Effort**: 6-8 hours  
-**Impact**: +8 tests → 63/115 (54.8%)
+**Impact**: +8 tests → 63/103 (61.2%)  
+**Status**: 🔄 **IN PROGRESS** (Nov 21, 2025) - 2/8 tests passing
 
 **Objective**: Support declarative font changes.
 
-#### 2.3.1: Font Series Commands
-**File**: `lambda/format/format-latex-html.cpp`
+#### ✅ Completed (Nov 21, 2025)
 
-**Implementation**:
-```cpp
-else if (strcmp(cmd_name, "bfseries") == 0) {
-    // Switch to bold font
-    // All following text is bold until scope ends
-    // Implementation: use font stack
-    push_font_series(font_context, FONT_BOLD);
-}
-else if (strcmp(cmd_name, "mdseries") == 0) {
-    // Medium weight (normal)
-    push_font_series(font_context, FONT_NORMAL);
-}
-```
-
-**Font Context Stack**:
+**Font Context System**:
 ```cpp
 typedef struct FontContext {
-    std::vector<FontSeries> series_stack;   // bold, medium
-    std::vector<FontShape> shape_stack;     // italic, upright, slant
-    std::vector<FontFamily> family_stack;   // roman, sans, mono
+    FontSeries series;      // bold, normal
+    FontShape shape;        // italic, upright, slant, sc
+    FontFamily family;      // roman, sans, mono
 } FontContext;
 
-// When entering a group
-void push_font_state(FontContext* ctx);
+// Implemented helper functions
+const char* get_font_css_class(const FontContext* ctx);
+bool needs_font_span(const FontContext* ctx);
+```
 
-// When exiting a group
-void pop_font_state(FontContext* ctx);
+**CSS Class Mapping** (Short names for LaTeX.js compatibility):
+- `\bfseries` → `<span class="bf">`
+- `\itshape` → `<span class="it">`
+- `\ttfamily` → `<span class="tt">`
+- `\slshape` → `<span class="sl">`
+- `\scshape` → `<span class="sc">`
+- `\sffamily` → `<span class="sf">`
+- `\rmfamily` → `<span class="rm">`
+- `\upshape` → `<span class="up">`
 
-// Apply current font state to HTML
-void apply_font_classes(StringBuf* html_buf, FontContext* ctx) {
-    stringbuf_append_str(html_buf, "<span class=\"");
-    if (current_series == FONT_BOLD) append("font-bold ");
-    if (current_shape == FONT_ITALIC) append("font-italic ");
-    // ...
-    stringbuf_append_str(html_buf, "\">");
+**Font Span Wrapping**:
+- Integrated into `process_element_content()` and `process_element_content_simple()`
+- Tracks `font_span_open` flag to wrap text when font is non-default
+- Closes spans when font returns to default or at paragraph boundaries
+
+**Test Results**:
+- ✅ `fonts_tex_1`: Simple `\bfseries` declaration (Hello **is emphasized.**)
+- ✅ `fonts_tex_5`: Multiple shape changes (`\itshape`, `\slshape`)
+- ❌ `fonts_tex_2-3`: `\emph` toggle logic not implemented
+- ❌ `fonts_tex_4`: Group scoping not working (braces `{...}`)
+- ❌ `fonts_tex_6`: Ligatures in monospace (`--` → `–` instead of staying `--`)
+- ❌ `fonts_tex_7-8`: Size command scoping issues
+
+#### ⏳ Remaining Work
+
+#### 2.3.1: Group Scoping ⏳ TODO
+**File**: `lambda/format/format-latex-html.cpp`
+
+**Issue**: Font context doesn't save/restore across groups.
+
+**Implementation Needed**:
+```cpp
+// When processing a group element
+if (elem->type == ELEMENT_GROUP) {
+    FontContext saved_ctx = *font_ctx;  // Save current state
+    
+    // Process group content
+    process_element_content(html_buf, elem, pool, depth, font_ctx);
+    
+    *font_ctx = saved_ctx;  // Restore state
 }
 ```
 
-#### 2.3.2: Font Shape Commands
+**Test**: `fonts_tex_4` - `outer { text \bfseries {what} more text } end outer`
+- Expected: `what` is bold, `more text` is bold, after `}` returns to normal
+- Current: Group boundaries not respected
 
-**Commands**:
+#### 2.3.2: Emphasis Toggle ⏳ TODO
+**File**: `lambda/format/format-latex-html.cpp`
+
+**Issue**: `\emph` should toggle italic/upright based on current font.
+
+**Implementation Needed**:
+```cpp
+else if (strcmp(cmd_name, "em") == 0 || strcmp(cmd_name, "emph") == 0) {
+    // Toggle emphasis
+    if (font_ctx->shape == FONT_SHAPE_ITALIC) {
+        font_ctx->shape = FONT_SHAPE_UPRIGHT;  // italic → upright
+    } else {
+        font_ctx->shape = FONT_SHAPE_ITALIC;   // upright → italic
+    }
+}
+```
+
+**Tests**: `fonts_tex_2`, `fonts_tex_3`
+- `\em You can also \emph{emphasize} text.`
+- Expected: Nested `\emph` returns to upright
+- Current: Always outputs italic
+
+#### 2.3.3: Ligature Suppression ⏳ TODO
+**File**: `lambda/input/input-latex.cpp` or `lambda/format/format-latex-html.cpp`
+
+**Issue**: Monospace fonts should not use ligatures (`--` should stay `--`, not `–`).
+
+**Implementation Needed**:
+```cpp
+// In text processing
+if (font_ctx->family == FONT_FAMILY_MONO) {
+    // Disable ligature conversion for monospace
+    // Keep -- as -- (not en-dash)
+    // Keep --- as --- (not em-dash)
+}
+```
+
+**Test**: `fonts_tex_6` - `\texttt{first test of -- and ---}`
+- Expected: `<span class="tt">first test of -- and ---</span>`
+- Current: `<span class="tt">first test of – and —</span>` (ligatures applied)
+
+#### 2.3.4: Font Series Commands ✅ DONE
+
+**Commands Implemented**:
+- `\bfseries` → bold
+- `\mdseries` → normal weight
+
+#### 2.3.5: Font Shape Commands ✅ DONE
+
+**Commands Implemented**:
 - `\itshape` → italic
 - `\slshape` → slanted (oblique)
 - `\scshape` → small caps
 - `\upshape` → upright (normal)
 
-**Implementation**: Similar to series, using shape stack.
+#### 2.3.6: Font Family Commands ✅ DONE
 
-#### 2.3.3: Font Family Commands
-
-**Commands**:
+**Commands Implemented**:
 - `\rmfamily` → roman (serif)
 - `\sffamily` → sans-serif
 - `\ttfamily` → typewriter (monospace)
 
-**Implementation**: Similar to series, using family stack.
-
-#### 2.3.4: Emphasis Toggle
-
-**File**: `lambda/format/format-latex-html.cpp`
-
-**Implementation**:
-```cpp
-else if (strcmp(cmd_name, "em") == 0) {
-    // Toggle emphasis
-    // If currently upright → italic
-    // If currently italic → upright
-    toggle_emphasis(font_context);
-}
-```
-
-**Estimated Completion**: 1 week (6-8 hours)  
-**Risk**: Medium - requires font context tracking
+**Estimated Completion**: 1 week (4-6 hours remaining)  
+**Risk**: Medium - group scoping and toggle logic need careful implementation
 
 ---
 
@@ -757,22 +835,140 @@ All are beyond Lambda's core mission of document structure processing.
 
 ## Implementation Guidelines
 
+### Debugging with lambda.exe CLI
+
+**Lambda provides a command-line tool to view parsed LaTeX documents**, which is invaluable for debugging parser and formatter issues.
+
+#### Basic Usage
+
+```bash
+# View parsed LaTeX AST
+./build/lambda.exe --input test/latex/fixtures/fonts.tex --format mark
+
+# Convert LaTeX to HTML
+./build/lambda.exe --input test.tex --format html > output.html
+
+# View specific test fixture
+./build/lambda.exe --input test/latex/fixtures/fonts.tex --format html
+```
+
+#### Debugging Parser Issues
+
+**View the parsed AST structure**:
+```bash
+# Mark format shows the internal element structure
+./build/lambda.exe --input test.tex --format mark
+```
+
+**Example output**:
+```
+<document
+  <textblock "Hello ">
+  <bfseries>
+  <textblock "is emphasized.">
+>
+```
+
+This shows:
+- Element types (textblock, bfseries, etc.)
+- Nesting structure
+- Text content
+
+**Use this to verify**:
+1. Parser correctly identifies commands (`\bfseries` → `<bfseries>`)
+2. Groups are properly structured
+3. Text is correctly extracted
+4. Element hierarchy matches expectations
+
+#### Debugging Formatter Issues
+
+**Compare HTML output with expected**:
+```bash
+# Generate HTML
+./build/lambda.exe --input test.tex --format html > actual.html
+
+# Compare with expected
+diff expected.html actual.html
+```
+
+**Check CSS classes**:
+```bash
+# View HTML output
+./build/lambda.exe --input test.tex --format html | grep 'class='
+
+# Should see short class names: bf, it, tt (not latex-textbf, etc.)
+```
+
+#### Debugging Font Context
+
+**Test font declarations**:
+```bash
+# Create test file
+echo "Hello \\bfseries is bold." > /tmp/test.tex
+
+# View parsed structure
+./build/lambda.exe --input /tmp/test.tex --format mark
+
+# View HTML output
+./build/lambda.exe --input /tmp/test.tex --format html
+```
+
+**Expected output**:
+```html
+<div class="body">
+<p>Hello <span class="bf">is bold.</span></p>
+</div>
+```
+
+#### Quick Test Workflow
+
+```bash
+# 1. Create minimal test case
+echo "\\bfseries bold text" > /tmp/test.tex
+
+# 2. View parsed structure
+./build/lambda.exe --input /tmp/test.tex --format mark
+
+# 3. View HTML output
+./build/lambda.exe --input /tmp/test.tex --format html
+
+# 4. If issues found, add log_debug() statements and rebuild
+make build
+
+# 5. Check log file
+tail -f ./log.txt
+```
+
+#### Available Formats
+
+- `mark` - Internal element structure (best for parser debugging)
+- `html` - HTML output (best for formatter debugging)
+- `json` - JSON representation
+- `xml` - XML representation
+
+**Pro tip**: Use `mark` format to understand what the parser produces, then use `html` format to see how the formatter handles it.
+
+---
+
 ### Coding Standards
 
 1. **Incremental Development**
    - Implement one phase at a time
    - Run full test suite after each change
    - Commit working code frequently
+   - Use `lambda.exe --format mark` to verify parser changes
 
 2. **Test-Driven Approach**
    - Enable tests as features are implemented
    - Use `--gtest_filter` to focus on specific tests
    - Debug failures immediately
+   - Use `lambda.exe` CLI to isolate issues
 
 3. **Error Handling**
    - Graceful degradation for unsupported features
    - Log warnings for unimplemented commands
    - Don't crash on unknown LaTeX constructs
+   - Use `log_debug()` from `lib/log.h` (output to `./log.txt`)
 
 4. **Performance**
    - Keep font context stack lightweight
@@ -888,13 +1084,17 @@ std::set<std::string> tests_to_skip_parser = {
 
 ## Timeline
 
-### ✅ Completed (Nov 20, 2025)
+### ✅ Completed (Nov 21, 2025)
 - **Test Infrastructure**: Split into BaselineFixtures (25/25 ✅) and OngoingFixtures (5/78)
 - **Whitespace Core**: normalize_latex_whitespace() function, tilde to nbsp
 - **Spacing Commands**: \quad, \qquad, \enspace, \,, \! (Unicode output)
 - **Linebreak Enhancement**: \\[dimension] with latex_dim_to_pixels() converter
+- **CSS Class Migration**: Short names (bf, it, tt) matching LaTeX.js conventions
+- **Font Context System**: Basic tracking and span wrapping implemented
+- **Font Declarations**: 2/8 tests passing (bfseries, itshape, slshape working)
 
-### 🔄 In Progress (Week 1-3)
+### 🔄 In Progress (Week 4)
+- **Font Declarations**: Finishing group scoping, emph toggle, ligature suppression
 - **Whitespace Edge Cases**: Comment handling, additional normalization
 - **Spacing Completion**: \hspace{} and \vspace{} implementation
 
@@ -926,25 +1126,35 @@ std::set<std::string> tests_to_skip_parser = {
 
 Phase 2 will transform Lambda's LaTeX processor from "basic document structure" to "comprehensive document formatting". By focusing on high-value, achievable features and explicitly excluding complex features that are out of scope, we can reach **65-80% test compatibility** in 4-9 weeks.
 
-**Progress Update (Nov 20, 2025)**:
+**Progress Update (Nov 21, 2025)**:
 - ✅ Test suite reorganized: BaselineFixtures (25/25 ✅) + OngoingFixtures (5/78)
 - ✅ Core whitespace normalization implemented
 - ✅ Spacing commands working (\quad, \qquad, \enspace, \,, \!)
 - ✅ Linebreak with dimensions: \\[1cm] → CSS pixels
 - ✅ Dimension converter: 7 LaTeX units supported
-- 🔄 Phase 2.1-2.2 in progress, on track for 50%+ pass rate
+- ✅ CSS classes migrated to short names (bf, it, tt) for LaTeX.js compatibility
+- ✅ Font context system with span wrapping implemented
+- 🔄 Font declarations: 2/8 tests passing (25%), basic declarations working
+- 🔄 Phase 2.3 in progress, remaining issues: group scoping, emph toggle, ligatures
 
 **Next Steps**:
 1. ✅ ~~Review this plan with team~~ - Underway
 2. ✅ ~~Begin Phase 2.1: Whitespace handling~~ - In progress
-3. 🔄 Complete Phase 2.1-2.2: Finish comment handling and hspace/vspace
-4. ⏳ Track progress in this document
-5. ⏳ Update skip list as features complete
-6. 🎉 Celebrate milestones!
+3. ✅ ~~Migrate to short CSS class names~~ - Complete
+4. 🔄 Complete Phase 2.3: Font declarations (group scoping, emph toggle, ligatures)
+5. 🔄 Complete Phase 2.1-2.2: Finish comment handling and hspace/vspace
+6. ⏳ Track progress in this document
+7. ⏳ Update skip list as features complete
+8. 🎉 Celebrate milestones!
+
+**Debugging Tools**:
+- Use `./build/lambda.exe --input file.tex --format mark` to view parsed AST
+- Use `./build/lambda.exe --input file.tex --format html` to test HTML output
+- Use `log_debug()` statements (output to `./log.txt`) for tracing execution
 
 ---
 
 **Document Status**: ✅ Updated with current progress  
-**Last Updated**: November 20, 2025  
+**Last Updated**: November 21, 2025  
 **Author**: Lambda Development Team  
-**Current Phase**: 2.1-2.2 (Whitespace & Spacing) - ~60% complete
+**Current Phase**: 2.3 (Font Declarations) - ~35% complete (2/8 tests passing)
