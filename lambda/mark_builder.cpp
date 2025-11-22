@@ -219,6 +219,22 @@ Item MarkBuilder::createNull() {
     return ItemNull;
 }
 
+Item MarkBuilder::createRange(int64_t start, int64_t end) {
+    // Allocate Range from arena
+    Range* range = (Range*)arena_alloc(arena_, sizeof(Range));
+    if (!range) return createNull();
+    
+    range->type_id = LMD_TYPE_RANGE;
+    range->flags = 0;
+    range->ref_cnt = 1;
+    range->start = start;
+    range->end = end;
+    range->length = (end >= start) ? (end - start + 1) : 0;
+    
+    Item result = {.item = r2it(range)};
+    return result;
+}
+
 //------------------------------------------------------------------------------
 // Internal Helpers
 //------------------------------------------------------------------------------
@@ -623,7 +639,8 @@ bool MarkBuilder::is_in_arena(Item item) const {
         
         // Pointer types - check arena ownership
         case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:
-        case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:  case LMD_TYPE_DTIME:   
+        case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:  case LMD_TYPE_DTIME:
+        case LMD_TYPE_RANGE:
             return is_pointer_in_arena_chain((void*)item.pointer);
         
         case LMD_TYPE_SYMBOL: {
@@ -791,6 +808,14 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             *dt_ptr = dt;
             Item result = {.item = k2it(dt_ptr)};
             return result;
+        }
+        
+        case LMD_TYPE_RANGE: {
+            Range* src_range = (Range*)item.pointer;
+            if (!src_range) return createNull();
+            
+            // Copy range using createRange
+            return createRange(src_range->start, src_range->end);
         }
             
         case LMD_TYPE_DECIMAL: {
@@ -1000,8 +1025,8 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             return elem_builder.final();
         }
         
-        // todo: range and type
-        
+        // todo: type
+
         default:
             // For unsupported types, return null
             log_debug("deep_copy_internal: unsupported type_id=%d, returning null", type_id);

@@ -192,6 +192,14 @@ public:
     Item createBool(bool value);
     Item createNull();
 
+    /**
+     * Create a Range Item
+     * @param start Inclusive start of range
+     * @param end Inclusive end of range
+     * @return Range Item with type LMD_TYPE_RANGE
+     */
+    Item createRange(int64_t start, int64_t end);
+
     // ============================================================================
     // Configuration Methods
     // ============================================================================

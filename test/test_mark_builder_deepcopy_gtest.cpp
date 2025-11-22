@@ -101,6 +101,35 @@ TEST_F(MarkBuilderDeepCopyTest, CopyFloat) {
     EXPECT_DOUBLE_EQ(it2d(copied), 3.14159);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, CopyRange) {
+    MarkBuilder builder1(input1);
+    MarkBuilder builder2(input2);
+    
+    // Create range in input1
+    Item range_item = builder1.createRange(1, 100);
+    EXPECT_EQ(get_type_id(range_item), LMD_TYPE_RANGE);
+    EXPECT_TRUE(builder1.is_in_arena(range_item));
+    
+    Range* orig_range = (Range*)range_item.pointer;
+    EXPECT_EQ(orig_range->start, 1);
+    EXPECT_EQ(orig_range->end, 100);
+    EXPECT_EQ(orig_range->length, 100);
+    
+    // Copy to same input - should return original (optimization)
+    Item copied_same = builder1.deep_copy(range_item);
+    EXPECT_EQ(copied_same.pointer, range_item.pointer);  // Same pointer
+    
+    // Copy to different input - should create new range
+    Item copied_diff = builder2.deep_copy(range_item);
+    EXPECT_NE(copied_diff.pointer, range_item.pointer);  // Different pointer
+    EXPECT_TRUE(builder2.is_in_arena(copied_diff));
+    
+    Range* copied_range = (Range*)copied_diff.pointer;
+    EXPECT_EQ(copied_range->start, 1);
+    EXPECT_EQ(copied_range->end, 100);
+    EXPECT_EQ(copied_range->length, 100);
+}
+
 // ============================================================================
 // String and Symbol Tests
 // ============================================================================
