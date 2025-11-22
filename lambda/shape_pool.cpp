@@ -42,18 +42,16 @@ static int shape_signature_compare(const void *a, const void *b, void *udata) {
 
 // ========== Signature Calculation ==========
 
-static uint64_t calculate_shape_hash(
-    const char** field_names,
-    TypeId* field_types,
-    size_t field_count
-) {
+static uint64_t calculate_shape_hash(const char** field_names, TypeId* field_types, size_t field_count) {
     // Use hashmap_sip for consistent hashing
     uint64_t hash = 0x123456789abcdefULL;
     
     for (size_t i = 0; i < field_count; i++) {
         // Hash field name
-        size_t name_len = strlen(field_names[i]);
-        hash = hashmap_sip(field_names[i], name_len, hash, i);
+        const char* name = field_names[i];
+        if (!name) { name = ""; } // use empty string for null field names (nested maps)
+        size_t name_len = strlen(name);
+        hash = hashmap_sip(name, name_len, hash, i);
         
         // Hash field type (combine with existing hash)
         uint64_t type_bits = (uint64_t)field_types[i];
@@ -64,11 +62,7 @@ static uint64_t calculate_shape_hash(
     return hash;
 }
 
-static ShapeSignature create_signature(
-    const char** field_names,
-    TypeId* field_types,
-    size_t field_count
-) {
+static ShapeSignature create_signature(const char** field_names, TypeId* field_types, size_t field_count) {
     ShapeSignature sig;
     sig.hash = calculate_shape_hash(field_names, field_types, field_count);
     sig.length = field_count;
@@ -141,12 +135,8 @@ void shape_pool_release(ShapePool* pool) {
 
 // ========== Shape Creation ==========
 
-static ShapeEntry* create_shape_chain(
-    Arena* arena,
-    const char** field_names,
-    TypeId* field_types,
-    size_t field_count
-) {
+static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names, 
+    TypeId* field_types, size_t field_count) {
     if (field_count == 0) return NULL;
     
     ShapeEntry* first = NULL;
@@ -154,9 +144,10 @@ static ShapeEntry* create_shape_chain(
     int64_t byte_offset = 0;
     
     for (size_t i = 0; i < field_count; i++) {
+        const char* name = field_names[i];
         // Allocate ShapeEntry + embedded StrView
-        ShapeEntry* entry = (ShapeEntry*)arena_alloc(arena, 
-            sizeof(ShapeEntry) + sizeof(StrView));
+        ShapeEntry* entry = (ShapeEntry*)arena_alloc(arena, sizeof(ShapeEntry) + 
+            (name ? sizeof(StrView) : 0));
         if (!entry) {
             log_error("Failed to allocate ShapeEntry from arena");
             return NULL;
@@ -164,9 +155,12 @@ static ShapeEntry* create_shape_chain(
         
         // Setup embedded StrView
         StrView* nv = (StrView*)((char*)entry + sizeof(ShapeEntry));
-        nv->str = field_names[i];
-        nv->length = strlen(field_names[i]);
-        
+        if (name) {
+            nv->str = name;
+            nv->length = strlen(name);
+        } else {
+            nv = NULL;
+        }
         entry->name = nv;
         entry->type = type_info[field_types[i]].type;
         entry->byte_offset = byte_offset;
@@ -178,7 +172,6 @@ static ShapeEntry* create_shape_chain(
         prev = entry;
         byte_offset += type_info[field_types[i]].byte_size;
     }
-    
     return first;
 }
 
@@ -205,17 +198,12 @@ static CachedShape* lookup_cached_shape(
     return NULL;
 }
 
-ShapeEntry* shape_pool_get_map_shape(
-    ShapePool* pool,
-    const char** field_names,
-    TypeId* field_types,
-    size_t field_count
-) {
+ShapeEntry* shape_pool_get_map_shape(ShapePool* pool, const char** field_names, 
+    TypeId* field_types, size_t field_count) {
     if (!pool || !field_names || !field_types || field_count == 0) {
         return NULL;
     }
-    
-    // Safety check
+    // safety check
     if (field_count > SHAPE_POOL_MAX_CHAIN_LENGTH) {
         log_warn("Shape too large (%zu fields), max is %d", field_count, SHAPE_POOL_MAX_CHAIN_LENGTH);
         return NULL;

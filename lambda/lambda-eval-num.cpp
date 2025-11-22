@@ -644,7 +644,7 @@ Item fn_pow(Item item_a, Item item_b) {
             // Convert decimal to string then to double (preserves precision better)
             char* str = mpd_to_sci(dec_ptr->dec_val, 1);
             base = strtod(str, NULL);
-            free(str);
+            mpd_free(str);
         }
         else {
             // Convert non-decimal to double
@@ -667,7 +667,7 @@ Item fn_pow(Item item_a, Item item_b) {
             Decimal* dec_ptr = (Decimal*)item_b.pointer;
             char* str = mpd_to_sci(dec_ptr->dec_val, 1);
             exponent = strtod(str, NULL);
-            free(str);
+            mpd_free(str);
         }
         else {
             // Convert non-decimal to double

@@ -732,9 +732,7 @@ static uint64_t xxh3(const void* data, size_t len, uint64_t seed) {
 }
 
 // hashmap_sip returns a hash value for `data` using SipHash-2-4.
-uint64_t hashmap_sip(const void *data, size_t len, uint64_t seed0,
-    uint64_t seed1)
-{
+uint64_t hashmap_sip(const void *data, size_t len, uint64_t seed0, uint64_t seed1) {
     return SIP64((uint8_t*)data, len, seed0, seed1);
 }
 

@@ -11,8 +11,9 @@
 class InputManager {
 private:
     Pool* global_pool;
-    ArrayList* inputs;  // Track all created inputs for cleanup
-
+    ArrayList* inputs;              // track all created inputs for cleanup
+    mpd_context_t* decimal_ctx;     // libmpdec context for decimal operations
+    
     // Private constructor for singleton pattern
     InputManager();
     ~InputManager();
@@ -22,6 +23,8 @@ private:
     InputManager& operator=(const InputManager&) = delete;
 
 public:
+    static mpd_context_t* decimal_context();
+
     // Create a new input using the managed pool
     static Input* create_input(Url* abs_url);
 

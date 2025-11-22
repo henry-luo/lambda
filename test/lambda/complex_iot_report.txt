@@ -41,32 +41,32 @@
   mobility_intelligence: {
     traffic_performance: {
       congestion_distribution: {
-          low_congestion: 0,
-          moderate_congestion: 2,
-          high_congestion: 0
-        },
+        low_congestion: 0,
+        moderate_congestion: 2,
+        high_congestion: 0
+      },
       speed_by_zone: {
-          downtown_avg: 0,
-          residential_avg: 0,
-          industrial_avg: 0
-        },
+        downtown_avg: 0,
+        residential_avg: 0,
+        industrial_avg: 0
+      },
       optimization_needed: 0
     },
     safety_metrics: {
       incident_hotspots: 0,
       safety_scores: ({
-          zone: "downtown",
-          incident_rate: 0,
-          safety_score: 1
-        }, {
-          zone: "residential",
-          incident_rate: 0,
-          safety_score: 1
-        }, {
-          zone: "industrial",
-          incident_rate: 0,
-          safety_score: 1
-        }),
+        zone: "downtown",
+        incident_rate: 0,
+        safety_score: 1
+      }, {
+        zone: "residential",
+        incident_rate: 0,
+        safety_score: 1
+      }, {
+        zone: "industrial",
+        incident_rate: 0,
+        safety_score: 1
+      }),
       infrastructure_improvements_needed: 0
     }
   },
@@ -80,10 +80,10 @@
     sustainability_metrics: {
       renewable_leaders: 0,
       grid_dependency_breakdown: {
-          high_dependency: 0,
-          medium_dependency: 0,
-          low_dependency: 0
-        },
+        high_dependency: 0,
+        medium_dependency: 0,
+        low_dependency: 0
+      },
       load_balancing_potential: 0
     }
   },

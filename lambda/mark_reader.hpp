@@ -229,10 +229,6 @@ public:
     bool isValid() const { return map_ != nullptr; }
 };
 
-// ==============================================================================
-// ArrayReader - Array Traversal
-// ==============================================================================
-
 /**
  * Type-safe wrapper for Array access
  * Stack-allocated value type
@@ -281,10 +277,6 @@ public:
     Array* array() const { return array_; }
     bool isValid() const { return array_ != nullptr; }
 };
-
-// ==============================================================================
-// ElementReaderWrapper - Stack-Based Element Reader
-// ==============================================================================
 
 /**
  * Pure stack-based element reader (no pool allocation)

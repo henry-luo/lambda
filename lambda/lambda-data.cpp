@@ -532,13 +532,14 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
         //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
+            log_debug("set nested map field of type: %d", field->type->type_id);
             Item itm = {.item = va_arg(args, uint64_t)};
             if (itm._type_id == LMD_TYPE_RAW_POINTER && *((TypeId*)itm.item) == LMD_TYPE_MAP) {
                 Map* nested_map = itm.map;
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
-                log_error("expected a map, got type %d", itm._type_id );
+                log_error("expected a map, got data of type %d", itm._type_id );
             }
         } else {
             log_debug("map set field: %.*s, type: %d, at offset: %d", (int)field->name->length,
@@ -567,9 +568,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_DTIME:  {
                 DateTime dtval = va_arg(args, DateTime);
-                StrBuf *strbuf = strbuf_new();
-                datetime_format_lambda(strbuf, &dtval);
-                log_debug("set field of datetime type to: %s", strbuf->str);
+                // StrBuf *strbuf = strbuf_new();
+                // datetime_format_lambda(strbuf, &dtval);
+                // log_debug("set field of datetime type to: %s", strbuf->str);
                 *(DateTime*)field_ptr = dtval;
                 break;
             }
@@ -692,6 +693,56 @@ Item typeditem_to_item(TypedItem *titem) {
     }
 }
 
+Item _map_field_to_item(void* field_ptr, TypeId type_id) {
+    Item result = (Item){._type_id = type_id};
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        return ItemNull;
+    case LMD_TYPE_BOOL:
+        result.bool_val = *(bool*)field_ptr;
+        break;
+    case LMD_TYPE_INT:
+        result.int_val = *(int*)field_ptr;
+        break;
+    case LMD_TYPE_INT64:
+        result = {.item = l2it(field_ptr)};  // points to long directly
+        break;
+    case LMD_TYPE_FLOAT:
+        result = {.item = d2it(field_ptr)};  // points to double directly
+        break;
+    case LMD_TYPE_DTIME:
+        result = {.item = k2it(field_ptr)};  // points to datetime directly
+        break;
+    case LMD_TYPE_DECIMAL:
+        result = {.item = c2it(*(Decimal**)field_ptr)};
+        break;
+    case LMD_TYPE_STRING:
+        result = {.item = s2it(*(String**)field_ptr)};
+        break;
+    case LMD_TYPE_SYMBOL:
+        result = {.item = y2it(*(String**)field_ptr)};
+        break;
+    case LMD_TYPE_BINARY:
+        result = {.item = x2it(*(String**)field_ptr)};
+        break;
+
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:  case LMD_TYPE_LIST:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+        result.container = *(Container**)field_ptr;
+        break;
+    case LMD_TYPE_ANY: {
+        log_debug("_map_get_const ANY type, pointer: %p", field_ptr);
+        result = typeditem_to_item((TypedItem*)field_ptr);
+        break;
+    }
+    default:
+        log_error("unknown map item type %d", type_id);
+        return ItemError;
+    }
+    return result;
+}
+
 ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, bool *is_found) {
     ShapeEntry *field = map_type->shape;
     while (field) {
@@ -713,53 +764,7 @@ ConstItem _map_get_const(TypeMap* map_type, void* map_data, const char *key, boo
             void* field_ptr = (char*)map_data + field->byte_offset;
             log_debug("_map_get_const found field: %.*s, type: %d, ptr: %p",
                 (int)field->name->length, field->name->str, type_id, field_ptr);
-
-            Item result = (Item){._type_id = type_id};
-            switch (type_id) {
-            case LMD_TYPE_NULL:
-                return null_result;
-            case LMD_TYPE_BOOL:
-                result.bool_val = *(bool*)field_ptr;
-                break;
-            case LMD_TYPE_INT:
-                result.int_val = *(int*)field_ptr;
-                break;
-            case LMD_TYPE_INT64:
-                result = {.item = l2it(field_ptr)};  // points to long directly
-                break;
-            case LMD_TYPE_FLOAT:
-                result = {.item = d2it(field_ptr)};  // points to double directly
-                break;
-            case LMD_TYPE_DTIME:
-                result = {.item = k2it(field_ptr)};  // points to datetime directly
-                break;
-            case LMD_TYPE_DECIMAL:
-                result = {.item = c2it(*(Decimal**)field_ptr)};
-                break;
-            case LMD_TYPE_STRING:
-                result = {.item = s2it(*(String**)field_ptr)};
-                break;
-            case LMD_TYPE_SYMBOL:
-                result = {.item = y2it(*(String**)field_ptr)};
-                break;
-            case LMD_TYPE_BINARY:
-                result = {.item = x2it(*(String**)field_ptr)};
-                break;
-
-            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-            case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:  case LMD_TYPE_LIST:
-            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
-                result.container = *(Container**)field_ptr;
-                break;
-            case LMD_TYPE_ANY: {
-                log_debug("_map_get_const ANY type, pointer: %p", field_ptr);
-                Item item = typeditem_to_item((TypedItem*)field_ptr);
-                break;
-            }
-            default:
-                log_error("unknown map item type %d", type_id);
-                return *(ConstItem*)&ItemError;
-            }
+            Item result = _map_field_to_item(field_ptr, type_id);
             return *(ConstItem*)&result;
         }
         field = field->next;

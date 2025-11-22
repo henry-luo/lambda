@@ -45,7 +45,7 @@ typedef struct Item {
         if (this->item) {
             return *((TypeId*)this->item);
         }
-        return LMD_TYPE_NULL; // fallback for null items
+        return LMD_TYPE_NULL; // fallback for null item
     }
 
     inline ConstItem to_const() const;

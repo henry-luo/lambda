@@ -114,17 +114,18 @@ TEST_F(MarkBuilderTest, CreateEmptyRange) {
 }
 
 // Test type creation
-TEST_F(MarkBuilderTest, CreateType) {
+TEST_F(MarkBuilderTest, createMetaType) {
     MarkBuilder builder(input);
 
-    Item type_item = builder.createType(LMD_TYPE_STRING);
+    Item type_item = builder.createMetaType(LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(type_item), LMD_TYPE_TYPE);
 
-    Type* type = (Type*)type_item.pointer;
+    TypeType* metatype = (TypeType*)type_item.type;
+    Type* type = metatype->type;
     ASSERT_NE(type, nullptr);
     EXPECT_EQ(type->type_id, LMD_TYPE_STRING);
-    EXPECT_EQ(type->is_literal, 0);
-    EXPECT_EQ(type->is_const, 0);
+    EXPECT_EQ(type->is_literal, true);
+    EXPECT_EQ(type->is_const, true);
 }
 
 // Test type creation with flags

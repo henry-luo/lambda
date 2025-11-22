@@ -43,11 +43,20 @@ Item input_markup_with_format(Input *input, const char* content, MarkupFormat fo
 __thread Context* input_context = NULL;
 
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
-    ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
-    StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-    nv->str = key->chars;  nv->length = key->len;
-    shape_entry->name = nv;
-    shape_entry->type = type_info[type_id].type;
+    ShapeEntry* shape_entry = NULL;
+    if (key) {
+        shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+        nv->str = key->chars;  nv->length = key->len;
+        shape_entry->name = nv;
+        shape_entry->type = type_info[type_id].type;
+    } else {
+        // no key, for nested map
+        log_debug("alloc_shape_entry: null key for nested map, type_id=%d", type_id);
+        shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry));
+        shape_entry->name = NULL;
+        shape_entry->type = type_info[type_id].type;
+    }
     if (prev_entry) {
         prev_entry->next = shape_entry;
         shape_entry->byte_offset = prev_entry->byte_offset + type_info[prev_entry->type->type_id].byte_size;
@@ -58,6 +67,7 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
 
 // Internal helper function - not exported in header but accessible to mark_builder.cpp
 void map_put(Map* mp, String* key, Item value, Input *input) {
+    // note: key could be null for nested map
     TypeMap *map_type = (TypeMap*)mp->type;
     if (map_type == &EmptyMap) {
         // alloc map type and data chunk
@@ -109,13 +119,63 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
-        *(String**)field_ptr = (String*)value.pointer;
-        ((String*)value.pointer)->ref_cnt++;
+    case LMD_TYPE_DTIME:
+        *(DateTime*)field_ptr = *(DateTime*)value.pointer;
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
+        *(String**)field_ptr = (String*)value.pointer;
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: 
         *(Map**)field_ptr = value.map;
         break;
+    case LMD_TYPE_TYPE:
+        *(Type**)field_ptr = value.type;
+        break;
+    case LMD_TYPE_ANY: {
+        Item item = value;
+        TypeId type_id = get_type_id(item);
+        log_debug("set field of ANY type to type: %d", type_id);
+        TypedItem titem = {.type_id = type_id, .item = item.item};
+        switch (type_id) {
+        case LMD_TYPE_NULL: ;
+            break; // no extra work needed
+        case LMD_TYPE_BOOL:
+            titem.bool_val = item.bool_val;  break;
+        case LMD_TYPE_INT:
+            titem.int_val = item.int_val;  break;
+        case LMD_TYPE_INT64:
+            titem.long_val = *(int64_t*)item.pointer;  break;
+        case LMD_TYPE_FLOAT:
+            titem.double_val = *(double*)item.pointer;  break;
+        case LMD_TYPE_DTIME:
+            titem.datetime_val = *(DateTime*)item.pointer;  break;
+        case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+            String *str = (String*)item.pointer;
+            titem.string = str;
+            break;
+        }
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+        case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+            Container *container = item.container;
+            titem.container = container;
+            break;
+        }
+        case LMD_TYPE_TYPE:
+            titem.type = item.type;
+            break;
+        case LMD_TYPE_FUNC:
+            titem.function = item.function;
+            break;
+        default:
+            log_error("unknown type %d in set_fields", type_id);
+            // set as ERROR
+            titem = {.type_id = LMD_TYPE_ERROR};
+        }
+        // set in map
+        *(TypedItem*)field_ptr = titem;
+        break;
+    }
     default:
         printf("unknown type %d\n", value._type_id);
         return;
@@ -171,12 +231,11 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = (String*)value.pointer;
-        ((String*)value.pointer)->ref_cnt++;
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
         Container *container = value.container;
-        *(void**)field_ptr = container;  container->ref_cnt;
+        *(void**)field_ptr = container;
         break;
     }
     default:
@@ -189,27 +248,20 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
 // with a pooled version from the shape_pool.
 
 void map_finalize_shape(TypeMap* type_map, Input* input) {
-    if (!type_map || !input || !input->shape_pool) {
-        return;  // safety check
-    }
-    
     if (!type_map->shape || type_map->length == 0) {
         return;  // empty map, nothing to finalize
     }
-
     // collect field names and types from existing shape chain
     size_t field_count = type_map->length;
     const char** field_names = (const char**)pool_alloc(input->pool, field_count * sizeof(char*));
     TypeId* field_types = (TypeId*)pool_alloc(input->pool, field_count * sizeof(TypeId));
-    
-    if (!field_names || !field_types) {
-        return;  // allocation failed
-    }
+    if (!field_names || !field_types) { return; }
 
     // traverse existing shape chain to collect info
     ShapeEntry* entry = type_map->shape;
     for (size_t i = 0; i < field_count && entry; i++) {
-        field_names[i] = entry->name->str;  // StrView has 'str' field, not 'chars'
+        // entry->name could be null for nested map
+        field_names[i] = entry->name ? entry->name->str : nullptr;  // StrView has 'str' field, not 'chars'
         field_types[i] = entry->type->type_id;
         entry = entry->next;
     }
@@ -240,7 +292,8 @@ void map_finalize_shape(TypeMap* type_map, Input* input) {
 }
 
 void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
-    if (!type_elmt || !input || !input->shape_pool) {
+    if (!type_elmt) {
+        log_debug("missing element type");
         return;  // safety check
     }
     
@@ -250,6 +303,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
 
     // collect attribute names and types from existing shape chain
     size_t attr_count = type_elmt->length;
+    log_debug("elmt_finalize_shape: attr_count=%zu", attr_count);
     const char** attr_names = (const char**)pool_alloc(input->pool, attr_count * sizeof(char*));
     TypeId* attr_types = (TypeId*)pool_alloc(input->pool, attr_count * sizeof(TypeId));
     
@@ -260,7 +314,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
     // traverse existing shape chain to collect info
     ShapeEntry* entry = type_elmt->shape;
     for (size_t i = 0; i < attr_count && entry; i++) {
-        attr_names[i] = entry->name->str;  // StrView has 'str' field, not 'chars'
+        attr_names[i] = entry->name ? entry->name->str : nullptr;
         attr_types[i] = entry->type->type_id;
         entry = entry->next;
     }
@@ -268,12 +322,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
     // get or create pooled shape (includes element name)
     const char* element_name = type_elmt->name.str ? type_elmt->name.str : "";
     struct ShapeEntry* pooled_shape = shape_pool_get_element_shape(
-        input->shape_pool,
-        element_name,
-        attr_names,
-        attr_types,
-        attr_count
-    );
+        input->shape_pool, element_name, attr_names, attr_types, attr_count);
 
     if (pooled_shape) {
         // replace the shape chain with pooled version
@@ -281,9 +330,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
         
         // find last entry in pooled chain
         struct ShapeEntry* last = pooled_shape;
-        while (last->next) {
-            last = last->next;
-        }
+        while (last->next) { last = last->next; }
         type_elmt->last = last;
     }
 
@@ -771,10 +818,13 @@ static InputManager* g_input_manager = nullptr;
 InputManager::InputManager() {
     global_pool = pool_create();
     inputs = arraylist_new(16);
+    decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    // mpd_maxcontext(decimal_ctx);
+    mpd_defaultcontext(decimal_ctx);
 }
 
 InputManager::~InputManager() {
-    // Clean up all tracked inputs
+    // clean up all tracked inputs
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
@@ -789,6 +839,17 @@ InputManager::~InputManager() {
     if (global_pool) {
         pool_destroy(global_pool);
     }
+
+    // todo: free decimal_ctx
+}
+
+mpd_context_t* InputManager::decimal_context() {
+    // Lazy initialization of singleton
+    if (!g_input_manager) {
+        g_input_manager = new InputManager();
+    }
+    if (!g_input_manager) return nullptr;
+    return g_input_manager->decimal_ctx;
 }
 
 // Static method to create input using global manager

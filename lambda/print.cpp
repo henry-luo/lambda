@@ -177,7 +177,7 @@ void print_double(StrBuf *strbuf, double num) {
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     if (!decimal || !decimal->dec_val) { strbuf_append_str(strbuf, "error");  return; }
     // Use libmpdec to format the decimal
-    char *decimal_str = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
+    char *decimal_str = mpd_to_sci(decimal->dec_val, 1);  // scientific notation
     if (!decimal_str) { strbuf_append_str(strbuf, "error");  return; }
     // log_debug("printed decimal: %s", decimal_str);
     strbuf_append_str(strbuf, decimal_str);
