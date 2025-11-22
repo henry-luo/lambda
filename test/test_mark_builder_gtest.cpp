@@ -113,6 +113,34 @@ TEST_F(MarkBuilderTest, CreateEmptyRange) {
     EXPECT_EQ(range->length, 0);  // Empty range
 }
 
+// Test type creation
+TEST_F(MarkBuilderTest, CreateType) {
+    MarkBuilder builder(input);
+
+    Item type_item = builder.createType(LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(type_item), LMD_TYPE_TYPE);
+
+    Type* type = (Type*)type_item.pointer;
+    ASSERT_NE(type, nullptr);
+    EXPECT_EQ(type->type_id, LMD_TYPE_STRING);
+    EXPECT_EQ(type->is_literal, 0);
+    EXPECT_EQ(type->is_const, 0);
+}
+
+// Test type creation with flags
+TEST_F(MarkBuilderTest, CreateTypeWithFlags) {
+    MarkBuilder builder(input);
+
+    Item type_item = builder.createType(LMD_TYPE_INT, true, true);
+    EXPECT_EQ(get_type_id(type_item), LMD_TYPE_TYPE);
+
+    Type* type = (Type*)type_item.pointer;
+    ASSERT_NE(type, nullptr);
+    EXPECT_EQ(type->type_id, LMD_TYPE_INT);
+    EXPECT_EQ(type->is_literal, 1);
+    EXPECT_EQ(type->is_const, 1);
+}
+
 // Test array creation
 TEST_F(MarkBuilderTest, CreateArray) {
     MarkBuilder builder(input);

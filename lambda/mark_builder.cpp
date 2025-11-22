@@ -235,6 +235,31 @@ Item MarkBuilder::createRange(int64_t start, int64_t end) {
     return result;
 }
 
+Item MarkBuilder::createType(TypeId type_id, bool is_literal, bool is_const) {
+    // Allocate Type from arena
+    Type* type = (Type*)arena_alloc(arena_, sizeof(Type));
+    if (!type) return {.item = ITEM_UNDEFINED};
+    
+    type->type_id = type_id;
+    type->is_literal = is_literal ? 1 : 0;
+    type->is_const = is_const ? 1 : 0;
+    
+    // Manual wrapping since no t2it() macro exists (similar to r2it pattern)
+    Item result = {.item = (((uint64_t)LMD_TYPE_TYPE) << 56) | (uint64_t)type};
+    return result;
+}
+
+Item MarkBuilder::createMetaType(TypeType* type) {
+    assert(type->type_id == LMD_TYPE_TYPE);
+    Type* sub_type = this->createType(type->type->type_id, type->type->is_literal, type->type->is_const).type;
+    if (sub_type) {
+        TypeType *new_type = (TypeType*)this->createType(LMD_TYPE_TYPE, type->is_literal, type->is_const).type;
+        new_type->type = sub_type;
+        return {.type = new_type};
+    }
+    return {.item = ITEM_UNDEFINED};
+}
+
 //------------------------------------------------------------------------------
 // Internal Helpers
 //------------------------------------------------------------------------------
@@ -640,7 +665,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
         // Pointer types - check arena ownership
         case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:
         case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:  case LMD_TYPE_DTIME:
-        case LMD_TYPE_RANGE:
+        case LMD_TYPE_RANGE:  case LMD_TYPE_TYPE:
             return is_pointer_in_arena_chain((void*)item.pointer);
         
         case LMD_TYPE_SYMBOL: {
@@ -810,13 +835,6 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             return result;
         }
         
-        case LMD_TYPE_RANGE: {
-            Range* src_range = (Range*)item.pointer;
-            if (!src_range) return createNull();
-            
-            // Copy range using createRange
-            return createRange(src_range->start, src_range->end);
-        }
             
         case LMD_TYPE_DECIMAL: {
             Decimal* src_dec = get_decimal(item);
@@ -854,7 +872,15 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             double val = get_double(item);
             return createFloat(val);
         }
+
+        case LMD_TYPE_RANGE: {
+            Range* src_range = (Range*)item.pointer;
+            if (!src_range) return createNull();
             
+            // Copy range using createRange
+            return createRange(src_range->start, src_range->end);
+        }           
+
         case LMD_TYPE_ARRAY_INT: {
             ArrayInt* arr = item.array_int;
             if (!arr) {
@@ -1025,7 +1051,9 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             return elem_builder.final();
         }
         
-        // todo: type
+        case LMD_TYPE_TYPE: {
+            return createMetaType((TypeType*)item.type);
+        } 
 
         default:
             // For unsupported types, return null

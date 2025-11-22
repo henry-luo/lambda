@@ -194,7 +194,6 @@ struct Function {
 };
 
 #define INT_ERROR           INT64_MAX
-// #define INT_MAX             INT_MAX
 #define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
 #define ITEM_UNDEFINED      0

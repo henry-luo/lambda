@@ -200,6 +200,17 @@ public:
      */
     Item createRange(int64_t start, int64_t end);
 
+    /**
+     * Create a Type Item
+     * @param type_id The type identifier (from TypeId enum)
+     * @param is_literal Whether this is a literal type (default: false)
+     * @param is_const Whether this is a const type (default: false)
+     * @return Type Item with type LMD_TYPE_TYPE
+     */
+    Item createType(TypeId type_id, bool is_literal = false, bool is_const = false);
+
+    Item createMetaType(TypeType* type);
+    
     // ============================================================================
     // Configuration Methods
     // ============================================================================

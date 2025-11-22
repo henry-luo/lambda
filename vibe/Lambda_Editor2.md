@@ -1091,6 +1091,29 @@ Item attr_item = attr_reader.item();  // ✓ Proper reconstruction via s2it()!
 - Now properly copies `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` with correct types
 - Uses direct `memcpy` for efficient copying of primitive array data
 
+**Additional Enhancement - ListBuilder** (November 22, 2025):
+- Added `ListBuilder` class for fluent List construction following builder pattern
+- Provides `push(Item)`, `push(int)`, `push(const char*)`, `push(double)` methods
+- Fixed List deep copy to use ListBuilder (was incorrectly using ArrayBuilder)
+- Fixed `is_in_arena()` to check List struct ownership (was only checking items)
+- All 71 builder tests pass, 33 deep copy tests pass
+
+**Additional Enhancement - Range Support** (November 22, 2025):
+- Added `createRange(int64_t start, int64_t end)` method to MarkBuilder
+- Range allocated from arena using `arena_alloc(arena_, sizeof(Range))`
+- Uses `r2it()` macro for proper Item wrapping
+- Added `LMD_TYPE_RANGE` to `is_in_arena()` pointer type checks
+- Added Range deep copy support in `deep_copy_internal()`
+- All tests pass: 71 builder tests + 33 deep copy tests
+
+**Additional Enhancement - Type Support** (November 22, 2025):
+- Added `createType(TypeId type_id, bool is_literal, bool is_const)` method to MarkBuilder
+- Type allocated from arena using `arena_alloc(arena_, sizeof(Type))`
+- Uses manual Item wrapping (no t2it macro exists): `{.item = (((uint64_t)LMD_TYPE_TYPE)<<56) | (uint64_t)type}`
+- Added `LMD_TYPE_TYPE` to `is_in_arena()` pointer type checks
+- Added Type deep copy support in `deep_copy_internal()`
+- All tests pass: 73 builder tests + 34 deep copy tests + 38 editor tests
+
 **Changes Made**:
 - [x] Fixed `deep_copy_internal()` element case to use ElementReader
 - [x] Replaced manual Item reconstruction with reader delegation
@@ -1106,6 +1129,8 @@ Item attr_item = attr_reader.item();  // ✓ Proper reconstruction via s2it()!
   - Accesses attributes in copied element
   - Verifies no crash, attributes accessible
 - [x] All 38 MarkEditor tests pass
+- [x] All 73 MarkBuilder tests pass (includes CreateType, CreateTypeWithFlags)
+- [x] All 34 DeepCopy tests pass (includes CopyType)
 - [x] 2240/2305 total tests pass (97.2% pass rate)
 
 **Success Criteria**: ✅ Met
