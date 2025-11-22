@@ -30,6 +30,7 @@
 // Forward declarations
 typedef struct Element Element;
 typedef struct DocumentStyler DocumentStyler;
+typedef struct Input Input;
 
 // Note: DomNode is defined in dom_node.hpp and included above
 
@@ -76,37 +77,6 @@ struct DomComment : public DomNode {
 };
 
 // ============================================================================
-// Attribute Storage (Hybrid Array/Tree)
-// ============================================================================
-
-/**
- * Attribute pair for storage
- */
-typedef struct AttributePair {
-    const char* name;   // Attribute name
-    const char* value;  // Attribute value
-} AttributePair;
-
-/**
- * Hybrid attribute storage
- * Uses array for small attribute counts (< 10), switches to HashMap for larger counts
- * This provides O(n) for common cases (n<10) and O(1) for SVG/data-heavy elements
- */
-typedef struct AttributeStorage {
-    int count;             // Number of attributes
-    bool use_hashmap;      // Whether using hashmap (true) or array (false)
-    Pool* pool;            // Memory pool
-
-    union {
-        AttributePair* array;     // Array storage for count < 10
-        struct hashmap* hashmap;  // HashMap storage for count >= 10
-    } storage;
-} AttributeStorage;
-
-// Threshold for switching from array to hashmap
-#define ATTRIBUTE_HASHMAP_THRESHOLD 10
-
-// ============================================================================
 // DOM Element with Style Support
 // ============================================================================
 
@@ -137,20 +107,18 @@ struct DomElement : public DomNode {
     uint32_t style_version;      // Incremented when specified styles change
     bool needs_style_recompute;  // Flag indicating computed values are stale
 
-    // Attribute access (for selector matching) - hybrid array/tree storage
-    AttributeStorage* attributes;  // Hybrid attribute storage (array < 10, tree >= 10)
-
     // Pseudo-class state (for :hover, :focus, etc.)
     uint32_t pseudo_state;       // Bitmask of pseudo-class states
 
     // Memory management
     Pool* pool;                  // Memory pool for this element's allocations
+    struct Input* input;         // Input context (needed for MarkEditor operations)
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), native_element(nullptr), tag_name(nullptr),
                    tag_name_ptr(nullptr), tag_id(0), id(nullptr), class_names(nullptr), class_count(0),
                    specified_style(nullptr), computed_style(nullptr), style_version(0),
-                   needs_style_recompute(false), attributes(nullptr), pseudo_state(0), pool(nullptr) {}
+                   needs_style_recompute(false), pseudo_state(0), pool(nullptr), input(nullptr) {}
 
     // Document reference
     DocumentStyler* document;    // Parent document styler (should be set after construction)
@@ -175,64 +143,6 @@ struct DomElement : public DomNode {
 #define PSEUDO_STATE_FIRST_CHILD    (1 << 15)
 #define PSEUDO_STATE_LAST_CHILD     (1 << 16)
 #define PSEUDO_STATE_ONLY_CHILD     (1 << 17)
-
-// ============================================================================
-// Attribute Storage API
-// ============================================================================
-
-/**
- * Create a new AttributeStorage
- * @param pool Memory pool for allocations
- * @return New AttributeStorage or NULL on failure
- */
-AttributeStorage* attribute_storage_create(Pool* pool);
-
-/**
- * Destroy an AttributeStorage
- * @param storage Storage to destroy
- */
-void attribute_storage_destroy(AttributeStorage* storage);
-
-/**
- * Set an attribute (creates or updates)
- * @param storage Attribute storage
- * @param name Attribute name
- * @param value Attribute value
- * @return true on success, false on failure
- */
-bool attribute_storage_set(AttributeStorage* storage, const char* name, const char* value);
-
-/**
- * Get an attribute value
- * @param storage Attribute storage
- * @param name Attribute name
- * @return Attribute value or NULL if not found
- */
-const char* attribute_storage_get(AttributeStorage* storage, const char* name);
-
-/**
- * Check if an attribute exists
- * @param storage Attribute storage
- * @param name Attribute name
- * @return true if attribute exists, false otherwise
- */
-bool attribute_storage_has(AttributeStorage* storage, const char* name);
-
-/**
- * Remove an attribute
- * @param storage Attribute storage
- * @param name Attribute name
- * @return true if attribute was removed, false if not found
- */
-bool attribute_storage_remove(AttributeStorage* storage, const char* name);
-
-/**
- * Get all attribute names
- * @param storage Attribute storage
- * @param count Output parameter for number of attributes
- * @return Array of attribute names
- */
-const char** attribute_storage_get_names(AttributeStorage* storage, int* count);
 
 // ============================================================================
 // DOM Element Creation and Destruction
@@ -305,6 +215,14 @@ bool dom_element_remove_attribute(DomElement* element, const char* name);
  * @return true if attribute exists, false otherwise
  */
 bool dom_element_has_attribute(DomElement* element, const char* name);
+
+/**
+ * Get all attribute names from element
+ * @param element Target element
+ * @param count Output parameter for number of attributes
+ * @return Array of attribute names (from element's shape, pool-allocated)
+ */
+const char** dom_element_get_attribute_names(DomElement* element, int* count);
 
 // ============================================================================
 // Class Management
