@@ -438,9 +438,4 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
 }
 #endif
 
-// Memory pool convenience functions
-Pool* variable_mem_pool_create();
-void variable_mem_pool_destroy(Pool* pool);
-void variable_mem_pool_destroy(Pool* pool);
-
 Type* alloc_type(Pool* pool, TypeId type, size_t size);

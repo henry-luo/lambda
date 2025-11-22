@@ -330,16 +330,6 @@ List* list_arena(Arena* arena) {
     return list;
 }
 
-Pool* variable_mem_pool_create() {
-    return pool_create();
-}
-
-void variable_mem_pool_destroy(Pool* pool) {
-    if (pool) {
-        pool_destroy(pool);
-    }
-}
-
 void array_set(Array* arr, int index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
