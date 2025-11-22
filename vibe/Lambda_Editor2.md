@@ -1101,7 +1101,6 @@ Item attr_item = attr_reader.item();  // ✓ Proper reconstruction via s2it()!
 **Additional Enhancement - Range Support** (November 22, 2025):
 - Added `createRange(int64_t start, int64_t end)` method to MarkBuilder
 - Range allocated from arena using `arena_alloc(arena_, sizeof(Range))`
-- Uses `r2it()` macro for proper Item wrapping
 - Added `LMD_TYPE_RANGE` to `is_in_arena()` pointer type checks
 - Added Range deep copy support in `deep_copy_internal()`
 - All tests pass: 71 builder tests + 33 deep copy tests
