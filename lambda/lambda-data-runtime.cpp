@@ -428,10 +428,10 @@ Element* elmt(int type_index) {
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
-        log_debug("elmt byte_size: %ld", elmt_type->byte_size);
+    log_debug("elmt byte_size: %ld", elmt_type->byte_size);
     // set attributes
     long count = elmt_type->length;
-        log_debug("elmt length: %ld", count);
+    log_debug("elmt length: %ld", count);
     va_list args;
     va_start(args, count);
     set_fields((TypeMap*)elmt_type, elmt->data, args);

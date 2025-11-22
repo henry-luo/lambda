@@ -294,14 +294,15 @@ MapReader::EntryIterator::EntryIterator(const MapReader* reader)
     }
 }
 
+Item _map_field_to_item(void* field_ptr, TypeId type_id);
+
 bool MapReader::EntryIterator::next(const char** key, ItemReader* value) {
-    if (!current_field_) {
-        return false;
-    }
-
-    *key = current_field_->name->str;
-    *value = reader_->get(*key);
-
+    if (!current_field_) { return false; }
+    *key = current_field_->name ? current_field_->name->str : nullptr;
+    // get field value based on offset
+    void* field_ptr = (char*)reader_->map_->data + current_field_->byte_offset;
+    Item result = _map_field_to_item(field_ptr, current_field_->type->type_id);
+    *value = ItemReader(result.to_const());
     current_field_ = current_field_->next;
     return true;
 }
@@ -592,63 +593,8 @@ const char* ElementReader::get_attr_string(const char* key) const {
 }
 
 ItemReader ElementReader::get_attr(const char* key) const {
-    if (!element_ || !element_type_ || !key) return ItemReader();
-
-    const TypeMap* map_type = (const TypeMap*)element_type_;
-    const ShapeEntry* shape = map_type->shape;
-    const void* attr_data = element_->data;
-
-    if (!shape || !attr_data) {
-        return ItemReader();
-    }
-
-    const ShapeEntry* field = shape;
-    size_t key_len = strlen(key);
-    while (field) {
-        if (field->name && field->name->length == key_len &&
-            strncmp(field->name->str, key, key_len) == 0) {
-
-            if (field->type) {
-                const void* data = ((const char*)attr_data) + field->byte_offset;
-
-                // Convert field data to Item
-                Item value;
-                TypeId field_type = field->type->type_id;
-
-                switch (field_type) {
-                    case LMD_TYPE_STRING:
-                        value.item = *(uint64_t*)data;
-                        value._type_id = LMD_TYPE_STRING;
-                        break;
-                    case LMD_TYPE_INT:
-                        value.int_val = *(int*)data;
-                        value._type_id = LMD_TYPE_INT;
-                        break;
-                    case LMD_TYPE_INT64:
-                        value.int_val = *(int64_t*)data;
-                        value._type_id = LMD_TYPE_INT64;
-                        break;
-                    case LMD_TYPE_FLOAT:
-                        value.item = *(uint64_t*)data;  // Float is stored as pointer to double
-                        value._type_id = LMD_TYPE_FLOAT;
-                        break;
-                    case LMD_TYPE_BOOL:
-                        value.bool_val = *(bool*)data;
-                        value._type_id = LMD_TYPE_BOOL;
-                        break;
-                    default:
-                        value.item = *(uint64_t*)data;
-                        break;
-                }
-
-                return ItemReader(value.to_const());
-            }
-            break;
-        }
-        field = field->next;
-    }
-
-    return ItemReader();
+    if (!element_) return ItemReader();
+    return ItemReader(element_->get_attr(key));
 }
 
 // Typed attribute accessors

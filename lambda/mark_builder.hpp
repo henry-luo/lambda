@@ -209,7 +209,7 @@ public:
      */
     Item createType(TypeId type_id, bool is_literal = false, bool is_const = false);
 
-    Item createMetaType(TypeType* type);
+    Item createMetaType(TypeId type_id);
     
     // ============================================================================
     // Configuration Methods

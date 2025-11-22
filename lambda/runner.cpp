@@ -1,5 +1,6 @@
 #include <time.h>
 #include "transpiler.hpp"
+#include "mark_builder.hpp"
 
 #if _WIN32
 #include <windows.h>
@@ -425,53 +426,30 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
 
     log_debug("exec main func");
     Item result = context->result = runner->script->main_func(context);
-    log_debug("after main func");
+    log_debug("after main func, result type_id=%d", get_type_id(result));
 
-    // Create output Input that shares Script's pool (so they share memory resources)
-    // This way, the result Item references remain valid as long as either Input or Script exists
-    log_debug("Creating output Input (sharing Script's pool)");
-    Input* output = Input::create(runner->script->pool, nullptr);
+    // Create output Input with its own pool (independent from Script's pool)
+    // This allows safe cleanup of the execution context and heap
+    log_debug("Creating output Input with independent pool");
+    Pool* output_pool = pool_create();
+    Input* output = Input::create(output_pool, nullptr);
     if (!output) {
         log_error("Failed to create output Input");
+        if (output_pool) pool_destroy(output_pool);
         runner_cleanup(runner);
-        // Still return an error Input instead of nullptr
-        Pool* error_pool = pool_create();
-        Input* error_output = Input::create(error_pool, nullptr);
-        if (!error_output) {
-            log_error("Failed to create error output Input");
-            if (error_pool) pool_destroy(error_pool);
-            return nullptr;
-        }
-        error_output->root = ItemError;
-        return error_output;
+        return nullptr;
     }
-    output->root = result;  // simply assign the result - it's already an Item
     
-    // note: we can't use MarkBuilder to deep copy here because Items contain pointers
-    // to data in the runner's pool/arena/heap. We'll need to keep the runner context alive
-
-    // Clean up execution heap and context resources, but keep the Script alive
-    // if (runner->context.heap) {
-    //     frame_end();
-    //     heap_destroy();
-    //     if (runner->context.num_stack) {
-    //         num_stack_destroy((num_stack_t*)runner->context.num_stack);
-    //         runner->context.num_stack = NULL;
-    //     }
-    // }
-
-    // Clean up only some EvalContext resources, but keep heap/pool alive for the output
-    // The heap is needed because output Items may reference heap-allocated data
-    if (runner->context.decimal_ctx) {
-        log_debug("freeing decimal context");
-        free(runner->context.decimal_ctx);
-        runner->context.decimal_ctx = NULL;
-    }
-    if (runner->context.validator) {
-        log_debug("freeing schema validator");
-        schema_validator_destroy(runner->context.validator);
-        runner->context.validator = NULL;
-    }
+    // Use MarkBuilder to deep copy result to output's arena
+    // This ensures all data is copied to the output's memory space
+    log_debug("Deep copying result using MarkBuilder, result.item=%016lx", result.item);
+    MarkBuilder builder(output);
+    output->root = builder.deep_copy(result);
+    log_debug("Deep copy completed, root type_id: %d", get_type_id(output->root));
+    
+    // Now we can safely clean up the execution heap since output has its own copy
+    log_debug("Cleaning up execution context");
+    // runner_cleanup(runner);
     
     log_debug("Script execution completed, returning output Input");
     return output;
