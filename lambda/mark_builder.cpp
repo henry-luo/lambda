@@ -166,6 +166,10 @@ ArrayBuilder MarkBuilder::array() {
     return ArrayBuilder(this);
 }
 
+ListBuilder MarkBuilder::list() {
+    return ListBuilder(this);
+}
+
 //------------------------------------------------------------------------------
 // Direct Item Creation
 //------------------------------------------------------------------------------
@@ -180,6 +184,10 @@ Item MarkBuilder::createMap() {
 
 Item MarkBuilder::createArray() {
     return array().final();
+}
+
+Item MarkBuilder::createList() {
+    return list().final();
 }
 
 Item MarkBuilder::createInt(int32_t value) {
@@ -525,6 +533,57 @@ Item ArrayBuilder::final() {
     return (Item){.array = array_};
 }
 
+//==============================================================================
+// ListBuilder Implementation
+//==============================================================================
+
+ListBuilder::ListBuilder(MarkBuilder* builder)
+    : builder_(builder)
+    , list_(nullptr)
+{
+    // allocate List from arena for MarkBuilder
+    list_ = list_arena(builder_->arena());
+}
+
+ListBuilder::~ListBuilder() {
+    // list_ is arena-allocated, no cleanup needed
+}
+
+ListBuilder& ListBuilder::push(Item item) {
+    if (list_) {
+        list_push(list_, item);
+    }
+    return *this;
+}
+
+ListBuilder& ListBuilder::push(const char* str) {
+    return push(builder_->createStringItem(str));
+}
+
+ListBuilder& ListBuilder::push(int64_t value) {
+    return push(builder_->createInt(value));
+}
+
+ListBuilder& ListBuilder::push(double value) {
+    return push(builder_->createFloat(value));
+}
+
+ListBuilder& ListBuilder::push(bool value) {
+    return push(builder_->createBool(value));
+}
+
+ListBuilder& ListBuilder::pushItems(std::initializer_list<Item> items) {
+    for (const Item& item : items) {
+        push(item);
+    }
+    return *this;
+}
+
+Item ListBuilder::final() {
+    // List is already built - just wrap it in an Item
+    return (Item){.list = list_};
+}
+
 // ============================================================================
 // Deep Copy Implementation (MarkBuilder)
 // ============================================================================
@@ -563,15 +622,9 @@ bool MarkBuilder::is_in_arena(Item item) const {
             return true;
         
         // Pointer types - check arena ownership
-        case LMD_TYPE_INT64:
+        case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:
+        case LMD_TYPE_STRING:  case LMD_TYPE_BINARY:  case LMD_TYPE_DTIME:   
             return is_pointer_in_arena_chain((void*)item.pointer);
-        
-        case LMD_TYPE_FLOAT:
-            return is_pointer_in_arena_chain((void*)item.pointer);
-        
-        case LMD_TYPE_STRING: {
-            return is_pointer_in_arena_chain((void*)item.pointer);
-        }
         
         case LMD_TYPE_SYMBOL: {
             String* sym = get_symbol(item);
@@ -585,9 +638,6 @@ bool MarkBuilder::is_in_arena(Item item) const {
             return is_pointer_in_arena_chain(sym);
         }
         
-        case LMD_TYPE_BINARY: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL: {
-            return is_pointer_in_arena_chain((void*)item.pointer);
-        }
         case LMD_TYPE_NUMBER: {
             // NUMBER is a double, check if pointer is in arena
             return is_pointer_in_arena_chain((void*)item.pointer);
@@ -600,32 +650,18 @@ bool MarkBuilder::is_in_arena(Item item) const {
             return is_pointer_in_arena_chain(item.array);
         }
         
-        case LMD_TYPE_ARRAY: {
-            Array* arr = item.array;
-            if (!arr) return true;  // Null array
-            
-            // Phase 5a: For arrays, check BOTH struct ownership AND content ownership
-            // Even if Array struct is in our arena, it might contain external values
-            ArrayReader reader(arr);
-            for (int i = 0; i < arr->length; i++) {
-                Item child = reader.get(i).item();
-                if (!is_in_arena(child)) return false;  // External element found
-            }
-            
-            // All elements in arena - now check if Array struct itself is in arena
-            return is_pointer_in_arena_chain(arr);
-        }
-        
-        case LMD_TYPE_LIST: {
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_LIST: {
             List* list = item.list;
             if (!list) return true;  // Null list
             
-            // Note: List struct itself may be from pool (Phase 5 TODO)
-            // Check if list items are in arena
+            // Phase 5a: For lists, check BOTH struct ownership AND content ownership
+            // Even if List struct is in our arena, it might contain external values
             for (int i = 0; i < list->length; i++) {
-                if (!is_in_arena(list->items[i])) return false;
+                if (!is_in_arena(list->items[i])) return false;  // External item found
             }
-            return true;
+            
+            // All items in arena - now check if List struct itself is in arena
+            return is_pointer_in_arena_chain(list);
         }
         
         case LMD_TYPE_MAP: {
@@ -694,7 +730,7 @@ bool MarkBuilder::is_in_arena(Item item) const {
 Item MarkBuilder::deep_copy(Item item) {
     // Quick check: if item contains no pointers (null, bool, int), just return it
     TypeId type_id = get_type_id(item);
-    if (type_id == LMD_TYPE_NULL || type_id == LMD_TYPE_BOOL || type_id == LMD_TYPE_INT) {
+    if (type_id <= LMD_TYPE_INT) {
         return item;  // Inline types - always safe
     }
     
@@ -716,14 +752,8 @@ Item MarkBuilder::deep_copy_internal(Item item) {
     log_debug("deep_copy_internal: type_id=%d", type_id);
     
     switch (type_id) {
-        case LMD_TYPE_NULL:
-            return createNull();
-            
-        case LMD_TYPE_BOOL:
-            return createBool(it2b(item));
-            
-        case LMD_TYPE_INT:
-            return createInt(it2i(item));
+        case LMD_TYPE_NULL:  case LMD_TYPE_BOOL:  case LMD_TYPE_INT:
+            return item;
             
         case LMD_TYPE_INT64:
             return createLong(it2l(item));
@@ -802,38 +832,65 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             
         case LMD_TYPE_ARRAY_INT: {
             ArrayInt* arr = item.array_int;
-            if (!arr) return createArray();
-            
-            ArrayBuilder arr_builder = array();
-            for (int i = 0; i < arr->length; i++) {
-                int32_t val = arr->items[i];
-                arr_builder.append((int64_t)val);
+            if (!arr) {
+                Item result = {.array_int = nullptr};
+                return result;
             }
-            return arr_builder.final();
+            
+            // Allocate new ArrayInt from arena
+            size_t size = sizeof(ArrayInt) + arr->capacity * sizeof(int32_t);
+            ArrayInt* new_arr = (ArrayInt*)arena_alloc(arena_, size);
+            if (!new_arr) return createNull();
+            
+            new_arr->type_id = LMD_TYPE_ARRAY_INT;
+            new_arr->length = arr->length;
+            new_arr->capacity = arr->capacity;
+            memcpy(new_arr->items, arr->items, arr->length * sizeof(int32_t));
+            
+            Item result = {.array_int = new_arr};
+            return result;
         }
             
         case LMD_TYPE_ARRAY_INT64: {
             ArrayInt64* arr = item.array_int64;
-            if (!arr) return createArray();
-            
-            ArrayBuilder arr_builder = array();
-            for (int i = 0; i < arr->length; i++) {
-                int64_t val = arr->items[i];
-                arr_builder.append(val);
+            if (!arr) {
+                Item result = {.array_int64 = nullptr};
+                return result;
             }
-            return arr_builder.final();
+            
+            // Allocate new ArrayInt64 from arena
+            size_t size = sizeof(ArrayInt64) + arr->capacity * sizeof(int64_t);
+            ArrayInt64* new_arr = (ArrayInt64*)arena_alloc(arena_, size);
+            if (!new_arr) return createNull();
+            
+            new_arr->type_id = LMD_TYPE_ARRAY_INT64;
+            new_arr->length = arr->length;
+            new_arr->capacity = arr->capacity;
+            memcpy(new_arr->items, arr->items, arr->length * sizeof(int64_t));
+            
+            Item result = {.array_int64 = new_arr};
+            return result;
         }
             
         case LMD_TYPE_ARRAY_FLOAT: {
             ArrayFloat* arr = item.array_float;
-            if (!arr) return createArray();
-            
-            ArrayBuilder arr_builder = array();
-            for (int i = 0; i < arr->length; i++) {
-                double val = arr->items[i];
-                arr_builder.append(val);
+            if (!arr) {
+                Item result = {.array_float = nullptr};
+                return result;
             }
-            return arr_builder.final();
+            
+            // Allocate new ArrayFloat from arena
+            size_t size = sizeof(ArrayFloat) + arr->capacity * sizeof(double);
+            ArrayFloat* new_arr = (ArrayFloat*)arena_alloc(arena_, size);
+            if (!new_arr) return createNull();
+            
+            new_arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+            new_arr->length = arr->length;
+            new_arr->capacity = arr->capacity;
+            memcpy(new_arr->items, arr->items, arr->length * sizeof(double));
+            
+            Item result = {.array_float = new_arr};
+            return result;
         }
             
         case LMD_TYPE_ARRAY: {
@@ -852,15 +909,15 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             
         case LMD_TYPE_LIST: {
             List* list = item.list;
-            if (!list) return createArray();
+            if (!list) return createList();
             
-            ArrayBuilder arr_builder = array();
+            ListBuilder list_builder = this->list();
             for (int i = 0; i < list->length; i++) {
                 Item child = list->items[i];
                 Item copied_child = deep_copy_internal(child);
-                arr_builder.append(copied_child);
+                list_builder.push(copied_child);
             }
-            return arr_builder.final();
+            return list_builder.final();
         }
             
         case LMD_TYPE_MAP: {
@@ -942,7 +999,9 @@ Item MarkBuilder::deep_copy_internal(Item item) {
             
             return elem_builder.final();
         }
-            
+        
+        // todo: range and type
+        
         default:
             // For unsupported types, return null
             log_debug("deep_copy_internal: unsupported type_id=%d, returning null", type_id);
