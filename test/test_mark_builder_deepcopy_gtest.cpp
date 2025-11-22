@@ -130,6 +130,35 @@ TEST_F(MarkBuilderDeepCopyTest, CopyRange) {
     EXPECT_EQ(copied_range->length, 100);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, CopyType) {
+    MarkBuilder builder1(input1);
+    MarkBuilder builder2(input2);
+    
+    // Create type in input1
+    Item type_item = builder1.createType(LMD_TYPE_STRING, true, false);
+    EXPECT_EQ(get_type_id(type_item), LMD_TYPE_TYPE);
+    EXPECT_TRUE(builder1.is_in_arena(type_item));
+    
+    Type* orig_type = (Type*)type_item.pointer;
+    EXPECT_EQ(orig_type->type_id, LMD_TYPE_STRING);
+    EXPECT_EQ(orig_type->is_literal, 1);
+    EXPECT_EQ(orig_type->is_const, 0);
+    
+    // Copy to same input - should return original (optimization)
+    Item copied_same = builder1.deep_copy(type_item);
+    EXPECT_EQ(copied_same.pointer, type_item.pointer);  // Same pointer
+    
+    // Copy to different input - should create new type
+    Item copied_diff = builder2.deep_copy(type_item);
+    EXPECT_NE(copied_diff.pointer, type_item.pointer);  // Different pointer
+    EXPECT_TRUE(builder2.is_in_arena(copied_diff));
+    
+    Type* copied_type = (Type*)copied_diff.pointer;
+    EXPECT_EQ(copied_type->type_id, LMD_TYPE_STRING);
+    EXPECT_EQ(copied_type->is_literal, 1);
+    EXPECT_EQ(copied_type->is_const, 0);
+}
+
 // ============================================================================
 // String and Symbol Tests
 // ============================================================================
