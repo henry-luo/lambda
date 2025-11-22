@@ -5,11 +5,18 @@
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/mark_builder.hpp"
+#include "../../lambda/input/input.hpp"
 #include "helpers/css_test_helpers.hpp"
 
 extern "C" {
 #include "../../lib/mempool.h"
+#include "../../lib/string.h"
+#include "../../lib/url.h"
 }
+
+// Forward declaration for helper function
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 
 /**
  * Comprehensive DOM Integration Test Suite
@@ -26,10 +33,22 @@ extern "C" {
 class DomIntegrationTest : public ::testing::Test {
 protected:
     Pool* pool;
+    Input* input;
     SelectorMatcher* matcher;
 
     void SetUp() override {
-        pool = pool_create();
+        // Create Input for MarkBuilder
+        char* dummy_source = strdup("<html></html>");
+        Url* dummy_url = url_parse("/test.html");
+        
+        Pool* temp_pool = pool_create();
+        String* type_str = create_string(temp_pool, "html");
+        input = input_from_source(dummy_source, dummy_url, type_str, nullptr);
+        ASSERT_NE(input, nullptr);
+        pool_destroy(temp_pool);
+        
+        // Use Input's pool for all test operations
+        pool = input->pool;
         ASSERT_NE(pool, nullptr);
 
         matcher = selector_matcher_create(pool);
@@ -40,9 +59,19 @@ protected:
         if (matcher) {
             selector_matcher_destroy(matcher);
         }
-        if (pool) {
-            pool_destroy(pool);
+        // Input cleanup handled automatically, pool is owned by Input
+    }
+
+    // Helper: Build DomElement from Lambda Element with MarkBuilder
+    DomElement* build_element(Item elem_item) {
+        if (!elem_item.element) return nullptr;
+        
+        Element* lambda_elem = elem_item.element;
+        DomElement* dom_elem = build_dom_tree_from_element(lambda_elem, pool, nullptr);
+        if (dom_elem) {
+            dom_elem->input = input;
         }
+        return dom_elem;
     }
 
     // Helper: Create a test declaration
@@ -264,8 +293,14 @@ TEST_F(DomIntegrationTest, ClassSelectorMatching) {
 }
 
 TEST_F(DomIntegrationTest, IdSelectorMatching) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(element, "id", "test-id");
+    // Build element with id attribute using MarkBuilder
+    MarkBuilder builder(input);
+    Item elem_item = builder.element("div")
+        .attr("id", "test-id")
+        .final();
+    
+    DomElement* element = build_element(elem_item);
+    ASSERT_NE(element, nullptr);
 
     CssSimpleSelector* id_sel1 = create_id_selector("test-id");
     CssSimpleSelector* id_sel2 = create_id_selector("other-id");
@@ -275,8 +310,14 @@ TEST_F(DomIntegrationTest, IdSelectorMatching) {
 }
 
 TEST_F(DomIntegrationTest, AttributeSelectorMatching) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(element, "data-test", "hello-world");
+    // Build element with data-test attribute using MarkBuilder
+    MarkBuilder builder(input);
+    Item elem_item = builder.element("div")
+        .attr("data-test", "hello-world")
+        .final();
+    
+    DomElement* element = build_element(elem_item);
+    ASSERT_NE(element, nullptr);
 
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "data-test", nullptr,
                                                    CSS_SELECTOR_ATTR_EXISTS, false, element));
@@ -306,18 +347,23 @@ TEST_F(DomIntegrationTest, UniversalSelectorMatching) {
 
 TEST_F(DomIntegrationTest, AttributeSelector_All7Types) {
     // Test all 7 attribute selector types comprehensively
+    MarkBuilder builder(input);
 
     // [attr] - Attribute exists
-    DomElement* elem1 = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(elem1, "title", "");
+    Item elem1_item = builder.element("div")
+        .attr("title", "")
+        .final();
+    DomElement* elem1 = build_element(elem1_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "title", nullptr,
                                                    CSS_SELECTOR_ATTR_EXISTS, false, elem1));
     EXPECT_FALSE(selector_matcher_matches_attribute(matcher, "missing", nullptr,
                                                     CSS_SELECTOR_ATTR_EXISTS, false, elem1));
 
     // [attr="exact"] - Exact match
-    DomElement* elem2 = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(elem2, "type", "text");
+    Item elem2_item = builder.element("div")
+        .attr("type", "text")
+        .final();
+    DomElement* elem2 = build_element(elem2_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "type", "text",
                                                    CSS_SELECTOR_ATTR_EXACT, false, elem2));
     EXPECT_FALSE(selector_matcher_matches_attribute(matcher, "type", "TEXT",
@@ -327,8 +373,10 @@ TEST_F(DomIntegrationTest, AttributeSelector_All7Types) {
                                                    CSS_SELECTOR_ATTR_EXACT, true, elem2));
 
     // [attr~="word"] - Contains word (space-separated)
-    DomElement* elem3 = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(elem3, "class", "button primary large");
+    Item elem3_item = builder.element("div")
+        .attr("class", "button primary large")
+        .final();
+    DomElement* elem3 = build_element(elem3_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "class", "primary",
                                                    CSS_SELECTOR_ATTR_CONTAINS, false, elem3));
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "class", "button",
@@ -337,35 +385,48 @@ TEST_F(DomIntegrationTest, AttributeSelector_All7Types) {
                                                     CSS_SELECTOR_ATTR_CONTAINS, false, elem3));
 
     // [attr|="value"] - Exact or starts with value followed by hyphen
-    DomElement* elem4 = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(elem4, "lang", "en-US");
+    Item elem4_item = builder.element("div")
+        .attr("lang", "en-US")
+        .final();
+    DomElement* elem4 = build_element(elem4_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "lang", "en",
                                                    CSS_SELECTOR_ATTR_LANG, false, elem4));
-    dom_element_set_attribute(elem4, "lang", "en");
+    
+    // Rebuild elem4 with different lang value
+    Item elem4b_item = builder.element("div")
+        .attr("lang", "en")
+        .final();
+    DomElement* elem4b = build_element(elem4b_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "lang", "en",
-                                                   CSS_SELECTOR_ATTR_LANG, false, elem4));
+                                                   CSS_SELECTOR_ATTR_LANG, false, elem4b));
     EXPECT_FALSE(selector_matcher_matches_attribute(matcher, "lang", "fr",
-                                                    CSS_SELECTOR_ATTR_LANG, false, elem4));
+                                                    CSS_SELECTOR_ATTR_LANG, false, elem4b));
 
     // [attr^="prefix"] - Begins with
-    DomElement* elem5 = dom_element_create(pool, "a", nullptr);
-    dom_element_set_attribute(elem5, "href", "https://example.com");
+    Item elem5_item = builder.element("a")
+        .attr("href", "https://example.com")
+        .final();
+    DomElement* elem5 = build_element(elem5_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "href", "https://",
                                                    CSS_SELECTOR_ATTR_BEGINS, false, elem5));
     EXPECT_FALSE(selector_matcher_matches_attribute(matcher, "href", "http://",
                                                     CSS_SELECTOR_ATTR_BEGINS, false, elem5));
 
     // [attr$="suffix"] - Ends with
-    DomElement* elem6 = dom_element_create(pool, "a", nullptr);
-    dom_element_set_attribute(elem6, "href", "document.pdf");
+    Item elem6_item = builder.element("a")
+        .attr("href", "document.pdf")
+        .final();
+    DomElement* elem6 = build_element(elem6_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "href", ".pdf",
                                                    CSS_SELECTOR_ATTR_ENDS, false, elem6));
     EXPECT_FALSE(selector_matcher_matches_attribute(matcher, "href", ".doc",
                                                     CSS_SELECTOR_ATTR_ENDS, false, elem6));
 
     // [attr*="substring"] - Contains substring
-    DomElement* elem7 = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(elem7, "data-url", "https://api.example.com/v1/users");
+    Item elem7_item = builder.element("div")
+        .attr("data-url", "https://api.example.com/v1/users")
+        .final();
+    DomElement* elem7 = build_element(elem7_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "data-url", "api",
                                                    CSS_SELECTOR_ATTR_SUBSTRING, false, elem7));
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "data-url", "/v1/",
@@ -566,10 +627,12 @@ TEST_F(DomIntegrationTest, NthLastChild) {
 
 TEST_F(DomIntegrationTest, CompoundSelectors) {
     // Test compound selectors like "div.container#main"
-    DomElement* element = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(element, "id", "main");
-    dom_element_add_class(element, "container");
-    dom_element_add_class(element, "active");
+    MarkBuilder builder(input);
+    Item elem_item = builder.element("div")
+        .attr("id", "main")
+        .attr("class", "container active")
+        .final();
+    DomElement* element = build_element(elem_item);
 
     // Create compound selector: div.container#main
     CssCompoundSelector* compound = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
@@ -583,17 +646,23 @@ TEST_F(DomIntegrationTest, CompoundSelectors) {
     EXPECT_TRUE(selector_matcher_matches_compound(matcher, compound, element));
 
     // Should not match if any condition fails
-    DomElement* wrong_tag = dom_element_create(pool, "span", nullptr);
-    dom_element_set_attribute(wrong_tag, "id", "main");
-    dom_element_add_class(wrong_tag, "container");
+    Item wrong_tag_item = builder.element("span")
+        .attr("id", "main")
+        .attr("class", "container")
+        .final();
+    DomElement* wrong_tag = build_element(wrong_tag_item);
     EXPECT_FALSE(selector_matcher_matches_compound(matcher, compound, wrong_tag));
 
-    DomElement* wrong_class = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(wrong_class, "id", "main");
+    Item wrong_class_item = builder.element("div")
+        .attr("id", "main")
+        .final();
+    DomElement* wrong_class = build_element(wrong_class_item);
     EXPECT_FALSE(selector_matcher_matches_compound(matcher, compound, wrong_class));
 
-    DomElement* wrong_id = dom_element_create(pool, "div", nullptr);
-    dom_element_add_class(wrong_id, "container");
+    Item wrong_id_item = builder.element("div")
+        .attr("class", "container")
+        .final();
+    DomElement* wrong_id = build_element(wrong_id_item);
     EXPECT_FALSE(selector_matcher_matches_compound(matcher, compound, wrong_id));
 }
 
@@ -622,18 +691,21 @@ TEST_F(DomIntegrationTest, ComplexSelectors_MultipleClasses) {
 
 TEST_F(DomIntegrationTest, ComplexSelectors_WithAttributes) {
     // Test input[type="text"].required#username
-    DomElement* input = dom_element_create(pool, "input", nullptr);
-    dom_element_set_attribute(input, "type", "text");
-    dom_element_set_attribute(input, "id", "username");
-    dom_element_add_class(input, "required");
+    MarkBuilder builder(input);
+    Item input_item = builder.element("input")
+        .attr("type", "text")
+        .attr("id", "username")
+        .attr("class", "required")
+        .final();
+    DomElement* input_elem = build_element(input_item);
 
     // This would require a full CssSelector with attribute selectors
     // For now, test individual components
-    EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_type_selector("input"), input));
-    EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_class_selector("required"), input));
-    EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_id_selector("username"), input));
+    EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_type_selector("input"), input_elem));
+    EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_class_selector("required"), input_elem));
+    EXPECT_TRUE(selector_matcher_matches_simple(matcher, create_id_selector("username"), input_elem));
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "type", "text",
-                                                   CSS_SELECTOR_ATTR_EXACT, false, input));
+                                                   CSS_SELECTOR_ATTR_EXACT, false, input_elem));
 }
 
 // ============================================================================
@@ -1350,25 +1422,35 @@ TEST_F(DomIntegrationTest, AdvancedSelector_HierarchyWithAttributes) {
     //   </section>
     // </div>
 
-    DomElement* app = dom_element_create(pool, "div", nullptr);
-    DomElement* section = dom_element_create(pool, "section", nullptr);
-    DomElement* article = dom_element_create(pool, "article", nullptr);
-    DomElement* p = dom_element_create(pool, "p", nullptr);
-
-    dom_element_set_attribute(app, "id", "app");
-
-    dom_element_add_class(section, "main");
-    dom_element_set_attribute(section, "data-section", "content");
-
-    dom_element_set_attribute(article, "data-type", "post");
-    dom_element_set_attribute(article, "data-status", "published");
-
-    dom_element_add_class(p, "text");
-    dom_element_set_attribute(p, "data-paragraph", "1");
-
-    dom_element_append_child(app, section);
-    dom_element_append_child(section, article);
-    dom_element_append_child(article, p);
+    MarkBuilder builder(input);
+    Item app_item = builder.element("div")
+        .attr("id", "app")
+        .child(
+            builder.element("section")
+                .attr("class", "main")
+                .attr("data-section", "content")
+                .child(
+                    builder.element("article")
+                        .attr("data-type", "post")
+                        .attr("data-status", "published")
+                        .child(
+                            builder.element("p")
+                                .attr("class", "text")
+                                .attr("data-paragraph", "1")
+                                .final()
+                        )
+                        .final()
+                )
+                .final()
+        )
+        .final();
+    
+    DomElement* app = build_element(app_item);
+    ASSERT_NE(app, nullptr);
+    
+    DomElement* section = (DomElement*)app->first_child;
+    DomElement* article = (DomElement*)section->first_child;
+    DomElement* p = (DomElement*)article->first_child;
 
     // Test attribute selectors at various levels
     EXPECT_STREQ(dom_element_get_attribute(section, "data-section"), "content");
@@ -1541,10 +1623,13 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexCascade_MultipleProperties) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_AttributeVariations) {
     // Test: Different attribute selector operators
-    DomElement* element = dom_element_create(pool, "div", nullptr);
-    dom_element_set_attribute(element, "data-value", "test-item-123");
-    dom_element_set_attribute(element, "class", "btn btn-primary active");
-    dom_element_set_attribute(element, "lang", "en-US");
+    MarkBuilder builder(input);
+    Item elem_item = builder.element("div")
+        .attr("data-value", "test-item-123")
+        .attr("class", "btn btn-primary active")
+        .attr("lang", "en-US")
+        .final();
+    DomElement* element = build_element(elem_item);
 
     // EXACT: [data-value="test-item-123"]
     bool exact = selector_matcher_matches_attribute(
@@ -1611,53 +1696,79 @@ TEST_F(DomIntegrationTest, AdvancedSelector_FormElementHierarchy) {
     //   <button type="submit" class="btn primary">Submit</button>
     // </form>
 
-    DomElement* form = dom_element_create(pool, "form", nullptr);
-    DomElement* fieldset1 = dom_element_create(pool, "fieldset", nullptr);
-    DomElement* fieldset2 = dom_element_create(pool, "fieldset", nullptr);
-    DomElement* input1 = dom_element_create(pool, "input", nullptr);
-    DomElement* input2 = dom_element_create(pool, "input", nullptr);
-    DomElement* input3 = dom_element_create(pool, "input", nullptr);
-    DomElement* input4 = dom_element_create(pool, "input", nullptr);
-    DomElement* input5 = dom_element_create(pool, "input", nullptr);
-    DomElement* button = dom_element_create(pool, "button", nullptr);
-
-    dom_element_set_attribute(form, "id", "contact");
-
-    dom_element_add_class(fieldset1, "personal");
-    dom_element_set_attribute(input1, "type", "text");
-    dom_element_set_attribute(input1, "name", "name");
-    dom_element_set_attribute(input1, "required", "true");
-    dom_element_set_attribute(input2, "type", "email");
-    dom_element_set_attribute(input2, "name", "email");
-    dom_element_set_attribute(input2, "required", "true");
-
-    dom_element_add_class(fieldset2, "preferences");
-    dom_element_set_attribute(input3, "type", "checkbox");
-    dom_element_set_attribute(input3, "name", "newsletter");
+    MarkBuilder builder(input);
+    Item form_item = builder.element("form")
+        .attr("id", "contact")
+        .child(
+            builder.element("fieldset")
+                .attr("class", "personal")
+                .child(
+                    builder.element("input")
+                        .attr("type", "text")
+                        .attr("name", "name")
+                        .attr("required", "true")
+                        .final()
+                )
+                .child(
+                    builder.element("input")
+                        .attr("type", "email")
+                        .attr("name", "email")
+                        .attr("required", "true")
+                        .final()
+                )
+                .final()
+        )
+        .child(
+            builder.element("fieldset")
+                .attr("class", "preferences")
+                .child(
+                    builder.element("input")
+                        .attr("type", "checkbox")
+                        .attr("name", "newsletter")
+                        .final()
+                )
+                .child(
+                    builder.element("input")
+                        .attr("type", "radio")
+                        .attr("name", "format")
+                        .attr("value", "html")
+                        .final()
+                )
+                .child(
+                    builder.element("input")
+                        .attr("type", "radio")
+                        .attr("name", "format")
+                        .attr("value", "text")
+                        .final()
+                )
+                .final()
+        )
+        .child(
+            builder.element("button")
+                .attr("type", "submit")
+                .attr("class", "btn primary")
+                .final()
+        )
+        .final();
+    
+    DomElement* form = build_element(form_item);
+    ASSERT_NE(form, nullptr);
+    
+    // Navigate to child elements
+    DomElement* fieldset1 = (DomElement*)form->first_child;
+    DomElement* fieldset2 = (DomElement*)fieldset1->next_sibling;
+    DomElement* button = (DomElement*)fieldset2->next_sibling;
+    
+    DomElement* input1 = (DomElement*)fieldset1->first_child;
+    DomElement* input2 = (DomElement*)input1->next_sibling;
+    
+    DomElement* input3 = (DomElement*)fieldset2->first_child;
+    DomElement* input4 = (DomElement*)input3->next_sibling;
+    DomElement* input5 = (DomElement*)input4->next_sibling;
+    
+    // Set pseudo-states (must be done after element creation)
     dom_element_set_pseudo_state(input3, PSEUDO_STATE_CHECKED);
-
-    dom_element_set_attribute(input4, "type", "radio");
-    dom_element_set_attribute(input4, "name", "format");
-    dom_element_set_attribute(input4, "value", "html");
-
-    dom_element_set_attribute(input5, "type", "radio");
-    dom_element_set_attribute(input5, "name", "format");
-    dom_element_set_attribute(input5, "value", "text");
     dom_element_set_pseudo_state(input5, PSEUDO_STATE_CHECKED);
-
-    dom_element_set_attribute(button, "type", "submit");
-    dom_element_add_class(button, "btn");
-    dom_element_add_class(button, "primary");
-
-    // Build hierarchy
-    dom_element_append_child(form, fieldset1);
-    dom_element_append_child(form, fieldset2);
-    dom_element_append_child(form, button);
-    dom_element_append_child(fieldset1, input1);
-    dom_element_append_child(fieldset1, input2);
-    dom_element_append_child(fieldset2, input3);
-    dom_element_append_child(fieldset2, input4);
-    dom_element_append_child(fieldset2, input5);
 
     // Verify hierarchy
     EXPECT_EQ(input1->parent, fieldset1);
