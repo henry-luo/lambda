@@ -1502,6 +1502,31 @@
                         "binary": "test_css_dom_integration.exe"
                     },
                     {
+                        "source": "test/css/test_css_dom_crud.cpp",
+                        "name": "✏️ DOM Element CRUD Tests (GTest) - EXPECTED TO FAIL",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/avl_tree.c",
+                            "lib/hashmap.c",
+                            "lambda/input/css/css_style_node.cpp",
+                            "lambda/input/css/css_properties.cpp",
+                            "lambda/input/css/css_value_parser.cpp",
+                            "lambda/input/css/css_value.cpp",
+                            "lambda/input/css/css_formatter.cpp",
+                            "lambda/input/css/dom_node.cpp",
+                            "lambda/input/css/dom_element.cpp",
+                            "lambda/input/css/selector_matcher.cpp"
+                        ],
+                        "binary": "test_css_dom_crud.exe"
+                    },
+                    {
                         "source": "test/css/test_css_style_application_gtest.cpp",
                         "name": "\ud83c\udfa8 CSS Style Application Tests (GTest)",
                         "dependencies": [

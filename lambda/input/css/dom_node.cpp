@@ -288,22 +288,20 @@ void DomNode::print(StrBuf* buf, int indent) const {
         }
 
         // Print other attributes
-        if (element->attributes) {
-            int attr_count = 0;
-            const char** attr_names = attribute_storage_get_names(element->attributes, &attr_count);
-            if (attr_names) {
-                for (int i = 0; i < attr_count; i++) {
-                    const char* name = attr_names[i];
-                    const char* value = attribute_storage_get(element->attributes, name);
+        int attr_count = 0;
+        const char** attr_names = dom_element_get_attribute_names((DomElement*)element, &attr_count);
+        if (attr_names) {
+            for (int i = 0; i < attr_count; i++) {
+                const char* name = attr_names[i];
+                const char* value = dom_element_get_attribute((DomElement*)element, name);
 
-                    // Skip id and class as they're already printed above
-                    if (strcmp(name, "id") != 0 && strcmp(name, "class") != 0 && value) {
-                        strbuf_append_char(buf, ' ');
-                        strbuf_append_str(buf, name);
-                        strbuf_append_str(buf, "=\"");
-                        strbuf_append_str(buf, value);
-                        strbuf_append_char(buf, '"');
-                    }
+                // Skip id and class as they're already printed above
+                if (strcmp(name, "id") != 0 && strcmp(name, "class") != 0 && value) {
+                    strbuf_append_char(buf, ' ');
+                    strbuf_append_str(buf, name);
+                    strbuf_append_str(buf, "=\"");
+                    strbuf_append_str(buf, value);
+                    strbuf_append_char(buf, '"');
                 }
             }
         }

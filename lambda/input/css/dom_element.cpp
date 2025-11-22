@@ -11,6 +11,9 @@
 #include "../../../lib/strview.h"
 #include "../../lambda.h"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
+#include "../../mark_reader.hpp"  // For ElementReader
+#include "../../mark_editor.hpp"  // For MarkEditor
+#include "../../mark_builder.hpp" // For MarkBuilder
 
 /**
  * Convert HTML tag name string to Lexbor tag ID
@@ -127,282 +130,6 @@ uintptr_t DomNode::tag_name_to_id(const char* tag_name) {
 }
 
 // ============================================================================
-// Attribute Storage Implementation (Hybrid Array/HashMap)
-// ============================================================================
-
-/**
- * Hash function for attribute names (strings)
- */
-static uint64_t attribute_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const AttributePair* pair = (const AttributePair*)item;
-    return hashmap_murmur(pair->name, strlen(pair->name), seed0, seed1);
-}
-
-/**
- * Compare function for attribute names
- */
-static int attribute_compare(const void* a, const void* b, void* udata) {
-    const AttributePair* pair_a = (const AttributePair*)a;
-    const AttributePair* pair_b = (const AttributePair*)b;
-    return strcmp(pair_a->name, pair_b->name);
-}
-
-AttributeStorage* attribute_storage_create(Pool* pool) {
-    if (!pool) {
-        return NULL;
-    }
-
-    AttributeStorage* storage = (AttributeStorage*)pool_calloc(pool, sizeof(AttributeStorage));
-    if (!storage) {
-        return NULL;
-    }
-
-    storage->count = 0;
-    storage->use_hashmap = false;
-    storage->pool = pool;
-
-    // Start with array storage
-    storage->storage.array = (AttributePair*)pool_calloc(pool, ATTRIBUTE_HASHMAP_THRESHOLD * sizeof(AttributePair));
-    if (!storage->storage.array) {
-        return NULL;
-    }
-
-    return storage;
-}
-
-void attribute_storage_destroy(AttributeStorage* storage) {
-    if (!storage) {
-        return;
-    }
-
-    if (storage->use_hashmap && storage->storage.hashmap) {
-        hashmap_free(storage->storage.hashmap);
-    }
-    // Array and storage struct will be freed by pool
-}
-
-/**
- * Pool allocator wrapper for HashMap
- */
-static void* pool_malloc_wrapper(size_t size) {
-    // Note: This is a limitation - HashMap needs malloc/free, not pool allocation
-    return malloc(size);
-}
-
-static void* pool_realloc_wrapper(void* ptr, size_t size) {
-    return realloc(ptr, size);
-}
-
-static void pool_free_wrapper(void* ptr) {
-    free(ptr);
-}
-
-/**
- * Convert array storage to hashmap storage (called when threshold is reached)
- */
-static bool attribute_storage_convert_to_hashmap(AttributeStorage* storage) {
-    if (!storage || storage->use_hashmap) {
-        return false;
-    }
-
-    // Create HashMap
-    HashMap* map = hashmap_new_with_allocator(
-        pool_malloc_wrapper,
-        pool_realloc_wrapper,
-        pool_free_wrapper,
-        sizeof(AttributePair),
-        16,  // initial capacity
-        0, 0,  // seeds
-        attribute_hash,
-        attribute_compare,
-        NULL,  // no free function
-        NULL   // no udata
-    );
-
-    if (!map) {
-        return false;
-    }
-
-    // Copy all attributes from array to hashmap
-    for (int i = 0; i < storage->count; i++) {
-        hashmap_set(map, &storage->storage.array[i]);
-    }
-
-    // Switch to hashmap storage
-    storage->storage.hashmap = map;
-    storage->use_hashmap = true;
-
-    return true;
-}
-
-bool attribute_storage_set(AttributeStorage* storage, const char* name, const char* value) {
-    if (!storage || !name || !value) {
-        return false;
-    }
-
-    // Copy strings to pool
-    size_t name_len = strlen(name);
-    size_t value_len = strlen(value);
-    char* name_copy = (char*)pool_alloc(storage->pool, name_len + 1);
-    char* value_copy = (char*)pool_alloc(storage->pool, value_len + 1);
-
-    if (!name_copy || !value_copy) {
-        return false;
-    }
-
-    strcpy(name_copy, name);
-    strcpy(value_copy, value);
-
-    if (storage->use_hashmap) {
-        // HashMap storage
-        AttributePair pair = { name_copy, value_copy };
-
-        // Check if attribute exists (for update)
-        AttributePair search = { name, NULL };
-        const AttributePair* existing = (const AttributePair*)hashmap_get(storage->storage.hashmap, &search);
-
-        if (existing) {
-            // Update existing attribute - need to remove and reinsert
-            hashmap_delete(storage->storage.hashmap, &search);
-            hashmap_set(storage->storage.hashmap, &pair);
-            return true;
-        } else {
-            // Insert new attribute
-            hashmap_set(storage->storage.hashmap, &pair);
-            storage->count++;
-            return true;
-        }
-    } else {
-        // Array storage - linear search
-        for (int i = 0; i < storage->count; i++) {
-            if (strcmp(storage->storage.array[i].name, name) == 0) {
-                // Update existing attribute
-                storage->storage.array[i].value = value_copy;
-                return true;
-            }
-        }
-
-        // Add new attribute
-        if (storage->count < ATTRIBUTE_HASHMAP_THRESHOLD) {
-            storage->storage.array[storage->count].name = name_copy;
-            storage->storage.array[storage->count].value = value_copy;
-            storage->count++;
-            return true;
-        } else {
-            // Convert to hashmap storage
-            if (!attribute_storage_convert_to_hashmap(storage)) {
-                return false;
-            }
-
-            // Now insert using hashmap
-            AttributePair pair = { name_copy, value_copy };
-            hashmap_set(storage->storage.hashmap, &pair);
-            storage->count++;
-            return true;
-        }
-    }
-}
-
-const char* attribute_storage_get(AttributeStorage* storage, const char* name) {
-    if (!storage || !name) {
-        return NULL;
-    }
-
-    if (storage->use_hashmap) {
-        // HashMap storage
-        AttributePair search = { name, NULL };
-        const AttributePair* pair = (const AttributePair*)hashmap_get(storage->storage.hashmap, &search);
-        return pair ? pair->value : NULL;
-    } else {
-        // Array storage - linear search
-        for (int i = 0; i < storage->count; i++) {
-            if (strcmp(storage->storage.array[i].name, name) == 0) {
-                return storage->storage.array[i].value;
-            }
-        }
-        log_debug("attribute '%s' not found in array storage", name);
-        return NULL;
-    }
-}
-
-bool attribute_storage_has(AttributeStorage* storage, const char* name) {
-    return attribute_storage_get(storage, name) != NULL;
-}
-
-bool attribute_storage_remove(AttributeStorage* storage, const char* name) {
-    if (!storage || !name) {
-        return false;
-    }
-
-    if (storage->use_hashmap) {
-        // HashMap storage
-        AttributePair search = { name, NULL };
-        if (hashmap_delete(storage->storage.hashmap, &search)) {
-            storage->count--;
-            return true;
-        }
-        return false;
-    } else {
-        // Array storage - find and remove
-        for (int i = 0; i < storage->count; i++) {
-            if (strcmp(storage->storage.array[i].name, name) == 0) {
-                // Shift remaining elements
-                for (int j = i; j < storage->count - 1; j++) {
-                    storage->storage.array[j] = storage->storage.array[j + 1];
-                }
-                storage->count--;
-                return true;
-            }
-        }
-        return false;
-    }
-}
-
-/**
- * Iterator callback for get_names
- */
-typedef struct {
-    const char** names;
-    int index;
-} GetNamesContext;
-
-static bool get_names_iter(const void* item, void* udata) {
-    const AttributePair* pair = (const AttributePair*)item;
-    GetNamesContext* ctx = (GetNamesContext*)udata;
-    ctx->names[ctx->index++] = pair->name;
-    return true;  // continue iteration
-}
-
-const char** attribute_storage_get_names(AttributeStorage* storage, int* count) {
-    if (!storage || !count) {
-        return NULL;
-    }
-
-    *count = storage->count;
-    if (storage->count == 0) {
-        return NULL;
-    }
-
-    const char** names = (const char**)pool_alloc(storage->pool, storage->count * sizeof(const char*));
-    if (!names) {
-        return NULL;
-    }
-
-    if (storage->use_hashmap) {
-        // HashMap storage - iterate and collect names
-        GetNamesContext ctx = { names, 0 };
-        hashmap_scan(storage->storage.hashmap, get_names_iter, &ctx);
-        return names;
-    } else {
-        // Array storage - copy names
-        for (int i = 0; i < storage->count; i++) {
-            names[i] = storage->storage.array[i].name;
-        }
-        return names;
-    }
-}
-
-// ============================================================================
 // DOM Element Creation and Destruction
 // ============================================================================
 
@@ -441,6 +168,10 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
     // Initialize DomElement fields
     element->pool = pool;
     element->native_element = native_element;
+    
+    // Try to extract Input* from pool metadata or native_element
+    // For now, set to NULL - caller should set this explicitly if needed
+    element->input = nullptr;
 
     // Copy tag name
     size_t tag_len = strlen(tag_name);
@@ -475,85 +206,45 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Ele
     element->class_count = 0;
     element->pseudo_state = 0;
 
-    // Create attribute storage
-    element->attributes = attribute_storage_create(pool);
-    if (!element->attributes) {
-        return false;
-    }
-
-    // Copy attributes from native_element if present
-    if (native_element && native_element->type && native_element->data) {
-        TypeElmt* elmt_type = (TypeElmt*)native_element->type;
-        ShapeEntry* field = static_cast<ShapeEntry*>(elmt_type->shape);
-
-        // Iterate through all attribute fields
-        while (field) {
-            // skip nested maps (fields without names)
-            if (!field->name) {
-                field = field->next;
-                continue;
+    // Initialize cached attribute fields from native element (if exists)
+    if (native_element) {
+        ElementReader reader(native_element);
+        
+        // Cache ID attribute
+        element->id = reader.get_attr_string("id");
+        
+        // Parse class attribute into array
+        const char* class_str = reader.get_attr_string("class");
+        if (class_str && class_str[0] != '\0') {
+            // Count classes (space-separated)
+            int count = 1;
+            for (const char* p = class_str; *p; p++) {
+                if (*p == ' ' || *p == '\t') count++;
             }
-
-            // Get field value from packed data
-            void* field_ptr = (char*)native_element->data + field->byte_offset;
-            TypeId type_id = field->type->type_id;
-
-            // Convert attribute name from StrView to C string
-            size_t name_len = field->name->length;
-            char* attr_name = (char*)pool_alloc(pool, name_len + 1);
-            if (!attr_name) {
-                log_warn("failed to allocate attribute name");
-                field = field->next;
-                continue;
-            }
-            memcpy(attr_name, field->name->str, name_len);
-            attr_name[name_len] = '\0';
-
-            // Convert value to string and set attribute
-            char value_buf[256];  // temporary buffer for numeric conversions
-            const char* attr_value = NULL;
-
-            switch (type_id) {
-            case LMD_TYPE_NULL:
-                // skip null attributes
-                break;
-            case LMD_TYPE_BOOL:
-                attr_value = *(bool*)field_ptr ? "true" : "false";
-                break;
-            case LMD_TYPE_INT:
-                snprintf(value_buf, sizeof(value_buf), "%d", *(int*)field_ptr);
-                attr_value = value_buf;
-                break;
-            case LMD_TYPE_INT64:
-                snprintf(value_buf, sizeof(value_buf), "%" PRId64, *(int64_t*)field_ptr);
-                attr_value = value_buf;
-                break;
-            case LMD_TYPE_FLOAT:
-                snprintf(value_buf, sizeof(value_buf), "%g", *(double*)field_ptr);
-                attr_value = value_buf;
-                break;
-            case LMD_TYPE_STRING:
-            case LMD_TYPE_SYMBOL: {
-                String* str = *(String**)field_ptr;
-                if (str) {
-                    attr_value = str->chars;
-                }
-                break;
-            }
-            default:
-                // for other types, skip or log a warning
-                log_debug("skipping attribute '%s' with unsupported type %d", attr_name, type_id);
-                break;
-            }
-
-            // Set the attribute if we have a value
-            if (attr_value) {
-                if (!attribute_storage_set(element->attributes, attr_name, attr_value)) {
-                    log_warn("failed to set attribute '%s'", attr_name);
+            
+            // Allocate array
+            element->class_names = (const char**)pool_alloc(pool, count * sizeof(const char*));
+            if (element->class_names) {
+                // Parse classes - make a copy for strtok
+                char* class_copy = (char*)pool_alloc(pool, strlen(class_str) + 1);
+                if (class_copy) {
+                    strcpy(class_copy, class_str);
+                    
+                    int index = 0;
+                    char* token = strtok(class_copy, " \t\n\r");
+                    while (token && index < count) {
+                        // Allocate permanent copy of each class
+                        size_t token_len = strlen(token);
+                        char* class_perm = (char*)pool_alloc(pool, token_len + 1);
+                        if (class_perm) {
+                            strcpy(class_perm, token);
+                            element->class_names[index++] = class_perm;
+                        }
+                        token = strtok(NULL, " \t\n\r");
+                    }
+                    element->class_count = index;
                 }
             }
-
-            field = field->next;
         }
     }
 
@@ -571,12 +262,6 @@ void dom_element_clear(DomElement* element) {
     }
     if (element->computed_style) {
         style_tree_clear(element->computed_style);
-    }
-
-    // Clear attribute storage
-    if (element->attributes) {
-        attribute_storage_destroy(element->attributes);
-        element->attributes = attribute_storage_create(element->pool);
     }
 
     // Reset version tracking
@@ -600,11 +285,12 @@ void dom_element_destroy(DomElement* element) {
         style_tree_destroy(element->computed_style);
     }
 
-    // Destroy attribute storage
-    if (element->attributes) {
-        attribute_storage_destroy(element->attributes);
-    }
+    // Clear cached fields (but don't free - owned by pool/element)
+    element->id = NULL;
+    element->class_names = NULL;
+    element->class_count = 0;
 
+    // Note: native_element is not freed here - managed by Input/Arena
     // Note: The element structure itself is pool-allocated,
     // so it will be freed when the pool is destroyed
 }
@@ -614,61 +300,159 @@ void dom_element_destroy(DomElement* element) {
 // ============================================================================
 
 bool dom_element_set_attribute(DomElement* element, const char* name, const char* value) {
-    if (!element || !name || !value || !element->attributes) {
+    if (!element || !name || !value) {
+        log_debug("dom_element_set_attribute: invalid parameters");
         return false;
     }
 
-    // Use AttributeStorage to set the attribute
-    if (!attribute_storage_set(element->attributes, name, value)) {
-        return false;
-    }
-
-    // Handle special attributes
-    if (strcmp(name, "id") == 0) {
-        // Copy value for cached ID
-        size_t value_len = strlen(value);
-        char* value_copy = (char*)pool_alloc(element->pool, value_len + 1);
-        if (value_copy) {
-            strcpy(value_copy, value);
-            element->id = value_copy;
+    // If native_element exists, use MarkEditor for updates
+    if (element->native_element && element->input) {
+        MarkEditor editor(element->input, EDIT_MODE_INLINE);
+        
+        // Create string value item
+        Item value_item = editor.builder()->createStringItem(value);
+        
+        // Update attribute via MarkEditor
+        Item result = editor.elmt_update_attr(
+            {.element = element->native_element}, 
+            name, 
+            value_item
+        );
+        
+        if (result.element) {
+            // Update native_element pointer (may have changed in inline mode)
+            element->native_element = result.element;
+            
+            // Handle special attributes
+            if (strcmp(name, "id") == 0) {
+                // Cache ID for fast access
+                ElementReader reader(element->native_element);
+                element->id = reader.get_attr_string("id");
+            } else if (strcmp(name, "class") == 0) {
+                // Parse class attribute - for now just trigger class cache refresh
+                // TODO: Properly parse space-separated classes
+                dom_element_add_class(element, value);
+            } else if (strcmp(name, "style") == 0) {
+                // Parse and apply inline styles
+                dom_element_apply_inline_style(element, value);
+            }
+            
+            // Invalidate style cache
+            element->style_version++;
+            element->needs_style_recompute = true;
+            
+            return true;
         }
-    } else if (strcmp(name, "class") == 0) {
-        // Parse class attribute and update class_names array
-        dom_element_add_class(element, value);
-    } else if (strcmp(name, "style") == 0) {
-        // Parse and apply inline styles
-        dom_element_apply_inline_style(element, value);
+        
+        log_error("dom_element_set_attribute: MarkEditor failed to update attribute");
+        return false;
     }
-
-    return true;
+    
+    // No native element - log warning
+    log_warn("dom_element_set_attribute: element has no native_element or input context");
+    return false;
 }
 
 const char* dom_element_get_attribute(DomElement* element, const char* name) {
-    if (!element || !name || name[0] == '\0' || !element->attributes) {
-        return NULL;  // Empty attribute names never match
+    if (!element || !name || name[0] == '\0') {
+        return nullptr;
     }
-    return attribute_storage_get(element->attributes, name);
+    
+    // Use ElementReader for read-only access
+    if (element->native_element) {
+        ElementReader reader(element->native_element);
+        return reader.get_attr_string(name);
+    }
+    
+    return nullptr;
 }
 
 bool dom_element_remove_attribute(DomElement* element, const char* name) {
-    if (!element || !name || !element->attributes) {
+    if (!element || !name) {
         return false;
     }
 
-    bool removed = attribute_storage_remove(element->attributes, name);
-
-    if (removed) {
-        // Handle special attributes
-        if (strcmp(name, "id") == 0) {
-            element->id = NULL;
+    if (element->native_element && element->input) {
+        MarkEditor editor(element->input, EDIT_MODE_INLINE);
+        
+        // Delete attribute via MarkEditor
+        Item result = editor.elmt_delete_attr(
+            {.element = element->native_element}, 
+            name
+        );
+        
+        if (result.element) {
+            // Update native_element pointer
+            element->native_element = result.element;
+            
+            // Clear cached fields
+            if (strcmp(name, "id") == 0) {
+                element->id = nullptr;
+            }
+            
+            // Invalidate style cache
+            element->style_version++;
+            element->needs_style_recompute = true;
+            
+            return true;
         }
     }
 
-    return removed;
+    return false;
 }
 
 bool dom_element_has_attribute(DomElement* element, const char* name) {
-    return dom_element_get_attribute(element, name) != NULL;
+    if (!element || !name) {
+        return false;
+    }
+    
+    if (element->native_element) {
+        ElementReader reader(element->native_element);
+        return reader.has_attr(name);
+    }
+    
+    return false;
+}
+
+const char** dom_element_get_attribute_names(DomElement* element, int* count) {
+    if (!element || !count) {
+        if (count) *count = 0;
+        return nullptr;
+    }
+    
+    *count = 0;
+    if (!element->native_element) return nullptr;
+    
+    ElementReader reader(element->native_element);
+    int attr_count = reader.attrCount();
+    if (attr_count == 0) return nullptr;
+    
+    // Allocate array from pool
+    const char** names = (const char**)pool_alloc(
+        element->pool, 
+        attr_count * sizeof(const char*)
+    );
+    if (!names) return nullptr;
+    
+    // Iterate through shape to collect names
+    const TypeElmt* type = (const TypeElmt*)element->native_element->type;
+    if (!type || !type->shape) {
+        *count = 0;
+        return nullptr;
+    }
+    
+    const ShapeEntry* field = type->shape;
+    int index = 0;
+    
+    while (field && index < attr_count) {
+        if (field->name && field->name->str) {
+            names[index++] = field->name->str;
+        }
+        field = field->next;
+    }
+    
+    *count = index;
+    return names;
 }
 
 // ============================================================================
@@ -862,7 +646,7 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
  * Returns the style attribute value or NULL if none
  */
 const char* dom_element_get_inline_style(DomElement* element) {
-    if (!element || !element->attributes) {
+    if (!element) {
         return NULL;
     }
 
@@ -1298,15 +1082,15 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
         return NULL;
     }
 
-    // Copy attributes
-    if (source->attributes) {
+    // Copy attributes from native element if it exists
+    if (source->native_element) {
         int attr_count = 0;
-        const char** attr_names = attribute_storage_get_names(source->attributes, &attr_count);
-        if (attr_names) {
+        const char** attr_names = dom_element_get_attribute_names(source, &attr_count);
+        if (attr_names && clone->input) {
             for (int i = 0; i < attr_count; i++) {
-                const char* value = attribute_storage_get(source->attributes, attr_names[i]);
+                const char* value = dom_element_get_attribute(source, attr_names[i]);
                 if (value) {
-                    attribute_storage_set(clone->attributes, attr_names[i], value);
+                    dom_element_set_attribute(clone, attr_names[i], value);
                 }
             }
         }
@@ -1325,9 +1109,6 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     if (source->computed_style) {
         clone->computed_style = style_tree_clone(source->computed_style, pool);
     }
-
-    // Note: inline_style field may not exist in all DomElement versions
-    // Skip inline_style copy if the field doesn't exist
 
     // Copy pseudo state
     clone->pseudo_state = source->pseudo_state;
@@ -1510,10 +1291,10 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     DomElement* dom_elem = dom_element_create(pool, tag_name, elem);
     if (!dom_elem) return nullptr;
 
-    // extract id and class attributes from Lambda Element
+    // Cache id attribute from native element (if present)
     const char* id_value = extract_element_attribute(elem, "id", pool);
     if (id_value) {
-        dom_element_set_attribute(dom_elem, "id", id_value);
+        dom_elem->id = id_value;  // Cache ID for fast access
     }
 
     const char* class_value = extract_element_attribute(elem, "class", pool);
