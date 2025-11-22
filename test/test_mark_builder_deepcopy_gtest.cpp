@@ -235,6 +235,61 @@ TEST_F(MarkBuilderDeepCopyTest, CopyNestedArray) {
 }
 
 // ============================================================================
+// List Tests
+// ============================================================================
+
+TEST_F(MarkBuilderDeepCopyTest, CopyList) {
+    MarkBuilder builder1(input1);
+    MarkBuilder builder2(input2);
+    
+    // Create list in input1
+    Item list = builder1.list()
+        .push((int64_t)1)
+        .push((int64_t)2)
+        .push((int64_t)3)
+        .final();
+    
+    EXPECT_EQ(get_type_id(list), LMD_TYPE_LIST);
+    EXPECT_TRUE(builder1.is_in_arena(list));
+    EXPECT_FALSE(builder2.is_in_arena(list));
+    
+    // Deep copy to input2
+    Item copied = builder2.deep_copy(list);
+    
+    // Verify type is preserved as LIST (not converted to ARRAY)
+    EXPECT_EQ(get_type_id(copied), LMD_TYPE_LIST);
+    EXPECT_TRUE(builder2.is_in_arena(copied));
+    
+    // Verify contents
+    List* copied_list = copied.list;
+    ASSERT_NE(copied_list, nullptr);
+    EXPECT_EQ(copied_list->length, 3);
+    EXPECT_EQ(it2i(copied_list->items[0]), 1);
+    EXPECT_EQ(it2i(copied_list->items[1]), 2);
+    EXPECT_EQ(it2i(copied_list->items[2]), 3);
+    
+    // Verify different memory addresses (actual copy)
+    EXPECT_NE(list.list, copied.list);
+}
+
+TEST_F(MarkBuilderDeepCopyTest, CopyListSameInput) {
+    MarkBuilder builder(input1);
+    
+    // Create list
+    Item list = builder.list()
+        .push((int64_t)10)
+        .push((int64_t)20)
+        .final();
+    
+    // Deep copy to same input - should return original (optimization)
+    Item copied = builder.deep_copy(list);
+    
+    // Should be same list (no copy needed)
+    EXPECT_EQ(list.list, copied.list);
+    EXPECT_EQ(get_type_id(copied), LMD_TYPE_LIST);
+}
+
+// ============================================================================
 // Map Tests
 // ============================================================================
 

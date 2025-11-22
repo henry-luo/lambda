@@ -425,6 +425,7 @@ Element* elmt_pooled(Pool* pool);
 Array* array_arena(Arena* arena);
 Map* map_arena(Arena* arena);
 Element* elmt_arena(Arena* arena);
+List* list_arena(Arena* arena);
 
 void map_put(Map* mp, String* key, Item value, Input *input);
 void elmt_put(Element* elmt, String* key, Item value, Pool* pool);

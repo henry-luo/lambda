@@ -141,6 +141,89 @@ TEST_F(MarkBuilderTest, CreateMixedArray) {
     EXPECT_EQ(get_type_id(arr->items[3]), LMD_TYPE_NULL);
 }
 
+// Test list creation
+TEST_F(MarkBuilderTest, CreateList) {
+    MarkBuilder builder(input);
+
+    Item list_item = builder.list()
+        .push(builder.createInt(1))
+        .push(builder.createInt(2))
+        .push(builder.createInt(3))
+        .final();
+
+    EXPECT_EQ(get_type_id(list_item), LMD_TYPE_LIST);
+
+    List* lst = list_item.list;
+    ASSERT_NE(lst, nullptr);
+    EXPECT_EQ(lst->length, 3);
+
+    // Check list contents
+    EXPECT_EQ(lst->items[0].int_val, 1);
+    EXPECT_EQ(lst->items[1].int_val, 2);
+    EXPECT_EQ(lst->items[2].int_val, 3);
+}
+
+// Test empty list
+TEST_F(MarkBuilderTest, CreateEmptyList) {
+    MarkBuilder builder(input);
+
+    Item list_item = builder.list().final();
+
+    EXPECT_EQ(get_type_id(list_item), LMD_TYPE_LIST);
+
+    List* lst = list_item.list;
+    ASSERT_NE(lst, nullptr);
+    EXPECT_EQ(lst->length, 0);
+}
+
+// Test list with null skipping (list_push behavior)
+TEST_F(MarkBuilderTest, ListSkipsNulls) {
+    MarkBuilder builder(input);
+
+    Item list_item = builder.list()
+        .push(builder.createInt(1))
+        .push(builder.createNull())  // Should be skipped
+        .push(builder.createInt(2))
+        .push(builder.createNull())  // Should be skipped
+        .push(builder.createInt(3))
+        .final();
+
+    List* lst = list_item.list;
+    ASSERT_NE(lst, nullptr);
+    EXPECT_EQ(lst->length, 3);  // Only 3 items, nulls skipped
+
+    EXPECT_EQ(lst->items[0].int_val, 1);
+    EXPECT_EQ(lst->items[1].int_val, 2);
+    EXPECT_EQ(lst->items[2].int_val, 3);
+}
+
+// Test list flattening (nested lists are flattened by list_push)
+TEST_F(MarkBuilderTest, ListFlattensNestedLists) {
+    MarkBuilder builder(input);
+
+    // Create inner list
+    Item inner_list = builder.list()
+        .push(builder.createInt(2))
+        .push(builder.createInt(3))
+        .final();
+
+    // Create outer list with nested list
+    Item outer_list = builder.list()
+        .push(builder.createInt(1))
+        .push(inner_list)  // Should be flattened
+        .push(builder.createInt(4))
+        .final();
+
+    List* lst = outer_list.list;
+    ASSERT_NE(lst, nullptr);
+    EXPECT_EQ(lst->length, 4);  // Flattened: [1, 2, 3, 4]
+
+    EXPECT_EQ(lst->items[0].int_val, 1);
+    EXPECT_EQ(lst->items[1].int_val, 2);
+    EXPECT_EQ(lst->items[2].int_val, 3);
+    EXPECT_EQ(lst->items[3].int_val, 4);
+}
+
 // Test simple element creation
 TEST_F(MarkBuilderTest, CreateSimpleElement) {
     MarkBuilder builder(input);

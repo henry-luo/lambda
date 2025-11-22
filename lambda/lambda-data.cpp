@@ -322,6 +322,14 @@ Array* array_arena(Arena* arena) {
     return arr;
 }
 
+List* list_arena(Arena* arena) {
+    List* list = (List*)arena_alloc(arena, sizeof(List));
+    if (list == NULL) return NULL;
+    memset(list, 0, sizeof(List));
+    list->type_id = LMD_TYPE_LIST;
+    return list;
+}
+
 Pool* variable_mem_pool_create() {
     return pool_create();
 }

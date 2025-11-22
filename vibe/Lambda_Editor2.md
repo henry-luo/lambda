@@ -1085,6 +1085,12 @@ Item attr_item = attr_reader.item();  // ✓ Proper reconstruction via s2it()!
 - Use `reader.childAt(i)` to access children safely
 - ElementReader internally calls `_map_get_const()` which uses `s2it(*(String**)field_ptr)` to add correct type_id tag
 
+**Additional Fix** (November 22, 2025):
+- Fixed typed array deep copy to preserve array types (ArrayInt, ArrayInt64, ArrayFloat)
+- Previously incorrectly converted typed arrays to generic Array
+- Now properly copies `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` with correct types
+- Uses direct `memcpy` for efficient copying of primitive array data
+
 **Changes Made**:
 - [x] Fixed `deep_copy_internal()` element case to use ElementReader
 - [x] Replaced manual Item reconstruction with reader delegation

@@ -13,6 +13,7 @@ class MarkBuilder;
 class ElementBuilder;
 class MapBuilder;
 class ArrayBuilder;
+class ListBuilder;
 
 /**
  * MarkBuilder - Fluent API for constructing Mark documents in input parsers
@@ -152,6 +153,12 @@ public:
      */
     ArrayBuilder array();
 
+    /**
+     * Create list builder
+     * Returned by value - stack-allocated
+     */
+    ListBuilder list();
+
     // ============================================================================
     // Direct Item Creation (convenience - arena-allocates final data immediately)
     // ============================================================================
@@ -170,6 +177,11 @@ public:
      * Create an empty array
      */
     Item createArray();
+
+    /**
+     * Create an empty list
+     */
+    Item createList();
 
     /**
      * Create primitive Items
@@ -580,6 +592,86 @@ public:
     /**
      * Build and return the final Array Item
      * Array was pool-allocated via array_pooled during construction
+     */
+    Item final();
+};
+
+/**
+ * ListBuilder - Fluent API for constructing List nodes
+ *
+ * MEMORY MODEL: Stack-allocated value type
+ * - Automatically destroyed when scope ends
+ * - List is allocated from pool with dynamic resizing
+ * 
+ * DIFFERENCE from ArrayBuilder:
+ * - List uses list_push() which flattens nested lists and skips nulls
+ * - Array uses array_append() which preserves nested arrays and nulls
+ */
+class ListBuilder {
+private:
+    MarkBuilder* builder_;      // parent builder
+    List* list_;                // list being built
+
+    friend class MarkBuilder;
+
+    /**
+     * Private constructor - use MarkBuilder::list() instead
+     */
+    explicit ListBuilder(MarkBuilder* builder);
+
+public:
+    /**
+     * Destructor - automatic cleanup
+     */
+    ~ListBuilder();
+
+    // copyable and movable (for value semantics)
+    ListBuilder(const ListBuilder&) = default;
+    ListBuilder& operator=(const ListBuilder&) = default;
+    ListBuilder(ListBuilder&&) = default;
+    ListBuilder& operator=(ListBuilder&&) = default;
+
+    // ============================================================================
+    // Push Operations (return reference for chaining)
+    // ============================================================================
+
+    /**
+     * Push an Item to the list
+     * Note: Nulls are skipped, nested lists are flattened
+     */
+    ListBuilder& push(Item item);
+
+    /**
+     * Push string value (convenience)
+     */
+    ListBuilder& push(const char* str);
+
+    /**
+     * Push integer value (convenience)
+     */
+    ListBuilder& push(int64_t value);
+
+    /**
+     * Push float value (convenience)
+     */
+    ListBuilder& push(double value);
+
+    /**
+     * Push boolean value (convenience)
+     */
+    ListBuilder& push(bool value);
+
+    /**
+     * Push multiple items from initializer list
+     */
+    ListBuilder& pushItems(std::initializer_list<Item> items);
+
+    // ============================================================================
+    // Finalization (returns final List)
+    // ============================================================================
+
+    /**
+     * Build and return the final List Item
      */
     Item final();
 };
