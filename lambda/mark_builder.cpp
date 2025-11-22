@@ -231,9 +231,7 @@ Item MarkBuilder::createRange(int64_t start, int64_t end) {
     range->start = start;
     range->end = end;
     range->length = (end >= start) ? (end - start + 1) : 0;
-    
-    Item result = {.item = r2it(range)};
-    return result;
+    return {.range = range};
 }
 
 Item MarkBuilder::createType(TypeId type_id, bool is_literal, bool is_const) {

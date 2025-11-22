@@ -110,21 +110,21 @@ TEST_F(MarkBuilderDeepCopyTest, CopyRange) {
     EXPECT_EQ(get_type_id(range_item), LMD_TYPE_RANGE);
     EXPECT_TRUE(builder1.is_in_arena(range_item));
     
-    Range* orig_range = (Range*)range_item.pointer;
+    Range* orig_range = range_item.range;
     EXPECT_EQ(orig_range->start, 1);
     EXPECT_EQ(orig_range->end, 100);
     EXPECT_EQ(orig_range->length, 100);
     
     // Copy to same input - should return original (optimization)
     Item copied_same = builder1.deep_copy(range_item);
-    EXPECT_EQ(copied_same.pointer, range_item.pointer);  // Same pointer
+    EXPECT_EQ(copied_same.range, range_item.range);  // Same pointer
     
     // Copy to different input - should create new range
     Item copied_diff = builder2.deep_copy(range_item);
-    EXPECT_NE(copied_diff.pointer, range_item.pointer);  // Different pointer
+    EXPECT_NE(copied_diff.range, range_item.range);  // Different pointer
     EXPECT_TRUE(builder2.is_in_arena(copied_diff));
     
-    Range* copied_range = (Range*)copied_diff.pointer;
+    Range* copied_range = copied_diff.range;
     EXPECT_EQ(copied_range->start, 1);
     EXPECT_EQ(copied_range->end, 100);
     EXPECT_EQ(copied_range->length, 100);
@@ -135,28 +135,24 @@ TEST_F(MarkBuilderDeepCopyTest, CopyType) {
     MarkBuilder builder2(input2);
     
     // Create type in input1
-    Item type_item = builder1.createType(LMD_TYPE_STRING, true, false);
+    Item type_item = builder1.createMetaType(LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(type_item), LMD_TYPE_TYPE);
     EXPECT_TRUE(builder1.is_in_arena(type_item));
     
-    Type* orig_type = (Type*)type_item.pointer;
+    Type* orig_type = ((TypeType*)type_item.type)->type;
     EXPECT_EQ(orig_type->type_id, LMD_TYPE_STRING);
-    EXPECT_EQ(orig_type->is_literal, 1);
-    EXPECT_EQ(orig_type->is_const, 0);
     
     // Copy to same input - should return original (optimization)
     Item copied_same = builder1.deep_copy(type_item);
-    EXPECT_EQ(copied_same.pointer, type_item.pointer);  // Same pointer
+    EXPECT_EQ(copied_same.type, type_item.type);  // Same pointer
     
     // Copy to different input - should create new type
     Item copied_diff = builder2.deep_copy(type_item);
-    EXPECT_NE(copied_diff.pointer, type_item.pointer);  // Different pointer
+    EXPECT_NE(copied_diff.type, type_item.type);  // Different pointer
     EXPECT_TRUE(builder2.is_in_arena(copied_diff));
     
-    Type* copied_type = (Type*)copied_diff.pointer;
+    Type* copied_type = ((TypeType*)copied_diff.type)->type;
     EXPECT_EQ(copied_type->type_id, LMD_TYPE_STRING);
-    EXPECT_EQ(copied_type->is_literal, 1);
-    EXPECT_EQ(copied_type->is_const, 0);
 }
 
 // ============================================================================

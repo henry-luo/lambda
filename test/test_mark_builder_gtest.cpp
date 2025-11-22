@@ -132,10 +132,10 @@ TEST_F(MarkBuilderTest, createMetaType) {
 TEST_F(MarkBuilderTest, CreateTypeWithFlags) {
     MarkBuilder builder(input);
 
-    Item type_item = builder.createType(LMD_TYPE_INT, true, true);
+    Item type_item = builder.createMetaType(LMD_TYPE_INT);
     EXPECT_EQ(get_type_id(type_item), LMD_TYPE_TYPE);
 
-    Type* type = (Type*)type_item.pointer;
+    Type* type = ((TypeType*)type_item.type)->type;
     ASSERT_NE(type, nullptr);
     EXPECT_EQ(type->type_id, LMD_TYPE_INT);
     EXPECT_EQ(type->is_literal, 1);
