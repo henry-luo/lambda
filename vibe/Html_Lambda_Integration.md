@@ -296,31 +296,167 @@ Updates local text copy
 
 ---
 
+### 3. DomComment Integration (CURRENT - READ-ONLY ❌)
+
+DomComment is currently **standalone** with **no Lambda backing**.
+
+#### Lambda Comment Representation
+
+In Lambda, HTML comments are represented as **Elements with tag name "!--"**, with the comment content stored as a **String child**:
+
+```cpp
+// Lambda structure for: <!-- This is a comment -->
+Element {
+    type: TypeElmt { name: "!--" },
+    items: [
+        String { chars: " This is a comment " }
+    ],
+    length: 1
+}
+```
+
+Similarly, DOCTYPE declarations use tag name "!DOCTYPE":
+
+```cpp
+// Lambda structure for: <!DOCTYPE html>
+Element {
+    type: TypeElmt { name: "!DOCTYPE" },
+    items: [
+        String { chars: "html" }
+    ],
+    length: 1
+}
+```
+
+#### Data Structure
+
+```cpp
+struct DomComment : public DomNode {
+    // Comment-specific fields (COPIED from Lambda)
+    const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
+    const char* content;         // Full content/text (standalone copy)
+    size_t length;               // Content length
+    
+    // Memory management
+    Pool* pool;                  // Memory pool for allocations
+    
+    // DOM tree relationships
+    DomNode* parent;
+    DomNode* first_child;        // Always nullptr for comments
+    DomNode* next_sibling;
+    DomNode* prev_sibling;
+    
+    // NO Lambda backing:
+    // - No Element* native_element pointer
+    // - No Input* input context
+    // - No parent Element* reference
+    // - No child index tracking
+};
+```
+
+#### Current Operations (Standalone)
+
+**1. Create Comment Node** (`dom_comment_create`)
+```cpp
+DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, 
+                              const char* tag_name, const char* content) {
+    DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
+    
+    // Copy tag name to pool
+    char* tag_copy = (char*)pool_alloc(pool, strlen(tag_name) + 1);
+    strcpy(tag_copy, tag_name);
+    comment_node->tag_name = tag_copy;
+    
+    // Copy content to pool (if provided)
+    if (content) {
+        comment_node->length = strlen(content);
+        char* content_copy = (char*)pool_alloc(pool, comment_node->length + 1);
+        strcpy(content_copy, content);
+        comment_node->content = content_copy;  // Standalone copy
+    }
+    
+    // No native_element, no input, no parent tracking
+    return comment_node;
+}
+```
+
+#### Current Behavior in build_dom_tree_from_element
+
+Comments are currently **skipped entirely** during DOM tree construction:
+
+```cpp
+// line 1571 in dom_element.cpp
+if (strcmp(tag_name, "!--") == 0 ||
+    strcasecmp(tag_name, "!DOCTYPE") == 0 ||
+    strncmp(tag_name, "?", 1) == 0) {
+    return nullptr;  // ❌ Skip comments, DOCTYPE, and XML declarations
+}
+```
+
+**Result**: Comments in the Lambda tree are **not represented in the DOM tree at all**.
+
+#### Flow: Lambda → DOM (NOT IMPLEMENTED ❌)
+
+```
+HTML Parser (build_dom_tree_from_element)
+    ↓
+Finds Element with tag_name "!--"
+    ↓
+Returns nullptr (SKIPPED)
+    ↓
+❌ No DomComment created
+❌ Comment content lost from DOM representation
+```
+
+#### Flow: DOM → Lambda (NOT IMPLEMENTED ❌)
+
+```
+User calls dom_comment_create()
+    ↓
+Creates standalone DomComment (unbacked)
+    ↓
+❌ No Lambda Element created
+❌ Comment not added to Lambda tree
+❌ Comment lost on serialization
+```
+
+---
+
 ## Problem Statement
 
 ### Current Issues
 
 1. **Architectural Inconsistency**
-   - DomElement: Full bidirectional sync via MarkEditor
-   - DomText: Read-only snapshot, no sync back to Lambda
+   - DomElement: Full bidirectional sync via MarkEditor ✅
+   - DomText: Read-only snapshot, no sync back to Lambda ❌ (NOW FIXED ✅)
+   - DomComment: Not represented in DOM at all ❌
 
 2. **Data Loss**
-   - Text modifications via `dom_text_set_content()` don't propagate to Lambda tree
-   - When Lambda tree is serialized, text changes are lost
-   - Inconsistent behavior: element attributes sync, text content doesn't
+   - Text modifications via `dom_text_set_content()` don't propagate to Lambda tree (NOW FIXED ✅)
+   - Comment modifications don't propagate to Lambda tree ❌
+   - Comments are completely skipped during DOM construction ❌
+   - When Lambda tree is serialized, text/comment changes are lost
+   - Inconsistent behavior: element attributes sync, text/comments don't
 
 3. **Limited Functionality**
-   - Cannot dynamically update text content in documents
+   - Cannot dynamically update text content in documents (NOW FIXED ✅)
+   - Cannot add, modify, or remove comments dynamically ❌
    - Cannot implement text editing features
    - Cannot support contenteditable or rich text scenarios
 
 4. **Memory Inefficiency**
-   - Text content duplicated (Lambda String + DomText copy)
-   - Reference to original Lambda String is discarded
+   - Text content duplicated (Lambda String + DomText copy) (NOW FIXED ✅)
+   - Comment content duplicated when created standalone
+   - Reference to original Lambda Element is discarded for comments
+
+5. **Missing DOM Representation**
+   - Comments in Lambda tree (Elements with tag "!--") are not represented in DOM
+   - Cannot traverse, query, or manipulate comments via DOM API
+   - Cannot preserve comments when editing documents
 
 ### Design Goals
 
-1. **Consistency**: DomText should have same integration level as DomElement
+1. **Consistency**: DomText and DomComment should have same integration level as DomElement ✅
 2. **Bidirectional Sync**: Changes flow both Lambda → DOM and DOM → Lambda
 3. **Correctness**: DOM tree operations must update Lambda tree structure
 4. **Performance**: Minimize copying, use references where possible
@@ -821,34 +957,444 @@ TEST_F(DomIntegrationTest, DomText_SetContent_VerifyLambdaBacking) {
 
 ---
 
+## DomComment Refactoring Plan
+
+### Overview
+
+Comments in Lambda are **Elements with tag name "!--"** (and DOCTYPE as "!DOCTYPE"). To achieve full bidirectional synchronization:
+
+1. **Update DomComment structure** to store Lambda Element reference
+2. **Create backed comment nodes** that reference Lambda Elements
+3. **Implement CRUD operations** that modify Lambda tree via MarkEditor
+4. **Update build_dom_tree_from_element()** to create DomComment nodes instead of skipping
+
+### Phase 1: Update DomComment Structure
+
+Add Lambda backing fields to DomComment:
+
+```cpp
+struct DomComment : public DomNode {
+    // Comment-specific fields
+    const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
+    const char* content;         // Content text (points to native_element's String child)
+    size_t length;               // Content length
+    
+    // Lambda backing (NEW)
+    Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
+    Input* input;                // Input context (for MarkEditor)
+    DomElement* parent_element;  // Parent DomElement (for child array updates)
+    int64_t child_index;         // Index in parent's native_element->items array
+    
+    // Memory management
+    Pool* pool;
+    
+    // DOM tree relationships
+    DomNode* parent;
+    DomNode* first_child;        // Always nullptr for comments
+    DomNode* next_sibling;
+    DomNode* prev_sibling;
+};
+```
+
+**Key Changes**:
+- Add `Element* native_element` - points to Lambda Element with tag "!--"
+- Add `Input* input` - provides access to MarkEditor dependencies
+- Add `DomElement* parent_element` - tracks parent (needed to access native_element)
+- Add `int64_t child_index` - tracks position in parent's items array
+- Modify `content` pointer - should reference `native_element->items[0].string->chars`
+
+### Phase 2: Create Backed Comment Nodes
+
+**New Function**: `dom_comment_create_backed`
+
+```cpp
+DomComment* dom_comment_create_backed(Pool* pool, Element* native_element, 
+                                     DomElement* parent_element, int64_t child_index) {
+    if (!pool || !native_element || !parent_element) return nullptr;
+    
+    // Get tag name and content
+    TypeElmt* type = (TypeElmt*)native_element->type;
+    const char* tag_name = type ? type->name.str : nullptr;
+    if (!tag_name) return nullptr;
+    
+    // Determine node type
+    DomNodeType node_type;
+    if (strcasecmp(tag_name, "!DOCTYPE") == 0) {
+        node_type = DOM_NODE_DOCTYPE;
+    } else if (strcmp(tag_name, "!--") == 0) {
+        node_type = DOM_NODE_COMMENT;
+    } else {
+        return nullptr;  // Not a comment or DOCTYPE
+    }
+    
+    DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
+    if (!comment_node) return nullptr;
+    
+    // Initialize base DomNode
+    comment_node->node_type = node_type;
+    comment_node->parent = parent_element;
+    comment_node->pool = pool;
+    
+    // Set Lambda backing
+    comment_node->native_element = native_element;
+    comment_node->input = parent_element->input;
+    comment_node->parent_element = parent_element;
+    comment_node->child_index = child_index;
+    comment_node->tag_name = tag_name;  // Reference type name (no copy needed)
+    
+    // Extract content from first String child (if exists)
+    if (native_element->length > 0) {
+        Item first_item = native_element->items[0];
+        if (get_type_id(first_item) == LMD_TYPE_STRING) {
+            String* content_str = (String*)first_item.pointer;
+            comment_node->content = content_str->chars;  // Reference, not copy
+            comment_node->length = content_str->len;
+        }
+    }
+    
+    if (!comment_node->content) {
+        comment_node->content = "";
+        comment_node->length = 0;
+    }
+    
+    return comment_node;
+}
+```
+
+### Phase 3: Implement Backed CRUD Operations
+
+**1. Set Comment Content (Backed)**
+
+```cpp
+bool dom_comment_set_content_backed(DomComment* comment, const char* new_content) {
+    if (!comment || !new_content) return false;
+    if (!comment->native_element || !comment->input) {
+        log_error("dom_comment_set_content_backed: comment not backed by Lambda");
+        return false;
+    }
+    
+    // Create new String via MarkBuilder
+    MarkEditor editor(comment->input, EDIT_MODE_INLINE);
+    Item new_string_item = editor.builder()->createStringItem(new_content);
+    
+    if (!new_string_item.string) {
+        log_error("dom_comment_set_content_backed: failed to create string");
+        return false;
+    }
+    
+    // Replace or append String child in comment Element
+    Item result;
+    if (comment->native_element->length > 0) {
+        // Replace existing content (child at index 0)
+        result = editor.elmt_replace_child(
+            {.element = comment->native_element},
+            0,  // Content is always first child
+            new_string_item
+        );
+    } else {
+        // Append content (comment was empty)
+        result = editor.elmt_append_child(
+            {.element = comment->native_element},
+            new_string_item
+        );
+    }
+    
+    if (!result.element) {
+        log_error("dom_comment_set_content_backed: failed to update content");
+        return false;
+    }
+    
+    // Update DomComment to point to new String
+    comment->native_element = result.element;
+    comment->content = new_string_item.string->chars;
+    comment->length = new_string_item.string->len;
+    
+    return true;
+}
+```
+
+**2. Append Comment to Element (Backed)**
+
+```cpp
+DomComment* dom_element_append_comment_backed(DomElement* parent, const char* comment_content) {
+    if (!parent || !comment_content) return nullptr;
+    if (!parent->native_element || !parent->input) {
+        log_error("dom_element_append_comment_backed: parent not backed");
+        return nullptr;
+    }
+    
+    // Create Lambda comment Element with tag "!--"
+    MarkEditor editor(parent->input, EDIT_MODE_INLINE);
+    ElementBuilder comment_elem = editor.builder()->element("!--");
+    
+    // Add content as String child
+    if (strlen(comment_content) > 0) {
+        Item content_item = editor.builder()->createStringItem(comment_content);
+        comment_elem.child(content_item);
+    }
+    
+    Item comment_item = comment_elem.build();
+    if (!comment_item.element) {
+        log_error("dom_element_append_comment_backed: failed to create comment element");
+        return nullptr;
+    }
+    
+    // Append to parent Element's children
+    Item result = editor.elmt_append_child(
+        {.element = parent->native_element},
+        comment_item
+    );
+    
+    if (!result.element) {
+        log_error("dom_element_append_comment_backed: failed to append");
+        return nullptr;
+    }
+    
+    // Create DomComment wrapper
+    int64_t child_index = parent->native_element->length - 1;
+    DomComment* comment_node = dom_comment_create_backed(
+        parent->pool,
+        comment_item.element,
+        parent,
+        child_index
+    );
+    
+    if (!comment_node) return nullptr;
+    
+    // Add to DOM sibling chain
+    comment_node->parent = parent;
+    if (!parent->first_child) {
+        parent->first_child = comment_node;
+    } else {
+        DomNode* last = parent->first_child;
+        while (last->next_sibling) last = last->next_sibling;
+        last->next_sibling = comment_node;
+        comment_node->prev_sibling = last;
+    }
+    
+    parent->native_element = result.element;
+    return comment_node;
+}
+```
+
+**3. Remove Comment (Backed)**
+
+```cpp
+bool dom_comment_remove_backed(DomComment* comment) {
+    if (!comment) return false;
+    if (!comment->native_element || !comment->input || !comment->parent_element) {
+        log_error("dom_comment_remove_backed: comment not backed");
+        return false;
+    }
+    
+    // Remove from Lambda parent Element's children array
+    MarkEditor editor(comment->input, EDIT_MODE_INLINE);
+    Item result = editor.elmt_delete_child(
+        {.element = comment->parent_element->native_element},
+        comment->child_index
+    );
+    
+    if (!result.element) {
+        log_error("dom_comment_remove_backed: failed to delete child");
+        return false;
+    }
+    
+    // Update parent
+    comment->parent_element->native_element = result.element;
+    
+    // Remove from DOM sibling chain
+    if (comment->prev_sibling) {
+        comment->prev_sibling->next_sibling = comment->next_sibling;
+    } else if (comment->parent) {
+        comment->parent->first_child = comment->next_sibling;
+    }
+    
+    if (comment->next_sibling) {
+        comment->next_sibling->prev_sibling = comment->prev_sibling;
+    }
+    
+    // Clear references
+    comment->parent = nullptr;
+    comment->native_element = nullptr;
+    
+    return true;
+}
+```
+
+### Phase 4: Update build_dom_tree_from_element()
+
+Stop skipping comments - create backed DomComment nodes instead:
+
+```cpp
+// BEFORE (line 1571):
+if (strcmp(tag_name, "!--") == 0 ||
+    strcasecmp(tag_name, "!DOCTYPE") == 0 ||
+    strncmp(tag_name, "?", 1) == 0) {
+    return nullptr;  // ❌ Skip comments, DOCTYPE, and XML declarations
+}
+
+// AFTER:
+// Handle comments and DOCTYPE as special cases
+if (strcmp(tag_name, "!--") == 0 || strcasecmp(tag_name, "!DOCTYPE") == 0) {
+    // Don't create DomElement, but still need to handle as child
+    // Return nullptr to indicate "not a layout element" but process elsewhere
+    return nullptr;  // Processed separately below
+}
+
+// In child processing loop (after line 1640):
+for (int64_t i = 0; i < elem->length; i++) {
+    Item child_item = elem->items[i];
+    TypeId child_type = get_type_id(child_item);
+    
+    if (child_type == LMD_TYPE_ELEMENT) {
+        Element* child_elem = (Element*)child_item.pointer;
+        TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
+        const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
+        
+        // Check if this is a comment or DOCTYPE
+        if (strcmp(child_tag_name, "!--") == 0 || strcasecmp(child_tag_name, "!DOCTYPE") == 0) {
+            // Create backed DomComment
+            DomComment* comment_node = dom_comment_create_backed(pool, child_elem, dom_elem, i);
+            if (comment_node) {
+                comment_node->parent = dom_elem;
+                
+                // Add to DOM sibling chain (same as text nodes)
+                if (!dom_elem->first_child) {
+                    dom_elem->first_child = comment_node;
+                } else {
+                    DomNode* last = dom_elem->first_child;
+                    while (last->next_sibling) last = last->next_sibling;
+                    last->next_sibling = comment_node;
+                    comment_node->prev_sibling = last;
+                }
+            }
+            continue;  // Don't try to build as DomElement
+        }
+        
+        // Regular element - build recursively
+        DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem, input);
+        // ... existing code
+    }
+    // ... text node handling
+}
+```
+
+### Phase 5: Add Unit Tests
+
+Add comprehensive tests to `test_css_dom_crud.cpp`:
+
+```cpp
+TEST_F(DomCrudTest, DomComment_CreateBacked) {
+    DomElement* parent = create_backed_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, " Test comment ");
+    
+    ASSERT_NE(comment, nullptr);
+    EXPECT_NE(comment->native_element, nullptr);
+    EXPECT_NE(comment->input, nullptr);
+    EXPECT_EQ(comment->parent_element, parent);
+    EXPECT_STREQ(comment->content, " Test comment ");
+    EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
+    
+    // Verify Lambda backing
+    TypeElmt* type = (TypeElmt*)comment->native_element->type;
+    EXPECT_STREQ(type->name.str, "!--");
+    EXPECT_EQ(comment->native_element->length, 1);
+    EXPECT_STREQ(comment->native_element->items[0].string->chars, " Test comment ");
+}
+
+TEST_F(DomCrudTest, DomComment_SetContentBacked_UpdatesLambda) {
+    DomElement* parent = create_backed_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, "Original");
+    
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Updated"));
+    
+    // Verify DomComment updated
+    EXPECT_STREQ(comment->content, "Updated");
+    EXPECT_EQ(comment->length, 7);
+    
+    // Verify Lambda updated
+    EXPECT_STREQ(comment->native_element->items[0].string->chars, "Updated");
+}
+
+TEST_F(DomCrudTest, DomComment_RemoveBacked_UpdatesLambda) {
+    DomElement* parent = create_backed_element("div");
+    DomComment* comment1 = dom_element_append_comment_backed(parent, "First");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, "Second");
+    
+    EXPECT_EQ(parent->native_element->length, 2);
+    EXPECT_TRUE(dom_comment_remove_backed(comment1));
+    
+    // Verify Lambda updated
+    EXPECT_EQ(parent->native_element->length, 1);
+    TypeElmt* remaining_type = (TypeElmt*)parent->native_element->items[0].element->type;
+    EXPECT_STREQ(remaining_type->name.str, "!--");
+}
+
+TEST_F(DomCrudTest, DomComment_MixedChildren_ElementsTextAndComments) {
+    DomElement* parent = create_backed_element("div");
+    
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " Start ");
+    DomText* text = dom_element_append_text_backed(parent, "Content");
+    DomElement* child = create_backed_element("span");
+    dom_element_append_child(parent, child);
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " End ");
+    
+    // Verify structure
+    EXPECT_EQ(parent->native_element->length, 4);
+    EXPECT_STREQ(((TypeElmt*)parent->native_element->items[0].element->type)->name.str, "!--");
+    EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(parent->native_element->items[2]), LMD_TYPE_ELEMENT);
+    EXPECT_STREQ(((TypeElmt*)parent->native_element->items[3].element->type)->name.str, "!--");
+}
+
+TEST_F(DomCrudTest, DomComment_ParseFromHTML_CreatesBacked) {
+    // Parse HTML with comments
+    const char* html = "<div><!-- Comment --><p>Text</p></div>";
+    Element* root = parse_html_fragment(html);
+    DomElement* dom_div = build_dom_tree_from_element(root, pool, nullptr, input);
+    
+    ASSERT_NE(dom_div, nullptr);
+    
+    // First child should be DomComment
+    DomNode* first_child = dom_div->first_child;
+    ASSERT_NE(first_child, nullptr);
+    EXPECT_EQ(first_child->node_type, DOM_NODE_COMMENT);
+    
+    DomComment* comment = static_cast<DomComment*>(first_child);
+    EXPECT_NE(comment->native_element, nullptr);
+    EXPECT_STREQ(comment->content, " Comment ");
+}
+
+// More tests: empty comments, DOCTYPE, long comments, child index tracking, etc.
+```
+
+---
+
 ## Implementation Checklist
 
-### Phase 1: Structure Updates
-- [ ] Add fields to DomText: `native_string`, `input`, `parent_element`, `child_index`
-- [ ] Update DomText constructor
-- [ ] Update `dom_text_create()` signature (add backing parameters)
+### DomText (COMPLETED ✅)
+- [x] Add fields to DomText: `native_string`, `input`, `parent_element`, `child_index`
+- [x] Implement `dom_text_create_backed()`
+- [x] Update `build_dom_tree_from_element()` to preserve String* references
+- [x] Implement `dom_text_set_content_backed()`
+- [x] Implement `dom_element_append_text_backed()`
+- [x] Implement `dom_text_remove_backed()`
+- [x] Implement `dom_text_get_child_index()` (validation helper)
+- [x] Add 11 new tests to `test_css_dom_crud.cpp`
+- [x] All tests passing: 43/43 CSS DOM CRUD, 30/30 DomNodeBase
 
-### Phase 2: Creation Functions
-- [ ] Implement `dom_text_create_backed()`
-- [ ] Update `build_dom_tree_from_element()` to preserve String* references
-- [ ] Update `build_dom_tree_from_element()` to pass parent and index
-
-### Phase 3: CRUD Operations
-- [ ] Implement `dom_text_set_content_backed()`
-- [ ] Implement `dom_element_append_text_backed()`
-- [ ] Implement `dom_text_remove_backed()`
-- [ ] Implement `dom_text_get_child_index()` (validation helper)
-
-### Phase 4: Child Index Management
-- [ ] Add child index update logic after removals
-- [ ] Add child index validation in CRUD operations
-- [ ] Test index tracking with mixed children
-
-### Phase 5: Testing
+### DomComment (IN PROGRESS)
+- [ ] Add fields to DomComment: `native_element`, `input`, `parent_element`, `child_index`
+- [ ] Update DomComment constructor
+- [ ] Implement `dom_comment_create_backed()`
+- [ ] Implement `dom_comment_set_content_backed()`
+- [ ] Implement `dom_element_append_comment_backed()`
+- [ ] Implement `dom_comment_remove_backed()`
+- [ ] Implement `dom_comment_is_backed()` helper
+- [ ] Update `build_dom_tree_from_element()` to create backed DomComment nodes
 - [ ] Add 8-10 new tests to `test_css_dom_crud.cpp`
-- [ ] Update existing tests in `test_css_dom_integration.cpp`
-- [ ] Test edge cases: empty strings, long strings, mixed children
-- [ ] Test index tracking after additions/removals
+- [ ] Update existing comment tests if needed
+- [ ] Verify all tests pass with no regressions
 - [ ] Verify memory management (no leaks)
 
 ### Phase 6: Documentation

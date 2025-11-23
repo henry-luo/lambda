@@ -17,6 +17,7 @@ struct DomElement;
 struct DomText;
 struct DomComment;
 typedef struct String String;  // Lambda String type
+typedef struct Element Element;  // Lambda Element type
 
 enum DomNodeType {
     DOM_NODE_ELEMENT = 1,     // Element node
@@ -174,6 +175,47 @@ DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* ta
  * @param comment_node Comment/DOCTYPE node to destroy
  */
 void dom_comment_destroy(DomComment* comment_node);
+
+/**
+ * Create a backed DomComment node (connected to Lambda Element)
+ * @param pool Memory pool for allocations
+ * @param native_element Lambda Element with tag "!--" or "!DOCTYPE"
+ * @param parent_element Parent DomElement
+ * @param child_index Index in parent's native_element->items array
+ * @return New backed DomComment or NULL on failure
+ */
+DomComment* dom_comment_create_backed(Pool* pool, Element* native_element, 
+                                     DomElement* parent_element, int64_t child_index);
+
+/**
+ * Set comment content (backed version - updates Lambda Element)
+ * @param comment_node Comment node to update
+ * @param new_content New content string
+ * @return true on success, false on failure
+ */
+bool dom_comment_set_content_backed(DomComment* comment_node, const char* new_content);
+
+/**
+ * Append a backed comment to a parent element (updates Lambda tree)
+ * @param parent Parent DomElement
+ * @param comment_content Comment content string
+ * @return New DomComment or NULL on failure
+ */
+DomComment* dom_element_append_comment_backed(DomElement* parent, const char* comment_content);
+
+/**
+ * Remove a backed comment node (updates Lambda tree)
+ * @param comment_node Comment node to remove
+ * @return true on success, false on failure
+ */
+bool dom_comment_remove_backed(DomComment* comment_node);
+
+/**
+ * Check if comment is backed by Lambda Element
+ * @param comment_node Comment node to check
+ * @return true if backed, false otherwise
+ */
+bool dom_comment_is_backed(DomComment* comment_node);
 
 /**
  * Get comment/DOCTYPE content
