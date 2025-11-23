@@ -96,7 +96,7 @@ typedef struct LayoutContext {
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
 
-    Document* doc;
+    DomDocument* doc;
     UiContext* ui_context;
     // Additional fields for test compatibility
     float width, height;  // context dimensions
@@ -225,7 +225,7 @@ void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_ratio);
 
 // HTML version detection functions
-int detect_html_version_lambda_css(Document* doc);
+int detect_html_version_lambda_css(DomDocument* doc);
 HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input);
 
 #endif // LAYOUT_HPP

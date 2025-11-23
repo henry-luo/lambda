@@ -1628,13 +1628,13 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     DomText* root_text = dom_element_append_text(root, "Root text ");
     DomComment* root_comment = dom_element_append_comment(root, " Root comment ");
     
-    // Create nested element
+    // Create nested element (build_dom_tree_from_element will append to root)
     MarkBuilder builder(input);
     Item child_item = builder.element("span")
         .attr("class", "nested")
         .final();
     DomElement* child = build_dom_tree_from_element(child_item.element, doc, root);
-    dom_element_append_child(root, child);
+    // Note: build_dom_tree_from_element already appends child to root, no need to call dom_element_append_child
     
     // Add content to nested element
     DomText* child_text = dom_element_append_text(child, "Child text");

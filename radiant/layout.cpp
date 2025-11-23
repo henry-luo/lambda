@@ -493,14 +493,14 @@ HtmlVersion detect_html_version(lxb_html_document_t* html_doc) {
 }
 */
 
-int detect_html_version_lambda_css(Document* doc) {
+int detect_html_version_lambda_css(DomDocument* doc) {
     if (!doc) { return HTML5; } // Default fallback
     // Return the HTML version that was detected during document loading
     log_debug("Using pre-detected HTML version: %d", doc->html_version);
     return doc->html_version;
 }
 
-void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
+void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
 
@@ -532,7 +532,7 @@ void layout_cleanup(LayoutContext* lycon) {
     cleanup_float_context(lycon);
 }
 
-void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
+void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     LayoutContext lycon;
     if (!doc) return;
     log_debug("layout html doc - start");
@@ -553,8 +553,8 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
 
     // Get root node based on document type
     DomNode* root_node = nullptr;
-    root_node = doc->dom_root;
-    log_debug("DEBUG: Using dom_root directly: %p", root_node);
+    root_node = doc->root;
+    log_debug("DEBUG: Using root directly: %p", root_node);
     if (root_node) {
         // Validate pointer before calling virtual methods
         log_debug("DEBUG: root_node->node_type = %d", root_node->node_type);

@@ -12,9 +12,9 @@
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-Document* load_html_doc(Url* base, char* doc_filename);
-View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
+DomDocument* load_html_doc(Url* base, char* doc_filename);
+View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
@@ -27,12 +27,12 @@ int window_main_with_file(const char* html_file);
 bool do_redraw = false;
 UiContext ui_context;
 
-Document* show_html_doc(Url* base, char* doc_url) {
+DomDocument* show_html_doc(Url* base, char* doc_url) {
     log_debug("Showing HTML document %s", doc_url);
-    Document* doc = load_html_doc(base, doc_url);
+    DomDocument* doc = load_html_doc(base, doc_url);
     ui_context.document = doc;
     // layout html doc
-    if (doc->dom_root) {
+    if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
     }
     // render html doc
@@ -43,8 +43,8 @@ Document* show_html_doc(Url* base, char* doc_url) {
     return doc;
 }
 
-void reflow_html_doc(Document* doc) {
-    if (!doc || !doc->dom_root) {
+void reflow_html_doc(DomDocument* doc) {
+    if (!doc || !doc->root) {
         log_debug("No document to reflow");
         return;
     }
@@ -250,7 +250,7 @@ int run_layout(const char* html_file) {
 
     // Load HTML document
     log_debug("Loading HTML document...");
-    Document* doc = load_html_doc(cwd, (char*)html_file);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file);
     if (!doc) {
         log_error("Error: Could not load HTML file: %s", html_file);
         url_destroy(cwd);
@@ -311,7 +311,7 @@ int view_html_in_window(const char* html_file) {
     if (cwd) {
         // Use provided HTML file or default to test file
         const char* file_to_load = html_file ? html_file : "test/html/index.html";
-        Document* doc = show_html_doc(cwd, (char*)file_to_load);
+        DomDocument* doc = show_html_doc(cwd, (char*)file_to_load);
         url_destroy(cwd);
 
         // Set custom window title if HTML file was provided

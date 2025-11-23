@@ -42,7 +42,7 @@ extern "C" {
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
+void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio);
 
 // Forward declarations
@@ -601,16 +601,16 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 
 /**
  * Load HTML document with Lambda CSS system
- * Parses HTML, applies CSS cascade, builds DOM tree, returns Document for layout
+ * Parses HTML, applies CSS cascade, builds DOM tree, returns DomDocument for layout
  *
  * @param html_filename Path to HTML file
  * @param css_filename Optional external CSS file (can be NULL)
  * @param viewport_width Viewport width for layout
  * @param viewport_height Viewport height for layout
  * @param pool Memory pool for allocations
- * @return Document structure with Lambda CSS DOM, ready for layout
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
-Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
+DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool) {
     if (!html_url || !pool) {
         log_error("load_lambda_html_doc: invalid parameters");
@@ -765,25 +765,20 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
     dom_root->print(str_buf, 0);
     log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
 
-    // Step 8: Create Document structure
-    Document* doc = (Document*)calloc(1, sizeof(Document));
-    if (!doc) {
-        log_error("Failed to allocate Document");
-        return nullptr;
-    }
-
-    doc->dom_root = dom_root;
-    doc->html_root = html_root;
-    doc->html_version = detected_version;
-    doc->url = html_url;
-    doc->view_tree = nullptr;  // Will be created during layout
-    doc->state = nullptr;
+    // Step 8: Create DomDocument structure (already created by dom_document_create)
+    // Just populate the additional fields
+    dom_doc->root = dom_root;
+    dom_doc->html_root = html_root;
+    dom_doc->html_version = detected_version;
+    dom_doc->url = html_url;
+    dom_doc->view_tree = nullptr;  // Will be created during layout
+    dom_doc->state = nullptr;
 
     log_debug("[Lambda CSS] Document loaded and styled");
-    return doc;
+    return dom_doc;
 }
 
-Document* load_html_doc(Url *base, char* doc_url) {
+DomDocument* load_html_doc(Url *base, char* doc_url) {
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -793,7 +788,7 @@ Document* load_html_doc(Url *base, char* doc_url) {
         pool_destroy(pool);
         return NULL;
     }
-    Document* doc = load_lambda_html_doc(full_url, NULL, 0, 0, pool);
+    DomDocument* doc = load_lambda_html_doc(full_url, NULL, 0, 0, pool);
     return doc;
 }
 
@@ -901,7 +896,7 @@ int cmd_layout(int argc, char** argv) {
     Url* cwd = get_current_dir();
     Url* input_url = url_parse_with_base(opts.input_file, cwd);
     // Load HTML document with Lambda CSS system
-    Document* doc = load_lambda_html_doc(
+    DomDocument* doc = load_lambda_html_doc(
         input_url,
         opts.css_file,
         opts.viewport_width,
@@ -939,7 +934,7 @@ int cmd_layout(int argc, char** argv) {
     // Perform layout computation
     log_debug("[Layout] About to call layout_html_doc...");
     log_debug("[Layout] lambda_html_root=%p, dom_root=%p",
-            (void*)doc->html_root, (void*)doc->dom_root);
+            (void*)doc->html_root, (void*)doc->root);
 
     layout_html_doc(&ui_context, doc, false);
 

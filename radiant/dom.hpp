@@ -54,20 +54,10 @@ extern "C" {
 
 typedef struct ViewTree ViewTree;
 typedef struct StateStore StateStore;
+typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
 typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
 typedef struct DomText DomText;        // Forward declaration for Lambda CSS DOM
 typedef struct DomComment DomComment;  // Forward declaration for Lambda CSS DOM
 
-typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
-
-typedef struct {
-    Url* url;               // document URL
-    Element* html_root;     // parsed HTML tree in Mark notation
-    DomElement* dom_root;   // Lambda CSS DOM root element (DomNode*)
-    int html_version;       // Detected HTML version (for Lambda CSS docs) - maps to HtmlVersion enum
-    ViewTree* view_tree;    // View tree after layout
-    StateStore* state;
-} Document;
-
-Document* load_html_doc(Url *base, char* doc_filename);
-void free_document(Document* doc);
+DomDocument* load_html_doc(Url *base, char* doc_filename);
+void free_document(DomDocument* doc);
