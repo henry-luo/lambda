@@ -11,7 +11,7 @@ extern "C" {
 #include "../lambda/mark_builder.hpp"
 
 // build_dom_tree_from_element is now exported from dom_element.cpp
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
 
 /**
  * Test DomNodeBase Integration (C++ Inheritance Model)
@@ -74,9 +74,9 @@ protected:
         Element* lambda_root = get_html_root_element(input);
         if (!lambda_root) return nullptr;
 
-        // Build DomElement tree from Lambda Element tree
-        // Use the Input's own pool, not the test fixture pool
-        return build_dom_tree_from_element(lambda_root, input->pool, nullptr);
+        // Build DomElement tree from Lambda Element tree with Input context
+        // This enables backed text nodes that sync with Lambda
+        return build_dom_tree_from_element(lambda_root, input->pool, nullptr, input);
     }
 
     // Helper: Get HTML root element (skip DOCTYPE)

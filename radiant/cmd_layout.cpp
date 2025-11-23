@@ -55,7 +55,7 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
 const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
 
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information

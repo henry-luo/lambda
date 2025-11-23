@@ -12,10 +12,11 @@
  * - DomElement, DomText, DomComment inherit from DomNode
  */
 
-// forward declarations of derived types
+// Forward declarations
 struct DomElement;
 struct DomText;
 struct DomComment;
+typedef struct String String;  // Lambda String type
 
 enum DomNodeType {
     DOM_NODE_ELEMENT = 1,     // Element node
@@ -81,12 +82,24 @@ protected:
 // ============================================================================
 
 /**
- * Create a new DomText node
+ * Create a new DomText node (unbacked - standalone copy)
  * @param pool Memory pool for allocations
  * @param text Text content (will be copied)
  * @return New DomText or NULL on failure
+ * @deprecated Use dom_text_create_backed for Lambda-backed text nodes
  */
 DomText* dom_text_create(Pool* pool, const char* text);
+
+/**
+ * Create a new DomText node backed by Lambda String (bidirectional sync)
+ * @param pool Memory pool for allocations
+ * @param native_string Pointer to Lambda String (will be referenced, not copied)
+ * @param parent_element Parent DomElement (for MarkEditor operations)
+ * @param child_index Index in parent's native_element->items array
+ * @return New DomText or NULL on failure
+ */
+DomText* dom_text_create_backed(Pool* pool, String* native_string, 
+                                 DomElement* parent_element, int64_t child_index);
 
 /**
  * Destroy a DomText node
@@ -102,12 +115,45 @@ void dom_text_destroy(DomText* text_node);
 const char* dom_text_get_content(DomText* text_node);
 
 /**
- * Set text content
+ * Set text content (unbacked - updates local copy only)
  * @param text_node Text node
  * @param text New text content (will be copied)
  * @return true on success, false on failure
+ * @deprecated Use dom_text_set_content_backed for Lambda-backed text nodes
  */
 bool dom_text_set_content(DomText* text_node, const char* text);
+
+/**
+ * Set text content (backed - syncs with Lambda String)
+ * Updates both DomText and underlying Lambda String via MarkEditor
+ * @param text_node Text node (must be backed)
+ * @param text New text content
+ * @return true on success, false on failure
+ */
+bool dom_text_set_content_backed(DomText* text_node, const char* text);
+
+/**
+ * Check if text node is backed by Lambda String
+ * @param text_node Text node
+ * @return true if backed, false if standalone copy
+ */
+bool dom_text_is_backed(DomText* text_node);
+
+/**
+ * Get child index of text node in parent's Lambda Element
+ * Validates cached index and rescans if necessary
+ * @param text_node Text node (must be backed)
+ * @return Child index or -1 on error
+ */
+int64_t dom_text_get_child_index(DomText* text_node);
+
+/**
+ * Remove text node from parent (backed - syncs with Lambda)
+ * Removes from both DOM tree and Lambda Element's children array
+ * @param text_node Text node to remove (must be backed)
+ * @return true on success, false on failure
+ */
+bool dom_text_remove_backed(DomText* text_node);
 
 // ============================================================================
 // DOM Comment/DOCTYPE Node API

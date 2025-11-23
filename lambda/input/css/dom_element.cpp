@@ -16,7 +16,8 @@
 #include "../../mark_builder.hpp" // For MarkBuilder
 
 // Forward declaration
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
+DomElement* build_dom_tree_from_element_with_input(Element* elem, Pool* pool, DomElement* parent, Input* input);
 
 /**
  * Convert HTML tag name string to Lexbor tag ID
@@ -1196,6 +1197,286 @@ bool dom_text_set_content(DomText* text_node, const char* text) {
 }
 
 // ============================================================================
+// DOM Text Node - Backed (Lambda-synchronized) Implementation
+// ============================================================================
+
+DomText* dom_text_create_backed(Pool* pool, String* native_string, 
+                                 DomElement* parent_element, int64_t child_index) {
+    if (!pool || !native_string || !parent_element) {
+        log_error("dom_text_create_backed: invalid parameters");
+        return nullptr;
+    }
+
+    if (!parent_element->native_element || !parent_element->input) {
+        log_error("dom_text_create_backed: parent element must be backed");
+        return nullptr;
+    }
+
+    // Allocate text node from pool
+    DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
+    if (!text_node) {
+        log_error("dom_text_create_backed: allocation failed");
+        return nullptr;
+    }
+
+    // Initialize base DomNode fields
+    text_node->node_type = DOM_NODE_TEXT;
+    text_node->parent = parent_element;
+    text_node->first_child = nullptr;
+    text_node->next_sibling = nullptr;
+    text_node->prev_sibling = nullptr;
+
+    // Set Lambda backing (reference, not copy)
+    text_node->native_string = native_string;
+    text_node->text = native_string->chars;  // Reference Lambda String's chars
+    text_node->length = native_string->len;
+    text_node->input = parent_element->input;
+    text_node->parent_element = parent_element;
+    text_node->child_index = child_index;
+    text_node->pool = pool;
+
+    log_debug("dom_text_create_backed: created backed text node at index %lld, text='%s'", 
+              child_index, native_string->chars);
+
+    return text_node;
+}
+
+bool dom_text_is_backed(DomText* text_node) {
+    return text_node && text_node->native_string && text_node->input && text_node->parent_element;
+}
+
+int64_t dom_text_get_child_index(DomText* text_node) {
+    if (!text_node || !text_node->parent_element || !text_node->native_string) {
+        log_error("dom_text_get_child_index: text node not backed");
+        return -1;
+    }
+
+    Element* parent_elem = text_node->parent_element->native_element;
+    if (!parent_elem) {
+        log_error("dom_text_get_child_index: parent has no native_element");
+        return -1;
+    }
+
+    // Try cached index first (optimization)
+    if (text_node->child_index >= 0 && text_node->child_index < parent_elem->length) {
+        Item cached_item = parent_elem->items[text_node->child_index];
+        if (get_type_id(cached_item) == LMD_TYPE_STRING && (String*)cached_item.pointer == text_node->native_string) {
+            log_debug("dom_text_get_child_index: cache hit at index %lld", text_node->child_index);
+            return text_node->child_index;  // Cache hit
+        }
+    }
+
+    // Cache miss - scan for correct index
+    log_debug("dom_text_get_child_index: cache miss, scanning parent children");
+    for (int64_t i = 0; i < parent_elem->length; i++) {
+        Item item = parent_elem->items[i];
+        if (get_type_id(item) == LMD_TYPE_STRING && (String*)item.pointer == text_node->native_string) {
+            text_node->child_index = i;  // Update cache
+            log_debug("dom_text_get_child_index: found at index %lld", i);
+            return i;
+        }
+    }
+
+    log_error("dom_text_get_child_index: native_string not found in parent (may have been removed)");
+    return -1;
+}
+
+bool dom_text_set_content_backed(DomText* text_node, const char* new_content) {
+    if (!text_node || !new_content) {
+        log_error("dom_text_set_content_backed: invalid parameters");
+        return false;
+    }
+
+    if (!dom_text_is_backed(text_node)) {
+        log_error("dom_text_set_content_backed: text node not backed by Lambda");
+        return false;
+    }
+
+    // Get current child index
+    int64_t child_idx = dom_text_get_child_index(text_node);
+    if (child_idx < 0) {
+        log_error("dom_text_set_content_backed: failed to get child index");
+        return false;
+    }
+
+    // Create new String via MarkBuilder
+    MarkEditor editor(text_node->input, EDIT_MODE_INLINE);
+    Item new_string_item = editor.builder()->createStringItem(new_content);
+
+    if (!new_string_item.pointer || get_type_id(new_string_item) != LMD_TYPE_STRING) {
+        log_error("dom_text_set_content_backed: failed to create string");
+        return false;
+    }
+
+    // Replace child in parent Element's items array
+    Item result = editor.elmt_replace_child(
+        {.element = text_node->parent_element->native_element},
+        child_idx,
+        new_string_item
+    );
+
+    if (!result.element) {
+        log_error("dom_text_set_content_backed: failed to replace child");
+        return false;
+    }
+
+    // Update DomText to point to new String
+    text_node->native_string = (String*)new_string_item.pointer;
+    text_node->text = text_node->native_string->chars;
+    text_node->length = text_node->native_string->len;
+
+    // In INLINE mode, parent element pointer unchanged, but update for consistency
+    text_node->parent_element->native_element = result.element;
+
+    log_debug("dom_text_set_content_backed: updated text at index %lld to '%s'", child_idx, new_content);
+
+    return true;
+}
+
+bool dom_text_remove_backed(DomText* text_node) {
+    if (!text_node) {
+        log_error("dom_text_remove_backed: null text node");
+        return false;
+    }
+
+    if (!dom_text_is_backed(text_node)) {
+        log_error("dom_text_remove_backed: text node not backed");
+        return false;
+    }
+
+    // Get current child index
+    int64_t child_idx = dom_text_get_child_index(text_node);
+    if (child_idx < 0) {
+        log_error("dom_text_remove_backed: failed to get child index");
+        return false;
+    }
+
+    // Remove from Lambda parent Element's children array
+    MarkEditor editor(text_node->input, EDIT_MODE_INLINE);
+    Item result = editor.elmt_delete_child(
+        {.element = text_node->parent_element->native_element},
+        child_idx
+    );
+
+    if (!result.element) {
+        log_error("dom_text_remove_backed: failed to delete child");
+        return false;
+    }
+
+    // Update parent
+    text_node->parent_element->native_element = result.element;
+
+    // Remove from DOM sibling chain
+    if (text_node->prev_sibling) {
+        text_node->prev_sibling->next_sibling = text_node->next_sibling;
+    } else if (text_node->parent) {
+        text_node->parent->first_child = text_node->next_sibling;
+    }
+
+    if (text_node->next_sibling) {
+        text_node->next_sibling->prev_sibling = text_node->prev_sibling;
+    }
+
+    // Update sibling text nodes' child indices (they shifted after removal)
+    DomNode* sibling = text_node->next_sibling;
+    while (sibling) {
+        if (sibling->is_text()) {
+            DomText* text_sibling = static_cast<DomText*>(sibling);
+            if (dom_text_is_backed(text_sibling) && text_sibling->child_index > child_idx) {
+                text_sibling->child_index--;
+                log_debug("dom_text_remove_backed: updated sibling index from %lld to %lld", 
+                          text_sibling->child_index + 1, text_sibling->child_index);
+            }
+        }
+        sibling = sibling->next_sibling;
+    }
+
+    // Clear references
+    text_node->parent = nullptr;
+    text_node->native_string = nullptr;
+    text_node->input = nullptr;
+    text_node->parent_element = nullptr;
+    text_node->child_index = -1;
+
+    log_debug("dom_text_remove_backed: removed text node at index %lld", child_idx);
+
+    return true;
+}
+
+DomText* dom_element_append_text_backed(DomElement* parent, const char* text_content) {
+    if (!parent || !text_content) {
+        log_error("dom_element_append_text_backed: invalid parameters");
+        return nullptr;
+    }
+
+    if (!parent->native_element || !parent->input) {
+        log_error("dom_element_append_text_backed: parent element must be backed");
+        return nullptr;
+    }
+
+    // Create String item via MarkBuilder
+    MarkEditor editor(parent->input, EDIT_MODE_INLINE);
+    Item string_item = editor.builder()->createStringItem(text_content);
+
+    if (!string_item.pointer || get_type_id(string_item) != LMD_TYPE_STRING) {
+        log_error("dom_element_append_text_backed: failed to create string");
+        return nullptr;
+    }
+
+    // Append to parent Element's children via MarkEditor
+    Item result = editor.elmt_append_child(
+        {.element = parent->native_element},
+        string_item
+    );
+
+    if (!result.element) {
+        log_error("dom_element_append_text_backed: failed to append child");
+        return nullptr;
+    }
+
+    // Calculate child index (last position)
+    int64_t child_index = parent->native_element->length - 1;
+
+    // Create DomText wrapper with Lambda backing
+    DomText* text_node = dom_text_create_backed(
+        parent->pool,
+        (String*)string_item.pointer,
+        parent,
+        child_index
+    );
+
+    if (!text_node) {
+        log_error("dom_element_append_text_backed: failed to create DomText");
+        return nullptr;
+    }
+
+    // Add to DOM sibling chain
+    text_node->parent = parent;
+    if (!parent->first_child) {
+        // First child
+        parent->first_child = text_node;
+        text_node->prev_sibling = nullptr;
+        text_node->next_sibling = nullptr;
+    } else {
+        // Find last child and append
+        DomNode* last = parent->first_child;
+        while (last->next_sibling) {
+            last = last->next_sibling;
+        }
+        last->next_sibling = text_node;
+        text_node->prev_sibling = last;
+        text_node->next_sibling = nullptr;
+    }
+
+    // Update parent element pointer (INLINE mode: no-op, but kept for consistency)
+    parent->native_element = result.element;
+
+    log_debug("dom_element_append_text_backed: appended text '%s' at index %lld", text_content, child_index);
+
+    return text_node;
+}
+
+// ============================================================================
 // DOM Comment/DOCTYPE Node Implementation
 // ============================================================================
 
@@ -1272,7 +1553,7 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Pool
     return string_value ? string_value->chars : nullptr;
 }
 
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input) {
     if (!elem || !pool) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
         return nullptr;
@@ -1303,6 +1584,11 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     // create DomElement
     DomElement* dom_elem = dom_element_create(pool, tag_name, elem);
     if (!dom_elem) return nullptr;
+
+    // Set input if provided (enables backed text node creation)
+    if (input) {
+        dom_elem->input = input;
+    }
 
     // Cache id attribute from native element (if present)
     const char* id_value = extract_element_attribute(elem, "id", pool);
@@ -1365,7 +1651,7 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
             log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
-            DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem);
+            DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem, input);
 
             // skip if nullptr (e.g., comments, DOCTYPE were filtered out)
             if (!child_dom) {
@@ -1381,14 +1667,15 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
             // No manual linking needed!
 
         } else if (child_type == LMD_TYPE_STRING) {
-            // Text node - create DomText and append manually (no dom_text_append_child function)
+            // Text node - create backed DomText that references Lambda String
             String* text_str = (String*)child_item.pointer;
             if (text_str && text_str->len > 0) {
-                DomText* text_node = dom_text_create(pool, text_str->chars);
+                // Create backed text node (preserves Lambda String reference)
+                DomText* text_node = dom_text_create_backed(pool, text_str, dom_elem, i);
                 if (text_node) {
                     text_node->parent = dom_elem;
 
-                    // Add text node using the same append logic as dom_element_append_child
+                    // Add text node to DOM sibling chain
                     if (!dom_elem->first_child) {
                         // First child
                         dom_elem->first_child = text_node;
@@ -1410,10 +1697,22 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
                             last_child_node = next;
                         }
                     }
+
+                    log_debug("  Created backed text node at index %lld: '%s' (len=%zu)", 
+                              i, text_str->chars, text_str->len);
                 }
             }
         }
     }
 
     return dom_elem;
+}
+
+/**
+ * Build DOM tree from Lambda Element with Input context
+ * This version sets input on all created DomElement nodes for backed operations
+ */
+DomElement* build_dom_tree_from_element_with_input(Element* elem, Pool* pool, DomElement* parent, Input* input) {
+    // Simply call build_dom_tree_from_element with input parameter
+    return build_dom_tree_from_element(elem, pool, parent, input);
 }

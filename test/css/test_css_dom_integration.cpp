@@ -16,7 +16,7 @@ extern "C" {
 }
 
 // Forward declaration for helper function
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
 
 /**
  * Comprehensive DOM Integration Test Suite
