@@ -15,6 +15,9 @@
 #include "../../mark_editor.hpp"  // For MarkEditor
 #include "../../mark_builder.hpp" // For MarkBuilder
 
+// Forward declaration
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+
 /**
  * Convert HTML tag name string to Lexbor tag ID
  * This is called once during element creation to populate the tag_id field
@@ -1076,34 +1079,36 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
         return NULL;
     }
 
-    // Create new element with same tag name
-    DomElement* clone = dom_element_create(pool, source->tag_name, NULL);
-    if (!clone) {
+    // All DomElements must have backing Lambda element
+    if (!source->native_element || !source->input) {
+        log_error("dom_element_clone: source element must have native_element and input context");
         return NULL;
     }
 
-    // Copy attributes from native element if it exists
-    if (source->native_element) {
-        // Ensure clone has input context
-        if (!clone->input && source->input) {
-            clone->input = source->input;
-        }
-        
-        int attr_count = 0;
-        const char** attr_names = dom_element_get_attribute_names(source, &attr_count);
-        if (attr_names && clone->input) {
-            for (int i = 0; i < attr_count; i++) {
-                const char* value = dom_element_get_attribute(source, attr_names[i]);
-                if (value) {
-                    dom_element_set_attribute(clone, attr_names[i], value);
-                }
-            }
-        }
+    // Use MarkBuilder to deep copy the backing Lambda element
+    MarkBuilder builder(source->input);
+    Item cloned_elem = builder.deep_copy({.element = source->native_element});
+    
+    if (!cloned_elem.element) {
+        log_error("dom_element_clone: MarkBuilder deep_copy failed");
+        return NULL;
     }
 
-    // Copy classes
+    // Build DomElement wrapper from the cloned Lambda element
+    DomElement* clone = build_dom_tree_from_element(cloned_elem.element, pool, nullptr);
+    if (!clone) {
+        log_error("dom_element_clone: build_dom_tree_from_element failed");
+        return NULL;
+    }
+
+    // Set input context
+    clone->input = source->input;
+
+    // Copy classes (if not already copied by build_dom_tree_from_element)
     for (int i = 0; i < source->class_count; i++) {
-        dom_element_add_class(clone, source->class_names[i]);
+        if (!dom_element_has_class(clone, source->class_names[i])) {
+            dom_element_add_class(clone, source->class_names[i]);
+        }
     }
 
     // Deep copy style trees using style_tree_clone
@@ -1318,6 +1323,12 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
                 token = strtok(nullptr, " \t\n");
             }
         }
+    }
+
+    // Parse and apply inline style attribute
+    const char* style_value = extract_element_attribute(elem, "style", pool);
+    if (style_value) {
+        dom_element_apply_inline_style(dom_elem, style_value);
     }
 
     // extract rowspan and colspan attributes for table cells (td, th)
