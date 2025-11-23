@@ -1084,6 +1084,11 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
 
     // Copy attributes from native element if it exists
     if (source->native_element) {
+        // Ensure clone has input context
+        if (!clone->input && source->input) {
+            clone->input = source->input;
+        }
+        
         int attr_count = 0;
         const char** attr_names = dom_element_get_attribute_names(source, &attr_count);
         if (attr_names && clone->input) {

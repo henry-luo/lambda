@@ -1218,6 +1218,109 @@ TEST(ExternalInputTest, DeepCopyExternalElement) {
     pool_destroy(parent_pool);
 }
 
+// Test for DOM CRUD scenario: IMMUTABLE mode for adding attributes
+TEST_F(MarkEditorTest, DomCrudScenario_AddAttributeWithImmutableMode) {
+    // Step 1: Create element with initial attribute
+    MarkBuilder builder(input);
+    Item elem_item = builder.element("div")
+        .attr("_init", "placeholder")
+        .final();
+    
+    ASSERT_NE(elem_item.element, nullptr);
+    input->root = elem_item;
+    
+    // Verify initial attribute
+    ElementReader reader1(elem_item.element);
+    EXPECT_STREQ(reader1.get_attr("_init").cstring(), "placeholder");
+    
+    // Step 2: Use IMMUTABLE mode to add new attribute
+    MarkEditor editor(input, EDIT_MODE_IMMUTABLE);
+    Item value_item = editor.builder()->createStringItem("value1");
+    
+    Item updated = editor.elmt_update_attr(elem_item, "data-test", value_item);
+    ASSERT_NE(updated.element, nullptr);
+    
+    // In IMMUTABLE mode, a NEW element is created
+    EXPECT_NE(updated.element, elem_item.element) << "IMMUTABLE mode should create new element";
+    
+    // Verify both attributes exist in new element
+    ElementReader reader2(updated.element);
+    EXPECT_STREQ(reader2.get_attr("_init").cstring(), "placeholder");
+    EXPECT_STREQ(reader2.get_attr("data-test").cstring(), "value1");
+    
+    // Original element unchanged
+    ElementReader reader_orig(elem_item.element);
+    EXPECT_STREQ(reader_orig.get_attr("_init").cstring(), "placeholder");
+    EXPECT_EQ(reader_orig.get_attr("data-test").cstring(), nullptr) << "Original should not have new attribute";
+    
+    // Step 3: Add another attribute (use updated element as base)
+    Item value_item2 = editor.builder()->createStringItem("value2");
+    Item updated2 = editor.elmt_update_attr(updated, "data-test2", value_item2);
+    ASSERT_NE(updated2.element, nullptr);
+    
+    // Verify all three attributes
+    ElementReader reader3(updated2.element);
+    EXPECT_STREQ(reader3.get_attr("_init").cstring(), "placeholder");
+    EXPECT_STREQ(reader3.get_attr("data-test").cstring(), "value1");
+    EXPECT_STREQ(reader3.get_attr("data-test2").cstring(), "value2");
+}
+
+// Test for DOM CRUD scenario: INLINE mode for adding attributes (after fix)
+TEST_F(MarkEditorTest, DomCrudScenario_AddAttributeWithInlineMode) {
+    // Step 1: Create element with initial attribute
+    MarkBuilder builder(input);
+    Item elem_item = builder.element("div")
+        .attr("_init", "placeholder")
+        .final();
+    
+    ASSERT_NE(elem_item.element, nullptr);
+    input->root = elem_item;
+    
+    // Verify initial attribute
+    ElementReader reader1(elem_item.element);
+    EXPECT_STREQ(reader1.get_attr("_init").cstring(), "placeholder");
+    
+    Element* original_ptr = elem_item.element;
+    
+    // Step 2: Use INLINE mode to add new attribute (should work now!)
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item value_item = editor.builder()->createStringItem("value1");
+    
+    Item updated = editor.elmt_update_attr(elem_item, "data-test", value_item);
+    ASSERT_NE(updated.element, nullptr);
+    
+    // In INLINE mode, element pointer stays the same
+    EXPECT_EQ(updated.element, original_ptr) << "INLINE mode should modify in-place";
+    
+    // Verify both attributes exist
+    ElementReader reader2(updated.element);
+    EXPECT_STREQ(reader2.get_attr("_init").cstring(), "placeholder");
+    EXPECT_STREQ(reader2.get_attr("data-test").cstring(), "value1");
+    
+    // Step 3: Add another attribute
+    Item value_item2 = editor.builder()->createStringItem("value2");
+    Item updated2 = editor.elmt_update_attr(updated, "data-test2", value_item2);
+    ASSERT_NE(updated2.element, nullptr);
+    EXPECT_EQ(updated2.element, original_ptr) << "Should still be same element";
+    
+    // Verify all three attributes
+    ElementReader reader3(updated2.element);
+    EXPECT_STREQ(reader3.get_attr("_init").cstring(), "placeholder");
+    EXPECT_STREQ(reader3.get_attr("data-test").cstring(), "value1");
+    EXPECT_STREQ(reader3.get_attr("data-test2").cstring(), "value2");
+    
+    // Step 4: Update an existing attribute
+    Item value_item3 = editor.builder()->createStringItem("updated_value");
+    Item updated3 = editor.elmt_update_attr(updated2, "data-test", value_item3);
+    ASSERT_NE(updated3.element, nullptr);
+    
+    // Verify update worked
+    ElementReader reader4(updated3.element);
+    EXPECT_STREQ(reader4.get_attr("_init").cstring(), "placeholder");
+    EXPECT_STREQ(reader4.get_attr("data-test").cstring(), "updated_value");
+    EXPECT_STREQ(reader4.get_attr("data-test2").cstring(), "value2");
+}
+
 //==============================================================================
 // MAIN
 //==============================================================================

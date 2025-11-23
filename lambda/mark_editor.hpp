@@ -335,7 +335,8 @@ private:
     // Element helpers
     Item elmt_update_attr_inline(Element* elmt, String* attr_name, Item value);
     Item elmt_update_attr_immutable(Element* elmt, String* attr_name, Item value);
-    Item elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* builder, bool is_inline);
+    Item elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* builder, bool is_inline, 
+                                     String* new_attr_name = nullptr, Item new_attr_value = ItemNull);
     Item elmt_copy_with_new_children(Element* old_elmt, Item* new_children, int64_t new_length);
     Item elmt_delete_attr_inline(Element* elmt, String* attr_name);
     Item elmt_delete_attr_immutable(Element* elmt, String* attr_name);
