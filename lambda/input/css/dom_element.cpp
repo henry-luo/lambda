@@ -1399,8 +1399,15 @@ bool dom_text_remove(DomText* text_node) {
             DomText* text_sibling = static_cast<DomText*>(sibling);
             if (dom_text_is_backed(text_sibling) && text_sibling->child_index > child_idx) {
                 text_sibling->child_index--;
-                log_debug("dom_text_remove_backed: updated sibling index from %lld to %lld", 
+                log_debug("dom_text_remove: updated text sibling index from %lld to %lld", 
                           text_sibling->child_index + 1, text_sibling->child_index);
+            }
+        } else if (sibling->is_comment()) {
+            DomComment* comment_sibling = static_cast<DomComment*>(sibling);
+            if (comment_sibling->native_element && comment_sibling->child_index > child_idx) {
+                comment_sibling->child_index--;
+                log_debug("dom_text_remove: updated comment sibling index from %lld to %lld", 
+                          comment_sibling->child_index + 1, comment_sibling->child_index);
             }
         }
         sibling = sibling->next_sibling;
@@ -1719,11 +1726,14 @@ bool dom_comment_remove(DomComment* comment_node) {
         return false;
     }
 
+    // Store child index before deletion
+    int64_t child_idx = comment_node->child_index;
+
     // Remove from Lambda parent Element's children array
     MarkEditor editor(parent_elem->doc->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
         {.element = parent_elem->native_element},
-        comment_node->child_index
+        child_idx
     );
 
     if (!result.element) {
@@ -1746,11 +1756,32 @@ bool dom_comment_remove(DomComment* comment_node) {
         comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
     }
 
+    // Update sibling nodes' child indices (they shifted after removal)
+    DomNode* sibling = comment_node->next_sibling;
+    while (sibling) {
+        if (sibling->is_text()) {
+            DomText* text_sibling = static_cast<DomText*>(sibling);
+            if (dom_text_is_backed(text_sibling) && text_sibling->child_index > child_idx) {
+                text_sibling->child_index--;
+                log_debug("dom_comment_remove: updated text sibling index from %lld to %lld", 
+                          text_sibling->child_index + 1, text_sibling->child_index);
+            }
+        } else if (sibling->is_comment()) {
+            DomComment* comment_sibling = static_cast<DomComment*>(sibling);
+            if (comment_sibling->native_element && comment_sibling->child_index > child_idx) {
+                comment_sibling->child_index--;
+                log_debug("dom_comment_remove: updated comment sibling index from %lld to %lld", 
+                          comment_sibling->child_index + 1, comment_sibling->child_index);
+            }
+        }
+        sibling = sibling->next_sibling;
+    }
+
     // Clear references
     comment_node->parent = nullptr;
     comment_node->native_element = nullptr;
 
-    log_debug("dom_comment_remove: removed comment at index %lld", comment_node->child_index);
+    log_debug("dom_comment_remove: removed comment at index %lld", child_idx);
 
     return true;
 }
