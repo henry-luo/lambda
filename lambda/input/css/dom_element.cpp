@@ -323,7 +323,9 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
         );
         
         if (result.element) {
-            // Update native_element pointer (may have changed in inline mode)
+            // In INLINE mode, element pointer remains the same (in-place mutation)
+            // In IMMUTABLE mode, a new element would be created
+            // Since we're using INLINE mode, this assignment is a no-op but kept for consistency
             element->native_element = result.element;
             
             // Handle special attributes
@@ -385,7 +387,8 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
         );
         
         if (result.element) {
-            // Update native_element pointer
+            // In INLINE mode, element pointer remains the same
+            // This assignment is a no-op but kept for consistency
             element->native_element = result.element;
             
             // Clear cached fields
