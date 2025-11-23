@@ -9,7 +9,10 @@
 LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node);
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node);
 LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
-    DomNode* node = span->first_child;
+    DomNode* node = nullptr;
+    if (span->is_element()) {
+        node = static_cast<DomElement*>(span)->first_child;
+    }
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }

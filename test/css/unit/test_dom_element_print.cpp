@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "../../../lambda/lambda.hpp"
+#include "../../../lambda/input/input.hpp"
 #include "../../../lambda/input/css/dom_element.hpp"
 #include "../helpers/css_test_helpers.hpp"
 
@@ -13,11 +15,20 @@ extern "C" {
 class DomElementPrintTest : public ::testing::Test {
 protected:
     Pool* pool;
+    DomDocument* doc;
     StrBuf* buffer;
 
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
+        
+        // Create a minimal Input for DomDocument
+        Input* input = Input::create(pool);
+        ASSERT_NE(input, nullptr);
+        
+        doc = dom_document_create(input);
+        ASSERT_NE(doc, nullptr);
+        
         buffer = strbuf_new();
         ASSERT_NE(buffer, nullptr);
     }
@@ -25,6 +36,9 @@ protected:
     void TearDown() override {
         if (buffer) {
             strbuf_free(buffer);
+        }
+        if (doc) {
+            dom_document_destroy(doc);
         }
         if (pool) {
             pool_destroy(pool);
@@ -40,7 +54,7 @@ TEST_F(DomElementPrintTest, PrintDivWithId) {
     GTEST_SKIP() << "Skipping - requires native Element for attributes";
     
     // Create div element with ID
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    DomElement* div = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(div, nullptr);
 
     // Set ID attribute
@@ -57,7 +71,7 @@ TEST_F(DomElementPrintTest, PrintDivWithId) {
 
 TEST_F(DomElementPrintTest, PrintDivWithClass) {
     // Create div element with class
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    DomElement* div = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(div, nullptr);
 
     // Add class
@@ -74,11 +88,11 @@ TEST_F(DomElementPrintTest, PrintDivWithClass) {
 
 TEST_F(DomElementPrintTest, PrintNestedElements) {
     // Create parent div
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    DomElement* div = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(div, nullptr);
 
     // Create child span
-    DomElement* span = dom_element_create(pool, "span", nullptr);
+    DomElement* span = dom_element_create(doc, "span", nullptr);
     ASSERT_NE(span, nullptr);
 
     // Append child (only works for DomElement to DomElement)
@@ -98,7 +112,7 @@ TEST_F(DomElementPrintTest, PrintNestedElements) {
 
 TEST_F(DomElementPrintTest, PrintWithIndentation) {
     // Create simple element
-    DomElement* p = dom_element_create(pool, "p", nullptr);
+    DomElement* p = dom_element_create(doc, "p", nullptr);
     ASSERT_NE(p, nullptr);
 
     // Print with indentation level 3
@@ -118,47 +132,47 @@ TEST_F(DomElementPrintTest, PrintComplexHTMLDocument) {
     GTEST_SKIP() << "Skipping - requires native Element for attributes";
     
     // Create a structure similar to the background-001.html test case
-    DomElement* html = dom_element_create(pool, "html", nullptr);
+    DomElement* html = dom_element_create(doc, "html", nullptr);
     ASSERT_NE(html, nullptr);
 
-    DomElement* head = dom_element_create(pool, "head", nullptr);
+    DomElement* head = dom_element_create(doc, "head", nullptr);
     ASSERT_NE(head, nullptr);
 
-    DomElement* title = dom_element_create(pool, "title", nullptr);
+    DomElement* title = dom_element_create(doc, "title", nullptr);
     ASSERT_NE(title, nullptr);
 
-    DomElement* link1 = dom_element_create(pool, "link", nullptr);
+    DomElement* link1 = dom_element_create(doc, "link", nullptr);
     ASSERT_NE(link1, nullptr);
     dom_element_set_attribute(link1, "rel", "author");
     dom_element_set_attribute(link1, "title", "Microsoft");
     dom_element_set_attribute(link1, "href", "http://www.microsoft.com/");
 
-    DomElement* link2 = dom_element_create(pool, "link", nullptr);
+    DomElement* link2 = dom_element_create(doc, "link", nullptr);
     ASSERT_NE(link2, nullptr);
     dom_element_set_attribute(link2, "rel", "help");
     dom_element_set_attribute(link2, "href", "http://www.w3.org/TR/CSS21/colors.html#propdef-background");
 
-    DomElement* meta1 = dom_element_create(pool, "meta", nullptr);
+    DomElement* meta1 = dom_element_create(doc, "meta", nullptr);
     ASSERT_NE(meta1, nullptr);
     dom_element_set_attribute(meta1, "name", "flags");
     dom_element_set_attribute(meta1, "content", "");
 
-    DomElement* meta2 = dom_element_create(pool, "meta", nullptr);
+    DomElement* meta2 = dom_element_create(doc, "meta", nullptr);
     ASSERT_NE(meta2, nullptr);
     dom_element_set_attribute(meta2, "name", "assert");
     dom_element_set_attribute(meta2, "content", "Background with color only sets the background of the element to the color specified.");
 
-    DomElement* style = dom_element_create(pool, "style", nullptr);
+    DomElement* style = dom_element_create(doc, "style", nullptr);
     ASSERT_NE(style, nullptr);
     dom_element_set_attribute(style, "type", "text/css");
 
-    DomElement* body = dom_element_create(pool, "body", nullptr);
+    DomElement* body = dom_element_create(doc, "body", nullptr);
     ASSERT_NE(body, nullptr);
 
-    DomElement* p = dom_element_create(pool, "p", nullptr);
+    DomElement* p = dom_element_create(doc, "p", nullptr);
     ASSERT_NE(p, nullptr);
 
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    DomElement* div = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(div, nullptr);
 
     // Build the structure
@@ -210,7 +224,7 @@ TEST_F(DomElementPrintTest, PrintElementWithMultipleAttributes) {
     GTEST_SKIP() << "Skipping - requires native Element for attributes";
     
     // Create an element with many attributes like a real HTML element
-    DomElement* form = dom_element_create(pool, "form", nullptr);
+    DomElement* form = dom_element_create(doc, "form", nullptr);
     ASSERT_NE(form, nullptr);
 
     dom_element_set_attribute(form, "id", "contact-form");
@@ -241,7 +255,7 @@ TEST_F(DomElementPrintTest, PrintElementWithMultipleAttributes) {
 
 TEST_F(DomElementPrintTest, PrintElementWithPseudoStates) {
     // Create an input element with various pseudo-states
-    DomElement* input = dom_element_create(pool, "input", nullptr);
+    DomElement* input = dom_element_create(doc, "input", nullptr);
     ASSERT_NE(input, nullptr);
 
     dom_element_set_attribute(input, "type", "text");
@@ -266,43 +280,43 @@ TEST_F(DomElementPrintTest, PrintElementWithPseudoStates) {
 
 TEST_F(DomElementPrintTest, PrintDeeplyNestedStructure) {
     // Create a deeply nested structure to test indentation
-    DomElement* container = dom_element_create(pool, "div", nullptr);
+    DomElement* container = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(container, nullptr);
     dom_element_add_class(container, "container");
 
-    DomElement* row = dom_element_create(pool, "div", nullptr);
+    DomElement* row = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(row, nullptr);
     dom_element_add_class(row, "row");
 
-    DomElement* col = dom_element_create(pool, "div", nullptr);
+    DomElement* col = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(col, nullptr);
     dom_element_add_class(col, "col-md-6");
 
-    DomElement* card = dom_element_create(pool, "div", nullptr);
+    DomElement* card = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(card, nullptr);
     dom_element_add_class(card, "card");
 
-    DomElement* card_header = dom_element_create(pool, "div", nullptr);
+    DomElement* card_header = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(card_header, nullptr);
     dom_element_add_class(card_header, "card-header");
 
-    DomElement* card_title = dom_element_create(pool, "h3", nullptr);
+    DomElement* card_title = dom_element_create(doc, "h3", nullptr);
     ASSERT_NE(card_title, nullptr);
     dom_element_add_class(card_title, "card-title");
 
-    DomElement* card_body = dom_element_create(pool, "div", nullptr);
+    DomElement* card_body = dom_element_create(doc, "div", nullptr);
     ASSERT_NE(card_body, nullptr);
     dom_element_add_class(card_body, "card-body");
 
-    DomElement* list = dom_element_create(pool, "ul", nullptr);
+    DomElement* list = dom_element_create(doc, "ul", nullptr);
     ASSERT_NE(list, nullptr);
     dom_element_add_class(list, "list-group");
 
-    DomElement* item1 = dom_element_create(pool, "li", nullptr);
+    DomElement* item1 = dom_element_create(doc, "li", nullptr);
     ASSERT_NE(item1, nullptr);
     dom_element_add_class(item1, "list-group-item");
 
-    DomElement* item2 = dom_element_create(pool, "li", nullptr);
+    DomElement* item2 = dom_element_create(doc, "li", nullptr);
     ASSERT_NE(item2, nullptr);
     dom_element_add_class(item2, "list-group-item");
 
@@ -347,18 +361,18 @@ TEST_F(DomElementPrintTest, PrintFormWithInputElements) {
     GTEST_SKIP() << "Skipping - requires native Element for attributes";
     
     // Create a realistic form structure
-    DomElement* form = dom_element_create(pool, "form", nullptr);
+    DomElement* form = dom_element_create(doc, "form", nullptr);
     ASSERT_NE(form, nullptr);
     dom_element_set_attribute(form, "id", "signup-form");
     dom_element_add_class(form, "needs-validation");
 
-    DomElement* fieldset = dom_element_create(pool, "fieldset", nullptr);
+    DomElement* fieldset = dom_element_create(doc, "fieldset", nullptr);
     ASSERT_NE(fieldset, nullptr);
 
-    DomElement* legend = dom_element_create(pool, "legend", nullptr);
+    DomElement* legend = dom_element_create(doc, "legend", nullptr);
     ASSERT_NE(legend, nullptr);
 
-    DomElement* email_input = dom_element_create(pool, "input", nullptr);
+    DomElement* email_input = dom_element_create(doc, "input", nullptr);
     ASSERT_NE(email_input, nullptr);
     dom_element_set_attribute(email_input, "type", "email");
     dom_element_set_attribute(email_input, "id", "email");
@@ -367,7 +381,7 @@ TEST_F(DomElementPrintTest, PrintFormWithInputElements) {
     dom_element_set_attribute(email_input, "placeholder", "Enter your email");
     dom_element_add_class(email_input, "form-control");
 
-    DomElement* password_input = dom_element_create(pool, "input", nullptr);
+    DomElement* password_input = dom_element_create(doc, "input", nullptr);
     ASSERT_NE(password_input, nullptr);
     dom_element_set_attribute(password_input, "type", "password");
     dom_element_set_attribute(password_input, "id", "password");
@@ -376,7 +390,7 @@ TEST_F(DomElementPrintTest, PrintFormWithInputElements) {
     dom_element_set_attribute(password_input, "minlength", "8");
     dom_element_add_class(password_input, "form-control");
 
-    DomElement* checkbox = dom_element_create(pool, "input", nullptr);
+    DomElement* checkbox = dom_element_create(doc, "input", nullptr);
     ASSERT_NE(checkbox, nullptr);
     dom_element_set_attribute(checkbox, "type", "checkbox");
     dom_element_set_attribute(checkbox, "id", "agree");
@@ -384,7 +398,7 @@ TEST_F(DomElementPrintTest, PrintFormWithInputElements) {
     dom_element_set_attribute(checkbox, "value", "yes");
     checkbox->pseudo_state = PSEUDO_STATE_CHECKED | PSEUDO_STATE_DISABLED;
 
-    DomElement* submit_btn = dom_element_create(pool, "button", nullptr);
+    DomElement* submit_btn = dom_element_create(doc, "button", nullptr);
     ASSERT_NE(submit_btn, nullptr);
     dom_element_set_attribute(submit_btn, "type", "submit");
     dom_element_add_class(submit_btn, "btn");
@@ -437,42 +451,42 @@ TEST_F(DomElementPrintTest, PrintTableStructure) {
     GTEST_SKIP() << "Skipping - requires native Element for attributes";
     
     // Create a table structure to test complex nesting
-    DomElement* table = dom_element_create(pool, "table", nullptr);
+    DomElement* table = dom_element_create(doc, "table", nullptr);
     ASSERT_NE(table, nullptr);
     dom_element_add_class(table, "table");
     dom_element_add_class(table, "table-striped");
 
-    DomElement* thead = dom_element_create(pool, "thead", nullptr);
+    DomElement* thead = dom_element_create(doc, "thead", nullptr);
     ASSERT_NE(thead, nullptr);
 
-    DomElement* header_row = dom_element_create(pool, "tr", nullptr);
+    DomElement* header_row = dom_element_create(doc, "tr", nullptr);
     ASSERT_NE(header_row, nullptr);
 
-    DomElement* th1 = dom_element_create(pool, "th", nullptr);
+    DomElement* th1 = dom_element_create(doc, "th", nullptr);
     ASSERT_NE(th1, nullptr);
     dom_element_set_attribute(th1, "scope", "col");
 
-    DomElement* th2 = dom_element_create(pool, "th", nullptr);
+    DomElement* th2 = dom_element_create(doc, "th", nullptr);
     ASSERT_NE(th2, nullptr);
     dom_element_set_attribute(th2, "scope", "col");
 
-    DomElement* th3 = dom_element_create(pool, "th", nullptr);
+    DomElement* th3 = dom_element_create(doc, "th", nullptr);
     ASSERT_NE(th3, nullptr);
     dom_element_set_attribute(th3, "scope", "col");
 
-    DomElement* tbody = dom_element_create(pool, "tbody", nullptr);
+    DomElement* tbody = dom_element_create(doc, "tbody", nullptr);
     ASSERT_NE(tbody, nullptr);
 
-    DomElement* row1 = dom_element_create(pool, "tr", nullptr);
+    DomElement* row1 = dom_element_create(doc, "tr", nullptr);
     ASSERT_NE(row1, nullptr);
 
-    DomElement* td1 = dom_element_create(pool, "td", nullptr);
+    DomElement* td1 = dom_element_create(doc, "td", nullptr);
     ASSERT_NE(td1, nullptr);
 
-    DomElement* td2 = dom_element_create(pool, "td", nullptr);
+    DomElement* td2 = dom_element_create(doc, "td", nullptr);
     ASSERT_NE(td2, nullptr);
 
-    DomElement* td3 = dom_element_create(pool, "td", nullptr);
+    DomElement* td3 = dom_element_create(doc, "td", nullptr);
     ASSERT_NE(td3, nullptr);
 
     // Build table structure

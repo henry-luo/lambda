@@ -146,7 +146,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         }
         // else HTM_TAG_IMG
     } else {  // layout block child content
-        DomNode *child = block->node->first_child;
+        DomNode *child = nullptr;
+        if (block->node->is_element()) {
+            child = static_cast<DomElement*>(block->node)->first_child;
+        }
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (block->display.inner == CSS_VALUE_FLOW) {

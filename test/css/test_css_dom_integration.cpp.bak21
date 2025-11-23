@@ -2010,7 +2010,8 @@ TEST_F(DomIntegrationTest, DomComment_EmptyContent) {
 
 TEST_F(DomIntegrationTest, DomComment_NullParameters) {
     GTEST_SKIP() << "dom_comment_create now requires parent element and native Element*";
-    DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* comment3 = nullptr; DomComment* doctype = nullptr; 
+    DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr; 
+    DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* comment3 = nullptr;
     // NULL tag name should fail
 //     DomComment* comment1 = dom_comment_create(pool, DOM_NODE_COMMENT, nullptr, "content");
     EXPECT_EQ(comment1, nullptr);
@@ -2440,8 +2441,6 @@ TEST_F(DomIntegrationTest, MixedTree_DoctypeAtStart) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, Memory_TextNodeDestroy) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; return;
-    DomText* text = nullptr; DomComment* comment = nullptr; DomElement* div = nullptr; DomElement* span = nullptr;
 //     DomText* text = dom_text_create(pool, "Test text");
     ASSERT_NE(text, nullptr);
 
@@ -2450,8 +2449,6 @@ TEST_F(DomIntegrationTest, Memory_TextNodeDestroy) {
 }
 
 TEST_F(DomIntegrationTest, Memory_CommentNodeDestroy) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; return;
-    DomText* text = nullptr; DomComment* comment = nullptr; DomElement* div = nullptr; DomElement* span = nullptr;
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "Test comment");
     ASSERT_NE(comment, nullptr);
 
@@ -2460,12 +2457,10 @@ TEST_F(DomIntegrationTest, Memory_CommentNodeDestroy) {
 }
 
 TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; return;
-    DomText* text = nullptr; DomComment* comment = nullptr; DomElement* div = nullptr; DomElement* span = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
+    DomElement* div = dom_element_create(doc, "div", nullptr);
 //     DomText* text = dom_text_create(pool, "Text");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "Comment");
-//     DomElement* span = dom_element_create(doc, "span", nullptr);
+    DomElement* span = dom_element_create(doc, "span", nullptr);
 
     // Manually link nodes
     text->parent = div;

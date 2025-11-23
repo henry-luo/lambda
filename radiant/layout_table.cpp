@@ -29,7 +29,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
 // Safe DOM traversal helpers
 static inline DomNode* first_element_child(DomNode* n) {
     if (!n) return nullptr;
-    DomNode* c = n->first_child;
+    DomNode* c = nullptr;
+    if (n->is_element()) {
+        c = static_cast<DomElement*>(n)->first_child;
+    }
     while (c && !c->is_element()) c = c->next_sibling;
     return c;
 }
@@ -346,7 +349,11 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 log_debug("Laying out caption with width=%d", caption_width);
 
                 // Layout caption content (text, inline elements)
-                for (DomNode* cc = child->first_child; cc; cc = cc->next_sibling) {
+                DomNode* cc = nullptr;
+                if (child->is_element()) {
+                    cc = static_cast<DomElement*>(child)->first_child;
+                }
+                for (; cc; cc = cc->next_sibling) {
                     layout_flow_node(lycon, cc);
                 }
 
@@ -442,7 +449,11 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                         // Initial layout for content measurement
                                         // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                                         // We'll re-layout later with correct parent width after cell dimensions are set
-                                        for (DomNode* cc = cellNode->first_child; cc; cc = cc->next_sibling) {
+                                        DomNode* cc = nullptr;
+                                        if (cellNode->is_element()) {
+                                            cc = static_cast<DomElement*>(cellNode)->first_child;
+                                        }
+                                        for (; cc; cc = cc->next_sibling) {
                                             layout_flow_node(lycon, cc);
                                         }
 
@@ -517,7 +528,11 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                             // Initial layout for content measurement
                             // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                             // We'll re-layout later with correct parent width after cell dimensions are set
-                            for (DomNode* cc = cellNode->first_child; cc; cc = cc->next_sibling) {
+                            DomNode* cc = nullptr;
+                            if (cellNode->is_element()) {
+                                cc = static_cast<DomElement*>(cellNode)->first_child;
+                            }
+                            for (; cc; cc = cc->next_sibling) {
                                 layout_flow_node(lycon, cc);
                             }
 
@@ -626,7 +641,11 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
 
     // Re-layout children with correct parent width
     // Child blocks without explicit width will now inherit content_width via pa_block.width
-    for (DomNode* cc = tcell->node->first_child; cc; cc = cc->next_sibling) {
+    DomNode* cc = nullptr;
+    if (tcell->node->is_element()) {
+        cc = static_cast<DomElement*>(tcell->node)->first_child;
+    }
+    for (; cc; cc = cc->next_sibling) {
         layout_flow_node(lycon, cc);
     }
 

@@ -32,7 +32,7 @@ extern "C" {
     Element* root_elem = get_root_element(input);
     ASSERT_NE(root_elem, nullptr) << "No root element found in parsed HTML";
 
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr) << "Failed to convert to DomElement";y Queries
  *
  * Updated to use actual HTML parsing like html roundtrip test.
@@ -56,30 +56,15 @@ String* create_lambda_string(const char* text) {
 }
 
 // Forward declaration
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
-
-// Helper to recursively set Input context on all DomElements in a tree
-void set_input_context_recursive(DomElement* elem, Input* input) {
-    if (!elem || !input) return;
-    
-    elem->input = input;
-    
-    // Recursively set on all children - but check node_type first!
-    for (DomNode* child = elem->first_child; child != nullptr; child = child->next_sibling) {
-        if (child->node_type == DOM_NODE_ELEMENT) {
-            set_input_context_recursive((DomElement*)child, input);
-        }
-    }
-}
+DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // Helper function to convert Lambda Element to DomElement recursively
 // This properly handles Lambda's Element structure
-DomElement* lambda_element_to_dom_element(Element* elem, Pool* pool, Input* input = nullptr) {
+DomElement* lambda_element_to_dom_element(Element* elem, DomDocument* doc) {
     if (!elem || elem->type_id != LMD_TYPE_ELEMENT) return nullptr;
 
-    // Pass input to enable backing (sets native_element, input fields properly)
-    // If input is not provided, the DOM tree will be unbacked (legacy behavior)
-    DomElement* dom_elem = build_dom_tree_from_element(elem, pool, nullptr, input);
+    // Build DOM tree with DomDocument
+    DomElement* dom_elem = build_dom_tree_from_element(elem, doc, nullptr);
     
     return dom_elem;
 }
@@ -200,13 +185,18 @@ DomElement* find_element_by_tag(DomElement* root, const char* tag_name) {
 class HtmlCssIntegrationTest : public ::testing::Test {
 protected:
     Pool* pool;
+    DomDocument* doc;
 
     void SetUp() override {
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
+        doc = nullptr;  // Will be created per test when needed
     }
 
     void TearDown() override {
+        if (doc) {
+            dom_document_destroy(doc);
+        }
         if (pool) {
             pool_destroy(pool);
         }
@@ -306,11 +296,18 @@ protected:
         // <div id="main" class="container">
         //   <p class="text">Hello</p>
         // </div>
-        DomElement* div = dom_element_create(pool, "div", nullptr);
+        
+        // Create a minimal Input for DOM document
+        if (!doc) {
+            Input* input = Input::create(pool);
+            doc = dom_document_create(input);
+        }
+        
+        DomElement* div = dom_element_create(doc, "div", nullptr);
         dom_element_set_attribute(div, "id", "main");
         dom_element_set_attribute(div, "class", "container");
 
-        DomElement* p = dom_element_create(pool, "p", nullptr);
+        DomElement* p = dom_element_create(doc, "p", nullptr);
         dom_element_set_attribute(p, "class", "text");
         dom_element_append_child(div, p);
 
@@ -332,7 +329,7 @@ TEST_F(HtmlCssIntegrationTest, ParseSimpleHTML) {
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     // Verify structure
@@ -361,7 +358,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithAttributes) {
     ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
 
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     // Check attributes (with more lenient checks since parsing may vary)
@@ -396,7 +393,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithInlineStyles) {
     ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
 
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     // Check if style attribute was parsed
@@ -463,8 +460,12 @@ TEST_F(HtmlCssIntegrationTest, ExtractCSSFromStyleTag) {
 }
 
 TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
+    // Create DomDocument for standalone test
+    Input* input = Input::create(pool);
+    doc = dom_document_create(input);
+    
     // Create a simple DOM element
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    DomElement* div = dom_element_create(doc, "div", nullptr);
     dom_element_add_class(div, "box");
 
     // Create CSS declaration for .box { color: blue; }
@@ -499,7 +500,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
     Element* root_elem = get_root_element(input);
     ASSERT_NE(root_elem, nullptr);
     
-    DomElement* div = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* div = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(div, nullptr);
 
     // Apply stylesheet rule: .box { color: blue; }
@@ -522,7 +523,11 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
 }
 
 TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    // Create DomDocument for standalone test
+    Input* input = Input::create(pool);
+    doc = dom_document_create(input);
+    
+    DomElement* div = dom_element_create(doc, "div", nullptr);
     dom_element_set_attribute(div, "id", "main");
     dom_element_add_class(div, "box");
 
@@ -573,7 +578,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
 
     // Step 2: Convert to DomElement
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
     printf("DOM element created: tag=%s\n", dom_root->tag_name);
@@ -618,7 +623,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_WithInlineStyle) {
 
     // Step 2: Convert to DomElement
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
     // Step 3: Check if inline style was applied during conversion
@@ -651,7 +656,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_NestedElements) {
 
     // Step 2: Convert to DomElement
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
     printf("Parent element: tag=%s\n", dom_root->tag_name);
@@ -709,7 +714,7 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
         }
     }
 
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     if (dom_root) {
@@ -732,7 +737,7 @@ TEST_F(HtmlCssIntegrationTest, LoadAndParseSampleHTML) {
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     printf("Successfully parsed sample.html: tag=%s\n", dom_root->tag_name);
@@ -757,7 +762,7 @@ TEST_F(HtmlCssIntegrationTest, VerifyInlineStylesInSampleHTML) {
     ASSERT_NE(input, nullptr);
 
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     // Find element with inline style (the custom-elmt has extensive inline styles)
@@ -796,7 +801,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
         processed++;
 
         Element* root_elem = get_root_element(input);
-        DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+        DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
             printf("  ✓ Converted to DomElement: tag=%s\n", dom_root->tag_name);
@@ -828,7 +833,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_EmptyDocument) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -841,7 +846,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_SingleDiv) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     // Should be able to extract CSS if present
@@ -858,7 +863,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_FlexContainer) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -876,7 +881,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_DisplayTypes) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -889,7 +894,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_BoxModel) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -914,7 +919,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_BasicLayout) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -932,7 +937,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_WrapAlignment) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -945,7 +950,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_NestedContent) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -962,7 +967,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_BasicLayout) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -980,7 +985,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_TemplateAreas) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -993,7 +998,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_NestedGrid) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1010,7 +1015,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BasicTable) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     // Find table element
@@ -1029,7 +1034,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BorderCollapse) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1042,7 +1047,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_ColspanRowspan) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1059,7 +1064,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_FloatLeft) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -1077,7 +1082,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Absolute) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1090,7 +1095,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Combined) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1107,7 +1112,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_FloatClear) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1120,7 +1125,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Borders) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -1138,7 +1143,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Overflow) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1155,7 +1160,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_FontFamilies) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -1173,7 +1178,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_Wrapping) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1190,7 +1195,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Page_Sample2) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -1206,7 +1211,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Page_Sample5) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1223,7 +1228,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Medium_DocumentStructure) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     // Try to extract CSS to verify document structure
@@ -1243,7 +1248,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Medium_NestedLists) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1260,7 +1265,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Colors) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     std::string css = extract_css_from_html(root_elem);
@@ -1278,7 +1283,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Margins) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1291,7 +1296,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Images) {
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr);
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     EXPECT_NE(dom_root, nullptr);
 }
 
@@ -1354,7 +1359,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
         parsed++;
 
         Element* root_elem = get_root_element(input);
-        DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+        DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
             converted++;
@@ -1392,7 +1397,11 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
 // ============================================================================
 
 TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    // Create DomDocument for standalone test
+    Input* input = Input::create(pool);
+    doc = dom_document_create(input);
+    
+    DomElement* div = dom_element_create(doc, "div", nullptr);
 
     // Apply many properties to test AVL tree performance
     const int num_properties = 50;
@@ -1433,7 +1442,11 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
 }
 
 TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
-    DomElement* div = dom_element_create(pool, "div", nullptr);
+    // Create DomDocument for standalone test
+    Input* input = Input::create(pool);
+    doc = dom_document_create(input);
+    
+    DomElement* div = dom_element_create(doc, "div", nullptr);
 
     // Apply color with different specificities
     // 1. Element selector (0,0,0,1)
@@ -1484,7 +1497,7 @@ TEST_F(HtmlCssIntegrationTest, NestedElements_StyleInheritance) {
     ASSERT_NE(input, nullptr);
 
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     // Parent should have inline color
@@ -1517,7 +1530,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteFlow_HTMLWithCSSAndInlineStyles) {
 
     // 2. Convert to DomElement
     Element* root_elem = get_root_element(input);
-    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool, input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr);
 
     // 3. Extract CSS (would be parsed separately in full implementation)

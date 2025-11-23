@@ -499,7 +499,8 @@ struct View {
         return text ? (unsigned char*)text->text : nullptr;
     }
     inline DomNode* node_first_child() const {
-        return node ? node->first_child : nullptr;
+        if (!node || !node->is_element()) return nullptr;
+        return static_cast<DomElement*>(node)->first_child;
     }
     inline DomNode* node_next_sibling() const {
         return node ? node->next_sibling : nullptr;

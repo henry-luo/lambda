@@ -35,7 +35,6 @@ enum DomNodeType {
 struct DomNode {
     DomNodeType node_type;   // Node type discriminator
     DomNode* parent;         // Parent node (nullptr at root)
-    DomNode* first_child;    // First child node (nullptr if no children)
     DomNode* next_sibling;   // Next sibling node (nullptr if last)
     DomNode* prev_sibling;   // Previous sibling (nullptr if first)
 
@@ -74,7 +73,7 @@ struct DomNode {
 
 protected:
     // Constructor (only callable by derived classes)
-    DomNode(DomNodeType type) : node_type(type), parent(nullptr), first_child(nullptr),
+    DomNode(DomNodeType type) : node_type(type), parent(nullptr),
         next_sibling(nullptr), prev_sibling(nullptr) {}
 };
 
@@ -83,24 +82,13 @@ protected:
 // ============================================================================
 
 /**
- * Create a new DomText node (unbacked - standalone copy)
- * @param pool Memory pool for allocations
- * @param text Text content (will be copied)
- * @return New DomText or NULL on failure
- * @deprecated Use dom_text_create_backed for Lambda-backed text nodes
- */
-DomText* dom_text_create(Pool* pool, const char* text);
-
-/**
- * Create a new DomText node backed by Lambda String (bidirectional sync)
- * @param pool Memory pool for allocations
+ * Create a new DomText node backed by Lambda String
  * @param native_string Pointer to Lambda String (will be referenced, not copied)
- * @param parent_element Parent DomElement (for MarkEditor operations)
+ * @param parent_element Parent DomElement (provides document context)
  * @param child_index Index in parent's native_element->items array
  * @return New DomText or NULL on failure
  */
-DomText* dom_text_create_backed(Pool* pool, String* native_string, 
-                                 DomElement* parent_element, int64_t child_index);
+DomText* dom_text_create(String* native_string, DomElement* parent_element, int64_t child_index);
 
 /**
  * Destroy a DomText node
@@ -116,27 +104,17 @@ void dom_text_destroy(DomText* text_node);
 const char* dom_text_get_content(DomText* text_node);
 
 /**
- * Set text content (unbacked - updates local copy only)
+ * Set text content (backed - updates Lambda String via MarkEditor)
  * @param text_node Text node
- * @param text New text content (will be copied)
+ * @param text New text content
  * @return true on success, false on failure
- * @deprecated Use dom_text_set_content_backed for Lambda-backed text nodes
  */
 bool dom_text_set_content(DomText* text_node, const char* text);
 
 /**
- * Set text content (backed - syncs with Lambda String)
- * Updates both DomText and underlying Lambda String via MarkEditor
- * @param text_node Text node (must be backed)
- * @param text New text content
- * @return true on success, false on failure
- */
-bool dom_text_set_content_backed(DomText* text_node, const char* text);
-
-/**
- * Check if text node is backed by Lambda String
+ * Check if text node is backed by Lambda String (always true now)
  * @param text_node Text node
- * @return true if backed, false if standalone copy
+ * @return true if backed, false otherwise
  */
 bool dom_text_is_backed(DomText* text_node);
 
@@ -149,26 +127,33 @@ bool dom_text_is_backed(DomText* text_node);
 int64_t dom_text_get_child_index(DomText* text_node);
 
 /**
- * Remove text node from parent (backed - syncs with Lambda)
+ * Remove text node from parent (syncs with Lambda)
  * Removes from both DOM tree and Lambda Element's children array
- * @param text_node Text node to remove (must be backed)
+ * @param text_node Text node to remove
  * @return true on success, false on failure
  */
-bool dom_text_remove_backed(DomText* text_node);
+bool dom_text_remove(DomText* text_node);
+
+/**
+ * Append a text node to a parent element (updates Lambda tree)
+ * @param parent Parent DomElement
+ * @param text_content Text content string
+ * @return New DomText or NULL on failure
+ */
+DomText* dom_element_append_text(DomElement* parent, const char* text_content);
 
 // ============================================================================
 // DOM Comment/DOCTYPE Node API
 // ============================================================================
 
 /**
- * Create a new DomComment node
- * @param pool Memory pool for allocations
- * @param node_type Type of node (DOM_NODE_COMMENT, DOM_NODE_DOCTYPE, etc.)
- * @param tag_name Node name (e.g., "!--", "!DOCTYPE")
- * @param content Content/text (will be copied)
- * @return New DomComment or NULL on failure
+ * Create a new DomComment node (backed by Lambda Element)
+ * @param native_element Lambda Element with tag "!--" or "!DOCTYPE" (required)
+ * @param parent_element Parent DomElement (provides document context)
+ * @param child_index Index in parent's native_element->items array
+ * @return New backed DomComment or NULL on failure
  */
-DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* tag_name, const char* content);
+DomComment* dom_comment_create(Element* native_element, DomElement* parent_element, int64_t child_index);
 
 /**
  * Destroy a DomComment node
@@ -177,41 +162,30 @@ DomComment* dom_comment_create(Pool* pool, DomNodeType node_type, const char* ta
 void dom_comment_destroy(DomComment* comment_node);
 
 /**
- * Create a backed DomComment node (connected to Lambda Element)
- * @param pool Memory pool for allocations
- * @param native_element Lambda Element with tag "!--" or "!DOCTYPE"
- * @param parent_element Parent DomElement
- * @param child_index Index in parent's native_element->items array
- * @return New backed DomComment or NULL on failure
- */
-DomComment* dom_comment_create_backed(Pool* pool, Element* native_element, 
-                                     DomElement* parent_element, int64_t child_index);
-
-/**
- * Set comment content (backed version - updates Lambda Element)
+ * Set comment content (updates Lambda Element)
  * @param comment_node Comment node to update
  * @param new_content New content string
  * @return true on success, false on failure
  */
-bool dom_comment_set_content_backed(DomComment* comment_node, const char* new_content);
+bool dom_comment_set_content(DomComment* comment_node, const char* new_content);
 
 /**
- * Append a backed comment to a parent element (updates Lambda tree)
+ * Append a comment to a parent element (updates Lambda tree)
  * @param parent Parent DomElement
  * @param comment_content Comment content string
  * @return New DomComment or NULL on failure
  */
-DomComment* dom_element_append_comment_backed(DomElement* parent, const char* comment_content);
+DomComment* dom_element_append_comment(DomElement* parent, const char* comment_content);
 
 /**
- * Remove a backed comment node (updates Lambda tree)
+ * Remove a comment node (updates Lambda tree)
  * @param comment_node Comment node to remove
  * @return true on success, false on failure
  */
-bool dom_comment_remove_backed(DomComment* comment_node);
+bool dom_comment_remove(DomComment* comment_node);
 
 /**
- * Check if comment is backed by Lambda Element
+ * Check if comment is backed by Lambda Element (always true now)
  * @param comment_node Comment node to check
  * @return true if backed, false otherwise
  */
