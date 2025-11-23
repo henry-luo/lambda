@@ -5,6 +5,7 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lambda/input/input.hpp"
+#include "../lib/log.h"
 }
 
 #include "../lambda/input/css/dom_element.hpp"
@@ -28,6 +29,8 @@ protected:
     DomDocument* doc;   // DOM document for tree building
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Create a test Input context for MarkBuilder
         // Use a minimal HTML source to create the Input context
         char* dummy_source = strdup("<html></html>");

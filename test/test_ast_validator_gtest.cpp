@@ -13,6 +13,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+extern "C" {
+#include "../lib/log.h"
+}
+
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/mark_builder.hpp"
@@ -80,6 +84,8 @@ protected:
     Input* input = nullptr;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         test_pool = pool_create();
         ASSERT_NE(test_pool, nullptr) << "Failed to create memory pool";
 

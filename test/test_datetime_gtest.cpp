@@ -3,6 +3,7 @@
 extern "C" {
 #include "../lib/datetime.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 }
 
 class DateTimeTest : public ::testing::Test {
@@ -10,6 +11,8 @@ protected:
     Pool* pool = nullptr;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr) << "Failed to create memory pool";
     }

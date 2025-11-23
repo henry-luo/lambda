@@ -14,6 +14,7 @@ extern "C" {
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/url.h"
+#include "../lib/log.h"
 }
 
 /**
@@ -188,6 +189,8 @@ protected:
     DomDocument* doc;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
         doc = nullptr;  // Will be created per test when needed

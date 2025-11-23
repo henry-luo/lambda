@@ -8,11 +8,14 @@ extern "C" {
 #include "../lib/cmdedit.h"
 #include "../lib/cmdedit_utf8.h"
 #include "../lib/strbuf.h"
+#include "../lib/log.h"
 }
 
 class CmdEditTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Test-specific setup - no automatic REPL init to avoid stdin issues
     }
 

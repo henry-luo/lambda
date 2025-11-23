@@ -9,6 +9,10 @@
 #include <sys/stat.h>
 #include <libgen.h>
 
+extern "C" {
+#include "../lib/log.h"
+}
+
 // Helper function to check if a file exists
 bool file_exists(const char* filepath) {
     struct stat buffer;
@@ -309,6 +313,8 @@ protected:
     const char* temp_output = "/tmp/test_html_roundtrip_output.html";
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Clean up any leftover temp files
         unlink(temp_output);
     }

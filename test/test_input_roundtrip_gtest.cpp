@@ -46,6 +46,7 @@
 #include "../lib/strbuf.h"
 #include "../lib/mempool.h"
 #include "../lib/url.h"
+#include "../lib/log.h"
 
 extern "C" {
     Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
@@ -183,6 +184,8 @@ char* create_temp_test_file(const char* content, const char* extension) {
 class InputRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Initialize test environment
     }
 

@@ -8,6 +8,7 @@
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 #include <cstring>
 
 // Test fixture for NamePool tests
@@ -16,6 +17,8 @@ protected:
     Pool* pool;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
     }
 

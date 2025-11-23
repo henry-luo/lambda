@@ -11,12 +11,18 @@
 #include <string.h>
 #include <errno.h>
 
+extern "C" {
+#include "../lib/log.h"
+}
+
 // Test fixture for directory tests
 class InputDirTest : public ::testing::Test {
 protected:
     static char test_dir_name[256];
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Generate unique directory name using PID to avoid race conditions
         snprintf(test_dir_name, sizeof(test_dir_name), "test_temp_dir_%d_%ld", getpid(), (long)time(NULL));
         setup_test_directory();
@@ -146,6 +152,8 @@ TEST_F(InputDirTest, FileInsteadOfDirectoryError) {
 class InputDirTestSimple : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // No setup needed
     }
 

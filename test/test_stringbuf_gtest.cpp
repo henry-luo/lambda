@@ -4,6 +4,7 @@
 extern "C" {
 #include "../lib/stringbuf.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 }
 
 class StringBufTest : public ::testing::Test {
@@ -11,6 +12,8 @@ protected:
     Pool *test_pool = nullptr;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         test_pool = pool_create();
         ASSERT_NE(test_pool, nullptr) << "Failed to create memory pool";
     }

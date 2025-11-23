@@ -10,6 +10,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/mempool.h"
 #include "../lib/url.h"
+#include "../lib/log.h"
 
 extern "C" {
     Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor);
@@ -46,6 +47,8 @@ void free_lambda_string(String* str) {
 class GraphFormatterTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Set up test environment
     }
 
