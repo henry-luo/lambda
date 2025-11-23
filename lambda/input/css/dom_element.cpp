@@ -1099,14 +1099,12 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     }
 
     // Build DomElement wrapper from the cloned Lambda element
-    DomElement* clone = build_dom_tree_from_element(cloned_elem.element, pool, nullptr);
+    // Pass source->input to enable backing for the clone and all its children
+    DomElement* clone = build_dom_tree_from_element(cloned_elem.element, pool, nullptr, source->input);
     if (!clone) {
         log_error("dom_element_clone: build_dom_tree_from_element failed");
         return NULL;
     }
-
-    // Set input context
-    clone->input = source->input;
 
     // Copy classes (if not already copied by build_dom_tree_from_element)
     for (int i = 0; i < source->class_count; i++) {

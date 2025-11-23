@@ -655,12 +655,16 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_root_item((Item){.element = html_root});
 
     // Step 2: Build DomElement tree from Lambda Element tree
-    log_debug("Building DomElement tree!!!");
-    DomElement* dom_root = build_dom_tree_from_element(html_root, pool, nullptr);
+    // IMPORTANT: Pass input parameter to enable backed DOM nodes (DomElement, DomText, DomComment)
+    log_debug("Building DomElement tree with Lambda backing (input=%p)!!!", (void*)input);
+    DomElement* dom_root = build_dom_tree_from_element(html_root, pool, nullptr, input);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
         return nullptr;
     }
+    log_debug("Built DomElement tree: root=%p, backed=%s", 
+              (void*)dom_root, 
+              (dom_root->native_element && dom_root->input) ? "YES" : "NO");
 
     // Step 3: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
