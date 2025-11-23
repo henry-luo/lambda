@@ -77,13 +77,9 @@ void set_input_context_recursive(DomElement* elem, Input* input) {
 DomElement* lambda_element_to_dom_element(Element* elem, Pool* pool, Input* input = nullptr) {
     if (!elem || elem->type_id != LMD_TYPE_ELEMENT) return nullptr;
 
-    // Use the proper build_dom_tree_from_element if available
-    DomElement* dom_elem = build_dom_tree_from_element(elem, pool, nullptr);
-    
-    if (dom_elem && input) {
-        // Set Input context recursively so attribute operations work on all elements
-        set_input_context_recursive(dom_elem, input);
-    }
+    // Pass input to enable backing (sets native_element, input fields properly)
+    // If input is not provided, the DOM tree will be unbacked (legacy behavior)
+    DomElement* dom_elem = build_dom_tree_from_element(elem, pool, nullptr, input);
     
     return dom_elem;
 }

@@ -67,10 +67,8 @@ protected:
         if (!elem_item.element) return nullptr;
         
         Element* lambda_elem = elem_item.element;
-        DomElement* dom_elem = build_dom_tree_from_element(lambda_elem, pool, nullptr);
-        if (dom_elem) {
-            dom_elem->input = input;
-        }
+        // Pass input to enable backing (sets native_element, input fields properly)
+        DomElement* dom_elem = build_dom_tree_from_element(lambda_elem, pool, nullptr, input);
         return dom_elem;
     }
 

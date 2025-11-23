@@ -69,10 +69,8 @@ protected:
         // Set as root (might be needed for MarkEditor)
         input->root = elem_item;
         
-        DomElement* dom_elem = build_dom_tree_from_element(elem_item.element, pool, nullptr);
-        if (dom_elem) {
-            dom_elem->input = input;
-        }
+        // Pass input to enable backing (sets native_element, input fields properly)
+        DomElement* dom_elem = build_dom_tree_from_element(elem_item.element, pool, nullptr, input);
         return dom_elem;
     }
 
