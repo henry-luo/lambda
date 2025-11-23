@@ -149,6 +149,42 @@ TEST_F(DomIntegrationTest, DomElementIdAttribute) {
     EXPECT_STREQ(dom_element_get_attribute(element, "id"), "test-id");
 }
 
+TEST_F(DomIntegrationTest, InlineMode_ElementPointerStability) {
+    // Verify that in INLINE mode, the Lambda element pointer does NOT change
+    // when attributes are added/updated (only the shape and data change)
+    DomElement* element = create_dom_element("div");
+    ASSERT_NE(element, nullptr);
+    
+    Element* original_native_ptr = element->native_element;
+    ASSERT_NE(original_native_ptr, nullptr);
+    
+    // Add a new attribute - should NOT change the element pointer in INLINE mode
+    EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
+    EXPECT_EQ(element->native_element, original_native_ptr) 
+        << "Element pointer should NOT change in INLINE mode when adding new attribute";
+    
+    // Update existing attribute - should NOT change the element pointer
+    EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value2"));
+    EXPECT_EQ(element->native_element, original_native_ptr)
+        << "Element pointer should NOT change in INLINE mode when updating attribute";
+    
+    // Add multiple attributes - pointer should remain stable
+    EXPECT_TRUE(dom_element_set_attribute(element, "id", "test-id"));
+    EXPECT_EQ(element->native_element, original_native_ptr);
+    
+    EXPECT_TRUE(dom_element_set_attribute(element, "class", "test-class"));
+    EXPECT_EQ(element->native_element, original_native_ptr);
+    
+    EXPECT_TRUE(dom_element_set_attribute(element, "style", "color: red;"));
+    EXPECT_EQ(element->native_element, original_native_ptr);
+    
+    // Verify all attributes are still accessible
+    EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value2");
+    EXPECT_STREQ(dom_element_get_attribute(element, "id"), "test-id");
+    EXPECT_STREQ(dom_element_get_attribute(element, "class"), "test-class");
+    EXPECT_STREQ(dom_element_get_attribute(element, "style"), "color: red;");
+}
+
 // ============================================================================
 // Style Management Tests
 // ============================================================================
