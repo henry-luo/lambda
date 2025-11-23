@@ -32,6 +32,9 @@ typedef struct Element Element;
 typedef struct DocumentStyler DocumentStyler;
 typedef struct Input Input;
 typedef struct Arena Arena;
+typedef struct ViewTree ViewTree;  // From radiant/view.hpp
+typedef struct StateStore StateStore;  // From radiant/view.hpp
+typedef struct Url Url;  // From lib/url.h
 
 // ============================================================================
 // DOM Document
@@ -40,15 +43,28 @@ typedef struct Arena Arena;
 /**
  * DomDocument - Root container for DOM tree
  * Manages memory (arena) and Lambda integration (Input*)
+ * Unified document structure (replaces radiant/dom.hpp Document)
  */
 struct DomDocument {
+    // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
     Pool* pool;                  // Pool for arena chunks
     Arena* arena;                // Memory arena for all DOM node allocations
-    DomElement* root;            // Root element of the document (optional)
+    
+    // Document content
+    Url* url;                    // Document URL
+    Element* html_root;          // Parsed HTML tree in Mark notation (Lambda tree)
+    DomElement* root;            // Root element of DOM tree (optional)
+    int html_version;            // Detected HTML version - maps to HtmlVersion enum
+    
+    // Layout and state
+    ViewTree* view_tree;         // View tree after layout
+    StateStore* state;           // Document state (cursor, caret, etc.)
 
     // Constructor
-    DomDocument() : input(nullptr), pool(nullptr), arena(nullptr), root(nullptr) {}
+    DomDocument() : input(nullptr), pool(nullptr), arena(nullptr), 
+                    url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
+                    view_tree(nullptr), state(nullptr) {}
 };
 
 // Note: DomNode is defined in dom_node.hpp and included above

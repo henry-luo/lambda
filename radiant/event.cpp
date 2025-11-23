@@ -4,8 +4,8 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
-Document* show_html_doc(Url *base, char* doc_filename);
-View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
+DomDocument* show_html_doc(Url *base, char* doc_filename);
+View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void to_repaint();
 
 void target_block_view(EventContext* evcon, ViewBlock* block);
@@ -377,7 +377,7 @@ View* find_view(View* view, DomNode* node) {
     return NULL;
 }
 
-void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
+void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("Handling event %d", event->type);
     if (!doc || !doc->html_root) {
@@ -465,7 +465,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
-                DomNode* elmt = set_iframe_src_by_name(doc->dom_root, evcon.new_target, evcon.new_url);
+                DomNode* elmt = set_iframe_src_by_name(doc->root, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     log_debug("found iframe view");
@@ -478,8 +478,8 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                             block->content_width = 0;  block->content_height = 0;
                         }
                         // load the new document
-                        Document* old_doc = block->embed->doc;
-                        Document* new_doc = block->embed->doc =
+                        DomDocument* old_doc = block->embed->doc;
+                        DomDocument* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url);
                         if (new_doc && new_doc->html_root) {
                             layout_html_doc(evcon.ui_context, new_doc, false);
@@ -501,7 +501,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                 }
             }
             else {
-                Document* old_doc = evcon.ui_context->document;
+                DomDocument* old_doc = evcon.ui_context->document;
                 // load the new document
                 evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url);
                 free_document(old_doc);

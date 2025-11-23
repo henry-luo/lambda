@@ -3,6 +3,7 @@
 #include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
 
 #include "../lib/log.h"
+#include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
@@ -128,18 +129,20 @@ int ui_context_init(UiContext* uicon, bool headless) {
     return EXIT_SUCCESS;
 }
 
-void free_document(Document* doc) {
+void free_document(DomDocument* doc) {
     if (!doc) return;
     if (doc->view_tree) {
         view_pool_destroy(doc->view_tree);
         free(doc->view_tree);
     }
-    // Note: dom_root is pool-allocated and will be freed with the pool
+    // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
     if (doc->url) {
         url_destroy(doc->url);
     }
-    free(doc);
+    
+    // Free DomDocument via dom_document_destroy (handles arena and pool)
+    dom_document_destroy(doc);
 }
 
 void ui_context_cleanup(UiContext* uicon) {

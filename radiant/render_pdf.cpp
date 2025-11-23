@@ -15,7 +15,7 @@
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
-void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
+void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 
 #ifndef _WIN32
 
@@ -380,7 +380,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
 
     // Load HTML document
     log_debug("Loading HTML document: %s", html_file);
-    Document* doc = load_html_doc(cwd, (char*)html_file);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file);
     if (!doc) {
         log_debug("Could not load HTML file: %s", html_file);
         url_destroy(cwd);

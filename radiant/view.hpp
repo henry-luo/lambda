@@ -667,7 +667,7 @@ typedef struct GridProp {
 
 typedef struct {
     ImageSurface* img;  // image surface
-    Document* doc;  // iframe document
+    DomDocument* doc;   // iframe document
     FlexProp* flex;
     GridProp* grid;
 } EmbedProp;
@@ -812,7 +812,7 @@ typedef struct {
     struct hashmap* image_cache;  // cache for images loaded
 
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
-    Document* document;     // current document
+    DomDocument* document;  // current document
     MouseState mouse_state; // current mouse state
 } UiContext;
 
