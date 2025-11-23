@@ -454,9 +454,31 @@ DomElement* dom_element_get_next_sibling(DomElement* element);
 DomElement* dom_element_get_prev_sibling(DomElement* element);
 
 /**
- * Append a child element
+ * Link child element to parent in DOM sibling chain only.
+ * Use this when the child is ALREADY in the parent's Lambda tree.
+ * Does NOT modify the Lambda tree - only updates DOM navigation pointers.
+ * 
+ * Typical use case: Building DOM wrappers from existing Lambda tree structure
+ * where parent-child relationships already exist in the Lambda data.
+ * 
  * @param parent Parent element
- * @param child Child element to append
+ * @param child Child element to link (must already exist in parent's Lambda tree)
+ * @return true on success, false on error
+ */
+bool dom_element_link_child(DomElement* parent, DomElement* child);
+
+/**
+ * Append child element to parent, updating BOTH Lambda tree AND DOM sibling chain.
+ * Use this when adding a NEW child that is NOT yet in the parent's Lambda tree.
+ * 
+ * Requires both parent and child to have Lambda backing (native_element).
+ * Creates a new parent-child relationship in both the Lambda tree structure
+ * and the DOM navigation chain.
+ * 
+ * For children already in the Lambda tree, use dom_element_link_child() instead.
+ * 
+ * @param parent Parent element (must have Lambda backing)
+ * @param child Child element (must have Lambda backing)
  * @return true on success, false on failure
  */
 bool dom_element_append_child(DomElement* parent, DomElement* child);

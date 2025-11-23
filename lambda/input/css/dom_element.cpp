@@ -894,17 +894,32 @@ DomElement* dom_element_get_prev_sibling(DomElement* element) {
     return element ? static_cast<DomElement*>(element->prev_sibling) : NULL;
 }
 
-// Internal helper: Link child to parent in DOM sibling chain only (Lambda tree unchanged)
-static void link_child_to_dom_chain(DomElement* parent, DomNode* child) {
+/**
+ * Link child element to parent in DOM sibling chain only.
+ * Use this when the child is ALREADY in the parent's Lambda tree.
+ * Does NOT modify the Lambda tree - only updates DOM navigation pointers.
+ * 
+ * @param parent Parent element
+ * @param child Child element to link (must already exist in parent's Lambda tree)
+ * @return true on success, false on error
+ */
+bool dom_element_link_child(DomElement* parent, DomElement* child) {
+    if (!parent || !child) {
+        log_error("dom_element_link_child: invalid arguments");
+        return false;
+    }
+
+    // Set parent relationship
     child->parent = parent;
 
+    // Add to parent's DOM sibling chain
     if (!parent->first_child) {
         // First child
         parent->first_child = child;
         child->prev_sibling = NULL;
         child->next_sibling = NULL;
     } else {
-        // Find last child
+        // Find last child and append
         DomNode* last = parent->first_child;
         while (last->next_sibling) {
             last = last->next_sibling;
@@ -913,54 +928,72 @@ static void link_child_to_dom_chain(DomElement* parent, DomNode* child) {
         child->prev_sibling = last;
         child->next_sibling = NULL;
     }
+
+    log_debug("dom_element_link_child: linked child to DOM chain (Lambda tree unchanged)");
+    return true;
 }
 
+/**
+ * Append child element to parent, updating BOTH Lambda tree AND DOM sibling chain.
+ * Use this when adding a NEW child that is NOT yet in the parent's Lambda tree.
+ * 
+ * For children already in the Lambda tree (e.g., when building DOM wrappers from
+ * existing Lambda structures), use dom_element_link_child() instead.
+ * 
+ * @param parent Parent element (must have Lambda backing)
+ * @param child Child element (must have Lambda backing)
+ * @return true on success, false on error
+ */
 bool dom_element_append_child(DomElement* parent, DomElement* child) {
     if (!parent || !child) {
+        log_error("dom_element_append_child: invalid arguments");
         return false;
     }
 
-    // Check if we need to update Lambda tree
-    // If child has backing and parent has backing, we should update Lambda tree
-    bool should_update_lambda_tree = (parent->native_element && child->native_element && parent->doc);
-
-    if (should_update_lambda_tree) {
-        // Check if child is already in parent's Lambda tree
-        bool already_in_lambda_tree = false;
-        for (int64_t i = 0; i < parent->native_element->length; i++) {
-            Item item = parent->native_element->items[i];
-            if (get_type_id(item) == LMD_TYPE_ELEMENT && item.element == child->native_element) {
-                already_in_lambda_tree = true;
-                break;
-            }
-        }
-
-        // Only append to Lambda tree if not already there
-        if (!already_in_lambda_tree) {
-            log_debug("dom_element_append_child: appending to Lambda tree (length before=%lld)", parent->native_element->length);
-
-            MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-            Item result = editor.elmt_append_child(
-                {.element = parent->native_element},
-                {.element = child->native_element}
-            );
-
-            if (!result.element) {
-                log_error("dom_element_append_child: failed to append to Lambda tree");
-                return false;
-            }
-
-            parent->native_element = result.element;
-            log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent->native_element->length);
-        } else {
-            log_debug("dom_element_append_child: child already in Lambda tree, only updating DOM chain");
-        }
+    // Require Lambda backing for both parent and child
+    if (!parent->native_element || !child->native_element || !parent->doc) {
+        log_error("dom_element_append_child: parent and child must have Lambda backing");
+        return false;
     }
 
-    // Always update DOM sibling chain
-    link_child_to_dom_chain(parent, child);
+    log_debug("dom_element_append_child: appending to Lambda tree (length before=%lld)", parent->native_element->length);
 
-    log_debug("dom_element_append_child: appended element to parent (DOM chain updated)");
+    // Append to Lambda tree using MarkEditor
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
+    Item result = editor.elmt_append_child(
+        {.element = parent->native_element},
+        {.element = child->native_element}
+    );
+
+    if (!result.element) {
+        log_error("dom_element_append_child: failed to append to Lambda tree");
+        return false;
+    }
+
+    // Update parent element pointer (INLINE mode modifies in place, but update for consistency)
+    parent->native_element = result.element;
+    log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent->native_element->length);
+
+    // Update DOM sibling chain
+    child->parent = parent;
+
+    if (!parent->first_child) {
+        // First child
+        parent->first_child = child;
+        child->prev_sibling = NULL;
+        child->next_sibling = NULL;
+    } else {
+        // Find last child and append
+        DomNode* last = parent->first_child;
+        while (last->next_sibling) {
+            last = last->next_sibling;
+        }
+        last->next_sibling = child;
+        child->prev_sibling = last;
+        child->next_sibling = NULL;
+    }
+
+    log_debug("dom_element_append_child: appended element to parent (both Lambda tree and DOM chain updated)");
 
     return true;
 }
@@ -1887,8 +1920,10 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
 
     // set parent relationship if provided
+    // Use link_child since the Lambda tree already contains this element
+    // (we're building DOM wrappers from existing Lambda structure)
     if (parent) {
-        dom_element_append_child(parent, dom_elem);
+        dom_element_link_child(parent, dom_elem);
     }
 
     // Process all children - including text nodes, comments, and elements
