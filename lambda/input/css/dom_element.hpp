@@ -76,15 +76,24 @@ struct DomText : public DomNode {
 struct DomComment : public DomNode {
     // Comment-specific fields
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
-    const char* content;         // Full content/text
+    const char* content;         // Full content/text (points to native_element's String child)
     size_t length;               // Content length
+
+    // Lambda backing
+    Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
+    Input* input;                // Input context (for MarkEditor)
+    DomElement* parent_element;  // Parent DomElement (for child array updates)
+    int64_t child_index;         // Index in parent's native_element->items array
 
     // Memory management
     Pool* pool;                  // Memory pool for allocations
 
     // Constructor
     DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
-                                                       content(nullptr), length(0), pool(nullptr) {}
+                                                       content(nullptr), length(0),
+                                                       native_element(nullptr), input(nullptr),
+                                                       parent_element(nullptr), child_index(-1),
+                                                       pool(nullptr) {}
 };
 
 // ============================================================================

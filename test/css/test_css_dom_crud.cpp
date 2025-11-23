@@ -1181,3 +1181,228 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
     EXPECT_FALSE(dom_text_is_backed(unbacked));
 }
 
+// ============================================================================
+// DomComment Backed Tests (Lambda Integration)
+// ============================================================================
+
+TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
+    DomElement* parent = create_dom_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, " Test comment ");
+    
+    ASSERT_NE(comment, nullptr);
+    EXPECT_NE(comment->native_element, nullptr);
+    EXPECT_NE(comment->input, nullptr);
+    EXPECT_EQ(comment->parent_element, parent);
+    EXPECT_STREQ(comment->content, " Test comment ");
+    EXPECT_EQ(comment->length, 14);
+    EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
+    
+    // Verify Lambda backing
+    TypeElmt* type = (TypeElmt*)comment->native_element->type;
+    EXPECT_STREQ(type->name.str, "!--");
+    EXPECT_EQ(comment->native_element->length, 1);
+    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, " Test comment ");
+}
+
+TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
+    DomElement* parent = create_dom_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, "Original");
+    
+    ASSERT_NE(comment, nullptr);
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Updated"));
+    
+    // Verify DomComment updated
+    EXPECT_STREQ(comment->content, "Updated");
+    EXPECT_EQ(comment->length, 7);
+    
+    // Verify Lambda updated
+    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Updated");
+}
+
+TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
+    DomElement* parent = create_dom_element("div");
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " First ");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " Second ");
+    
+    ASSERT_NE(comment1, nullptr);
+    ASSERT_NE(comment2, nullptr);
+    EXPECT_EQ(parent->native_element->length, 2);
+    
+    // Remove first comment
+    EXPECT_TRUE(dom_comment_remove_backed(comment1));
+    
+    // Verify Lambda updated
+    EXPECT_EQ(parent->native_element->length, 1);
+    TypeElmt* remaining_type = (TypeElmt*)parent->native_element->items[0].element->type;
+    EXPECT_STREQ(remaining_type->name.str, "!--");
+    EXPECT_STREQ(((String*)parent->native_element->items[0].element->items[0].pointer)->chars, " Second ");
+}
+
+TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
+    DomElement* parent = create_dom_element("div");
+    
+    // Add mixed children: comment, text, comment
+    // (Note: We use only backed operations for this test)
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " Start ");
+    DomText* text = dom_element_append_text_backed(parent, "Content");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " End ");
+    
+    // Verify structure in Lambda (3 children: comment, text, comment)
+    EXPECT_EQ(parent->native_element->length, 3);
+    
+    // Check types in Lambda tree
+    TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
+    EXPECT_STREQ(type0->name.str, "!--");
+    EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_STRING);
+    TypeElmt* type2 = (TypeElmt*)parent->native_element->items[2].element->type;
+    EXPECT_STREQ(type2->name.str, "!--");
+    
+    // Verify content
+    EXPECT_STREQ(comment1->content, " Start ");
+    EXPECT_STREQ(text->text, "Content");
+    EXPECT_STREQ(comment2->content, " End ");
+    
+    // Verify DOM sibling chain traversal includes all three
+    DomNode* node = parent->first_child;
+    ASSERT_NE(node, (DomNode*)NULL);
+    EXPECT_EQ(node->type(), DOM_NODE_COMMENT);
+    
+    node = node->next_sibling;
+    ASSERT_NE(node, (DomNode*)NULL);
+    EXPECT_EQ(node->type(), DOM_NODE_TEXT);
+    
+    node = node->next_sibling;
+    ASSERT_NE(node, (DomNode*)NULL);
+    EXPECT_EQ(node->type(), DOM_NODE_COMMENT);
+    
+    node = node->next_sibling;
+    EXPECT_EQ(node, (DomNode*)NULL);  // No more siblings
+}
+
+TEST_F(DomIntegrationTest, DomComment_EmptyComment_Backed) {
+    DomElement* parent = create_dom_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, "");
+    
+    ASSERT_NE(comment, nullptr);
+    EXPECT_STREQ(comment->content, "");
+    EXPECT_EQ(comment->length, 0);
+    
+    // Verify Lambda - empty comments should have empty String child
+    EXPECT_EQ(comment->native_element->length, 0);
+    
+    // Set content on empty comment
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Now has content"));
+    EXPECT_STREQ(comment->content, "Now has content");
+    EXPECT_EQ(comment->native_element->length, 1);
+}
+
+TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
+    const char* long_comment = "This is a very long comment that might span multiple lines\n"
+                               "and contains various special characters: <>&\"'\n"
+                               "It should be handled correctly by the backing system.";
+    
+    DomElement* parent = create_dom_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, long_comment);
+    
+    ASSERT_NE(comment, nullptr);
+    EXPECT_STREQ(comment->content, long_comment);
+    EXPECT_EQ(comment->length, strlen(long_comment));
+    
+    // Verify Lambda backing
+    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, long_comment);
+}
+
+TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
+    DomElement* parent = create_dom_element("div");
+    DomComment* comment = dom_element_append_comment_backed(parent, "Version1");
+    
+    ASSERT_NE(comment, nullptr);
+    
+    // Multiple sequential updates
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Version2"));
+    EXPECT_STREQ(comment->content, "Version2");
+    
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Version3"));
+    EXPECT_STREQ(comment->content, "Version3");
+    
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Final"));
+    EXPECT_STREQ(comment->content, "Final");
+    
+    // Verify Lambda has latest
+    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Final");
+}
+
+TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
+    DomElement* parent = create_dom_element("div");
+    
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " C1 ");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " C2 ");
+    DomComment* comment3 = dom_element_append_comment_backed(parent, " C3 ");
+    
+    EXPECT_EQ(parent->native_element->length, 3);
+    
+    // Remove middle comment
+    EXPECT_TRUE(dom_comment_remove_backed(comment2));
+    
+    // Verify Lambda structure
+    EXPECT_EQ(parent->native_element->length, 2);
+    
+    TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
+    EXPECT_STREQ(type0->name.str, "!--");
+    EXPECT_STREQ(((String*)parent->native_element->items[0].element->items[0].pointer)->chars, " C1 ");
+    
+    TypeElmt* type1 = (TypeElmt*)parent->native_element->items[1].element->type;
+    EXPECT_STREQ(type1->name.str, "!--");
+    EXPECT_STREQ(((String*)parent->native_element->items[1].element->items[0].pointer)->chars, " C3 ");
+}
+
+TEST_F(DomIntegrationTest, DomComment_IsBacked_DetectsCorrectly) {
+    DomElement* parent = create_dom_element("div");
+    
+    // Create backed comment
+    DomComment* backed = dom_element_append_comment_backed(parent, "Backed");
+    ASSERT_NE(backed, nullptr);
+    EXPECT_TRUE(dom_comment_is_backed(backed));
+    
+    // Create unbacked comment
+    DomComment* unbacked = dom_comment_create(pool, DOM_NODE_COMMENT, "!--", "Unbacked");
+    ASSERT_NE(unbacked, nullptr);
+    EXPECT_FALSE(dom_comment_is_backed(unbacked));
+}
+
+TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {
+    DomElement* parent = create_dom_element("div");
+    
+    // Build structure: comment -> text -> element -> comment
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " Start ");
+    DomText* text = dom_element_append_text_backed(parent, "Text");
+    DomElement* span = create_dom_element("span");
+    dom_element_append_child(parent, span);
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " End ");
+    
+    // Traverse via DOM sibling chain
+    DomNode* child = parent->first_child;
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->node_type, DOM_NODE_COMMENT);
+    EXPECT_EQ(child, (DomNode*)comment1);
+    
+    child = child->next_sibling;
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->node_type, DOM_NODE_TEXT);
+    EXPECT_EQ(child, (DomNode*)text);
+    
+    child = child->next_sibling;
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->node_type, DOM_NODE_ELEMENT);
+    EXPECT_EQ(child, (DomNode*)span);
+    
+    child = child->next_sibling;
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->node_type, DOM_NODE_COMMENT);
+    EXPECT_EQ(child, (DomNode*)comment2);
+    
+    child = child->next_sibling;
+    EXPECT_EQ(child, nullptr);
+}
+
+

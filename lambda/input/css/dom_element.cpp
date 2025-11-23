@@ -1534,6 +1534,250 @@ void dom_comment_destroy(DomComment* comment_node) {
     // Note: Memory is pool-allocated, so it will be freed when pool is destroyed
 }
 
+// ============================================================================
+// Backed DomComment Operations (Lambda Integration)
+// ============================================================================
+
+DomComment* dom_comment_create_backed(Pool* pool, Element* native_element, 
+                                     DomElement* parent_element, int64_t child_index) {
+    if (!pool || !native_element || !parent_element) {
+        log_error("dom_comment_create_backed: invalid arguments");
+        return nullptr;
+    }
+
+    // Get tag name and verify it's a comment or DOCTYPE
+    TypeElmt* type = (TypeElmt*)native_element->type;
+    const char* tag_name = type ? type->name.str : nullptr;
+    if (!tag_name) {
+        log_error("dom_comment_create_backed: no tag name");
+        return nullptr;
+    }
+
+    // Determine node type
+    DomNodeType node_type;
+    if (strcasecmp(tag_name, "!DOCTYPE") == 0) {
+        node_type = DOM_NODE_DOCTYPE;
+    } else if (strcmp(tag_name, "!--") == 0) {
+        node_type = DOM_NODE_COMMENT;
+    } else {
+        log_error("dom_comment_create_backed: not a comment or DOCTYPE: %s", tag_name);
+        return nullptr;
+    }
+
+    DomComment* comment_node = (DomComment*)pool_calloc(pool, sizeof(DomComment));
+    if (!comment_node) {
+        log_error("dom_comment_create_backed: pool_calloc failed");
+        return nullptr;
+    }
+
+    // Initialize base DomNode
+    comment_node->node_type = node_type;
+    comment_node->parent = parent_element;
+    comment_node->pool = pool;
+
+    // Set Lambda backing
+    comment_node->native_element = native_element;
+    comment_node->input = parent_element->input;
+    comment_node->parent_element = parent_element;
+    comment_node->child_index = child_index;
+    comment_node->tag_name = tag_name;  // Reference type name (no copy needed)
+
+    // Extract content from first String child (if exists)
+    if (native_element->length > 0) {
+        Item first_item = native_element->items[0];
+        if (get_type_id(first_item) == LMD_TYPE_STRING) {
+            String* content_str = (String*)first_item.pointer;
+            comment_node->content = content_str->chars;  // Reference, not copy
+            comment_node->length = content_str->len;
+        }
+    }
+
+    if (!comment_node->content) {
+        comment_node->content = "";
+        comment_node->length = 0;
+    }
+
+    log_debug("dom_comment_create_backed: created backed comment (tag=%s, content='%s', index=%lld)",
+              tag_name, comment_node->content, child_index);
+
+    return comment_node;
+}
+
+bool dom_comment_set_content_backed(DomComment* comment_node, const char* new_content) {
+    if (!comment_node || !new_content) {
+        log_error("dom_comment_set_content_backed: invalid arguments");
+        return false;
+    }
+
+    if (!comment_node->native_element || !comment_node->input) {
+        log_error("dom_comment_set_content_backed: comment not backed by Lambda");
+        return false;
+    }
+
+    // Create new String via MarkBuilder
+    MarkEditor editor(comment_node->input, EDIT_MODE_INLINE);
+    Item new_string_item = editor.builder()->createStringItem(new_content);
+
+    if (!new_string_item.pointer || get_type_id(new_string_item) != LMD_TYPE_STRING) {
+        log_error("dom_comment_set_content_backed: failed to create string");
+        return false;
+    }
+
+    // Replace or append String child in comment Element
+    Item result;
+    if (comment_node->native_element->length > 0) {
+        // Replace existing content (child at index 0)
+        result = editor.elmt_replace_child(
+            {.element = comment_node->native_element},
+            0,  // Content is always first child
+            new_string_item
+        );
+    } else {
+        // Append content (comment was empty)
+        result = editor.elmt_append_child(
+            {.element = comment_node->native_element},
+            new_string_item
+        );
+    }
+
+    if (!result.element) {
+        log_error("dom_comment_set_content_backed: failed to update content");
+        return false;
+    }
+
+    // Update DomComment to point to new String
+    comment_node->native_element = result.element;
+    String* new_string = (String*)new_string_item.pointer;
+    comment_node->content = new_string->chars;
+    comment_node->length = new_string->len;
+
+    log_debug("dom_comment_set_content_backed: updated content to '%s'", new_content);
+
+    return true;
+}
+
+DomComment* dom_element_append_comment_backed(DomElement* parent, const char* comment_content) {
+    if (!parent || !comment_content) {
+        log_error("dom_element_append_comment_backed: invalid arguments");
+        return nullptr;
+    }
+
+    if (!parent->native_element || !parent->input) {
+        log_error("dom_element_append_comment_backed: parent not backed");
+        return nullptr;
+    }
+
+    // Create Lambda comment Element with tag "!--"
+    MarkEditor editor(parent->input, EDIT_MODE_INLINE);
+    ElementBuilder comment_elem = editor.builder()->element("!--");
+
+    // Add content as String child
+    if (strlen(comment_content) > 0) {
+        Item content_item = editor.builder()->createStringItem(comment_content);
+        comment_elem.child(content_item);
+    }
+
+    Item comment_item = comment_elem.final();
+    if (!comment_item.element) {
+        log_error("dom_element_append_comment_backed: failed to create comment element");
+        return nullptr;
+    }
+
+    // Append to parent Element's children
+    Item result = editor.elmt_append_child(
+        {.element = parent->native_element},
+        comment_item
+    );
+
+    if (!result.element) {
+        log_error("dom_element_append_comment_backed: failed to append");
+        return nullptr;
+    }
+
+    // Update parent element pointer (INLINE mode keeps it stable, but update for consistency)
+    parent->native_element = result.element;
+
+    // Create DomComment wrapper
+    int64_t child_index = result.element->length - 1;
+    DomComment* comment_node = dom_comment_create_backed(
+        parent->pool,
+        comment_item.element,
+        parent,
+        child_index
+    );
+
+    if (!comment_node) {
+        log_error("dom_element_append_comment_backed: failed to create DomComment");
+        return nullptr;
+    }
+
+    // Add to DOM sibling chain
+    comment_node->parent = parent;
+    if (!parent->first_child) {
+        parent->first_child = comment_node;
+    } else {
+        DomNode* last = parent->first_child;
+        while (last->next_sibling) last = last->next_sibling;
+        last->next_sibling = comment_node;
+        comment_node->prev_sibling = last;
+    }
+
+    log_debug("dom_element_append_comment_backed: appended comment '%s' at index %lld",
+              comment_content, child_index);
+
+    return comment_node;
+}
+
+bool dom_comment_remove_backed(DomComment* comment_node) {
+    if (!comment_node) {
+        log_error("dom_comment_remove_backed: null comment");
+        return false;
+    }
+
+    if (!comment_node->native_element || !comment_node->input || !comment_node->parent_element) {
+        log_error("dom_comment_remove_backed: comment not backed");
+        return false;
+    }
+
+    // Remove from Lambda parent Element's children array
+    MarkEditor editor(comment_node->input, EDIT_MODE_INLINE);
+    Item result = editor.elmt_delete_child(
+        {.element = comment_node->parent_element->native_element},
+        comment_node->child_index
+    );
+
+    if (!result.element) {
+        log_error("dom_comment_remove_backed: failed to delete child");
+        return false;
+    }
+
+    // Update parent
+    comment_node->parent_element->native_element = result.element;
+
+    // Remove from DOM sibling chain
+    if (comment_node->prev_sibling) {
+        comment_node->prev_sibling->next_sibling = comment_node->next_sibling;
+    } else if (comment_node->parent) {
+        comment_node->parent->first_child = comment_node->next_sibling;
+    }
+
+    if (comment_node->next_sibling) {
+        comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
+    }
+
+    // Clear references
+    comment_node->parent = nullptr;
+    comment_node->native_element = nullptr;
+
+    log_debug("dom_comment_remove_backed: removed comment at index %lld", comment_node->child_index);
+
+    return true;
+}
+
+bool dom_comment_is_backed(DomComment* comment_node) {
+    return comment_node && comment_node->native_element && comment_node->input && comment_node->parent_element;
+}
+
 const char* dom_comment_get_content(DomComment* comment_node) {
     return comment_node ? comment_node->content : NULL;
 }
@@ -1567,12 +1811,16 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     log_debug("build element: <%s> (parent: %s)", tag_name,
               parent ? parent->tag_name : "none");
 
-    // skip comments and other non-element nodes - they should not participate in CSS cascade or layout
-    // use case-insensitive comparison for DOCTYPE to handle both !DOCTYPE and !doctype
-    if (strcmp(tag_name, "!--") == 0 ||
-        strcasecmp(tag_name, "!DOCTYPE") == 0 ||
-        strncmp(tag_name, "?", 1) == 0) {
-        return nullptr;  // Skip comments, DOCTYPE, and XML declarations
+    // Handle comments and DOCTYPE - don't create DomElement (not layout nodes)
+    // They will be processed separately in the child loop below
+    // XML declarations are still skipped
+    if (strcmp(tag_name, "!--") == 0 || strcasecmp(tag_name, "!DOCTYPE") == 0) {
+        return nullptr;  // Not a layout element, processed as child below
+    }
+
+    // Skip XML declarations
+    if (strncmp(tag_name, "?", 1) == 0) {
+        return nullptr;  // Skip XML declarations
     }
 
     // skip script elements - they should not participate in layout
@@ -1650,10 +1898,37 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
             TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
+            // Check if this is a comment or DOCTYPE
+            if (strcmp(child_tag_name, "!--") == 0 || strcasecmp(child_tag_name, "!DOCTYPE") == 0) {
+                // Create backed DomComment
+                if (input) {  // Only create backed comments if we have Input context
+                    DomComment* comment_node = dom_comment_create_backed(pool, child_elem, dom_elem, i);
+                    if (comment_node) {
+                        comment_node->parent = dom_elem;
+
+                        // Add to DOM sibling chain (same as text nodes)
+                        if (!dom_elem->first_child) {
+                            dom_elem->first_child = comment_node;
+                            comment_node->prev_sibling = nullptr;
+                            comment_node->next_sibling = nullptr;
+                        } else {
+                            DomNode* last = dom_elem->first_child;
+                            while (last->next_sibling) last = last->next_sibling;
+                            last->next_sibling = comment_node;
+                            comment_node->prev_sibling = last;
+                        }
+
+                        log_debug("  Created backed comment node at index %lld: '%s'",
+                                  i, comment_node->content);
+                    }
+                }
+                continue;  // Don't try to build as DomElement
+            }
+
             log_debug("  Building child element: <%s> for parent <%s> (parent_dom=%p)", child_tag_name, tag_name, (void*)dom_elem);
             DomElement* child_dom = build_dom_tree_from_element(child_elem, pool, dom_elem, input);
 
-            // skip if nullptr (e.g., comments, DOCTYPE were filtered out)
+            // skip if nullptr (e.g., script, XML declarations)
             if (!child_dom) {
                 log_debug("  Skipped child element: <%s>", child_tag_name);
                 continue;
