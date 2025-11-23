@@ -14,7 +14,8 @@ extern "C" {
 }
 
 // Forward declaration for helper function
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
+DomElement* build_dom_tree_from_element_with_input(Element* elem, Pool* pool, DomElement* parent, Input* input);
 
 /**
  * Comprehensive DOM Integration Test Suite
@@ -897,4 +898,286 @@ TEST_F(DomIntegrationTest, InlineStyle_MixedWithOtherAttributes) {
 // ============================================================================
 // DomText Tests (New Node Type)
 // ============================================================================
+
+// ============================================================================
+// DomText Backed Tests (Lambda Integration)
+// ============================================================================
+
+TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
+    // Create parent element with backing
+    DomElement* parent = create_dom_element("div");
+    ASSERT_NE(parent, nullptr);
+    ASSERT_NE(parent->native_element, nullptr);
+    
+    // Append backed text node
+    DomText* text = dom_element_append_text_backed(parent, "Hello World");
+    
+    ASSERT_NE(text, nullptr);
+    EXPECT_NE(text->native_string, nullptr);
+    EXPECT_NE(text->input, nullptr);
+    EXPECT_EQ(text->parent_element, parent);
+    EXPECT_STREQ(text->text, "Hello World");
+    EXPECT_EQ(text->length, 11u);
+    EXPECT_TRUE(dom_text_is_backed(text));
+    
+    // Verify Lambda backing
+    ASSERT_EQ(parent->native_element->length, 1);
+    Item child = parent->native_element->items[0];
+    EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
+    EXPECT_EQ((String*)child.pointer, text->native_string);
+    EXPECT_STREQ(((String*)child.pointer)->chars, "Hello World");
+}
+
+TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
+    DomElement* parent = create_dom_element("p");
+    DomText* text = dom_element_append_text_backed(parent, "Original");
+    ASSERT_NE(text, nullptr);
+    
+    // Update text content
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Updated"));
+    
+    // Verify DomText updated
+    EXPECT_STREQ(text->text, "Updated");
+    EXPECT_EQ(text->length, 7u);
+    
+    // Verify Lambda String updated
+    int64_t idx = dom_text_get_child_index(text);
+    ASSERT_GE(idx, 0);
+    Item child = parent->native_element->items[idx];
+    EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
+    EXPECT_STREQ(((String*)child.pointer)->chars, "Updated");
+    EXPECT_EQ(((String*)child.pointer)->len, 7u);
+}
+
+TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
+    DomElement* parent = create_dom_element("div");
+    DomText* text1 = dom_element_append_text_backed(parent, "First");
+    DomText* text2 = dom_element_append_text_backed(parent, "Second");
+    ASSERT_NE(text1, nullptr);
+    ASSERT_NE(text2, nullptr);
+    
+    EXPECT_EQ(parent->native_element->length, 2);
+    
+    // Remove first text node
+    EXPECT_TRUE(dom_text_remove_backed(text1));
+    
+    // Verify Lambda updated
+    EXPECT_EQ(parent->native_element->length, 1);
+    Item remaining = parent->native_element->items[0];
+    EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
+    EXPECT_STREQ(((String*)remaining.pointer)->chars, "Second");
+    
+    // Verify text2 index updated
+    EXPECT_EQ(dom_text_get_child_index(text2), 0);
+}
+
+TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
+    DomElement* parent = create_dom_element("div");
+    
+    // Add multiple text nodes
+    DomText* text1 = dom_element_append_text_backed(parent, "One");
+    DomText* text2 = dom_element_append_text_backed(parent, "Two");
+    DomText* text3 = dom_element_append_text_backed(parent, "Three");
+    ASSERT_NE(text1, nullptr);
+    ASSERT_NE(text2, nullptr);
+    ASSERT_NE(text3, nullptr);
+    
+    EXPECT_EQ(parent->native_element->length, 3);
+    
+    // Update middle text
+    EXPECT_TRUE(dom_text_set_content_backed(text2, "TWO"));
+    
+    // Verify all strings
+    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
+    EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "TWO");
+    EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Three");
+    
+    // Remove middle text
+    EXPECT_TRUE(dom_text_remove_backed(text2));
+    
+    EXPECT_EQ(parent->native_element->length, 2);
+    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
+    EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "Three");
+    
+    // Verify indices updated
+    EXPECT_EQ(dom_text_get_child_index(text1), 0);
+    EXPECT_EQ(dom_text_get_child_index(text3), 1);
+}
+
+TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
+    // Build Lambda element tree with mixed children
+    MarkBuilder builder(input);
+    Item div_item = builder.element("div")
+        .text("Before")
+        .child(builder.element("span").text("Middle").final())
+        .text("After")
+        .final();
+    
+    ASSERT_NE(div_item.element, nullptr);
+    
+    // Set as input root
+    input->root = div_item;
+    
+    // Build DOM tree from Lambda with Input context
+    DomElement* parent = build_dom_tree_from_element_with_input(div_item.element, pool, nullptr, input);
+    ASSERT_NE(parent, nullptr);
+    
+    // Verify structure in Lambda tree
+    EXPECT_EQ(parent->native_element->length, 3);
+    EXPECT_EQ(get_type_id(parent->native_element->items[0]), LMD_TYPE_STRING);
+    EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_ELEMENT);
+    EXPECT_EQ(get_type_id(parent->native_element->items[2]), LMD_TYPE_STRING);
+    
+    // Get the text nodes from DOM
+    DomText* text1 = static_cast<DomText*>(parent->first_child);
+    ASSERT_NE(text1, nullptr);
+    ASSERT_TRUE(text1->is_text());
+    EXPECT_TRUE(dom_text_is_backed(text1));
+    
+    DomElement* span = static_cast<DomElement*>(text1->next_sibling);
+    ASSERT_NE(span, nullptr);
+    ASSERT_TRUE(span->is_element());
+    
+    DomText* text2 = static_cast<DomText*>(span->next_sibling);
+    ASSERT_NE(text2, nullptr);
+    ASSERT_TRUE(text2->is_text());
+    EXPECT_TRUE(dom_text_is_backed(text2));
+    
+    // Update text around element
+    EXPECT_TRUE(dom_text_set_content_backed(text1, "BEFORE"));
+    EXPECT_TRUE(dom_text_set_content_backed(text2, "AFTER"));
+    
+    // Verify Lambda tree updated
+    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "BEFORE");
+    EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "AFTER");
+}
+
+TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
+    DomElement* parent = create_dom_element("p");
+    
+    DomText* t0 = dom_element_append_text_backed(parent, "Zero");
+    DomText* t1 = dom_element_append_text_backed(parent, "One");
+    DomText* t2 = dom_element_append_text_backed(parent, "Two");
+    ASSERT_NE(t0, nullptr);
+    ASSERT_NE(t1, nullptr);
+    ASSERT_NE(t2, nullptr);
+    
+    EXPECT_EQ(dom_text_get_child_index(t0), 0);
+    EXPECT_EQ(dom_text_get_child_index(t1), 1);
+    EXPECT_EQ(dom_text_get_child_index(t2), 2);
+    
+    // Remove middle - indices should update
+    EXPECT_TRUE(dom_text_remove_backed(t1));
+    
+    EXPECT_EQ(dom_text_get_child_index(t0), 0);
+    EXPECT_EQ(dom_text_get_child_index(t2), 1);
+}
+
+TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
+    DomElement* parent = create_dom_element("div");
+    
+    // Start with non-empty string
+    DomText* text = dom_element_append_text_backed(parent, "Initial");
+    ASSERT_NE(text, nullptr);
+    EXPECT_TRUE(dom_text_is_backed(text));
+    
+    // Update to single space (empty strings become "lambda.nil" in MarkBuilder)
+    EXPECT_TRUE(dom_text_set_content_backed(text, " "));
+    
+    // Verify DomText updated
+    EXPECT_STREQ(text->text, " ");
+    EXPECT_EQ(text->length, 1u);
+    
+    // Verify Lambda String updated
+    Item child = parent->native_element->items[0];
+    EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
+    String* str = (String*)child.pointer;
+    EXPECT_EQ(str->len, 1u);
+    EXPECT_STREQ(str->chars, " ");
+}
+
+TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
+    const char* long_text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+                           "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+    
+    DomElement* parent = create_dom_element("div");
+    DomText* text = dom_element_append_text_backed(parent, long_text);
+    
+    ASSERT_NE(text, nullptr);
+    EXPECT_STREQ(text->text, long_text);
+    EXPECT_EQ(text->length, strlen(long_text));
+    
+    // Update to even longer string
+    const char* longer = "This is an even longer string that tests memory handling and proper allocation strategies.";
+    EXPECT_TRUE(dom_text_set_content_backed(text, longer));
+    EXPECT_STREQ(text->text, longer);
+    
+    // Verify Lambda
+    int64_t idx = dom_text_get_child_index(text);
+    EXPECT_STREQ(((String*)parent->native_element->items[idx].pointer)->chars, longer);
+}
+
+TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
+    DomElement* parent = create_dom_element("p");
+    DomText* text = dom_element_append_text_backed(parent, "Version1");
+    ASSERT_NE(text, nullptr);
+    
+    // Multiple sequential updates
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Version2"));
+    EXPECT_STREQ(text->text, "Version2");
+    
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Version3"));
+    EXPECT_STREQ(text->text, "Version3");
+    
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Final"));
+    EXPECT_STREQ(text->text, "Final");
+    
+    // Verify Lambda has latest
+    Item child = parent->native_element->items[0];
+    EXPECT_STREQ(((String*)child.pointer)->chars, "Final");
+}
+
+TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
+    DomElement* parent = create_dom_element("div");
+    
+    DomText* texts[5];
+    for (int i = 0; i < 5; i++) {
+        char buf[20];
+        snprintf(buf, sizeof(buf), "Text%d", i);
+        texts[i] = dom_element_append_text_backed(parent, buf);
+        ASSERT_NE(texts[i], nullptr);
+    }
+    
+    EXPECT_EQ(parent->native_element->length, 5);
+    
+    // Remove text at index 2
+    EXPECT_TRUE(dom_text_remove_backed(texts[2]));
+    
+    // Verify structure
+    EXPECT_EQ(parent->native_element->length, 4);
+    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "Text0");
+    EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "Text1");
+    EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Text3");  // Shifted
+    EXPECT_STREQ(((String*)parent->native_element->items[3].pointer)->chars, "Text4");  // Shifted
+    
+    // Verify indices updated
+    EXPECT_EQ(dom_text_get_child_index(texts[0]), 0);
+    EXPECT_EQ(dom_text_get_child_index(texts[1]), 1);
+    EXPECT_EQ(dom_text_get_child_index(texts[3]), 2);  // Shifted
+    EXPECT_EQ(dom_text_get_child_index(texts[4]), 3);  // Shifted
+}
+
+TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
+    DomElement* parent = create_dom_element("div");
+    
+    // Create backed text node
+    DomText* backed = dom_element_append_text_backed(parent, "Backed");
+    ASSERT_NE(backed, nullptr);
+    EXPECT_TRUE(dom_text_is_backed(backed));
+    
+    // Create unbacked text node
+    DomText* unbacked = dom_text_create(pool, "Unbacked");
+    ASSERT_NE(unbacked, nullptr);
+    EXPECT_FALSE(dom_text_is_backed(unbacked));
+}
 

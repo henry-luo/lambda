@@ -41,17 +41,28 @@ typedef struct Input Input;
 /**
  * DomText - Text node in DOM tree
  * Represents text content between elements
+ * 
+ * Can be backed by Lambda String (bidirectional sync) or standalone copy.
+ * Backed nodes maintain synchronization with Lambda tree via MarkEditor.
  */
 struct DomText : public DomNode {
     // Text-specific fields
-    const char* text;            // Text content
+    const char* text;            // Text content (references native_string->chars if backed)
     size_t length;               // Text length
+
+    // Lambda backing (for bidirectional sync)
+    String* native_string;       // Pointer to backing Lambda String (nullptr if unbacked)
+    Input* input;                // Input context for MarkEditor operations (nullptr if unbacked)
+    DomElement* parent_element;  // Parent DomElement (needed for child array updates)
+    int64_t child_index;         // Index in parent's native_element->items array
 
     // Memory management
     Pool* pool;                  // Memory pool for allocations
 
     // Constructor
-    DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0), pool(nullptr) {}
+    DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
+                native_string(nullptr), input(nullptr), parent_element(nullptr),
+                child_index(-1), pool(nullptr) {}
 };
 
 // ============================================================================
@@ -396,6 +407,15 @@ DomElement* dom_element_get_prev_sibling(DomElement* element);
  * @return true on success, false on failure
  */
 bool dom_element_append_child(DomElement* parent, DomElement* child);
+
+/**
+ * Append text content as backed DomText node
+ * Creates Lambda String and adds to parent's children array via MarkEditor
+ * @param parent Parent element (must be backed)
+ * @param text Text content to append
+ * @return New DomText node or NULL on failure
+ */
+DomText* dom_element_append_text_backed(DomElement* parent, const char* text);
 
 /**
  * Remove a child element

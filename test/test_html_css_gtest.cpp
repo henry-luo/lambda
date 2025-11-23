@@ -56,7 +56,7 @@ String* create_lambda_string(const char* text) {
 }
 
 // Forward declaration
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
 
 // Helper to recursively set Input context on all DomElements in a tree
 void set_input_context_recursive(DomElement* elem, Input* input) {
