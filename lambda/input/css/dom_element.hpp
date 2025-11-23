@@ -72,11 +72,10 @@ struct DomText : public DomNode {
     // Lambda backing (required)
     String* native_string;       // Pointer to backing Lambda String
     DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
-    int64_t child_index;         // Index in parent's native_element->items array
 
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-                native_string(nullptr), parent_element(nullptr), child_index(-1) {}
+                native_string(nullptr), parent_element(nullptr) {}
 };
 
 // ============================================================================
@@ -97,13 +96,12 @@ struct DomComment : public DomNode {
     // Lambda backing (required)
     Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
     DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
-    int64_t child_index;         // Index in parent's native_element->items array
 
     // Constructor
     DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
                                                        content(nullptr), length(0),
                                                        native_element(nullptr),
-                                                       parent_element(nullptr), child_index(-1) {}
+                                                       parent_element(nullptr) {}
 };
 
 // ============================================================================

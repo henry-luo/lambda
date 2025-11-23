@@ -1197,7 +1197,7 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
 // DOM Text Node Implementation
 // ============================================================================
 
-DomText* dom_text_create(String* native_string, DomElement* parent_element, int64_t child_index) {
+DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     if (!native_string || !parent_element) {
         log_error("dom_text_create: native_string and parent_element required");
         return nullptr;
@@ -1226,10 +1226,8 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element, int6
     text_node->text = native_string->chars;  // Reference Lambda String's chars
     text_node->length = native_string->len;
     text_node->parent_element = parent_element;
-    text_node->child_index = child_index;
 
-    log_debug("dom_text_create: created backed text node at index %lld, text='%s'", 
-              child_index, native_string->chars);
+    log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
 
     return text_node;
 }
@@ -1318,21 +1316,10 @@ int64_t dom_text_get_child_index(DomText* text_node) {
         return -1;
     }
 
-    // Try cached index first (optimization)
-    if (text_node->child_index >= 0 && text_node->child_index < parent_elem->length) {
-        Item cached_item = parent_elem->items[text_node->child_index];
-        if (get_type_id(cached_item) == LMD_TYPE_STRING && (String*)cached_item.pointer == text_node->native_string) {
-            log_debug("dom_text_get_child_index: cache hit at index %lld", text_node->child_index);
-            return text_node->child_index;  // Cache hit
-        }
-    }
-
-    // Cache miss - scan for correct index
-    log_debug("dom_text_get_child_index: cache miss, scanning parent children");
+    // Scan parent's children to find matching native_string
     for (int64_t i = 0; i < parent_elem->length; i++) {
         Item item = parent_elem->items[i];
         if (get_type_id(item) == LMD_TYPE_STRING && (String*)item.pointer == text_node->native_string) {
-            text_node->child_index = i;  // Update cache
             log_debug("dom_text_get_child_index: found at index %lld", i);
             return i;
         }
@@ -1392,32 +1379,12 @@ bool dom_text_remove(DomText* text_node) {
         text_node->next_sibling->prev_sibling = text_node->prev_sibling;
     }
 
-    // Update sibling text nodes' child indices (they shifted after removal)
-    DomNode* sibling = text_node->next_sibling;
-    while (sibling) {
-        if (sibling->is_text()) {
-            DomText* text_sibling = static_cast<DomText*>(sibling);
-            if (dom_text_is_backed(text_sibling) && text_sibling->child_index > child_idx) {
-                text_sibling->child_index--;
-                log_debug("dom_text_remove: updated text sibling index from %lld to %lld", 
-                          text_sibling->child_index + 1, text_sibling->child_index);
-            }
-        } else if (sibling->is_comment()) {
-            DomComment* comment_sibling = static_cast<DomComment*>(sibling);
-            if (comment_sibling->native_element && comment_sibling->child_index > child_idx) {
-                comment_sibling->child_index--;
-                log_debug("dom_text_remove: updated comment sibling index from %lld to %lld", 
-                          comment_sibling->child_index + 1, comment_sibling->child_index);
-            }
-        }
-        sibling = sibling->next_sibling;
-    }
+    // No need to update sibling indices - they will be recalculated on demand via scanning
 
     // Clear references
     text_node->parent = nullptr;
     text_node->native_string = nullptr;
     text_node->parent_element = nullptr;
-    text_node->child_index = -1;
 
     log_debug("dom_text_remove: removed text node at index %lld", child_idx);
 
@@ -1455,14 +1422,10 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
         return nullptr;
     }
 
-    // Calculate child index (last position)
-    int64_t child_index = parent->native_element->length - 1;
-
     // Create DomText wrapper with Lambda backing
     DomText* text_node = dom_text_create(
         (String*)string_item.pointer,
-        parent,
-        child_index
+        parent
     );
 
     if (!text_node) {
@@ -1491,7 +1454,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     // Update parent element pointer (INLINE mode: no-op, but kept for consistency)
     parent->native_element = result.element;
 
-    log_debug("dom_element_append_text: appended text '%s' at index %lld", text_content, child_index);
+    log_debug("dom_element_append_text: appended text '%s'", text_content);
 
     return text_node;
 }
@@ -1500,7 +1463,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
 // DOM Comment/DOCTYPE Node Implementation
 // ============================================================================
 
-DomComment* dom_comment_create(Element* native_element, DomElement* parent_element, int64_t child_index) {
+DomComment* dom_comment_create(Element* native_element, DomElement* parent_element) {
     if (!native_element || !parent_element) {
         log_error("dom_comment_create: native_element and parent_element required");
         return nullptr;
@@ -1546,7 +1509,6 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
     // Set Lambda backing
     comment_node->native_element = native_element;
     comment_node->parent_element = parent_element;
-    comment_node->child_index = child_index;
     comment_node->tag_name = tag_name;  // Reference type name (no copy needed)
 
     // Extract content from first String child (if exists)
@@ -1564,8 +1526,8 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
         comment_node->length = 0;
     }
 
-    log_debug("dom_comment_create: created backed comment (tag=%s, content='%s', index=%lld)",
-              tag_name, comment_node->content, child_index);
+    log_debug("dom_comment_create: created backed comment (tag=%s, content='%s')",
+              tag_name, comment_node->content);
 
     return comment_node;
 }
@@ -1583,6 +1545,31 @@ void dom_comment_destroy(DomComment* comment_node) {
 
 bool dom_comment_is_backed(DomComment* comment_node) {
     return comment_node && comment_node->native_element && comment_node->parent_element;
+}
+
+int64_t dom_comment_get_child_index(DomComment* comment_node) {
+    if (!comment_node || !comment_node->parent_element || !comment_node->native_element) {
+        log_error("dom_comment_get_child_index: comment node not backed");
+        return -1;
+    }
+
+    Element* parent_elem = comment_node->parent_element->native_element;
+    if (!parent_elem) {
+        log_error("dom_comment_get_child_index: parent has no native_element");
+        return -1;
+    }
+
+    // Scan parent's children to find matching native_element
+    for (int64_t i = 0; i < parent_elem->length; i++) {
+        Item item = parent_elem->items[i];
+        if (get_type_id(item) == LMD_TYPE_ELEMENT && item.element == comment_node->native_element) {
+            log_debug("dom_comment_get_child_index: found at index %lld", i);
+            return i;
+        }
+    }
+
+    log_error("dom_comment_get_child_index: native_element not found in parent (may have been removed)");
+    return -1;
 }
 
 bool dom_comment_set_content(DomComment* comment_node, const char* new_content) {
@@ -1685,11 +1672,9 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
     parent->native_element = result.element;
 
     // Create DomComment wrapper
-    int64_t child_index = result.element->length - 1;
     DomComment* comment_node = dom_comment_create(
         comment_item.element,
-        parent,
-        child_index
+        parent
     );
 
     if (!comment_node) {
@@ -1708,8 +1693,7 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
         comment_node->prev_sibling = last;
     }
 
-    log_debug("dom_element_append_comment: appended comment '%s' at index %lld",
-              comment_content, child_index);
+    log_debug("dom_element_append_comment: appended comment '%s'", comment_content);
 
     return comment_node;
 }
@@ -1726,8 +1710,12 @@ bool dom_comment_remove(DomComment* comment_node) {
         return false;
     }
 
-    // Store child index before deletion
-    int64_t child_idx = comment_node->child_index;
+    // Get current child index
+    int64_t child_idx = dom_comment_get_child_index(comment_node);
+    if (child_idx < 0) {
+        log_error("dom_comment_remove: failed to get child index");
+        return false;
+    }
 
     // Remove from Lambda parent Element's children array
     MarkEditor editor(parent_elem->doc->input, EDIT_MODE_INLINE);
@@ -1756,26 +1744,7 @@ bool dom_comment_remove(DomComment* comment_node) {
         comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
     }
 
-    // Update sibling nodes' child indices (they shifted after removal)
-    DomNode* sibling = comment_node->next_sibling;
-    while (sibling) {
-        if (sibling->is_text()) {
-            DomText* text_sibling = static_cast<DomText*>(sibling);
-            if (dom_text_is_backed(text_sibling) && text_sibling->child_index > child_idx) {
-                text_sibling->child_index--;
-                log_debug("dom_comment_remove: updated text sibling index from %lld to %lld", 
-                          text_sibling->child_index + 1, text_sibling->child_index);
-            }
-        } else if (sibling->is_comment()) {
-            DomComment* comment_sibling = static_cast<DomComment*>(sibling);
-            if (comment_sibling->native_element && comment_sibling->child_index > child_idx) {
-                comment_sibling->child_index--;
-                log_debug("dom_comment_remove: updated comment sibling index from %lld to %lld", 
-                          comment_sibling->child_index + 1, comment_sibling->child_index);
-            }
-        }
-        sibling = sibling->next_sibling;
-    }
+    // No need to update sibling indices - they will be recalculated on demand via scanning
 
     // Clear references
     comment_node->parent = nullptr;
@@ -1904,7 +1873,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             // Check if this is a comment or DOCTYPE
             if (strcmp(child_tag_name, "!--") == 0 || strcasecmp(child_tag_name, "!DOCTYPE") == 0) {
                 // Create DomComment node backed by Lambda Element
-                DomComment* comment_node = dom_comment_create(child_elem, dom_elem, i);
+                DomComment* comment_node = dom_comment_create(child_elem, dom_elem);
                 if (comment_node) {
                     comment_node->parent = dom_elem;
 
@@ -1947,7 +1916,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             String* text_str = (String*)child_item.pointer;
             if (text_str && text_str->len > 0) {
                 // Create text node (preserves Lambda String reference)
-                DomText* text_node = dom_text_create(text_str, dom_elem, i);
+                DomText* text_node = dom_text_create(text_str, dom_elem);
                 if (text_node) {
                     text_node->parent = dom_elem;
 
