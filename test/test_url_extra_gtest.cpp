@@ -4,11 +4,14 @@
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/strbuf.h"
+#include "../lib/log.h"
 }
 
 class UrlExtraTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Setup code if needed
     }
 

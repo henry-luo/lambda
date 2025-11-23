@@ -4,6 +4,7 @@
 extern "C" {
 #include "../lib/num_stack.h"
 #include "../lib/datetime.h"
+#include "../lib/log.h"
 }
 
 class NumStackTest : public ::testing::Test {
@@ -11,6 +12,8 @@ protected:
     num_stack_t* stack = nullptr;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         stack = num_stack_create(10);
         ASSERT_NE(stack, nullptr) << "Failed to create num stack";
     }

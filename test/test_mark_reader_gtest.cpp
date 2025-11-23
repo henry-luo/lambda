@@ -4,6 +4,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 #include <cmath>
 #include <string>
 #include <set>
@@ -15,6 +16,8 @@ protected:
     MarkBuilder* builder;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         input = InputManager::create_input(nullptr);
         builder = new MarkBuilder(input);
     }

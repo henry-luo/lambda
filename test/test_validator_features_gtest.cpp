@@ -27,6 +27,8 @@ protected:
     Input* input;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
 

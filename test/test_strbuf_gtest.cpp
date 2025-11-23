@@ -58,11 +58,14 @@
 
 extern "C" {
 #include "../lib/strbuf.h"
+#include "../lib/log.h"
 }
 
 class StrBufTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Runs before each test
     }
 

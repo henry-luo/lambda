@@ -1144,6 +1144,7 @@ project "test_mempool_gtest"
     files {
         "test/test_mempool_gtest.cpp",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {

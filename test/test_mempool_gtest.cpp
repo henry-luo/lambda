@@ -19,6 +19,7 @@
  */
 
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 #include <gtest/gtest.h>
 #include <cstdio>
 #include <cstdlib>
@@ -78,6 +79,8 @@ protected:
     Pool* pool;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr) << "Pool creation should succeed";
     }

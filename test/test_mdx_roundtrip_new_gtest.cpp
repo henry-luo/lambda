@@ -3,10 +3,13 @@
 #include <stdlib.h>
 #include "../lambda/input/input.hpp"
 #include "../lambda/format/format.h"
+#include "../lib/log.h"
 
 class MDXRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Setup code if needed
     }
 

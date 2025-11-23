@@ -40,6 +40,8 @@ protected:
     String* html_type;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
 

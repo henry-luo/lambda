@@ -13,6 +13,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 extern "C" {
     #include "../lib/url.h"
     #include <tree_sitter/api.h>
@@ -208,6 +209,8 @@ bool are_ascii_math_expressions_equivalent(const std::string& expr1, const std::
 class AsciiMathRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Setup code
     }
 

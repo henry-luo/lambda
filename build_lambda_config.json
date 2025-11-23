@@ -999,7 +999,8 @@
                             "rpmalloc"
                         ],
                         "additional_sources": [
-                            "lib/mempool.c"
+                            "lib/mempool.c",
+                            "lib/log.c"
                         ],
                         "binary": "test_mempool_gtest.exe"
                     },

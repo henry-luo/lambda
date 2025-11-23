@@ -3,11 +3,14 @@
 
 extern "C" {
 #include "../lib/strview.h"
+#include "../lib/log.h"
 }
 
 class StrViewTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Runs before each test
     }
 

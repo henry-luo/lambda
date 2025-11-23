@@ -10,6 +10,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arraylist.h"
 #include "../lib/stringbuf.h"
+#include "../lib/log.h"
 #include <cmath>
 #include <string>
 #include <cstdint>
@@ -21,6 +22,8 @@ protected:
     Input* input;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Create minimal Input structure for testing
         input = InputManager::create_input(nullptr);
     }

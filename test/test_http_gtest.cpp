@@ -3,6 +3,7 @@
 #include "../lib/url.h"
 #include "../lib/string.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,8 @@ protected:
     Pool* pool;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Create memory pool for tests
         pool = pool_create();
         ASSERT_NE(pool, nullptr) << "Failed to create memory pool";

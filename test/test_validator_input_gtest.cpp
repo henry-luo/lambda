@@ -51,6 +51,8 @@ protected:
     SchemaValidator* validator = nullptr;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr) << "Failed to create memory pool";
 

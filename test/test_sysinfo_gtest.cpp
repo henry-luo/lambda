@@ -4,6 +4,7 @@
 #include "../lib/url.h"
 #include "../lib/string.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 #include <cstring>
 
 // Test fixture for system information functionality
@@ -12,6 +13,8 @@ protected:
     Pool* pool;
 
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         pool = pool_create();
         ASSERT_NE(pool, nullptr) << "Should create pool";
     }

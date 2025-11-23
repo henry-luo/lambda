@@ -13,6 +13,7 @@
 #include "../lib/strbuf.h"
 #include "../lib/mempool.h"
 #include "../lib/url.h"  // Use new URL parser instead of lexbor
+#include "../lib/log.h"
 
 // Forward declarations with C linkage
 extern "C" {
@@ -51,6 +52,8 @@ String* create_lambda_string(const char* text) {
 class MarkupRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Setup code if needed
     }
 

@@ -6,6 +6,7 @@
 #include "../lambda/format/format.h"
 #include "../lib/string.h"
 #include "../lib/mempool.h"
+#include "../lib/log.h"
 
 extern "C" {
     Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
@@ -17,6 +18,8 @@ extern "C" {
 class JSXRoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
         // Setup code if needed
     }
 
