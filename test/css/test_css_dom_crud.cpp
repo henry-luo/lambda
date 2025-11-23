@@ -1504,6 +1504,49 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
     EXPECT_STREQ(comment_type->name.str, "!--");
     EXPECT_EQ(comment_elem->length, 1);
     EXPECT_STREQ(((String*)comment_elem->items[0].pointer)->chars, " modified comment ");
+    
+    // 10. DELETE OPERATIONS: Test removal of text and comment nodes
+    printf("\n=== Testing Deletions ===\n");
+    printf("Before deletion - Lambda tree has %d children\n", root->native_element->length);
+    
+    // Delete text2 ("Universe!")
+    EXPECT_TRUE(dom_text_remove(text2));
+    printf("After removing text2 - Lambda tree has %d children\n", root->native_element->length);
+    
+    // Delete comment
+    EXPECT_TRUE(dom_comment_remove(comment));
+    printf("After removing comment - Lambda tree has %d children\n", root->native_element->length);
+    
+    // 11. Format after deletions and verify
+    String* html_after = format_html(pool, root_item);
+    ASSERT_NE(html_after, nullptr);
+    
+    const char* output_after = html_after->chars;
+    printf("\n=== After Deletion Output ===\n%s\n=== End Output ===\n", output_after);
+    
+    // Verify "Universe!" was deleted
+    EXPECT_TRUE(strstr(output_after, "Universe!") == nullptr) 
+        << "Universe! should be deleted but found in: " << output_after;
+    
+    // Verify comment was deleted
+    EXPECT_TRUE(strstr(output_after, "<!--") == nullptr) 
+        << "Comment should be deleted but found in: " << output_after;
+    
+    // Verify "Greetings " still exists
+    EXPECT_TRUE(strstr(output_after, "Greetings ") != nullptr) 
+        << "Greetings should remain after deletions in: " << output_after;
+    
+    // 12. Verify final Lambda tree structure
+    printf("Final Lambda tree length: %d\n", root->native_element->length);
+    EXPECT_EQ(root->native_element->length, 1) << "Should have 1 child remaining";
+    
+    if (root->native_element->length > 0) {
+        Item remaining = root->native_element->items[0];
+        EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
+        if (get_type_id(remaining) == LMD_TYPE_STRING) {
+            EXPECT_STREQ(((String*)remaining.pointer)->chars, "Greetings ");
+        }
+    }
 }
 
 
