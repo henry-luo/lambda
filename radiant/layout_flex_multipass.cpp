@@ -262,8 +262,11 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
     log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
-    if (flex_item->node && flex_item->node->first_child) {
-        DomNode* child = flex_item->node->first_child;
+    DomNode* child = nullptr;
+    if (flex_item->node && flex_item->node->is_element()) {
+        child = static_cast<DomElement*>(flex_item->node)->first_child;
+    }
+    if (child) {
         do {
             log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->name(), lycon->parent);
             // Use standard layout flow - this handles all HTML content types
@@ -317,8 +320,12 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // PASS 1: Create Views with measured sizes (combined measurement + View creation)
     log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
     int child_count = 0;
-    DomNode* measure_child = block->node->first_child;
-    do {
+    DomNode* measure_child = nullptr;
+    if (block->node->is_element()) {
+        measure_child = static_cast<DomElement*>(block->node)->first_child;
+    }
+    if (measure_child) {
+        do {
         log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
         // Only create Views for element nodes, skip text nodes
         if (measure_child->is_element()) {
@@ -332,7 +339,8 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
         }
         measure_child = measure_child->next_sibling;
         child_count++;
-    } while (measure_child);
+        } while (measure_child);
+    }
 
     // PASS 2: Run enhanced flex algorithm with nested content support
     log_debug("FLEX MULTIPASS: Running enhanced flex algorithm (final pass)");

@@ -788,7 +788,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             // Count siblings with same tag name
             int sibling_count = 0;
             int current_index = 0;
-            DomNode* sibling = parent->first_child;
+            DomNode* sibling = nullptr;
+            if (parent->is_element()) {
+                sibling = static_cast<DomElement*>(parent)->first_child;
+            }
 
             while (sibling) {
                 if (sibling->type() == DOM_NODE_ELEMENT) {
@@ -1367,7 +1370,10 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             // Count siblings with same tag name
             int sibling_count = 0;
             int current_index = 0;
-            DomNode* sibling = parent->first_child;
+            DomNode* sibling = nullptr;
+            if (parent->is_element()) {
+                sibling = static_cast<DomElement*>(parent)->first_child;
+            }
 
             while (sibling) {
                 if (sibling->type() == DOM_NODE_ELEMENT) {

@@ -116,7 +116,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // line.max_ascender and max_descender to be changed only when there's output from the span
 
     // layout inline content
-    DomNode *child = elmt->first_child;
+    DomNode *child = nullptr;
+    if (elmt->is_element()) {
+        child = static_cast<DomElement*>(elmt)->first_child;
+    }
     if (child) {
         lycon->parent = (ViewGroup*)span;  lycon->prev_view = NULL;
         log_debug("layout inline children: advance_y %f, line_height %f", lycon->block.advance_y, lycon->block.line_height);

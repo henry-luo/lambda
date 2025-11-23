@@ -448,9 +448,9 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
     ASSERT_NE(native_elem, nullptr);
     
     // Create DomElement with native backing
-    DomElement* elem = dom_element_create(doc, "div", native_elem);
+    DomElement* elem = dom_element_create(pool, "div", native_elem);
     ASSERT_NE(elem, nullptr);
-    elem->doc->input = test_input;  // Set input context for attribute operations
+    elem->input = test_input;  // Set input context for attribute operations
 
     // Set attributes
     EXPECT_TRUE(dom_element_set_attribute(elem, "id", "test-id"));
@@ -479,7 +479,7 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
 }
 
 TEST_F(DomNodeBaseTest, ClassManagement) {
-    DomElement* elem = dom_element_create(doc, "div", nullptr);
+    DomElement* elem = dom_element_create(pool, "div", nullptr);
     ASSERT_NE(elem, nullptr);
 
     // Add classes
@@ -510,7 +510,7 @@ TEST_F(DomNodeBaseTest, ClassManagement) {
 
 TEST_F(DomNodeBaseTest, EmptyAndNullHandling) {
     // Test with null/empty strings
-    DomElement* elem = dom_element_create(doc, "div", nullptr);
+    DomElement* elem = dom_element_create(pool, "div", nullptr);
     ASSERT_NE(elem, nullptr);
 
     // Empty class name
@@ -645,11 +645,7 @@ TEST_F(DomNodeBaseTest, MixedContentWithWhitespace) {
 }
 
 TEST_F(DomNodeBaseTest, TextNodeManipulation) {
-    GTEST_SKIP() << "dom_text_create now requires parent element and native String*";
-    return;
-    
-    // DomText* text = dom_text_create(pool, "Original text");
-    DomText* text = nullptr;
+    DomText* text = dom_text_create(pool, "Original text");
     ASSERT_NE(text, nullptr);
 
     // Initial state
@@ -766,9 +762,9 @@ TEST_F(DomNodeBaseTest, ComplexAttributeValues) {
     ASSERT_NE(native_elem, nullptr);
     
     // Create DomElement with native backing
-    DomElement* elem = dom_element_create(doc, "div", native_elem);
+    DomElement* elem = dom_element_create(pool, "div", native_elem);
     ASSERT_NE(elem, nullptr);
-    elem->doc->input = test_input;  // Set input context for attribute operations
+    elem->input = test_input;  // Set input context for attribute operations
 
     // Various attribute value types
     dom_element_set_attribute(elem, "data-json", "{\"key\": \"value\"}");

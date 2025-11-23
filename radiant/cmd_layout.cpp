@@ -54,8 +54,8 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void log_root_item(Item item, char* indent="  ");
-const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool);
-DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent, Input* input = nullptr);
+const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
+DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
@@ -180,7 +180,7 @@ void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Poo
     if (!dom_elem || !html_elem || !pool) return;
 
     // Extract 'style' attribute from html_elem
-    const char* style_text = extract_element_attribute(html_elem, "style", pool);
+    const char* style_text = extract_element_attribute(html_elem, "style", nullptr);
 
     if (style_text && strlen(style_text) > 0) {
         log_debug("[CSS] Applying inline style to <%s>: %s",
@@ -654,17 +654,23 @@ Document* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_debug("Parsed HTML root element");
     log_root_item((Item){.element = html_root});
 
-    // Step 2: Build DomElement tree from Lambda Element tree
-    // IMPORTANT: Pass input parameter to enable backed DOM nodes (DomElement, DomText, DomComment)
+    // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
     log_debug("Building DomElement tree with Lambda backing (input=%p)!!!", (void*)input);
-    DomElement* dom_root = build_dom_tree_from_element(html_root, pool, nullptr, input);
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+    
+    DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
+        dom_document_destroy(dom_doc);
         return nullptr;
     }
     log_debug("Built DomElement tree: root=%p, backed=%s", 
               (void*)dom_root, 
-              (dom_root->native_element && dom_root->input) ? "YES" : "NO");
+              (dom_root->native_element && dom_root->doc) ? "YES" : "NO");
 
     // Step 3: Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);

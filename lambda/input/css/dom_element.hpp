@@ -2,7 +2,7 @@
 #define DOM_ELEMENT_H
 
 #include "../../../lib/avl_tree.h"
-#include "../../../lib/mempool.h"
+#include "../../../lib/arena.h"
 #include "../../../lib/strbuf.h"
 #include "css_style.hpp"
 #include "css_style_node.hpp"
@@ -31,6 +31,25 @@
 typedef struct Element Element;
 typedef struct DocumentStyler DocumentStyler;
 typedef struct Input Input;
+typedef struct Arena Arena;
+
+// ============================================================================
+// DOM Document
+// ============================================================================
+
+/**
+ * DomDocument - Root container for DOM tree
+ * Manages memory (arena) and Lambda integration (Input*)
+ */
+struct DomDocument {
+    Input* input;                // Lambda Input context for MarkEditor operations
+    Pool* pool;                  // Pool for arena chunks
+    Arena* arena;                // Memory arena for all DOM node allocations
+    DomElement* root;            // Root element of the document (optional)
+
+    // Constructor
+    DomDocument() : input(nullptr), pool(nullptr), arena(nullptr), root(nullptr) {}
+};
 
 // Note: DomNode is defined in dom_node.hpp and included above
 
@@ -42,27 +61,22 @@ typedef struct Input Input;
  * DomText - Text node in DOM tree
  * Represents text content between elements
  * 
- * Can be backed by Lambda String (bidirectional sync) or standalone copy.
- * Backed nodes maintain synchronization with Lambda tree via MarkEditor.
+ * Always backed by Lambda String (references chars, no copy).
+ * Maintains synchronization with Lambda tree via MarkEditor through parent element.
  */
 struct DomText : public DomNode {
-    // Text-specific fields
-    const char* text;            // Text content (references native_string->chars if backed)
+    // Text-specific fields (reference to Lambda String)
+    const char* text;            // Text content (references native_string->chars)
     size_t length;               // Text length
 
-    // Lambda backing (for bidirectional sync)
-    String* native_string;       // Pointer to backing Lambda String (nullptr if unbacked)
-    Input* input;                // Input context for MarkEditor operations (nullptr if unbacked)
-    DomElement* parent_element;  // Parent DomElement (needed for child array updates)
+    // Lambda backing (required)
+    String* native_string;       // Pointer to backing Lambda String
+    DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
     int64_t child_index;         // Index in parent's native_element->items array
-
-    // Memory management
-    Pool* pool;                  // Memory pool for allocations
 
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-                native_string(nullptr), input(nullptr), parent_element(nullptr),
-                child_index(-1), pool(nullptr) {}
+                native_string(nullptr), parent_element(nullptr), child_index(-1) {}
 };
 
 // ============================================================================
@@ -72,6 +86,7 @@ struct DomText : public DomNode {
 /**
  * DomComment - Comment, DOCTYPE, or XML declaration node
  * Represents comments (<!-- -->), DOCTYPE declarations, and XML declarations
+ * Always backed by Lambda Element (tag "!--" or "!DOCTYPE")
  */
 struct DomComment : public DomNode {
     // Comment-specific fields
@@ -79,21 +94,16 @@ struct DomComment : public DomNode {
     const char* content;         // Full content/text (points to native_element's String child)
     size_t length;               // Content length
 
-    // Lambda backing
+    // Lambda backing (required)
     Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
-    Input* input;                // Input context (for MarkEditor)
-    DomElement* parent_element;  // Parent DomElement (for child array updates)
+    DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
     int64_t child_index;         // Index in parent's native_element->items array
-
-    // Memory management
-    Pool* pool;                  // Memory pool for allocations
 
     // Constructor
     DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
                                                        content(nullptr), length(0),
-                                                       native_element(nullptr), input(nullptr),
-                                                       parent_element(nullptr), child_index(-1),
-                                                       pool(nullptr) {}
+                                                       native_element(nullptr),
+                                                       parent_element(nullptr), child_index(-1) {}
 };
 
 // ============================================================================
@@ -110,6 +120,9 @@ struct DomComment : public DomNode {
  * - Parent/child relationships for inheritance
  */
 struct DomElement : public DomNode {
+    // Tree structure (only elements can have children)
+    DomNode* first_child;        // First child node (Element, Text, or Comment)
+
     // Basic element information
     Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
@@ -130,18 +143,18 @@ struct DomElement : public DomNode {
     // Pseudo-class state (for :hover, :focus, etc.)
     uint32_t pseudo_state;       // Bitmask of pseudo-class states
 
-    // Memory management
-    Pool* pool;                  // Memory pool for this element's allocations
-    struct Input* input;         // Input context (needed for MarkEditor operations)
+    // Document reference (provides Arena and Input*)
+    DomDocument* doc;            // Parent document (provides arena and input)
 
     // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), native_element(nullptr), tag_name(nullptr),
-                   tag_name_ptr(nullptr), tag_id(0), id(nullptr), class_names(nullptr), class_count(0),
-                   specified_style(nullptr), computed_style(nullptr), style_version(0),
-                   needs_style_recompute(false), pseudo_state(0), pool(nullptr), input(nullptr) {}
+    DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), native_element(nullptr),
+                   tag_name(nullptr), tag_name_ptr(nullptr), tag_id(0), id(nullptr),
+                   class_names(nullptr), class_count(0), specified_style(nullptr),
+                   computed_style(nullptr), style_version(0), needs_style_recompute(false),
+                   pseudo_state(0), doc(nullptr) {}
 
-    // Document reference
-    DocumentStyler* document;    // Parent document styler (should be set after construction)
+    // Document styler reference
+    DocumentStyler* styler;      // Parent document styler (optional, for styling operations)
 };
 
 // Pseudo-class state flags
@@ -165,17 +178,34 @@ struct DomElement : public DomNode {
 #define PSEUDO_STATE_ONLY_CHILD     (1 << 17)
 
 // ============================================================================
+// DOM Document Creation and Destruction
+// ============================================================================
+
+/**
+ * Create a new DomDocument
+ * @param input Lambda Input context (required for MarkEditor operations)
+ * @return New DomDocument or NULL on failure
+ */
+DomDocument* dom_document_create(Input* input);
+
+/**
+ * Destroy a DomDocument and all its nodes
+ * @param document Document to destroy
+ */
+void dom_document_destroy(DomDocument* document);
+
+// ============================================================================
 // DOM Element Creation and Destruction
 // ============================================================================
 
 /**
  * Create a new DomElement
- * @param pool Memory pool for allocations
+ * @param doc Parent document (provides arena and input)
  * @param tag_name Element tag name (e.g., "div", "span")
- * @param native_element Optional pointer to native element (lexbor/Lambda)
+ * @param native_element Pointer to backing Lambda Element (required)
  * @return New DomElement or NULL on failure
  */
-DomElement* dom_element_create(Pool* pool, const char* tag_name, Element* native_element);
+DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element);
 
 /**
  * Destroy a DomElement
@@ -186,12 +216,12 @@ void dom_element_destroy(DomElement* element);
 /**
  * Initialize a DomElement structure (for stack-allocated elements)
  * @param element Element to initialize
- * @param pool Memory pool for allocations
+ * @param doc Parent document (provides arena and input)
  * @param tag_name Element tag name
- * @param native_element Optional pointer to native element
+ * @param native_element Pointer to backing Lambda Element (required)
  * @return true on success, false on failure
  */
-bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, Element* native_element);
+bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_name, Element* native_element);
 
 /**
  * Clear all data from a DomElement (without freeing the structure)

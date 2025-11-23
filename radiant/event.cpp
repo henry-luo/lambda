@@ -302,7 +302,7 @@ DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, c
         return NULL;
     }
     // get memory pool from document
-    Pool* pool = document->pool;
+    Pool* pool = document->doc ? document->doc->pool : nullptr;
     if (!pool) {
         log_error("Document has no memory pool");
         return NULL;

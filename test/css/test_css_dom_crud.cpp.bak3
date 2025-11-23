@@ -126,7 +126,7 @@ TEST_F(DomIntegrationTest, DomElementAttributes) {
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
     ASSERT_NE(element->native_element, nullptr);
-    ASSERT_NE(element->doc->input, nullptr);
+    ASSERT_NE(element->input, nullptr);
     
     // Set attribute
     EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
@@ -915,11 +915,11 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     ASSERT_NE(parent->native_element, nullptr);
     
     // Append backed text node
-    DomText* text = dom_element_append_text(parent, "Hello World");
+    DomText* text = dom_element_append_text_backed(parent, "Hello World");
     
     ASSERT_NE(text, nullptr);
     EXPECT_NE(text->native_string, nullptr);
-    EXPECT_NE(text->parent_element->doc->input, nullptr);
+    EXPECT_NE(text->input, nullptr);
     EXPECT_EQ(text->parent_element, parent);
     EXPECT_STREQ(text->text, "Hello World");
     EXPECT_EQ(text->length, 11u);
@@ -935,11 +935,11 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
 
 TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("p");
-    DomText* text = dom_element_append_text(parent, "Original");
+    DomText* text = dom_element_append_text_backed(parent, "Original");
     ASSERT_NE(text, nullptr);
     
     // Update text content
-    EXPECT_TRUE(dom_text_set_content(text, "Updated"));
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Updated"));
     
     // Verify DomText updated
     EXPECT_STREQ(text->text, "Updated");
@@ -956,15 +956,15 @@ TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
 
 TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
-    DomText* text1 = dom_element_append_text(parent, "First");
-    DomText* text2 = dom_element_append_text(parent, "Second");
+    DomText* text1 = dom_element_append_text_backed(parent, "First");
+    DomText* text2 = dom_element_append_text_backed(parent, "Second");
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
     
     EXPECT_EQ(parent->native_element->length, 2);
     
     // Remove first text node
-    EXPECT_TRUE(dom_text_remove(text1));
+    EXPECT_TRUE(dom_text_remove_backed(text1));
     
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
@@ -980,9 +980,9 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     DomElement* parent = create_dom_element("div");
     
     // Add multiple text nodes
-    DomText* text1 = dom_element_append_text(parent, "One");
-    DomText* text2 = dom_element_append_text(parent, "Two");
-    DomText* text3 = dom_element_append_text(parent, "Three");
+    DomText* text1 = dom_element_append_text_backed(parent, "One");
+    DomText* text2 = dom_element_append_text_backed(parent, "Two");
+    DomText* text3 = dom_element_append_text_backed(parent, "Three");
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
     ASSERT_NE(text3, nullptr);
@@ -990,7 +990,7 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     EXPECT_EQ(parent->native_element->length, 3);
     
     // Update middle text
-    EXPECT_TRUE(dom_text_set_content(text2, "TWO"));
+    EXPECT_TRUE(dom_text_set_content_backed(text2, "TWO"));
     
     // Verify all strings
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
@@ -998,7 +998,7 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Three");
     
     // Remove middle text
-    EXPECT_TRUE(dom_text_remove(text2));
+    EXPECT_TRUE(dom_text_remove_backed(text2));
     
     EXPECT_EQ(parent->native_element->length, 2);
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
@@ -1023,8 +1023,8 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
     // Set as input root
     input->root = div_item;
     
-    // Build DOM tree from Lambda with DomDocument
-    DomElement* parent = build_dom_tree_from_element(div_item.element, doc, nullptr);
+    // Build DOM tree from Lambda with Input context
+    DomElement* parent = build_dom_tree_from_element_with_input(div_item.element, pool, nullptr, input);
     ASSERT_NE(parent, nullptr);
     
     // Verify structure in Lambda tree
@@ -1049,8 +1049,8 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
     EXPECT_TRUE(dom_text_is_backed(text2));
     
     // Update text around element
-    EXPECT_TRUE(dom_text_set_content(text1, "BEFORE"));
-    EXPECT_TRUE(dom_text_set_content(text2, "AFTER"));
+    EXPECT_TRUE(dom_text_set_content_backed(text1, "BEFORE"));
+    EXPECT_TRUE(dom_text_set_content_backed(text2, "AFTER"));
     
     // Verify Lambda tree updated
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "BEFORE");
@@ -1060,9 +1060,9 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
 TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
     DomElement* parent = create_dom_element("p");
     
-    DomText* t0 = dom_element_append_text(parent, "Zero");
-    DomText* t1 = dom_element_append_text(parent, "One");
-    DomText* t2 = dom_element_append_text(parent, "Two");
+    DomText* t0 = dom_element_append_text_backed(parent, "Zero");
+    DomText* t1 = dom_element_append_text_backed(parent, "One");
+    DomText* t2 = dom_element_append_text_backed(parent, "Two");
     ASSERT_NE(t0, nullptr);
     ASSERT_NE(t1, nullptr);
     ASSERT_NE(t2, nullptr);
@@ -1072,7 +1072,7 @@ TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
     EXPECT_EQ(dom_text_get_child_index(t2), 2);
     
     // Remove middle - indices should update
-    EXPECT_TRUE(dom_text_remove(t1));
+    EXPECT_TRUE(dom_text_remove_backed(t1));
     
     EXPECT_EQ(dom_text_get_child_index(t0), 0);
     EXPECT_EQ(dom_text_get_child_index(t2), 1);
@@ -1082,12 +1082,12 @@ TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
     DomElement* parent = create_dom_element("div");
     
     // Start with non-empty string
-    DomText* text = dom_element_append_text(parent, "Initial");
+    DomText* text = dom_element_append_text_backed(parent, "Initial");
     ASSERT_NE(text, nullptr);
     EXPECT_TRUE(dom_text_is_backed(text));
     
     // Update to single space (empty strings become "lambda.nil" in MarkBuilder)
-    EXPECT_TRUE(dom_text_set_content(text, " "));
+    EXPECT_TRUE(dom_text_set_content_backed(text, " "));
     
     // Verify DomText updated
     EXPECT_STREQ(text->text, " ");
@@ -1106,7 +1106,7 @@ TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
                            "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
     
     DomElement* parent = create_dom_element("div");
-    DomText* text = dom_element_append_text(parent, long_text);
+    DomText* text = dom_element_append_text_backed(parent, long_text);
     
     ASSERT_NE(text, nullptr);
     EXPECT_STREQ(text->text, long_text);
@@ -1114,7 +1114,7 @@ TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
     
     // Update to even longer string
     const char* longer = "This is an even longer string that tests memory handling and proper allocation strategies.";
-    EXPECT_TRUE(dom_text_set_content(text, longer));
+    EXPECT_TRUE(dom_text_set_content_backed(text, longer));
     EXPECT_STREQ(text->text, longer);
     
     // Verify Lambda
@@ -1124,17 +1124,17 @@ TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
 
 TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
     DomElement* parent = create_dom_element("p");
-    DomText* text = dom_element_append_text(parent, "Version1");
+    DomText* text = dom_element_append_text_backed(parent, "Version1");
     ASSERT_NE(text, nullptr);
     
     // Multiple sequential updates
-    EXPECT_TRUE(dom_text_set_content(text, "Version2"));
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Version2"));
     EXPECT_STREQ(text->text, "Version2");
     
-    EXPECT_TRUE(dom_text_set_content(text, "Version3"));
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Version3"));
     EXPECT_STREQ(text->text, "Version3");
     
-    EXPECT_TRUE(dom_text_set_content(text, "Final"));
+    EXPECT_TRUE(dom_text_set_content_backed(text, "Final"));
     EXPECT_STREQ(text->text, "Final");
     
     // Verify Lambda has latest
@@ -1149,14 +1149,14 @@ TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
     for (int i = 0; i < 5; i++) {
         char buf[20];
         snprintf(buf, sizeof(buf), "Text%d", i);
-        texts[i] = dom_element_append_text(parent, buf);
+        texts[i] = dom_element_append_text_backed(parent, buf);
         ASSERT_NE(texts[i], nullptr);
     }
     
     EXPECT_EQ(parent->native_element->length, 5);
     
     // Remove text at index 2
-    EXPECT_TRUE(dom_text_remove(texts[2]));
+    EXPECT_TRUE(dom_text_remove_backed(texts[2]));
     
     // Verify structure
     EXPECT_EQ(parent->native_element->length, 4);
@@ -1176,12 +1176,14 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
     DomElement* parent = create_dom_element("div");
     
     // Create backed text node
-    DomText* backed = dom_element_append_text(parent, "Backed");
+    DomText* backed = dom_element_append_text_backed(parent, "Backed");
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_text_is_backed(backed));
     
-    // Skip unbacked test - all text nodes are now backed
-    // NOTE: Text nodes now always reference Lambda String*, there's no "unbacked" mode
+    // Create unbacked text node
+    DomText* unbacked = dom_text_create(pool, "Unbacked");
+    ASSERT_NE(unbacked, nullptr);
+    EXPECT_FALSE(dom_text_is_backed(unbacked));
 }
 
 // ============================================================================
@@ -1190,14 +1192,14 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
 
 TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, " Test comment ");
+    DomComment* comment = dom_element_append_comment_backed(parent, " Test comment ");
     
     ASSERT_NE(comment, nullptr);
     EXPECT_NE(comment->native_element, nullptr);
-    EXPECT_NE(comment->parent_element->doc->input, nullptr);
+    EXPECT_NE(comment->input, nullptr);
     EXPECT_EQ(comment->parent_element, parent);
     EXPECT_STREQ(comment->content, " Test comment ");
-    EXPECT_EQ(comment->length, 14u);
+    EXPECT_EQ(comment->length, 14);
     EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
     
     // Verify Lambda backing
@@ -1209,14 +1211,14 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
 
 TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, "Original");
+    DomComment* comment = dom_element_append_comment_backed(parent, "Original");
     
     ASSERT_NE(comment, nullptr);
-    EXPECT_TRUE(dom_comment_set_content(comment, "Updated"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Updated"));
     
     // Verify DomComment updated
     EXPECT_STREQ(comment->content, "Updated");
-    EXPECT_EQ(comment->length, 7u);
+    EXPECT_EQ(comment->length, 7);
     
     // Verify Lambda updated
     EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Updated");
@@ -1224,15 +1226,15 @@ TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
 
 TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment1 = dom_element_append_comment(parent, " First ");
-    DomComment* comment2 = dom_element_append_comment(parent, " Second ");
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " First ");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " Second ");
     
     ASSERT_NE(comment1, nullptr);
     ASSERT_NE(comment2, nullptr);
     EXPECT_EQ(parent->native_element->length, 2);
     
     // Remove first comment
-    EXPECT_TRUE(dom_comment_remove(comment1));
+    EXPECT_TRUE(dom_comment_remove_backed(comment1));
     
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
@@ -1246,9 +1248,9 @@ TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
     
     // Add mixed children: comment, text, comment
     // (Note: We use only backed operations for this test)
-    DomComment* comment1 = dom_element_append_comment(parent, " Start ");
-    DomText* text = dom_element_append_text(parent, "Content");
-    DomComment* comment2 = dom_element_append_comment(parent, " End ");
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " Start ");
+    DomText* text = dom_element_append_text_backed(parent, "Content");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " End ");
     
     // Verify structure in Lambda (3 children: comment, text, comment)
     EXPECT_EQ(parent->native_element->length, 3);
@@ -1284,17 +1286,17 @@ TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
 
 TEST_F(DomIntegrationTest, DomComment_EmptyComment_Backed) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, "");
+    DomComment* comment = dom_element_append_comment_backed(parent, "");
     
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, "");
-    EXPECT_EQ(comment->length, 0u);
+    EXPECT_EQ(comment->length, 0);
     
     // Verify Lambda - empty comments should have empty String child
     EXPECT_EQ(comment->native_element->length, 0);
     
     // Set content on empty comment
-    EXPECT_TRUE(dom_comment_set_content(comment, "Now has content"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Now has content"));
     EXPECT_STREQ(comment->content, "Now has content");
     EXPECT_EQ(comment->native_element->length, 1);
 }
@@ -1305,7 +1307,7 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
                                "It should be handled correctly by the backing system.";
     
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, long_comment);
+    DomComment* comment = dom_element_append_comment_backed(parent, long_comment);
     
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, long_comment);
@@ -1317,18 +1319,18 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
 
 TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
     DomElement* parent = create_dom_element("div");
-    DomComment* comment = dom_element_append_comment(parent, "Version1");
+    DomComment* comment = dom_element_append_comment_backed(parent, "Version1");
     
     ASSERT_NE(comment, nullptr);
     
     // Multiple sequential updates
-    EXPECT_TRUE(dom_comment_set_content(comment, "Version2"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Version2"));
     EXPECT_STREQ(comment->content, "Version2");
     
-    EXPECT_TRUE(dom_comment_set_content(comment, "Version3"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Version3"));
     EXPECT_STREQ(comment->content, "Version3");
     
-    EXPECT_TRUE(dom_comment_set_content(comment, "Final"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Final"));
     EXPECT_STREQ(comment->content, "Final");
     
     // Verify Lambda has latest
@@ -1338,14 +1340,14 @@ TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
 TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
     DomElement* parent = create_dom_element("div");
     
-    DomComment* comment1 = dom_element_append_comment(parent, " C1 ");
-    DomComment* comment2 = dom_element_append_comment(parent, " C2 ");
-    DomComment* comment3 = dom_element_append_comment(parent, " C3 ");
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " C1 ");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " C2 ");
+    DomComment* comment3 = dom_element_append_comment_backed(parent, " C3 ");
     
     EXPECT_EQ(parent->native_element->length, 3);
     
     // Remove middle comment
-    EXPECT_TRUE(dom_comment_remove(comment2));
+    EXPECT_TRUE(dom_comment_remove_backed(comment2));
     
     // Verify Lambda structure
     EXPECT_EQ(parent->native_element->length, 2);
@@ -1363,22 +1365,25 @@ TEST_F(DomIntegrationTest, DomComment_IsBacked_DetectsCorrectly) {
     DomElement* parent = create_dom_element("div");
     
     // Create backed comment
-    DomComment* backed = dom_element_append_comment(parent, "Backed");
+    DomComment* backed = dom_element_append_comment_backed(parent, "Backed");
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_comment_is_backed(backed));
     
-    // Note: All comments are now backed (reference Lambda String*), no unbacked mode exists
+    // Create unbacked comment
+    DomComment* unbacked = dom_comment_create(pool, DOM_NODE_COMMENT, "!--", "Unbacked");
+    ASSERT_NE(unbacked, nullptr);
+    EXPECT_FALSE(dom_comment_is_backed(unbacked));
 }
 
 TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {
     DomElement* parent = create_dom_element("div");
     
     // Build structure: comment -> text -> element -> comment
-    DomComment* comment1 = dom_element_append_comment(parent, " Start ");
-    DomText* text = dom_element_append_text(parent, "Text");
+    DomComment* comment1 = dom_element_append_comment_backed(parent, " Start ");
+    DomText* text = dom_element_append_text_backed(parent, "Text");
     DomElement* span = create_dom_element("span");
     dom_element_append_child(parent, span);
-    DomComment* comment2 = dom_element_append_comment(parent, " End ");
+    DomComment* comment2 = dom_element_append_comment_backed(parent, " End ");
     
     // Traverse via DOM sibling chain
     DomNode* child = parent->first_child;

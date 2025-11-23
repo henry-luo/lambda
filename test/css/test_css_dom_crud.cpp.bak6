@@ -126,7 +126,7 @@ TEST_F(DomIntegrationTest, DomElementAttributes) {
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
     ASSERT_NE(element->native_element, nullptr);
-    ASSERT_NE(element->doc->input, nullptr);
+    ASSERT_NE(element->input, nullptr);
     
     // Set attribute
     EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
@@ -919,7 +919,7 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     
     ASSERT_NE(text, nullptr);
     EXPECT_NE(text->native_string, nullptr);
-    EXPECT_NE(text->parent_element->doc->input, nullptr);
+    EXPECT_NE(text->input, nullptr);
     EXPECT_EQ(text->parent_element, parent);
     EXPECT_STREQ(text->text, "Hello World");
     EXPECT_EQ(text->length, 11u);
@@ -964,7 +964,7 @@ TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
     EXPECT_EQ(parent->native_element->length, 2);
     
     // Remove first text node
-    EXPECT_TRUE(dom_text_remove(text1));
+    EXPECT_TRUE(dom_text_remove_backed(text1));
     
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
@@ -998,7 +998,7 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Three");
     
     // Remove middle text
-    EXPECT_TRUE(dom_text_remove(text2));
+    EXPECT_TRUE(dom_text_remove_backed(text2));
     
     EXPECT_EQ(parent->native_element->length, 2);
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
@@ -1023,8 +1023,8 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
     // Set as input root
     input->root = div_item;
     
-    // Build DOM tree from Lambda with DomDocument
-    DomElement* parent = build_dom_tree_from_element(div_item.element, doc, nullptr);
+    // Build DOM tree from Lambda with Input context
+    DomElement* parent = build_dom_tree_from_element_with_input(div_item.element, pool, nullptr, input);
     ASSERT_NE(parent, nullptr);
     
     // Verify structure in Lambda tree
@@ -1072,7 +1072,7 @@ TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
     EXPECT_EQ(dom_text_get_child_index(t2), 2);
     
     // Remove middle - indices should update
-    EXPECT_TRUE(dom_text_remove(t1));
+    EXPECT_TRUE(dom_text_remove_backed(t1));
     
     EXPECT_EQ(dom_text_get_child_index(t0), 0);
     EXPECT_EQ(dom_text_get_child_index(t2), 1);
@@ -1156,7 +1156,7 @@ TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
     EXPECT_EQ(parent->native_element->length, 5);
     
     // Remove text at index 2
-    EXPECT_TRUE(dom_text_remove(texts[2]));
+    EXPECT_TRUE(dom_text_remove_backed(texts[2]));
     
     // Verify structure
     EXPECT_EQ(parent->native_element->length, 4);
@@ -1180,8 +1180,10 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_text_is_backed(backed));
     
-    // Skip unbacked test - all text nodes are now backed
-    // NOTE: Text nodes now always reference Lambda String*, there's no "unbacked" mode
+    // Create unbacked text node
+    DomText* unbacked = dom_text_create(pool, "Unbacked");
+    ASSERT_NE(unbacked, nullptr);
+    EXPECT_FALSE(dom_text_is_backed(unbacked));
 }
 
 // ============================================================================
@@ -1194,10 +1196,10 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     
     ASSERT_NE(comment, nullptr);
     EXPECT_NE(comment->native_element, nullptr);
-    EXPECT_NE(comment->parent_element->doc->input, nullptr);
+    EXPECT_NE(comment->input, nullptr);
     EXPECT_EQ(comment->parent_element, parent);
     EXPECT_STREQ(comment->content, " Test comment ");
-    EXPECT_EQ(comment->length, 14u);
+    EXPECT_EQ(comment->length, 14);
     EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
     
     // Verify Lambda backing
@@ -1212,11 +1214,11 @@ TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
     DomComment* comment = dom_element_append_comment(parent, "Original");
     
     ASSERT_NE(comment, nullptr);
-    EXPECT_TRUE(dom_comment_set_content(comment, "Updated"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Updated"));
     
     // Verify DomComment updated
     EXPECT_STREQ(comment->content, "Updated");
-    EXPECT_EQ(comment->length, 7u);
+    EXPECT_EQ(comment->length, 7);
     
     // Verify Lambda updated
     EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Updated");
@@ -1232,7 +1234,7 @@ TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
     EXPECT_EQ(parent->native_element->length, 2);
     
     // Remove first comment
-    EXPECT_TRUE(dom_comment_remove(comment1));
+    EXPECT_TRUE(dom_comment_remove_backed(comment1));
     
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
@@ -1288,13 +1290,13 @@ TEST_F(DomIntegrationTest, DomComment_EmptyComment_Backed) {
     
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, "");
-    EXPECT_EQ(comment->length, 0u);
+    EXPECT_EQ(comment->length, 0);
     
     // Verify Lambda - empty comments should have empty String child
     EXPECT_EQ(comment->native_element->length, 0);
     
     // Set content on empty comment
-    EXPECT_TRUE(dom_comment_set_content(comment, "Now has content"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Now has content"));
     EXPECT_STREQ(comment->content, "Now has content");
     EXPECT_EQ(comment->native_element->length, 1);
 }
@@ -1322,13 +1324,13 @@ TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
     ASSERT_NE(comment, nullptr);
     
     // Multiple sequential updates
-    EXPECT_TRUE(dom_comment_set_content(comment, "Version2"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Version2"));
     EXPECT_STREQ(comment->content, "Version2");
     
-    EXPECT_TRUE(dom_comment_set_content(comment, "Version3"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Version3"));
     EXPECT_STREQ(comment->content, "Version3");
     
-    EXPECT_TRUE(dom_comment_set_content(comment, "Final"));
+    EXPECT_TRUE(dom_comment_set_content_backed(comment, "Final"));
     EXPECT_STREQ(comment->content, "Final");
     
     // Verify Lambda has latest
@@ -1345,7 +1347,7 @@ TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
     EXPECT_EQ(parent->native_element->length, 3);
     
     // Remove middle comment
-    EXPECT_TRUE(dom_comment_remove(comment2));
+    EXPECT_TRUE(dom_comment_remove_backed(comment2));
     
     // Verify Lambda structure
     EXPECT_EQ(parent->native_element->length, 2);
@@ -1367,7 +1369,10 @@ TEST_F(DomIntegrationTest, DomComment_IsBacked_DetectsCorrectly) {
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_comment_is_backed(backed));
     
-    // Note: All comments are now backed (reference Lambda String*), no unbacked mode exists
+    // Create unbacked comment
+    DomComment* unbacked = dom_comment_create(pool, DOM_NODE_COMMENT, "!--", "Unbacked");
+    ASSERT_NE(unbacked, nullptr);
+    EXPECT_FALSE(dom_comment_is_backed(unbacked));
 }
 
 TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {

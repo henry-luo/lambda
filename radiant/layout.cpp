@@ -373,7 +373,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // navigate DomNode tree to find body
     DomNode* body_node = nullptr;
     log_debug("Searching for body element in Lambda CSS document");
-    DomNode* child = elmt->first_child;
+    DomNode* child = nullptr;
+    if (elmt->is_element()) {
+        child = static_cast<DomElement*>(elmt)->first_child;
+    }
     while (child) {
         if (child->is_element()) {
             const char* tag_name = child->name();

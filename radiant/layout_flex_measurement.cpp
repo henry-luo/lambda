@@ -201,10 +201,17 @@ bool requires_content_measurement(ViewBlock* flex_container) {
     if (!flex_container || !flex_container->node) return false;
 
     // Check if any children have auto flex-basis or need intrinsic sizing
-    DomNode* child = flex_container->node->first_child;
+    DomNode* child = nullptr;
+    if (flex_container->node->is_element()) {
+        child = static_cast<DomElement*>(flex_container->node)->first_child;
+    }
     while (child) {
         // If child has complex content or auto sizing, measurement is needed
-        if (child->first_child || child->is_text()) {
+        DomNode* child_first = nullptr;
+        if (child->is_element()) {
+            child_first = static_cast<DomElement*>(child)->first_child;
+        }
+        if (child_first || child->is_text()) {
             return true;
         }
         child = child->next_sibling;
@@ -218,7 +225,10 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 
     log_debug("Measuring all flex children content");
 
-    DomNode* child = flex_container->node->first_child;
+    DomNode* child = nullptr;
+    if (flex_container->node->is_element()) {
+        child = static_cast<DomElement*>(flex_container->node)->first_child;
+    }
     int child_count = 0;
     const int MAX_CHILDREN = 100; // Safety limit
 

@@ -691,7 +691,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
         dom_elem->next_sibling = nullptr;
         dom_elem->prev_sibling = nullptr;
         dom_elem->first_child = nullptr;
-        dom_elem->pool = input->pool;
+        dom_elem->doc = nullptr;  // PDF views don't have backing document
     }
 
     // Directly assign DomElement as the node
@@ -825,7 +825,9 @@ static void create_text_view(Input* input, ViewBlock* parent,
         dom_text->parent = nullptr;
         dom_text->next_sibling = nullptr;
         dom_text->prev_sibling = nullptr;
-        dom_text->pool = input->pool;
+        dom_text->parent_element = nullptr;  // PDF views don't have backing element
+        dom_text->native_string = nullptr;
+        dom_text->child_index = -1;
     }
 
     // Directly assign DomText as the node

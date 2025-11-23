@@ -48,15 +48,18 @@ bool DomNode::append_child(DomNode* child) {
     // Set parent relationship
     child->parent = this;
 
+    // Cast to DomElement to access first_child
+    DomElement* element = static_cast<DomElement*>(this);
+
     // Add to parent's child list
-    if (!this->first_child) {
+    if (!element->first_child) {
         // First child
-        this->first_child = child;
+        element->first_child = child;
         child->prev_sibling = nullptr;
         child->next_sibling = nullptr;
     } else {
         // Find last child
-        DomNode* last = this->first_child;
+        DomNode* last = element->first_child;
         while (last->next_sibling) {
             last = last->next_sibling;
         }
@@ -75,18 +78,27 @@ bool DomNode::remove_child(DomNode* child) {
         return false;
     }
 
+    // Only elements can have children
+    if (!this->is_element()) {
+        log_error("DomNode::remove_child: Parent is not an element");
+        return false;
+    }
+
     // Verify parent relationship
     if (child->parent != this) {
         log_error("DomNode::remove_child: Child does not belong to this parent");
         return false;
     }
 
+    // Cast to DomElement to access first_child
+    DomElement* element = static_cast<DomElement*>(this);
+
     // Update sibling links
     if (child->prev_sibling) {
         child->prev_sibling->next_sibling = child->next_sibling;
     } else {
         // Child was first child
-        this->first_child = child->next_sibling;
+        element->first_child = child->next_sibling;
     }
 
     if (child->next_sibling) {
@@ -106,6 +118,12 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
         return false;
     }
 
+    // Only elements can have children
+    if (!this->is_element()) {
+        log_error("DomNode::insert_before: Parent is not an element");
+        return false;
+    }
+
     // If no reference node, append at end
     if (!ref_node) {
         return this->append_child(new_node);
@@ -116,6 +134,9 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
         log_error("DomNode::insert_before: Reference node is not a child of this parent");
         return false;
     }
+
+    // Cast to DomElement to access first_child
+    DomElement* element = static_cast<DomElement*>(this);
 
     // Set parent relationship
     new_node->parent = this;
@@ -128,7 +149,7 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
         ref_node->prev_sibling->next_sibling = new_node;
     } else {
         // Reference node was first child
-        this->first_child = new_node;
+        element->first_child = new_node;
     }
 
     ref_node->prev_sibling = new_node;
@@ -248,11 +269,14 @@ void DomNode::print(StrBuf* buf, int indent) const {
 
         printf(">\n");
 
-        // Recursively print children
-        const DomNode* child = this->first_child;
-        while (child) {
-            child->print(nullptr, indent + 1);
-            child = child->next_sibling;
+        // Recursively print children (only for elements)
+        if (this->is_element()) {
+            const DomElement* element = this->as_element();
+            const DomNode* child = element->first_child;
+            while (child) {
+                child->print(nullptr, indent + 1);
+                child = child->next_sibling;
+            }
         }
         return;
     }
@@ -359,69 +383,72 @@ void DomNode::print(StrBuf* buf, int indent) const {
             strbuf_append_char(buf, ']');
         }
 
-        // Print children
-        const DomNode* child = this->first_child;
-        bool has_element_children = false;
+        // Print children (only for elements)
+        if (this->is_element()) {
+            const DomElement* element = this->as_element();
+            const DomNode* child = element->first_child;
+            bool has_element_children = false;
 
-        // Count and print children
-        while (child) {
-            if (child->is_element()) {
-                // Recursively print child elements with newline before each child
-                has_element_children = true;
-                strbuf_append_char(buf, '\n');
-                child->print(buf, indent + 2);
-            } else if (child->is_text()) {
-                // Print text nodes (skip whitespace-only text nodes)
-                const DomText* text_node = (const DomText*)child;
+            // Count and print children
+            while (child) {
+                if (child->is_element()) {
+                    // Recursively print child elements with newline before each child
+                    has_element_children = true;
+                    strbuf_append_char(buf, '\n');
+                    child->print(buf, indent + 2);
+                } else if (child->is_text()) {
+                    // Print text nodes (skip whitespace-only text nodes)
+                    const DomText* text_node = (const DomText*)child;
 
-                if (text_node->text && text_node->length > 0) {
-                    // Check if text node contains only whitespace
-                    bool is_whitespace_only = true;
-                    for (size_t i = 0; i < text_node->length; i++) {
-                        char c = text_node->text[i];
-                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
-                            is_whitespace_only = false;
-                            break;
+                    if (text_node->text && text_node->length > 0) {
+                        // Check if text node contains only whitespace
+                        bool is_whitespace_only = true;
+                        for (size_t i = 0; i < text_node->length; i++) {
+                            char c = text_node->text[i];
+                            if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                                is_whitespace_only = false;
+                                break;
+                            }
+                        }
+
+                        if (!is_whitespace_only) {
+                            strbuf_append_str(buf, "\n");
+                            strbuf_append_char_n(buf, ' ', indent + 2);
+                            strbuf_append_str(buf, "\"");
+                            strbuf_append_str_n(buf, text_node->text, text_node->length);
+                            strbuf_append_str(buf, "\"");
                         }
                     }
-
-                    if (!is_whitespace_only) {
-                        strbuf_append_str(buf, "\n");
-                        strbuf_append_char_n(buf, ' ', indent + 2);
-                        strbuf_append_str(buf, "\"");
-                        strbuf_append_str_n(buf, text_node->text, text_node->length);
-                        strbuf_append_str(buf, "\"");
+                } else if (child->is_comment()) {
+                    // Print comment/DOCTYPE nodes
+                    const DomComment* comment_node = (const DomComment*)child;
+                    strbuf_append_char(buf, '\n');
+                    strbuf_append_char_n(buf, ' ', indent + 2);
+                    strbuf_append_str(buf, "<!-- ");
+                    if (comment_node->content) {
+                        strbuf_append_str(buf, comment_node->content);
                     }
+                    strbuf_append_str(buf, " -->");
                 }
-            } else if (child->is_comment()) {
-                // Print comment/DOCTYPE nodes
-                const DomComment* comment_node = (const DomComment*)child;
-                strbuf_append_char(buf, '\n');
-                strbuf_append_char_n(buf, ' ', indent + 2);
-                strbuf_append_str(buf, "<!-- ");
-                if (comment_node->content) {
-                    strbuf_append_str(buf, comment_node->content);
-                }
-                strbuf_append_str(buf, " -->");
+
+                // Move to next sibling
+                child = child->next_sibling;
             }
 
-            // Move to next sibling
-            child = child->next_sibling;
-        }
+            // Print closing tag
+            // Add newline and indentation before closing tag only if we had element children
+            if (has_element_children) {
+                strbuf_append_char(buf, '\n');
+                strbuf_append_char_n(buf, ' ', indent);
+            }
+            strbuf_append_str(buf, "</");
+            strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
+            strbuf_append_char(buf, '>');
 
-        // Print closing tag
-        // Add newline and indentation before closing tag only if we had element children
-        if (has_element_children) {
-            strbuf_append_char(buf, '\n');
-            strbuf_append_char_n(buf, ' ', indent);
-        }
-        strbuf_append_str(buf, "</");
-        strbuf_append_str(buf, element->tag_name ? element->tag_name : "unknown");
-        strbuf_append_char(buf, '>');
-
-        // Add trailing newline only for root element (indent == 0)
-        if (indent == 0) {
-            strbuf_append_char(buf, '\n');
+            // Add trailing newline only for root element (indent == 0)
+            if (indent == 0) {
+                strbuf_append_char(buf, '\n');
+            }
         }
     } else if (this->is_text()) {
         // For standalone text node printing
@@ -451,17 +478,22 @@ void DomNode::print(StrBuf* buf, int indent) const {
 }
 
 void DomNode::free_tree() {
-    // Recursively free all children
-    DomNode* child = this->first_child;
-    while (child) {
-        DomNode* next = child->next_sibling;
-        child->free_tree();
-        child = next;
+    // Recursively free all children (only for elements)
+    if (this->is_element()) {
+        DomElement* element = static_cast<DomElement*>(this);
+        DomNode* child = element->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            child->free_tree();
+            child = next;
+        }
+
+        // Clear first_child
+        element->first_child = nullptr;
     }
 
     // Clear relationships
     this->parent = nullptr;
-    this->first_child = nullptr;
     this->next_sibling = nullptr;
     this->prev_sibling = nullptr;
 }
