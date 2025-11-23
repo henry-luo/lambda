@@ -136,10 +136,24 @@ TEST_F(DomNodeBaseTest, CreateDomElement) {
 }
 
 TEST_F(DomNodeBaseTest, CreateDomText) {
-    GTEST_SKIP() << "Skipping - dom_text_create now requires parent element and native String*";
+    // Create a backed parent element using MarkBuilder
+    MarkBuilder builder(test_input);
+    Item parent_item = builder.element("div").final();
+    ASSERT_NE(parent_item.element, nullptr);
     
-    // NOTE: Text nodes now require a parent element and reference Lambda String*
-    // This test should be rewritten to create text within an element using MarkBuilder
+    // Build DomElement from Lambda element
+    DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
+    ASSERT_NE(parent, nullptr);
+    
+    // Append text to the parent element
+    DomText* text = dom_element_append_text(parent, "Hello World");
+    ASSERT_NE(text, nullptr);
+    
+    // Verify text node properties
+    EXPECT_EQ(text->node_type, DOM_NODE_TEXT);
+    EXPECT_STREQ(dom_text_get_content(text), "Hello World");
+    EXPECT_EQ(text->parent_element, parent);
+    EXPECT_TRUE(dom_text_is_backed(text));
 }
 
 TEST_F(DomNodeBaseTest, GetTagName) {
@@ -645,11 +659,17 @@ TEST_F(DomNodeBaseTest, MixedContentWithWhitespace) {
 }
 
 TEST_F(DomNodeBaseTest, TextNodeManipulation) {
-    GTEST_SKIP() << "dom_text_create now requires parent element and native String*";
-    return;
+    // Create a backed parent element using MarkBuilder
+    MarkBuilder builder(test_input);
+    Item parent_item = builder.element("p").final();
+    ASSERT_NE(parent_item.element, nullptr);
     
-    // DomText* text = dom_text_create(pool, "Original text");
-    DomText* text = nullptr;
+    // Build DomElement from Lambda element
+    DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
+    ASSERT_NE(parent, nullptr);
+    
+    // Create text node via parent
+    DomText* text = dom_element_append_text(parent, "Original text");
     ASSERT_NE(text, nullptr);
 
     // Initial state
