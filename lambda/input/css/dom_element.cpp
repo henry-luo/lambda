@@ -200,7 +200,7 @@ void dom_document_destroy(DomDocument* document) {
 // ============================================================================
 
 DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* native_element) {
-    if (!doc || !tag_name || !native_element) {
+    if (!doc || !tag_name) {
         return NULL;
     }
 
@@ -219,7 +219,7 @@ DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* 
 }
 
 bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_name, Element* native_element) {
-    if (!element || !doc || !tag_name || !native_element) {
+    if (!element || !doc || !tag_name) {
         return false;
     }
 
