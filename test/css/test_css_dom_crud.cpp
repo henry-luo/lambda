@@ -7,6 +7,7 @@
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/mark_builder.hpp"
 #include "../../lambda/input/input.hpp"
+#include "../../lambda/format/format.h"
 #include "helpers/css_test_helpers.hpp"
 
 extern "C" {
@@ -1403,6 +1404,106 @@ TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {
     
     child = child->next_sibling;
     EXPECT_EQ(child, nullptr);
+}
+
+// ============================================================================
+// Comprehensive CRUD Integration Test
+// ============================================================================
+
+TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) {
+    // Purpose: Verify DOM CRUD operations (Create, Update, format) are properly routed 
+    // to underlying Lambda elements by checking formatted HTML output
+    
+    // 1. CREATE: Build initial DOM element backed by Lambda
+    DomElement* root = create_dom_element("div");
+    ASSERT_NE(root, nullptr);
+    ASSERT_NE(root->native_element, nullptr);
+    ASSERT_NE(root->doc->input, nullptr);
+    
+    // Set input root so we can format it
+    input->root = Item{.element = root->native_element};
+    
+    // 2. SET ATTRIBUTES: Add various attributes
+    EXPECT_TRUE(dom_element_set_attribute(root, "id", "container"));
+    EXPECT_TRUE(dom_element_set_attribute(root, "data-test", "value1"));
+    EXPECT_TRUE(dom_element_set_attribute(root, "title", "Test Container"));
+    
+    // 3. INSERT TEXT: Add text content
+    DomText* text1 = dom_element_append_text(root, "Hello ");
+    ASSERT_NE(text1, nullptr);
+    EXPECT_TRUE(dom_text_is_backed(text1));
+    
+    // 4. INSERT MORE TEXT: Add more text
+    DomText* text2 = dom_element_append_text(root, "World");
+    ASSERT_NE(text2, nullptr);
+    
+    // 5. INSERT COMMENT: Add a comment
+    DomComment* comment = dom_element_append_comment(root, " test comment ");
+    ASSERT_NE(comment, nullptr);
+    EXPECT_TRUE(dom_comment_is_backed(comment));
+    
+    // 6. UPDATE OPERATIONS: Modify existing content
+    EXPECT_TRUE(dom_text_set_content(text1, "Greetings "));
+    EXPECT_TRUE(dom_text_set_content(text2, "Universe!"));
+    EXPECT_TRUE(dom_element_set_attribute(root, "data-test", "updated"));
+    EXPECT_TRUE(dom_comment_set_content(comment, " modified comment "));
+    
+    // 7. ADD MORE ATTRIBUTES: Test attribute addition after updates
+    EXPECT_TRUE(dom_element_set_attribute(root, "role", "main"));
+    
+    // 8. Format the underlying Lambda element to HTML
+    Item root_item = {.element = root->native_element};
+    String* html = format_html(pool, root_item);
+    ASSERT_NE(html, nullptr);
+    ASSERT_NE(html->chars, nullptr);
+    
+    const char* output = html->chars;
+    
+    printf("=== Formatted HTML Output ===\n%s\n=== End Output ===\n", output);
+    
+    // Verify the output contains all our CRUD operations:
+    
+    // Check root attributes (all set/updated attributes should be present)
+    EXPECT_TRUE(strstr(output, "id=\"container\"") != nullptr) 
+        << "Missing id attribute in output";
+    EXPECT_TRUE(strstr(output, "data-test=\"updated\"") != nullptr) 
+        << "Missing updated data-test attribute in output";
+    EXPECT_TRUE(strstr(output, "title=\"Test Container\"") != nullptr) 
+        << "Missing title attribute in output";
+    EXPECT_TRUE(strstr(output, "role=\"main\"") != nullptr) 
+        << "Missing role attribute in output";
+    
+    // Check text content (all updated text should be present)
+    EXPECT_TRUE(strstr(output, "Greetings ") != nullptr) 
+        << "Missing first updated text in output";
+    EXPECT_TRUE(strstr(output, "Universe!") != nullptr) 
+        << "Missing second updated text in output";
+    
+    // Check comment (updated comment should be present)
+    EXPECT_TRUE(strstr(output, "<!-- modified comment -->") != nullptr) 
+        << "Missing updated comment in output";
+    
+    // 9. VERIFY LAMBDA TREE STRUCTURE: Ensure backing structure is correct
+    EXPECT_EQ(root->native_element->length, 3);  // text1, text2, comment
+    
+    // Verify first child is text1
+    Item child0 = root->native_element->items[0];
+    EXPECT_EQ(get_type_id(child0), LMD_TYPE_STRING);
+    EXPECT_STREQ(((String*)child0.pointer)->chars, "Greetings ");
+    
+    // Verify second child is text2
+    Item child1 = root->native_element->items[1];
+    EXPECT_EQ(get_type_id(child1), LMD_TYPE_STRING);
+    EXPECT_STREQ(((String*)child1.pointer)->chars, "Universe!");
+    
+    // Verify third child is comment
+    Item child2 = root->native_element->items[2];
+    EXPECT_EQ(get_type_id(child2), LMD_TYPE_ELEMENT);
+    Element* comment_elem = child2.element;
+    TypeElmt* comment_type = (TypeElmt*)comment_elem->type;
+    EXPECT_STREQ(comment_type->name.str, "!--");
+    EXPECT_EQ(comment_elem->length, 1);
+    EXPECT_STREQ(((String*)comment_elem->items[0].pointer)->chars, " modified comment ");
 }
 
 
