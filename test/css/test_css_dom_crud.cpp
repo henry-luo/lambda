@@ -5,11 +5,16 @@
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/mark_builder.hpp"
+#include "../../lambda/input/input.hpp"
 #include "helpers/css_test_helpers.hpp"
 
 extern "C" {
 #include "../../lib/mempool.h"
 }
+
+// Forward declaration for helper function
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 
 /**
  * Comprehensive DOM Integration Test Suite
@@ -26,11 +31,16 @@ extern "C" {
 class DomIntegrationTest : public ::testing::Test {
 protected:
     Pool* pool;
+    Input* input;
     SelectorMatcher* matcher;
 
     void SetUp() override {
+        // Create Input context for MarkBuilder
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
+        
+        input = Input::create(pool);
+        ASSERT_NE(input, nullptr);
 
         matcher = selector_matcher_create(pool);
         ASSERT_NE(matcher, nullptr);
@@ -43,6 +53,26 @@ protected:
         if (pool) {
             pool_destroy(pool);
         }
+    }
+
+    // Helper: Create DomElement with backing Lambda Element using MarkBuilder
+    DomElement* create_dom_element(const char* tag_name) {
+        MarkBuilder builder(input);
+        // Create element WITH an initial dummy attribute to establish a shape
+        Item elem_item = builder.element(tag_name)
+            .attr("_init", "placeholder")
+            .final();
+        
+        if (!elem_item.element) return nullptr;
+        
+        // Set as root (might be needed for MarkEditor)
+        input->root = elem_item;
+        
+        DomElement* dom_elem = build_dom_tree_from_element(elem_item.element, pool, nullptr);
+        if (dom_elem) {
+            dom_elem->input = input;
+        }
+        return dom_elem;
     }
 
     // Helper: Create a test declaration
@@ -83,13 +113,15 @@ protected:
 // ============================================================================
 
 
-// NOTE: These tests test dom_element_set_attribute() which currently fails
-// due to MarkEditor/shape_builder limitation with finalized Lambda elements.
+// NOTE: These tests now use MarkBuilder to create elements with backing Lambda Elements,
+// which allows dom_element_set_attribute() to work via MarkEditor.
 
 TEST_F(DomIntegrationTest, DomElementAttributes) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
-
+    ASSERT_NE(element->native_element, nullptr);
+    ASSERT_NE(element->input, nullptr);
+    
     // Set attribute
     EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
     EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value1");
@@ -108,7 +140,7 @@ TEST_F(DomIntegrationTest, DomElementAttributes) {
 }
 
 TEST_F(DomIntegrationTest, DomElementIdAttribute) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
 
     // Set ID attribute
@@ -122,7 +154,7 @@ TEST_F(DomIntegrationTest, DomElementIdAttribute) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, EdgeCase_VeryLongStrings) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Very long class name (1000 chars)
     char long_class[1001];
@@ -142,7 +174,7 @@ TEST_F(DomIntegrationTest, EdgeCase_VeryLongStrings) {
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_SpecialCharacters) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Special characters in class names
     EXPECT_TRUE(dom_element_add_class(element, "class-with-hyphen"));
@@ -163,7 +195,7 @@ TEST_F(DomIntegrationTest, EdgeCase_SpecialCharacters) {
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_CaseSensitivity) {
-    DomElement* element = dom_element_create(pool, "DIV", nullptr);
+    DomElement* element = create_dom_element("DIV");
     dom_element_add_class(element, "MyClass");
     dom_element_set_attribute(element, "DATA-TEST", "VALUE");
 
@@ -189,7 +221,7 @@ TEST_F(DomIntegrationTest, EdgeCase_CaseSensitivity) {
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_AttributeOverwrite) {
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Set attribute
     dom_element_set_attribute(element, "data-test", "value1");
@@ -207,7 +239,7 @@ TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveAttributes) {
     // Enable quirks mode
     selector_matcher_set_quirks_mode(matcher, true);
 
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
     dom_element_set_attribute(element, "data-test", "ValueMixed");
 
     // Test with quirks mode (should be case-insensitive now)
@@ -221,7 +253,7 @@ TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveAttributes) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_ArrayMode_SmallCount) {
     // Test with < 10 attributes (should use array mode)
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Add 5 attributes
     dom_element_set_attribute(element, "attr1", "value1");
@@ -251,7 +283,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_ArrayMode_SmallCount) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_HashMapMode_LargeCount) {
     // Test with >= 10 attributes (should convert to HashMap)
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Add 15 attributes (triggers conversion at 10th)
     for (int i = 1; i <= 15; i++) {
@@ -280,7 +312,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_HashMapMode_LargeCount) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_ConversionThreshold) {
     // Test the exact conversion point (10th attribute)
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Add exactly 9 attributes (should stay in array mode)
     for (int i = 1; i <= 9; i++) {
@@ -307,7 +339,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_ConversionThreshold) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_SVGElement_ManyAttributes) {
     // Simulate SVG element with many attributes (typical case)
-    DomElement* svg_path = dom_element_create(pool, "path", nullptr);
+    DomElement* svg_path = create_dom_element("path");
 
     // Add typical SVG path attributes
     dom_element_set_attribute(svg_path, "d", "M 10 10 L 100 100");
@@ -340,7 +372,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_SVGElement_ManyAttributes) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_Performance_ManyAttributes) {
     // Performance test: 50 attributes (typical for complex SVG)
-    DomElement* element = dom_element_create(pool, "g", nullptr);
+    DomElement* element = create_dom_element("g");
 
     // Add 50 attributes
     for (int i = 1; i <= 50; i++) {
@@ -362,7 +394,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_Performance_ManyAttributes) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_Clone_ManyAttributes) {
     // Test cloning element with many attributes (tests iterator)
-    DomElement* original = dom_element_create(pool, "div", nullptr);
+    DomElement* original = create_dom_element("div");
 
     // Add 20 attributes
     for (int i = 1; i <= 20; i++) {
@@ -387,7 +419,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_Clone_ManyAttributes) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_UpdateAfterConversion) {
     // Test updating attributes after array→HashMap conversion
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Add 9 attributes (array mode)
     for (int i = 1; i <= 9; i++) {
@@ -419,7 +451,7 @@ TEST_F(DomIntegrationTest, AttributeStorage_UpdateAfterConversion) {
 
 TEST_F(DomIntegrationTest, AttributeStorage_RemoveAfterConversion) {
     // Test removing attributes after conversion to HashMap
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Add 15 attributes (HashMap mode)
     for (int i = 1; i <= 15; i++) {
@@ -455,7 +487,7 @@ TEST_F(DomIntegrationTest, Integration_QuirksModeWithManyAttributes) {
     // Test quirks mode + hybrid storage together
     selector_matcher_set_quirks_mode(matcher, true);
 
-    DomElement* element = dom_element_create(pool, "button", nullptr);
+    DomElement* element = create_dom_element("button");
 
     // Add many attributes (triggers HashMap)
     for (int i = 1; i <= 15; i++) {
@@ -485,7 +517,7 @@ TEST_F(DomIntegrationTest, Integration_SVGWithQuirksMode) {
     // Real-world scenario: SVG with many attributes in quirks mode
     selector_matcher_set_quirks_mode(matcher, true);
 
-    DomElement* svg = dom_element_create(pool, "svg", nullptr);
+    DomElement* svg = create_dom_element("svg");
     dom_element_set_attribute(svg, "xmlns", "http://www.w3.org/2000/svg");
     dom_element_set_attribute(svg, "viewBox", "0 0 100 100");
     dom_element_set_attribute(svg, "width", "100");
@@ -513,7 +545,7 @@ TEST_F(DomIntegrationTest, Integration_SVGWithQuirksMode) {
 
 TEST_F(DomIntegrationTest, Integration_PerformanceManyAttributesWithMatching) {
     // Performance test: element with many attributes, multiple selector matches
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Add 30 attributes
     for (int i = 1; i <= 30; i++) {
@@ -550,7 +582,7 @@ TEST_F(DomIntegrationTest, Integration_PerformanceManyAttributesWithMatching) {
 
 TEST_F(DomIntegrationTest, InlineStyle_SingleProperty) {
     // Test: Single inline style property
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     dom_element_set_attribute(element, "style", "color: red");
 
@@ -570,7 +602,7 @@ TEST_F(DomIntegrationTest, InlineStyle_SingleProperty) {
 
 TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
     // Test: Multiple inline style properties
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     int applied = dom_element_apply_inline_style(element, "color: blue; font-size: 16px; background-color: yellow");
     EXPECT_EQ(applied, 3);
@@ -600,7 +632,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
 
 TEST_F(DomIntegrationTest, InlineStyle_OverridesStylesheet) {
     // Test: Inline style overrides stylesheet rules
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
     dom_element_add_class(element, "box");
 
     // Apply stylesheet rule with class selector (0,1,0)
@@ -620,7 +652,7 @@ TEST_F(DomIntegrationTest, InlineStyle_OverridesStylesheet) {
 
 TEST_F(DomIntegrationTest, InlineStyle_OverridesIDSelector) {
     // Test: Inline style overrides even ID selectors
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
     dom_element_set_attribute(element, "id", "unique");
 
     // Apply ID selector rule (1,0,0)
@@ -642,7 +674,7 @@ TEST_F(DomIntegrationTest, InlineStyle_OverridesIDSelector) {
 
 TEST_F(DomIntegrationTest, InlineStyle_WhitespaceHandling) {
     // Test: Inline style with various whitespace
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Extra spaces, tabs, newlines
     int applied = dom_element_apply_inline_style(element,
@@ -657,7 +689,7 @@ TEST_F(DomIntegrationTest, InlineStyle_WhitespaceHandling) {
 
 TEST_F(DomIntegrationTest, InlineStyle_EmptyValue) {
     // Test: Empty inline style
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     int applied = dom_element_apply_inline_style(element, "");
     EXPECT_EQ(applied, 0);
@@ -668,7 +700,7 @@ TEST_F(DomIntegrationTest, InlineStyle_EmptyValue) {
 
 TEST_F(DomIntegrationTest, InlineStyle_InvalidDeclarations) {
     // Test: Invalid declarations should be skipped
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Mix of valid and invalid
     int applied = dom_element_apply_inline_style(element,
@@ -685,7 +717,7 @@ TEST_F(DomIntegrationTest, InlineStyle_InvalidDeclarations) {
 
 TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
     // Test: Updating style attribute replaces inline styles
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Set initial inline style
     dom_element_set_attribute(element, "style", "color: red");
@@ -713,7 +745,7 @@ TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
 
 TEST_F(DomIntegrationTest, InlineStyle_GetInlineStyle) {
     // Test: Retrieving inline style text
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // No inline style initially
     EXPECT_EQ(dom_element_get_inline_style(element), nullptr);
@@ -730,7 +762,7 @@ TEST_F(DomIntegrationTest, InlineStyle_GetInlineStyle) {
 
 TEST_F(DomIntegrationTest, InlineStyle_RemoveInlineStyles) {
     // Test: Removing inline styles
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     // Set inline style
     dom_element_set_attribute(element, "style", "color: red; font-size: 16px");
@@ -746,7 +778,7 @@ TEST_F(DomIntegrationTest, InlineStyle_RemoveInlineStyles) {
 
 TEST_F(DomIntegrationTest, InlineStyle_ComplexSpecificity) {
     // Test: Inline style in complex specificity scenario
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
     dom_element_set_attribute(element, "id", "main");
     dom_element_add_class(element, "container");
 
@@ -777,9 +809,9 @@ TEST_F(DomIntegrationTest, InlineStyle_ComplexSpecificity) {
 
 TEST_F(DomIntegrationTest, InlineStyle_MultipleElements) {
     // Test: Inline styles on multiple elements are independent
-    DomElement* elem1 = dom_element_create(pool, "div", nullptr);
-    DomElement* elem2 = dom_element_create(pool, "span", nullptr);
-    DomElement* elem3 = dom_element_create(pool, "p", nullptr);
+    DomElement* elem1 = create_dom_element("div");
+    DomElement* elem2 = create_dom_element("span");
+    DomElement* elem3 = create_dom_element("p");
 
     dom_element_set_attribute(elem1, "style", "color: red");
     dom_element_set_attribute(elem2, "style", "color: blue");
@@ -804,7 +836,7 @@ TEST_F(DomIntegrationTest, InlineStyle_MultipleElements) {
 
 TEST_F(DomIntegrationTest, InlineStyle_MixedWithOtherAttributes) {
     // Test: Inline style works alongside other attributes
-    DomElement* element = dom_element_create(pool, "div", nullptr);
+    DomElement* element = create_dom_element("div");
 
     dom_element_set_attribute(element, "id", "box");
     dom_element_set_attribute(element, "class", "container");

@@ -949,15 +949,22 @@ Item MarkEditor::elmt_update_attr_inline(Element* elmt, String* attr_name, Item 
         }
         shape_builder_add_field(&builder, attr_name->chars, value_type);
         
-        return elmt_rebuild_with_new_shape(elmt, &builder, true);
+        return elmt_rebuild_with_new_shape(elmt, &builder, true, attr_name, value);
     }
 }
 
-Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* builder, bool is_inline) {
-    log_debug("elmt_rebuild_with_new_shape: field_count=%zu", builder->field_count);
+Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* builder, bool is_inline,
+                                              String* new_attr_name, Item new_attr_value) {
+    log_debug("elmt_rebuild_with_new_shape: field_count=%zu, new_attr=%s", 
+              builder->field_count, new_attr_name ? new_attr_name->chars : "NULL");
     
     // Get new deduplicated shape
     ShapeEntry* new_shape = shape_builder_finalize(builder);
+    
+    if (!new_shape) {
+        log_error("elmt_rebuild_with_new_shape: shape_builder_finalize failed");
+        return ItemError;
+    }
     
     // Calculate new byte size
     int64_t new_byte_size = 0;
@@ -979,31 +986,43 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
     
     // Copy matching attributes from old data to new data
     TypeElmt* old_type = (TypeElmt*)old_elmt->type;
+    TypeId new_attr_type = new_attr_name ? get_type_id(new_attr_value) : LMD_TYPE_NULL;
+    
     entry = new_shape;
     while (entry) {
-        TypeId old_type_id;
-        int64_t old_offset;
-        bool found = find_field_in_shape(old_type->shape, entry->name->str, 
-                                        &old_type_id, &old_offset);
-        
-        if (found && old_type_id == entry->type->type_id) {
-            void* old_field = (char*)old_elmt->data + old_offset;
+        // Check if this is the NEW attribute being added
+        if (new_attr_name && strcmp(entry->name->str, new_attr_name->chars) == 0) {
+            // Store the new attribute value
             void* new_field = (char*)new_data + entry->byte_offset;
-            int field_size = type_info[entry->type->type_id].byte_size;
-            memcpy(new_field, old_field, field_size);
+            store_value_at_offset(new_field, new_attr_value, new_attr_type);
+            log_debug("elmt_rebuild_with_new_shape: stored new attr '%s' at offset %lld", 
+                      new_attr_name->chars, entry->byte_offset);
+        } else {
+            // Copy from old element if it exists
+            TypeId old_type_id;
+            int64_t old_offset;
+            bool found = find_field_in_shape(old_type->shape, entry->name->str, 
+                                            &old_type_id, &old_offset);
             
-            // Update ref counts (immutable mode only)
-            if (!is_inline) {
-                if (entry->type->type_id == LMD_TYPE_STRING || 
-                    entry->type->type_id == LMD_TYPE_SYMBOL ||
-                    entry->type->type_id == LMD_TYPE_BINARY) {
-                    String* str = *(String**)new_field;
-                    if (str) str->ref_cnt++;
-                }
-                else if (entry->type->type_id >= LMD_TYPE_LIST && 
-                         entry->type->type_id <= LMD_TYPE_ELEMENT) {
-                    Container* container = *(Container**)new_field;
-                    if (container) container->ref_cnt++;
+            if (found && old_type_id == entry->type->type_id) {
+                void* old_field = (char*)old_elmt->data + old_offset;
+                void* new_field = (char*)new_data + entry->byte_offset;
+                int field_size = type_info[entry->type->type_id].byte_size;
+                memcpy(new_field, old_field, field_size);
+                
+                // Update ref counts (immutable mode only)
+                if (!is_inline) {
+                    if (entry->type->type_id == LMD_TYPE_STRING || 
+                        entry->type->type_id == LMD_TYPE_SYMBOL ||
+                        entry->type->type_id == LMD_TYPE_BINARY) {
+                        String* str = *(String**)new_field;
+                        if (str) str->ref_cnt++;
+                    }
+                    else if (entry->type->type_id >= LMD_TYPE_LIST && 
+                             entry->type->type_id <= LMD_TYPE_ELEMENT) {
+                        Container* container = *(Container**)new_field;
+                        if (container) container->ref_cnt++;
+                    }
                 }
             }
         }
@@ -1115,7 +1134,7 @@ Item MarkEditor::elmt_update_attr_immutable(Element* old_elmt, String* attr_name
         }
         shape_builder_add_field(&builder, attr_name->chars, value_type);
         
-        return elmt_rebuild_with_new_shape(new_elmt, &builder, false);
+        return elmt_rebuild_with_new_shape(new_elmt, &builder, false, attr_name, value);
     }
 }
 
