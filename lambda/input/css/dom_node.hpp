@@ -85,10 +85,9 @@ protected:
  * Create a new DomText node backed by Lambda String
  * @param native_string Pointer to Lambda String (will be referenced, not copied)
  * @param parent_element Parent DomElement (provides document context)
- * @param child_index Index in parent's native_element->items array
  * @return New DomText or NULL on failure
  */
-DomText* dom_text_create(String* native_string, DomElement* parent_element, int64_t child_index);
+DomText* dom_text_create(String* native_string, DomElement* parent_element);
 
 /**
  * Destroy a DomText node
@@ -150,16 +149,22 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content);
  * Create a new DomComment node (backed by Lambda Element)
  * @param native_element Lambda Element with tag "!--" or "!DOCTYPE" (required)
  * @param parent_element Parent DomElement (provides document context)
- * @param child_index Index in parent's native_element->items array
  * @return New backed DomComment or NULL on failure
  */
-DomComment* dom_comment_create(Element* native_element, DomElement* parent_element, int64_t child_index);
+DomComment* dom_comment_create(Element* native_element, DomElement* parent_element);
 
 /**
  * Destroy a DomComment node
  * @param comment_node Comment/DOCTYPE node to destroy
  */
 void dom_comment_destroy(DomComment* comment_node);
+
+/**
+ * Get child index of a comment node in parent's items array
+ * @param comment_node Comment node to check
+ * @return Index in parent's items array, or -1 if not found
+ */
+int64_t dom_comment_get_child_index(DomComment* comment_node);
 
 /**
  * Set comment content (updates Lambda Element)

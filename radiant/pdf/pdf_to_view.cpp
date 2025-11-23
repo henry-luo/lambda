@@ -827,7 +827,6 @@ static void create_text_view(Input* input, ViewBlock* parent,
         dom_text->prev_sibling = nullptr;
         dom_text->parent_element = nullptr;  // PDF views don't have backing element
         dom_text->native_string = nullptr;
-        dom_text->child_index = -1;
     }
 
     // Directly assign DomText as the node
