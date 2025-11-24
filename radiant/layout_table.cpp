@@ -4,10 +4,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 
-// Forward declaration for CSS length resolution
-float resolve_length_value(LayoutContext* lycon, uintptr_t property,
-    const lxb_css_value_length_percentage_t *value);
-
 /*
  * RADIANT TABLE LAYOUT ENGINE
  *

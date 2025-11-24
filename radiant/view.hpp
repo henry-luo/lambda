@@ -246,27 +246,6 @@ typedef enum AlignType {
     ALIGN_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
 } AlignType;
 
-// Length/percentage value structure (replacing lexbor's lxb_css_value_length_percentage_t)
-typedef struct {
-    CssEnum type;  // CSS_VALUE__LENGTH or CSS_VALUE__PERCENTAGE
-    union {
-        struct {
-            float num;
-            CssUnit unit;
-            bool is_float;
-        } length;
-        struct {
-            float num;
-        } percentage;
-    } u;
-} lxb_css_value_length_percentage_t;
-
-// Color value structure stub
-typedef struct {
-    CssEnum type;
-    uint32_t rgba;
-} lxb_css_value_color_t;
-
 // Line height property structure (replacing lexbor's lxb_css_property_line_height_t)
 typedef struct {
     CssEnum type;  // CSS_VALUE__NUMBER, CSS_VALUE__LENGTH, CSS_VALUE__PERCENTAGE, CSS_VALUE_NORMAL
@@ -362,7 +341,7 @@ extern bool is_space(char c);
 
 typedef struct ViewBlock ViewBlock;
 
-typedef struct {
+struct FontProp {
     char* family;  // font family name
     float font_size;  // font size in pixels, scaled by pixel_ratio
     CssEnum font_style;
@@ -374,7 +353,7 @@ typedef struct {
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
-} FontProp;
+};
 
 struct FlexFlowProp {
     // Integrated flex item properties (no separate allocation)
@@ -504,10 +483,10 @@ typedef struct TextRect {
     TextRect* next;
 } TextRect;
 
-typedef struct ViewText : View {
-    TextRect *rect;  // first text rect
-    FontProp *font;  // font for this text
-    Color color;     // text color (for PDF text fill color)
+typedef struct ViewText : DomText {
+    // TextRect *rect;  // first text rect
+    // FontProp *font;  // font for this text
+    // Color color;     // text color (for PDF text fill color)
 } ViewText;
 
 // multiple inheritance

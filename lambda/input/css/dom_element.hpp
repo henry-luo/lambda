@@ -67,7 +67,8 @@ struct DomDocument {
                     view_tree(nullptr), state(nullptr) {}
 };
 
-// Note: DomNode is defined in dom_node.hpp and included above
+typedef struct TextRect TextRect;
+typedef struct FontProp FontProp;
 
 /**
  * DomText - Text node in DOM tree
@@ -81,13 +82,18 @@ struct DomText : public DomNode {
     const char* text;            // Text content (references native_string->chars)
     size_t length;               // Text length
 
+    // view related fields
+    TextRect *rect;  // first text rect
+    FontProp *font;  // font for this text
+    Color color;     // text color (for PDF text fill color)
+
     // Lambda backing (required)
     String* native_string;       // Pointer to backing Lambda String
     DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
 
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-                native_string(nullptr), parent_element(nullptr) {}
+        native_string(nullptr), parent_element(nullptr), rect(nullptr), font(nullptr) { color.c = 0; }
 };
 
 // ============================================================================
