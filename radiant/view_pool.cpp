@@ -41,16 +41,19 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
             view = (ViewBlock*)pool_calloc(tree->pool, sizeof(ViewBlock));
             break;
-        case RDT_VIEW_TABLE:
-            view = (ViewTable*)pool_calloc(tree->pool, sizeof(ViewTable));
+        case RDT_VIEW_TABLE: {
+            ViewTable* table = (ViewTable*)pool_calloc(tree->pool, sizeof(ViewTable));
+            table->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
             // Initialize defaults
-            ((ViewTable*)view)->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
+            table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
             // CRITICAL FIX: Set CSS default border-spacing to 2px
             // CSS 2.1 spec: initial value for border-spacing is 2px
-            ((ViewTable*)view)->border_spacing_h = 2.0f;
-            ((ViewTable*)view)->border_spacing_v = 2.0f;
-            ((ViewTable*)view)->border_collapse = false; // default is separate borders
+            table->tb->border_spacing_h = 2.0f;
+            table->tb->border_spacing_v = 2.0f;
+            table->tb->border_collapse = false; // default is separate borders
+            view = (View*)table;
             break;
+        }
         case RDT_VIEW_TABLE_ROW_GROUP:
             view = (ViewTableRowGroup*)pool_calloc(tree->pool, sizeof(ViewTableRowGroup));
             break;
@@ -62,7 +65,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             // Initialize rowspan/colspan from DOM attributes (for Lambda CSS support)
             if (view && node) {
                 ViewTableCell* cell = (ViewTableCell*)view;
-
+                cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
                 // Read colspan attribute
                 const char* colspan_str = node->get_attribute("colspan");
                 if (colspan_str && *colspan_str) {
