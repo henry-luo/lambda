@@ -231,6 +231,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
         do { str++; } while (is_space(*str));
         if (!*str) {
+            // todo: probably should still set it bounds
+            text_node->view_type = RDT_VIEW_NONE;
             log_debug("skipping whitespace text node");
             return;
         }

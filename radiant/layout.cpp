@@ -306,6 +306,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("layout_text: '%t'", str);
         // skip whitespace at end of block
         if (!node->next_sibling && lycon->parent->is_block() && is_only_whitespace((const char*)str)) {
+            node->view_type = RDT_VIEW_NONE;
             log_debug("skipping whitespace text at end of block");
         }
         else {
