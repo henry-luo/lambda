@@ -1,8 +1,7 @@
-#define _POSIX_C_SOURCE 200809L
+// #define _POSIX_C_SOURCE 200809L
 #include "dom_element.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
-#include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
@@ -10,11 +9,11 @@
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
 #include "../../../lib/arena.h"
-#include "../../lambda.h"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
 #include "../../mark_reader.hpp"  // For ElementReader
 #include "../../mark_editor.hpp"  // For MarkEditor
 #include "../../mark_builder.hpp" // For MarkBuilder
+#include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
 
 // Forward declaration
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* document, DomElement* parent);
