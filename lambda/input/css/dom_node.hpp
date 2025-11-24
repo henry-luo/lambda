@@ -99,43 +99,8 @@ struct DomNode {
     static uintptr_t tag_name_to_id(const char* tag_name);
 
     inline ViewGroup* parent_view() { return (ViewGroup*)this->parent; }
-    
-    // inline const char* node_tag_name() const {
-    //     const DomElement* elem = this->as_element();
-    //     return elem ? elem->tag_name : nullptr;
-    // }
-    // inline const char* node_get_attribute(const char* attr_name) const {
-    //     return this->get_attribute(attr_name);
-    // }
-    // inline unsigned char* node_text_data() const {
-    //     const DomText* text = this->as_text();
-    //     return text ? (unsigned char*)text->text : nullptr;
-    // }
-    // inline DomNode* node_first_child() const {
-    //     if (!this->is_element()) return nullptr;
-    //     return ((DomElement*)this)->first_child;
-    // }
-    // inline DomNode* node_next_sibling() const {
-    //     return this->next_sibling;
-    // }
-    // inline bool node_is_element() const {
-    //     return this->is_element();
-    // }
-    // inline bool node_is_text() const {
-    //     return this->is_text();
-    // }
-    // inline const DomElement* node_as_element() const {
-    //     return this->as_element();
-    // }
-    // inline DomNodeType node_get_type() const {
-    //     return this->node_type;
-    // }
-    // inline uintptr_t node_tag() const {
-    //     const DomElement* elem = this->as_element();
-    //     return elem ? elem->tag_id : 0;
-    // }
 
-// view related methods
+    // view related methods
     inline bool is_group() { return view_type >= RDT_VIEW_INLINE; }
 
     inline bool is_inline() { return view_type == RDT_VIEW_TEXT || view_type == RDT_VIEW_INLINE || view_type == RDT_VIEW_INLINE_BLOCK; }
