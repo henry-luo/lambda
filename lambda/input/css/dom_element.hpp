@@ -69,10 +69,6 @@ struct DomDocument {
 
 // Note: DomNode is defined in dom_node.hpp and included above
 
-// ============================================================================
-// DOM Text Node
-// ============================================================================
-
 /**
  * DomText - Text node in DOM tree
  * Represents text content between elements
