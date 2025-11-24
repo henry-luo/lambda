@@ -3,11 +3,6 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include <time.h>
 
-extern "C" {
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-#include "../lib/hashmap.h"
-}
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
 // Helper function to get view type name for JSON
@@ -28,21 +23,18 @@ const char* View::view_name() {
 }
 
 View* View::previous_view() {
-    if (!parent || ((ViewGroup*)parent)->child() == this) return NULL;
-    View* sibling = ((ViewGroup*)parent)->child();
-    while (sibling && sibling->next() != this) { sibling = sibling->next(); }
-    return sibling;
+    return (View*)this->prev_sibling;
 }
 
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
-    View* view;
-    ViewTree* tree = lycon->doc->view_tree;
+    View* view = (View*)node;
     switch (type) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
-            view = (ViewBlock*)pool_calloc(tree->pool, sizeof(ViewBlock));
+        case RDT_VIEW_TABLE_ROW_GROUP:  case RDT_VIEW_TABLE_ROW:
+        case RDT_VIEW_INLINE:  case RDT_VIEW_TEXT:  case RDT_VIEW_BR:
             break;
         case RDT_VIEW_TABLE: {
-            ViewTable* table = (ViewTable*)pool_calloc(tree->pool, sizeof(ViewTable));
+            ViewTable* table = (ViewTable*)node;
             table->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
             // Initialize defaults
             table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
@@ -54,45 +46,28 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             view = (View*)table;
             break;
         }
-        case RDT_VIEW_TABLE_ROW_GROUP:
-            view = (ViewTableRowGroup*)pool_calloc(tree->pool, sizeof(ViewTableRowGroup));
-            break;
-        case RDT_VIEW_TABLE_ROW:
-            view = (ViewTableRow*)pool_calloc(tree->pool, sizeof(ViewTableRow));
-            break;
-        case RDT_VIEW_TABLE_CELL:
-            view = (ViewTableCell*)pool_calloc(tree->pool, sizeof(ViewTableCell));
+        case RDT_VIEW_TABLE_CELL: {
             // Initialize rowspan/colspan from DOM attributes (for Lambda CSS support)
-            if (view && node) {
-                ViewTableCell* cell = (ViewTableCell*)view;
-                cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
-                // Read colspan attribute
-                const char* colspan_str = node->get_attribute("colspan");
-                if (colspan_str && *colspan_str) {
-                    int colspan = atoi(colspan_str);
-                    cell->td->col_span = (colspan > 0) ? colspan : 1;
-                } else {
-                    cell->td->col_span = 1;
-                }
-                // Read rowspan attribute
-                const char* rowspan_str = node->get_attribute("rowspan");
-                if (rowspan_str && *rowspan_str) {
-                    int rowspan = atoi(rowspan_str);
-                    cell->td->row_span = (rowspan > 0) ? rowspan : 1;
-                } else {
-                    cell->td->row_span = 1;
-                }
+            ViewTableCell* cell = (ViewTableCell*)view;
+            cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
+            // Read colspan attribute
+            const char* colspan_str = node->get_attribute("colspan");
+            if (colspan_str && *colspan_str) {
+                int colspan = atoi(colspan_str);
+                cell->td->col_span = (colspan > 0) ? colspan : 1;
+            } else {
+                cell->td->col_span = 1;
+            }
+            // Read rowspan attribute
+            const char* rowspan_str = node->get_attribute("rowspan");
+            if (rowspan_str && *rowspan_str) {
+                int rowspan = atoi(rowspan_str);
+                cell->td->row_span = (rowspan > 0) ? rowspan : 1;
+            } else {
+                cell->td->row_span = 1;
             }
             break;
-        case RDT_VIEW_INLINE:
-            view = (ViewSpan*)pool_calloc(tree->pool, sizeof(ViewSpan));
-            break;
-        case RDT_VIEW_TEXT:
-            view = (ViewText*)pool_calloc(tree->pool, sizeof(ViewText));
-            break;
-        case RDT_VIEW_BR:
-            view = (View*)pool_calloc(tree->pool, sizeof(View));
-            break;
+        }
         default:
             log_debug("Unknown view type: %d", type);
             return NULL;
@@ -103,29 +78,15 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     }
     view->view_type = type;  view->parent = lycon->parent;
 
-    // COMPREHENSIVE VIEW ALLOCATION TRACING
-    fprintf(stderr, "[DOM DEBUG] alloc_view - created view %p, type=%d, node=%p", view, type, (void*)node);
-    if (node) {
-        fprintf(stderr, ", node_type=%d\n", node->node_type);
-    } else {
-        fprintf(stderr, ", node=NULL\n");
-    }
-
-    const char* node_name = node ? node->node_name() : "NULL";
-    const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
+    const char* parent_name = lycon->parent ? lycon->parent->node_name() : "no_parent";
     log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
-        view, type, node_name, node, lycon->parent, parent_name);
+        view, type, node->node_name(), node, lycon->parent, parent_name);
 
     // link the view
-    if (lycon->prev_view) { lycon->prev_view->next_sibling = view; }
-    else { if (lycon->parent) ((ViewGroup*)lycon->parent)->first_child = view; }
     if (!lycon->line.start_view) lycon->line.start_view = view;
-
-    // CRITICAL FIX: Also maintain ViewBlock hierarchy for flex layout
     if (view->is_block() && lycon->parent && lycon->parent->is_block()) {
         ViewBlock* block_child = (ViewBlock*)view;
         ViewBlock* block_parent = (ViewBlock*)lycon->parent;
-
         // Link in ViewBlock hierarchy
         if (block_parent->last_child) {
             block_parent->last_child->next_sibling = block_child;
