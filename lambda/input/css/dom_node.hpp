@@ -27,6 +27,26 @@ enum DomNodeType {
     DOM_NODE_DOCTYPE = 10     // DOCTYPE declaration
 };
 
+typedef enum {
+    RDT_VIEW_NONE = 0,
+    RDT_VIEW_TEXT,
+    RDT_VIEW_BR,
+    // ViewSpan
+    RDT_VIEW_INLINE,
+    // ViewBlock
+    RDT_VIEW_INLINE_BLOCK,
+    RDT_VIEW_BLOCK,
+    RDT_VIEW_LIST_ITEM,
+    RDT_VIEW_TABLE,
+    RDT_VIEW_TABLE_ROW_GROUP,
+    RDT_VIEW_TABLE_ROW,
+    RDT_VIEW_TABLE_CELL,
+} ViewType;
+
+typedef struct DomNode DomNode;
+typedef DomNode View;
+typedef struct ViewGroup ViewGroup;
+
 /**
  * DomNode - Base struct/class for all DOM nodes
  * Provides common tree structure and node operations
@@ -38,8 +58,15 @@ struct DomNode {
     DomNode* next_sibling;   // Next sibling node (nullptr if last)
     DomNode* prev_sibling;   // Previous sibling (nullptr if first)
 
-    const char* name() const;
-    inline DomNodeType type() const { return node_type; }
+    // view related fields
+    ViewType view_type;
+    View* next() { return (View*)next_sibling; }
+    // view always has x, y, wd, hg;  otherwise, it is a property group
+    float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
+
+    // node_name() is for all nodes, including text and comment nodes
+    // whereas tag_name is only for element nodes
+    const char* node_name() const;
 
     // type checking helpers
     inline bool is_element() const { return node_type == DOM_NODE_ELEMENT; }
@@ -71,10 +98,61 @@ struct DomNode {
     // static helper for tag name to ID conversion
     static uintptr_t tag_name_to_id(const char* tag_name);
 
+    inline ViewGroup* parent_view() { return (ViewGroup*)this->parent; }
+    
+    // inline const char* node_tag_name() const {
+    //     const DomElement* elem = this->as_element();
+    //     return elem ? elem->tag_name : nullptr;
+    // }
+    // inline const char* node_get_attribute(const char* attr_name) const {
+    //     return this->get_attribute(attr_name);
+    // }
+    // inline unsigned char* node_text_data() const {
+    //     const DomText* text = this->as_text();
+    //     return text ? (unsigned char*)text->text : nullptr;
+    // }
+    // inline DomNode* node_first_child() const {
+    //     if (!this->is_element()) return nullptr;
+    //     return ((DomElement*)this)->first_child;
+    // }
+    // inline DomNode* node_next_sibling() const {
+    //     return this->next_sibling;
+    // }
+    // inline bool node_is_element() const {
+    //     return this->is_element();
+    // }
+    // inline bool node_is_text() const {
+    //     return this->is_text();
+    // }
+    // inline const DomElement* node_as_element() const {
+    //     return this->as_element();
+    // }
+    // inline DomNodeType node_get_type() const {
+    //     return this->node_type;
+    // }
+    // inline uintptr_t node_tag() const {
+    //     const DomElement* elem = this->as_element();
+    //     return elem ? elem->tag_id : 0;
+    // }
+
+// view related methods
+    inline bool is_group() { return view_type >= RDT_VIEW_INLINE; }
+
+    inline bool is_inline() { return view_type == RDT_VIEW_TEXT || view_type == RDT_VIEW_INLINE || view_type == RDT_VIEW_INLINE_BLOCK; }
+
+    inline bool is_block() {
+        return view_type == RDT_VIEW_BLOCK || view_type == RDT_VIEW_INLINE_BLOCK || view_type == RDT_VIEW_LIST_ITEM ||
+            view_type == RDT_VIEW_TABLE || view_type == RDT_VIEW_TABLE_ROW_GROUP || view_type == RDT_VIEW_TABLE_ROW || view_type == RDT_VIEW_TABLE_CELL;
+    }
+
+    View* previous_view();
+    const char* view_name();    
+
 protected:
     // Constructor (only callable by derived classes)
     DomNode(DomNodeType type) : node_type(type), parent(nullptr),
-        next_sibling(nullptr), prev_sibling(nullptr) {}
+        next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
+        x(0), y(0), width(0), height(0) {}
 };
 
 // ============================================================================

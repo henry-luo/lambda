@@ -242,7 +242,6 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     }
     strcpy(tag_copy, tag_name);
     element->tag_name = tag_copy;
-    element->tag_name_ptr = (void*)tag_copy;  // Use string pointer as unique ID
 
     // Convert tag name to Lexbor tag ID for fast comparison
     element->tag_id = DomNode::tag_name_to_id(tag_name);

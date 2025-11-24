@@ -64,11 +64,11 @@ void line_break(LayoutContext* lycon) {
             do {
                 view_vertical_align(lycon, vw);
                 if (vw == lycon->prev_view) { break; } // reached the last view in the line
-                vw = vw->next;
+                vw = vw->next();
             } while (vw);
             if (vw != lycon->prev_view) { // need to go parent level
                 view = view->parent;
-                if (view) { view = view->next; }
+                if (view) { view = view->next(); }
                 if (view) goto NEXT_VIEW;
             }
             lycon->font = pa_font;
@@ -132,6 +132,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     return RDT_NOT_SURE;
 }
 
+// check node and its siblings to see if line is filled
 LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
     do {
         if (node->is_text()) {
@@ -155,13 +156,12 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
     return RDT_NOT_SURE;
 }
 
-// This function was replaced by the DomNode version above
-
-LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* node) {
+// check view and its parents/siblings to see if line is filled
+LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view) {
     // note: this function navigates to parenets through laid out view tree,
     // and siblings through non-processed html nodes
     log_debug("check if view has line filled");
-    node = node->next_sibling;
+    DomNode* node = view->next_sibling;
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }
@@ -169,9 +169,9 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* n
     // check at parent level
     view = (View*)view->parent;
     if (view) {
-        if (view->type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
-        else if (view->type == RDT_VIEW_INLINE) {
-            return view_has_line_filled(lycon, view, view->node);
+        if (view->view_type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
+        else if (view->view_type == RDT_VIEW_INLINE) {
+            return view_has_line_filled(lycon, view);
         }
         log_debug("unknown view type");
     }
@@ -186,7 +186,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
-        text_length, text->node->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
+        text_length, text->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
 
     if (text->rect == rect) {  // first rect
         text->x = rect->x;
@@ -356,7 +356,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // end of text
     if (lycon->line.last_space) { // need to check if line will fill up
         float advance_x = lycon->line.advance_x;  lycon->line.advance_x += rect->width;
-        if (view_has_line_filled(lycon, text_view, text_view->node) == RDT_LINE_FILLED) {
+        if (view_has_line_filled(lycon, text_view) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                 str = lycon->line.last_space + 1;
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, lycon->line.last_space_pos);

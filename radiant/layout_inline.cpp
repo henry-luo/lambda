@@ -2,7 +2,7 @@
 
 // Compute bounding box of a ViewSpan based on union of child views
 void compute_span_bounding_box(ViewSpan* span) {
-    View* child = span->child;
+    View* child = span->child();
     if (!child) {
         // If no child views, keep current position and zero size
         span->width = 0;
@@ -17,7 +17,7 @@ void compute_span_bounding_box(ViewSpan* span) {
     int max_y = child->y + child->height;
 
     // Iterate through remaining children to find union
-    child = child->next;
+    child = child->next();
     while (child) {
         int child_min_x = child->x;
         int child_min_y = child->y;
@@ -30,7 +30,7 @@ void compute_span_bounding_box(ViewSpan* span) {
         if (child_max_x > max_x) max_x = child_max_x;
         if (child_max_y > max_y) max_y = child_max_y;
 
-        child = child->next;
+        child = child->next();
     }
 
     // Update span's bounding box
@@ -41,7 +41,7 @@ void compute_span_bounding_box(ViewSpan* span) {
 }
 
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
-    uintptr_t elmt_name = span->node->tag();
+    uintptr_t elmt_name = span->tag();
     switch (elmt_name) {
     case HTM_TAG_B:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
@@ -62,7 +62,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
     case HTM_TAG_FONT: {
         // parse font style
         // Get color attribute using DomNode interface
-        const char* color_attr = span->node->get_attribute("color");
+        const char* color_attr = span->get_attribute("color");
         if (color_attr) {
             log_debug("font color: %s", color_attr);
         }
@@ -81,7 +81,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
 }
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
-    log_debug("layout inline %s", elmt->name());
+    log_debug("layout inline %s", elmt->node_name());
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = alloc_view(lycon, RDT_VIEW_BR, elmt);
@@ -127,11 +127,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             layout_flow_node(lycon, child);
             child = child->next_sibling;
         } while (child);
-        lycon->parent = span->parent;
+        lycon->parent = span->parent_view();
     }
 
     compute_span_bounding_box(span);
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->prev_view = (View*)span;
-    log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->type, span->child, span->x, span->y, span->width, span->height);
+    log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type, 
+        span->child(), span->x, span->y, span->width, span->height);
 }

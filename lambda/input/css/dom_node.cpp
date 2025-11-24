@@ -8,7 +8,7 @@
 #include "../../../lib/string.h"
 #include <string.h>
 
-const char* DomNode::name() const {
+const char* DomNode::node_name() const {
     // Dispatch based on node type
     switch (node_type) {
         case DOM_NODE_ELEMENT: {
@@ -235,7 +235,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
     if (!buf) {
         for (int i = 0; i < indent; i++) printf("  ");
 
-        const char* node_name = this->name();
+        const char* node_name = this->node_name();
         printf("<%s", node_name);
 
         // Print additional info for elements

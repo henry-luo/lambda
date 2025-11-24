@@ -267,7 +267,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
     ViewBlock* child = container->first_child;
     while (child) {
         log_debug("*** COLLECT_FLEX_ITEMS TRACE: Found child view %p (type=%d, node=%s)",
-                  child, child->type, child->node ? child->node->name() : "NULL");
+                  child, child->view_type, child->node_name());
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
             (child->position->position == CSS_VALUE_ABSOLUTE || child->position->position == CSS_VALUE_FIXED);
@@ -319,20 +319,18 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
 
             // CRITICAL FIX: Apply cached measurements to flex items
             // This connects the measurement pass with the layout pass
-            if (child->node) {
-                MeasurementCacheEntry* cached = get_from_measurement_cache(child->node);
-                if (cached) {
-                    log_debug("Applying cached measurements to flex item %d: %dx%d (content: %dx%d)",
-                             count, cached->measured_width, cached->measured_height, cached->content_width, cached->content_height);
-                    child->width = cached->measured_width;
-                    child->height = cached->measured_height;
-                    child->content_width = cached->content_width;
-                    child->content_height = cached->content_height;
-                    log_debug("Applied measurements: item %d now has size %dx%d (content: %dx%d)",
-                             count, child->width, child->height, child->content_width, child->content_height);
-                } else {
-                    log_debug("No cached measurement found for flex item %d", count);
-                }
+            MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+            if (cached) {
+                log_debug("Applying cached measurements to flex item %d: %dx%d (content: %dx%d)",
+                    count, cached->measured_width, cached->measured_height, cached->content_width, cached->content_height);
+                child->width = cached->measured_width;
+                child->height = cached->measured_height;
+                child->content_width = cached->content_width;
+                child->content_height = cached->content_height;
+                log_debug("Applied measurements: item %d now has size %dx%d (content: %dx%d)",
+                    count, child->width, child->height, child->content_width, child->content_height);
+            } else {
+                log_debug("No cached measurement found for flex item %d", count);
             }
 
             // DEBUG: Check CSS dimensions
@@ -425,10 +423,7 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
 
                     // ENHANCED: Calculate more accurate text width based on font size
                     // In a real implementation, this would measure actual text
-                    DomNode* first_child = nullptr;
-                    if (item->node && item->node->is_element()) {
-                        first_child = static_cast<DomElement*>(item->node)->first_child;
-                    }
+                    DomNode* first_child = item->child();
                     if (first_child && first_child->is_text()) {
                         const char* text = (const char*)first_child->text_data();
                         if (text) {
@@ -489,7 +484,7 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
 // Helper function to check if a view is a valid flex item
 bool is_valid_flex_item(ViewBlock* item) {
     if (!item) return false;
-    return item->type == RDT_VIEW_BLOCK || item->type == RDT_VIEW_INLINE_BLOCK;
+    return item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK;
 }
 
 // Helper function for clamping values with min/max constraints

@@ -11,8 +11,8 @@ extern "C" {
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
 // Helper function to get view type name for JSON
-const char* View::name() {
-    switch (this->type) {
+const char* View::view_name() {
+    switch (this->view_type) {
         case RDT_VIEW_BLOCK: return "block";
         case RDT_VIEW_INLINE_BLOCK: return "inline-block";
         case RDT_VIEW_LIST_ITEM: return "list-item";
@@ -28,9 +28,9 @@ const char* View::name() {
 }
 
 View* View::previous_view() {
-    if (!parent || parent->child == this) return NULL;
-    View* sibling = parent->child;
-    while (sibling && sibling->next != this) { sibling = sibling->next; }
+    if (!parent || ((ViewGroup*)parent)->child() == this) return NULL;
+    View* sibling = ((ViewGroup*)parent)->child();
+    while (sibling && sibling->next() != this) { sibling = sibling->next(); }
     return sibling;
 }
 
@@ -98,17 +98,17 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         log_debug("Failed to allocate view: %d", type);
         return NULL;
     }
-    view->type = type;  view->node = node;  view->parent = lycon->parent;
+    view->view_type = type;  view->parent = lycon->parent;
 
     // COMPREHENSIVE VIEW ALLOCATION TRACING
     fprintf(stderr, "[DOM DEBUG] alloc_view - created view %p, type=%d, node=%p", view, type, (void*)node);
     if (node) {
-        fprintf(stderr, ", node_type=%d\n", node->type());
+        fprintf(stderr, ", node_type=%d\n", node->node_type);
     } else {
         fprintf(stderr, ", node=NULL\n");
     }
 
-    const char* node_name = node ? node->name() : "NULL";
+    const char* node_name = node ? node->node_name() : "NULL";
     const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
     log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
         view, type, node_name, node, lycon->parent, parent_name);
@@ -126,8 +126,8 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     }
 
     // link the view
-    if (lycon->prev_view) { lycon->prev_view->next = view; }
-    else { if (lycon->parent) lycon->parent->child = view; }
+    if (lycon->prev_view) { lycon->prev_view->next_sibling = view; }
+    else { if (lycon->parent) ((ViewGroup*)lycon->parent)->first_child = view; }
     if (!lycon->line.start_view) lycon->line.start_view = view;
 
     // CRITICAL FIX: Also maintain ViewBlock hierarchy for flex layout
@@ -149,11 +149,11 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
 }
 
 void free_view(ViewTree* tree, View* view) {
-    log_debug("free view %p, type %s", view, view->name());
-    if (view->type >= RDT_VIEW_INLINE) {
-        View* child = ((ViewGroup*)view)->child;
+    log_debug("free view %p, type %s", view, view->node_name());
+    if (view->view_type >= RDT_VIEW_INLINE) {
+        View* child = ((ViewGroup*)view)->first_child;
         while (child) {
-            View* next = child->next;
+            View* next = child->next();
             free_view(tree, child);
             child = next;
         }
@@ -535,7 +535,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 void print_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
-        block->name(), block->node->name(),
+        block->view_name(), block->node_name(),
         (float)block->x, (float)block->y, (float)block->width, (float)block->height);
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);
@@ -545,30 +545,30 @@ void print_block(ViewBlock* block, StrBuf* buf, int indent) {
 }
 
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
-    View* view = view_group->child;
+    View* view = view_group->child();
     if (view) {
         do {
             if (view->is_block()) {
                 print_block((ViewBlock*)view, buf, indent);
             }
-            else if (view->type == RDT_VIEW_INLINE) {
+            else if (view->view_type == RDT_VIEW_INLINE) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewSpan* span = (ViewSpan*)view;
                 strbuf_append_format(buf, "[view-inline:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
-                    span->node->name(), (float)span->x, (float)span->y, (float)span->width, (float)span->height);
+                    span->node_name(), (float)span->x, (float)span->y, (float)span->width, (float)span->height);
                 print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_str(buf, "]\n");
             }
-            else if (view->type == RDT_VIEW_BR) {
+            else if (view->view_type == RDT_VIEW_BR) {
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_format(buf, "[br: x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]\n",
                     (float)view->x, (float)view->y, (float)view->width, (float)view->height);
             }
-            else if (view->type == RDT_VIEW_TEXT) {
+            else if (view->view_type == RDT_VIEW_TEXT) {
                 ViewText* text = (ViewText*)view;
-                unsigned char* text_data = view->node->text_data();
+                unsigned char* text_data = view->text_data();
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_format(buf, "[text: {x:%.1f, y:%.1f, wd:%.1f, hg:%.1f}\n",
                     text->x, text->y, text->width, text->height);
@@ -595,11 +595,11 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             }
             else {
                 strbuf_append_char_n(buf, ' ', indent);
-                strbuf_append_format(buf, "unknown-view: %d\n", view->type);
+                strbuf_append_format(buf, "unknown-view: %d\n", view->view_type);
             }
             // a check for robustness
-            if (view == view->next) { log_debug("invalid next view");  return; }
-            view = view->next;
+            if (view == view->next()) { log_debug("invalid next view");  return; }
+            view = view->next();
         } while (view);
     }
     // else no child view
@@ -658,17 +658,17 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
     // calculate absolute position for view
     float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
     float initial_y = abs_y;
-    const char* view_tag = view->node ? view->node->name() : "unknown";
+    const char* view_tag = view->node_name();
     log_debug("[Coord] %s: initial y=%.2f", view_tag, initial_y);
     // Calculate absolute position by traversing up the parent chain
-    ViewGroup* parent = view->parent;
+    ViewGroup* parent = view->parent_view();
     while (parent) {
         if (parent->is_block()) {
-            const char* parent_tag = parent->node ? parent->node->name() : "unknown";
+            const char* parent_tag = parent->node_name();
             log_debug("[Coord]   + parent %s: y=%.2f (abs_y: %.2f -> %.2f)", parent_tag, parent->y, abs_y, abs_y + parent->y);
             abs_x += parent->x;  abs_y += parent->y;
         }
-        parent = parent->parent;
+        parent = parent->parent_view();
     }
     log_debug("[Coord] %s: final abs_y=%.2f", view_tag, abs_y);
 
@@ -702,7 +702,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // Basic view properties
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": ");
-    append_json_string(buf, block->name());
+    append_json_string(buf, block->view_name());
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -710,54 +710,32 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
     // CRITICAL FIX: Provide better element names for debugging
     const char* tag_name = "unknown";
-    if (block->node) {
-        fprintf(stderr, "[DOM DEBUG] view_to_json accessing block %p, block->node=%p\n", (void*)block, (void*)block->node);
-        const char* node_name = block->node->name();
-        if (node_name) {
-            // CRITICAL ISSUE: #null elements should not exist in proper DOM structure
-            if (strcmp(node_name, "#null") == 0) {
-                printf("ERROR: Found #null element! This indicates DOM structure issue.\n");
-                printf("ERROR: Element details - parent: %p, parent_node: %p\n",
-                       (void*)block->parent,
-                       block->parent ? (void*)block->parent->node : nullptr);
-
-                if (block->parent && block->parent->node) {
-                    printf("ERROR: Parent node name: %s\n", block->parent->node->name());
-                }
-
-                // Try to infer the element type from context (TEMPORARY WORKAROUND)
-                if (block->parent == nullptr) {
-                    tag_name = "html";  // Root element should be html, not html-root
-                    printf("WORKAROUND: Mapping root #null -> html\n");
-                } else if (block->parent && block->parent->node &&
-                          strcmp(block->parent->node->name(), "html") == 0) {
-                    tag_name = "body";
-                    printf("WORKAROUND: Mapping child of html #null -> body\n");
-                } else {
-                    tag_name = "div";  // Most #null elements are divs
-                    printf("WORKAROUND: Mapping other #null -> div\n");
-                }
-            } else {
-                tag_name = node_name;
-                printf("DEBUG: Using proper node name: %s\n", node_name);
+    fprintf(stderr, "[DOM DEBUG] view_to_json accessing block %p\n", (void*)block);
+    const char* node_name = block->node_name();
+    if (node_name) {
+        // CRITICAL ISSUE: #null elements should not exist in proper DOM structure
+        if (strcmp(node_name, "#null") == 0) {
+            log_debug("ERROR: Found #null element! This indicates DOM structure issue.");
+            log_debug("ERROR: Element details - parent: %p", (void*)block->parent);
+            if (block->parent) {
+                log_debug("ERROR: Parent node name: %s", block->parent->node_name());
             }
-        }
-    } else {
-        // No DOM node - try to infer from view type
-        switch (block->type) {
-            case RDT_VIEW_BLOCK:
-                tag_name = "div";
-                break;
-            case RDT_VIEW_INLINE:
-            case RDT_VIEW_INLINE_BLOCK:
-                tag_name = "span";
-                break;
-            case RDT_VIEW_LIST_ITEM:
-                tag_name = "li";
-                break;
-            default:
-                tag_name = "unknown";
-                break;
+
+            // Try to infer the element type from context (TEMPORARY WORKAROUND)
+            if (block->parent == nullptr) {
+                tag_name = "html";  // Root element should be html, not html-root
+                log_debug("WORKAROUND: Mapping root #null -> html");
+            } 
+            else if (block->parent && strcmp(block->parent->node_name(), "html") == 0) {
+                tag_name = "body";
+                log_debug("WORKAROUND: Mapping child of html #null -> body");
+            } else {
+                tag_name = "div";  // Most #null elements are divs
+                log_debug("WORKAROUND: Mapping other #null -> div");
+            }
+        } else {
+            tag_name = node_name;
+            log_debug("DEBUG: Using proper node name: %s", node_name);
         }
     }
 
@@ -769,72 +747,64 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"selector\": ");
 
     // Generate enhanced CSS selector with nth-of-type support (matches browser behavior)
-    if (block->node) {
-        const char* class_attr = block->node->get_attribute("class");
+    const char* class_attr = block->get_attribute("class");
 
-        // Start with tag name and class
-        char base_selector[256];
-        if (class_attr) {
-            size_t class_len = strlen(class_attr);
-            snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
-        } else {
-            snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    // Start with tag name and class
+    char base_selector[256];
+    if (class_attr) {
+        size_t class_len = strlen(class_attr);
+        snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
+    } else {
+        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    }
+
+    // Add nth-of-type if there are multiple siblings with same tag
+    char final_selector[512];
+    DomNode* parent = block->parent;
+    if (parent) {
+        // Count siblings with same tag name
+        int sibling_count = 0;
+        int current_index = 0;
+        DomNode* sibling = nullptr;
+        if (parent->is_element()) {
+            sibling = static_cast<DomElement*>(parent)->first_child;
         }
 
-        // Add nth-of-type if there are multiple siblings with same tag
-        char final_selector[512];
-        DomNode* parent = block->node->parent;
-        if (parent) {
-            // Count siblings with same tag name
-            int sibling_count = 0;
-            int current_index = 0;
-            DomNode* sibling = nullptr;
-            if (parent->is_element()) {
-                sibling = static_cast<DomElement*>(parent)->first_child;
-            }
-
-            while (sibling) {
-                if (sibling->type() == DOM_NODE_ELEMENT) {
-                    const char* sibling_tag = sibling->name();
-                    if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
-                        sibling_count++;
-                        if (sibling == block->node) {
-                            current_index = sibling_count; // 1-based index
-                        }
+        while (sibling) {
+            if (sibling->node_type == DOM_NODE_ELEMENT) {
+                const char* sibling_tag = sibling->node_name();
+                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
+                    sibling_count++;
+                    if (sibling == block) {
+                        current_index = sibling_count; // 1-based index
                     }
                 }
-                sibling = sibling->next_sibling;
             }
+            sibling = sibling->next_sibling;
+        }
 
-            // Add nth-of-type if multiple siblings exist
-            if (sibling_count > 1 && current_index > 0) {
-                snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
-            } else {
-                snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-            }
+        // Add nth-of-type if multiple siblings exist
+        if (sibling_count > 1 && current_index > 0) {
+            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
         } else {
             snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
         }
-
-        append_json_string(buf, final_selector);
     } else {
-        append_json_string(buf, tag_name);
+        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
     }
+    append_json_string(buf, final_selector);
     strbuf_append_str(buf, ",\n");
 
     // Add classes array (for test compatibility)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"classes\": [");
-    if (block->node) {
-        const char* class_attr = block->node->get_attribute("class");
-        if (class_attr) {
-            size_t class_len = strlen(class_attr);
-            // Output class names as array
-            // For now, assume single class (TODO: split on whitespace for multiple classes)
-            strbuf_append_char(buf, '\"');
-            strbuf_append_str_n(buf, class_attr, class_len);
-            strbuf_append_char(buf, '\"');
-        }
+    if (class_attr) {
+        size_t class_len = strlen(class_attr);
+        // Output class names as array
+        // For now, assume single class (TODO: split on whitespace for multiple classes)
+        strbuf_append_char(buf, '\"');
+        strbuf_append_str_n(buf, class_attr, class_len);
+        strbuf_append_char(buf, '\"');
     }
     strbuf_append_str(buf, "],\n");
 
@@ -852,9 +822,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 4);
 
     const char* display = "block";
-    if (block->type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
-    else if (block->type == RDT_VIEW_LIST_ITEM) display = "list-item";
-    else if (block->type == RDT_VIEW_TABLE) display = "table";
+    if (block->view_type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
+    else if (block->view_type == RDT_VIEW_LIST_ITEM) display = "list-item";
+    else if (block->view_type == RDT_VIEW_TABLE) display = "table";
     // CRITICAL FIX: Check for flex container
     else if (block->embed && block->embed->flex) display = "flex";
     strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
@@ -1186,7 +1156,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewGroup*)block)->child;
+    View* child = ((ViewGroup*)block)->child();
     bool first_child = true;
     while (child) {
         if (!first_child) {
@@ -1197,13 +1167,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         if (child->is_block()) {
             print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         }
-        else if (child->type == RDT_VIEW_TEXT) {
+        else if (child->view_type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
         }
-        else if (child->type == RDT_VIEW_BR) {
+        else if (child->view_type == RDT_VIEW_BR) {
             print_br_json(child, buf, indent + 4, pixel_ratio);
         }
-        else if (child->type == RDT_VIEW_INLINE) {
+        else if (child->view_type == RDT_VIEW_INLINE) {
             print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
         }
         else {
@@ -1212,13 +1182,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             strbuf_append_str(buf, "{\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_str(buf, "\"type\": ");
-            append_json_string(buf, child->name());
+            append_json_string(buf, child->view_name());
             strbuf_append_str(buf, "\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "}");
         }
 
-        child = child->next;
+        child = child->next();
     }
 
     strbuf_append_str(buf, "\n");
@@ -1251,21 +1221,17 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"content\": ");
 
-    if (text->node) {
-        unsigned char* text_data = text->node->text_data();
-        if (text_data && rect->length > 0) {
-            char content[2048];
-            int len = min(sizeof(content) - 1, rect->length);
-            strncpy(content, (char*)(text_data + rect->start_index), len);
-            content[len] = '\0';
-            unsigned char last_char = content[len - 1];  // todo: this is not unicode-safe
-            is_last_char_space = is_space(last_char);
-            append_json_string(buf, content);
-        } else {
-            append_json_string(buf, "[empty]");
-        }
+    unsigned char* text_data = text->text_data();
+    if (text_data && rect->length > 0) {
+        char content[2048];
+        int len = min(sizeof(content) - 1, rect->length);
+        strncpy(content, (char*)(text_data + rect->start_index), len);
+        content[len] = '\0';
+        unsigned char last_char = content[len - 1];  // todo: this is not unicode-safe
+        is_last_char_space = is_space(last_char);
+        append_json_string(buf, content);
     } else {
-        append_json_string(buf, "[no-node]");
+        append_json_string(buf, "[empty]");
     }
     strbuf_append_str(buf, ",\n");
 
@@ -1330,7 +1296,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     // Basic view properties
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": ");
-    append_json_string(buf, span->name());
+    append_json_string(buf, span->view_name());
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1338,11 +1304,9 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
     // Get tag name
     const char* tag_name = "span";
-    if (span->node) {
-        const char* node_name = span->node->name();
-        if (node_name) {
-            tag_name = node_name;
-        }
+    const char* node_name = span->node_name();
+    if (node_name) {
+        tag_name = node_name;
     }
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
@@ -1351,57 +1315,52 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": ");
 
-    if (span->node) {
-        const char* class_attr = span->node->get_attribute("class");
+    const char* class_attr = span->get_attribute("class");
+    // Start with tag name and class
+    char base_selector[256];
+    if (class_attr) {
+        size_t class_len = strlen(class_attr);
+        snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
+    } else {
+        snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    }
 
-        // Start with tag name and class
-        char base_selector[256];
-        if (class_attr) {
-            size_t class_len = strlen(class_attr);
-            snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
-        } else {
-            snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+    // Add nth-of-type if there are multiple siblings with same tag
+    char final_selector[512];
+    DomNode* parent = span->parent;
+    if (parent) {
+        // Count siblings with same tag name
+        int sibling_count = 0;
+        int current_index = 0;
+        DomNode* sibling = nullptr;
+        if (parent->is_element()) {
+            sibling = static_cast<DomElement*>(parent)->first_child;
         }
 
-        // Add nth-of-type if there are multiple siblings with same tag
-        char final_selector[512];
-        DomNode* parent = span->node->parent;
-        if (parent) {
-            // Count siblings with same tag name
-            int sibling_count = 0;
-            int current_index = 0;
-            DomNode* sibling = nullptr;
-            if (parent->is_element()) {
-                sibling = static_cast<DomElement*>(parent)->first_child;
-            }
-
-            while (sibling) {
-                if (sibling->type() == DOM_NODE_ELEMENT) {
-                    const char* sibling_tag = sibling->name();
-                    if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
-                        sibling_count++;
-                        if (sibling == span->node) {
-                            current_index = sibling_count; // 1-based index
-                        }
+        while (sibling) {
+            if (sibling->node_type == DOM_NODE_ELEMENT) {
+                const char* sibling_tag = sibling->node_name();
+                if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
+                    sibling_count++;
+                    if (sibling == span) {
+                        current_index = sibling_count; // 1-based index
                     }
                 }
-                sibling = sibling->next_sibling;
             }
+            sibling = sibling->next_sibling;
+        }
 
-            // Add nth-of-type if multiple siblings exist
-            if (sibling_count > 1 && current_index > 0) {
-                snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
-            } else {
-                snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
-            }
+        // Add nth-of-type if multiple siblings exist
+        if (sibling_count > 1 && current_index > 0) {
+            snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
         } else {
             snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
         }
-
-        append_json_string(buf, final_selector);
     } else {
-        append_json_string(buf, tag_name);
+        snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
     }
+
+    append_json_string(buf, final_selector);
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1477,7 +1436,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewGroup*)span)->child;
+    View* child = ((ViewGroup*)span)->child();
     bool first_child = true;
     while (child) {
         if (!first_child) {
@@ -1485,13 +1444,13 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         }
         first_child = false;
 
-        if (child->type == RDT_VIEW_TEXT) {
+        if (child->view_type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
         }
-        else if (child->type == RDT_VIEW_BR) {
+        else if (child->view_type == RDT_VIEW_BR) {
             print_br_json(child, buf, indent + 4, pixel_ratio);
         }
-        else if (child->type == RDT_VIEW_INLINE) {
+        else if (child->view_type == RDT_VIEW_INLINE) {
             // Nested inline elements
             print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
         } else {
@@ -1500,13 +1459,13 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             strbuf_append_str(buf, "{\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_str(buf, "\"type\": ");
-            append_json_string(buf, child->name());
+            append_json_string(buf, child->view_name());
             strbuf_append_str(buf, "\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "}");
         }
 
-        child = child->next;
+        child = child->next();
     }
 
     strbuf_append_str(buf, "\n");

@@ -23,31 +23,31 @@ void target_children(EventContext* evcon, View* view) {
         if (view->is_block()) {
             ViewBlock* block = (ViewBlock*)view;
             log_debug("target view block:%s, x:%f, y:%f, wd:%f, hg:%f",
-                block->node->name(), block->x, block->y, block->width, block->height);
+                block->node_name(), block->x, block->y, block->width, block->height);
             if (block->position && block->position->position != CSS_VALUE_STATIC) {
                 log_debug("skip absolute/fixed positioned block");
             } else {
                 target_block_view(evcon, block);
             }
         }
-        else if (view->type == RDT_VIEW_INLINE) {
+        else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            log_debug("target view inline:%s", span->node->name());
+            log_debug("target view inline:%s", span->node_name());
             target_inline_view(evcon, span);
         }
-        else if (view->type == RDT_VIEW_TEXT) {
+        else if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             target_text_view(evcon, text);
         }
         else {
-            log_debug("Invalid target view type: %d", view->type);
+            log_debug("Invalid target view type: %d", view->view_type);
         }
-        view = view->next;
+        view = view->next();
     } while (view && !evcon->target);
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
-    unsigned char* str = text->node->text_data();
+    unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float x = evcon->block.x + text_rect->x, y = evcon->block.y + text_rect->y;
@@ -90,10 +90,10 @@ void target_text_view(EventContext* evcon, ViewText* text) {
 }
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
-    log_debug("targetting inline: %s", view_span->node->name());
+    log_debug("targetting inline: %s", view_span->node_name());
     log_enter();
     FontBox pa_font = evcon->font;
-    View* view = view_span->child;
+    View* view = view_span->child();
     if (view) {
         if (view_span->font) {
             setup_font(evcon->ui_context, &evcon->font, view_span->font);
@@ -108,7 +108,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
-    log_debug("targetting block: %s", block->node->name());
+    log_debug("targetting block: %s", block->node_name());
     log_enter();
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
@@ -119,7 +119,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (block->scroller && block->scroller->pane) {
         hover = scrollpane_target(evcon, block);
         if (hover) {
-            log_debug("hit on block scroll: %s", block->node->name());
+            log_debug("hit on block scroll: %s", block->node_name());
             evcon->target = (View*)block;
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
@@ -138,7 +138,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         ViewBlock* abs_child = block->position->first_abs_child;
         do {
             // todo: should target based on z-index order
-            log_debug("targetting positioned child block: %s", abs_child->node->name());
+            log_debug("targetting positioned child block: %s", abs_child->node_name());
             target_block_view(evcon, abs_child);
             if (evcon->target) { goto RETURN; }
             abs_child = abs_child->position->next_abs_sibling;
@@ -146,7 +146,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     // target static positioned children
-    view = block->child;
+    view = block->child();
     if (view) {
         if (block->font) {
             setup_font(evcon->ui_context, &evcon->font, block->font);
@@ -160,14 +160,14 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         float x = evcon->block.x, y = evcon->block.y;
         if (x <= event->x && event->x < x + block->width &&
             y <= event->y && event->y < y + block->height) {
-            log_debug("hit on block: %s", block->node->name());
+            log_debug("hit on block: %s", block->node_name());
             evcon->target = (View*)block;
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
         }
         else {
             log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %.1f, ey: %.1f, right: %.1f, bottom: %.1f",
-                block->node->name(), x, y, event->x, event->y, x + block->width, y + block->height);
+                block->node_name(), x, y, event->x, event->y, x + block->width, y + block->height);
         }
     }
     log_leave();
@@ -175,7 +175,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
 void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
     View* root_view = view_tree->root;
-    if (root_view && root_view->type == RDT_VIEW_BLOCK) {
+    if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("target root view");
         FontBox pa_font = evcon->font;
         FontProp* default_font = view_tree->html_version == HTML5 ? &evcon->ui_context->default_font : &evcon->ui_context->legacy_default_font;
@@ -185,7 +185,7 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         evcon->font = pa_font;
     }
     else {
-        log_error("Invalid root view: %d", root_view ? root_view->type : -1);
+        log_error("Invalid root view: %d", root_view ? root_view->view_type : -1);
     }
 }
 
@@ -214,17 +214,17 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     if (span->in_line && span->in_line->cursor) {
         evcon->new_cursor = span->in_line->cursor;
     }
-    uintptr_t name = span->node->tag();
-    log_debug("fired at view %s", span->node->name());
+    uintptr_t name = span->tag();
+    log_debug("fired at view %s", span->node_name());
     if (name == HTM_TAG_A) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
-            const char* href = span->node->get_attribute("href");
+            const char* href = span->get_attribute("href");
             if (href) {
                 log_debug("got anchor href: %s", href);
                 evcon->new_url = (char*)href;
-                const char* target = span->node->get_attribute("target");
+                const char* target = span->get_attribute("target");
                 if (target) {
                     log_debug("got anchor target: %s", target);
                     evcon->new_target = (char*)target;
@@ -264,18 +264,18 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
     for (int i = 0; i < stack_size; i++) {
         log_debug("fire event to view no. %d", i);
         View* view = (View*)target_list->data[i];
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-            view->type == RDT_VIEW_LIST_ITEM) {
+        if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
+            view->view_type == RDT_VIEW_LIST_ITEM) {
             fire_block_event(evcon, (ViewBlock*)view);
         }
-        else if (view->type == RDT_VIEW_INLINE) {
+        else if (view->view_type == RDT_VIEW_INLINE) {
             fire_inline_event(evcon, (ViewSpan*)view);
         }
-        else if (view->type == RDT_VIEW_TEXT) {
+        else if (view->view_type == RDT_VIEW_TEXT) {
             fire_text_event(evcon, (ViewText*)view);
         }
         else {
-            log_error("Invalid fire view type: %d", view->type);
+            log_error("Invalid fire view type: %d", view->view_type);
         }
     }
 }
@@ -361,17 +361,15 @@ DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, c
 // find the sub-view that matches the given node
 View* find_view(View* view, DomNode* node) {
     // Compare if the view's node matches the target node directly
-    if (view->node && node && view->node == node) {
-        return view;
-    }
+    if (view == node) { return view; }
 
     if (view->is_group()) {
         ViewGroup* group = (ViewGroup*)view;
-        View* child = group->child;
+        View* child = group->child();
         while (child) {
             View* found = find_view(child, node);
             if (found) { return found; }
-            child = child->next;
+            child = child->next();
         }
     }
     return NULL;
@@ -469,7 +467,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 View* iframe = find_view(doc->view_tree->root, elmt);
                 if (iframe) {
                     log_debug("found iframe view");
-                    if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) && ((ViewBlock*)iframe)->embed) {
+                    if ((iframe->view_type == RDT_VIEW_BLOCK || iframe->view_type == RDT_VIEW_INLINE_BLOCK) && ((ViewBlock*)iframe)->embed) {
                         log_debug("updating doc of iframe view");
                         ViewBlock* block = (ViewBlock*)iframe;
                         // reset scroll position

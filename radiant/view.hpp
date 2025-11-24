@@ -344,29 +344,7 @@ extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface*
 extern bool can_break(char c);
 extern bool is_space(char c);
 
-typedef enum {
-    RDT_VIEW_NONE = 0,
-    RDT_VIEW_TEXT,
-    RDT_VIEW_BR,
-    // ViewSpan
-    RDT_VIEW_INLINE,
-    // ViewBlock
-    RDT_VIEW_INLINE_BLOCK,
-    RDT_VIEW_BLOCK,
-    RDT_VIEW_LIST_ITEM,
-    RDT_VIEW_TABLE,
-    RDT_VIEW_TABLE_ROW_GROUP,
-    RDT_VIEW_TABLE_ROW,
-    RDT_VIEW_TABLE_CELL,
-} ViewType;
-
-typedef struct View View;
 typedef struct ViewBlock ViewBlock;
-
-typedef struct {
-    CssEnum outer;
-    CssEnum inner;
-} DisplayValue;
 
 typedef struct {
     char* family;  // font family name
@@ -456,68 +434,6 @@ typedef struct {
     // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 
-
-typedef struct ViewGroup ViewGroup;
-
-// view always has x, y, wd, hg; otherwise, it is a property group
-struct View {
-    ViewType type;
-    DomNode* node;  // DOM node (DomElement*, DomText*, or DomComment* via inheritance)
-    View* next;
-    ViewGroup* parent;  // corrected the type to ViewGroup
-    float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
-
-    inline bool is_group() { return type >= RDT_VIEW_INLINE; }
-
-    inline bool is_inline() { return type == RDT_VIEW_TEXT || type == RDT_VIEW_INLINE || type == RDT_VIEW_INLINE_BLOCK; }
-
-    inline bool is_block() {
-        return type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM ||
-            type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP || type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL;
-    }
-
-    View* previous_view();
-    const char* name();
-
-    // DOM node access helpers - forward to node's methods for backward compatibility
-    // These provide syntactic compatibility with old view->node->method() patterns
-    inline const char* node_name() const { return node ? node->name() : "#null"; }
-    inline const char* node_tag_name() const {
-        DomElement* elem = node ? node->as_element() : nullptr;
-        return elem ? elem->tag_name : nullptr;
-    }
-    inline const char* node_get_attribute(const char* attr_name) const {
-        return node ? node->get_attribute(attr_name) : nullptr;
-    }
-    inline unsigned char* node_text_data() const {
-        DomText* text = node ? node->as_text() : nullptr;
-        return text ? (unsigned char*)text->text : nullptr;
-    }
-    inline DomNode* node_first_child() const {
-        if (!node || !node->is_element()) return nullptr;
-        return static_cast<DomElement*>(node)->first_child;
-    }
-    inline DomNode* node_next_sibling() const {
-        return node ? node->next_sibling : nullptr;
-    }
-    inline bool node_is_element() const {
-        return node ? node->is_element() : false;
-    }
-    inline bool node_is_text() const {
-        return node ? node->is_text() : false;
-    }
-    inline DomElement* node_as_element() const {
-        return node ? node->as_element() : nullptr;
-    }
-    inline DomNodeType node_get_type() const {
-        return node ? node->type() : (DomNodeType)0;
-    }
-    inline uintptr_t node_tag() const {
-        DomElement* elem = node ? node->as_element() : nullptr;
-        return elem ? elem->tag_id : 0;
-    }
-};
-
 typedef struct FontBox {
     FontProp *style;  // current font style
     FT_Face ft_face;  // FreeType font face
@@ -536,9 +452,11 @@ typedef struct ViewText : View {
     Color color;     // text color (for PDF text fill color)
 } ViewText;
 
-struct ViewGroup : View {
-    View* child;  // first child view
-    DisplayValue display;
+// multiple inheritance
+struct ViewGroup : DomElement {
+    // DisplayValue display;
+
+    View* child() { return (View*)first_child; }
 };
 
 typedef struct ViewSpan : ViewGroup {

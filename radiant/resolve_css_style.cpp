@@ -347,7 +347,7 @@ DisplayValue resolve_display_value(void* child) {
     DomNode* node = (DomNode*)child;
     if (node && node->is_element()) {
         // resolve display from CSS if available
-        const char* tag_name = node->name();
+        const char* tag_name = node->node_name();
 
         // first, try to get display from CSS
         DomElement* dom_elem = node->as_element();
@@ -975,7 +975,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
     // Dispatch based on property ID
     // Parallel implementation to resolve_element_style() in resolve_style.cpp
     ViewSpan* span = (ViewSpan*)lycon->view;
-    ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
+    ViewBlock* block = lycon->view->view_type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
 
     switch (prop_id) {
         // ===== GROUP 1: Core Typography & Color =====

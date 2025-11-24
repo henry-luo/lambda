@@ -131,13 +131,13 @@ static void render_view_recursive(UiContext* uicon, View* view, float offset_x, 
 
 // Render a ViewText node
 static void render_view_text(UiContext* uicon, ViewText* text_view, float offset_x, float offset_y, float scale) {
-    if (!text_view || !text_view->node) {
+    if (!text_view) {
         log_debug("render_view_text: null text_view or node");
         return;
     }
 
     // Get text content from the node
-    unsigned char* text_data = text_view->node->text_data();
+    unsigned char* text_data = text_view->text_data();
     if (!text_data || !*text_data) {
         log_debug("render_view_text: no text data");
         return;
@@ -267,20 +267,20 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
     // Note: ViewBlock inherits from ViewSpan which inherits from ViewGroup
     // The children are in the 'child' field from ViewGroup, not 'first_child'
     ViewGroup* group = (ViewGroup*)block;
-    View* child = group->child;
+    View* child = group->child();
     int child_count = 0;
     while (child) {
         child_count++;
-        child = child->next;
+        child = child->next();
     }
 
     log_debug("Block has %d children", child_count);
 
     // Render children with original offset (children have absolute coordinates)
-    child = group->child;
+    child = group->child();
     while (child) {
         render_view_recursive(uicon, child, offset_x, offset_y, scale);
-        child = child->next;
+        child = child->next();
     }
 }
 
@@ -288,9 +288,9 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
 static void render_view_recursive(UiContext* uicon, View* view, float offset_x, float offset_y, float scale) {
     if (!view) return;
 
-    log_debug("render_view_recursive: type=%d at (%.1f, %.1f)", view->type, offset_x, offset_y);
+    log_debug("render_view_recursive: type=%d at (%.1f, %.1f)", view->view_type, offset_x, offset_y);
 
-    switch (view->type) {
+    switch (view->view_type) {
         case RDT_VIEW_TEXT:
             render_view_text(uicon, (ViewText*)view, offset_x, offset_y, scale);
             break;
@@ -308,10 +308,10 @@ static void render_view_recursive(UiContext* uicon, View* view, float offset_x, 
         case RDT_VIEW_INLINE: {
             // Render inline spans - they may contain text or other inline elements
             ViewSpan* span = (ViewSpan*)view;
-            View* child = span->child;
+            View* child = span->child();
             while (child) {
                 render_view_recursive(uicon, child, offset_x, offset_y, scale);
-                child = child->next;
+                child = child->next();
             }
             break;
         }
@@ -520,7 +520,7 @@ static void window_refresh_callback_pdf(GLFWwindow* window) {
     if (view_tree && view_tree->root) {
         // Debug: log view tree info
         log_info("View tree root: type=%d, size=%.0fx%.0f",
-                 view_tree->root->type, view_tree->root->width, view_tree->root->height);
+                 view_tree->root->view_type, view_tree->root->width, view_tree->root->height);
 
         // Calculate scale to fit PDF into page area
         float content_x = x + 20;  // Add some margin

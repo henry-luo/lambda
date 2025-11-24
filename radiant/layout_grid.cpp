@@ -490,7 +490,7 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
 // Helper function to check if a view is a valid grid item
 bool is_valid_grid_item(ViewBlock* item) {
     if (!item) return false;
-    return item->type == RDT_VIEW_BLOCK || item->type == RDT_VIEW_INLINE_BLOCK;
+    return item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK;
 }
 
 // Helper function to check if a block is a grid item

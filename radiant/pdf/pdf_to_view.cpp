@@ -105,10 +105,10 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
     // Count children to verify
     int child_count = 0;
     ViewGroup* group = (ViewGroup*)root_view;
-    View* child = group->child;
+    View* child = group->child();
     while (child) {
         child_count++;
-        child = child->next;
+        child = child->next();
     }
     log_info("Root view has %d children", child_count);
 
@@ -157,7 +157,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
         return nullptr;
     }
 
-    root_view->type = RDT_VIEW_BLOCK;
+    root_view->view_type = RDT_VIEW_BLOCK;
     root_view->x = page_info->media_box[0];
     root_view->y = page_info->media_box[1];
     root_view->width = page_info->media_box[2] - page_info->media_box[0];
@@ -186,10 +186,10 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
     // Count children to verify
     int child_count = 0;
     ViewGroup* group = (ViewGroup*)root_view;
-    View* child = group->child;
+    View* child = group->child();
     while (child) {
         child_count++;
-        child = child->next;
+        child = child->next();
     }
     log_info("Page %d has %d view elements", page_index + 1, child_count);
 
@@ -219,7 +219,7 @@ static ViewBlock* create_document_view(Pool* pool) {
         return nullptr;
     }
 
-    root->type = RDT_VIEW_BLOCK;
+    root->view_type = RDT_VIEW_BLOCK;
     root->x = 0;
     root->y = 0;
     root->width = 612;  // Default letter width in points (8.5 inches * 72 dpi)
@@ -676,7 +676,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
         return;
     }
 
-    rect_view->type = RDT_VIEW_BLOCK;
+    rect_view->view_type = RDT_VIEW_BLOCK;
     rect_view->x = (float)x;
     rect_view->y = (float)y;  // Store PDF Y as-is
     rect_view->width = (float)width;
@@ -695,7 +695,7 @@ static void create_rect_view(Input* input, ViewBlock* parent,
     }
 
     // Directly assign DomElement as the node
-    rect_view->node = dom_elem;
+    // rect_view = dom_elem;
 
     // Apply fill color and/or stroke color from graphics state based on paint operation
     BoundaryProp* bound = nullptr;
@@ -808,7 +808,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
         return;
     }
 
-    text_view->type = RDT_VIEW_TEXT;
+    text_view->view_type = RDT_VIEW_TEXT;
     text_view->x = (float)x;
     text_view->y = (float)y;  // Store PDF Y as-is
     text_view->width = 0;  // Will be calculated during layout
@@ -830,7 +830,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
     }
 
     // Directly assign DomText as the node
-    text_view->node = dom_text;
+    // text_view = dom_text;
 
     // Create font property using proper font descriptor parsing
     if (parser->state.font_name) {
@@ -927,13 +927,13 @@ static void append_child_view(View* parent, View* child) {
     child->parent = parent_group;
 
     // Append to child list
-    if (!parent_group->child) {
-        parent_group->child = child;
+    if (!parent_group->first_child) {
+        parent_group->first_child = child;
     } else {
-        View* last = parent_group->child;
-        while (last->next) {
-            last = last->next;
+        View* last = parent_group->first_child;
+        while (last->next_sibling) {
+            last = last->next_sibling;
         }
-        last->next = child;
+        last->next_sibling = child;
     }
 }
