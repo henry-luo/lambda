@@ -443,8 +443,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (is_reflow) {
         // free existing view tree
         log_debug("free existing views");
-        if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
-        view_pool_destroy(doc->view_tree);
+        // if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
+        // view_pool_destroy(doc->view_tree);
     } else {
         doc->view_tree = (ViewTree*)calloc(1, sizeof(ViewTree));
         log_debug("allocated view tree");
