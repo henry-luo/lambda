@@ -25,39 +25,8 @@ typedef enum {
     JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
 } JustifyContent;
 
-typedef enum {
-    ALIGN_AUTO = CSS_VALUE_AUTO,
-    ALIGN_START = CSS_VALUE_FLEX_START,
-    ALIGN_END = CSS_VALUE_FLEX_END,
-    ALIGN_CENTER = CSS_VALUE_CENTER,
-    ALIGN_BASELINE = CSS_VALUE_BASELINE,
-    ALIGN_STRETCH = CSS_VALUE_STRETCH,
-    ALIGN_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN,
-    ALIGN_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,
-    ALIGN_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
-} AlignType;
-
-// Note: Visibility, PositionType, WritingMode, TextDirection are now defined in view.hpp
-// to ensure they're available before FlexProp uses them
-
 // structs (with field names in snake_case)
 typedef struct { int x, y; } Point;
-
-typedef struct {
-    int flex_basis;  // -1 for auto
-    float flex_grow;
-    float flex_shrink;
-    AlignType align_self;
-    int order;
-    float aspect_ratio;
-    int baseline_offset;
-    // Flags for percentage values
-    int is_flex_basis_percent : 1;
-    int is_margin_top_auto : 1;
-    int is_margin_right_auto : 1;
-    int is_margin_bottom_auto : 1;
-    int is_margin_left_auto : 1;
-} FlexItemProp;
 
 typedef struct FlexItem : FlexItemProp {
     Point pos;

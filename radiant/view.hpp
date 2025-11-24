@@ -4,6 +4,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/utf.h"
 #include "../lib/url.h"
+#include "../lib/mempool.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -22,15 +23,6 @@
 // Forward declarations
 struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include "../lib/log.h"
-#include "../lib/mempool.h"
-#ifdef __cplusplus
-}
-#endif
 
 // Define lexbor tag and CSS value constants first, before including headers that need them
 enum {
@@ -242,6 +234,17 @@ typedef enum { VIS_VISIBLE, VIS_HIDDEN, VIS_COLLAPSE } Visibility;
 typedef enum { POS_STATIC, POS_ABSOLUTE } PositionType;
 typedef enum { WM_HORIZONTAL_TB, WM_VERTICAL_RL, WM_VERTICAL_LR } WritingMode;
 typedef enum { TD_LTR, TD_RTL } TextDirection;
+typedef enum AlignType {
+    ALIGN_AUTO = CSS_VALUE_AUTO,
+    ALIGN_START = CSS_VALUE_FLEX_START,
+    ALIGN_END = CSS_VALUE_FLEX_END,
+    ALIGN_CENTER = CSS_VALUE_CENTER,
+    ALIGN_BASELINE = CSS_VALUE_BASELINE,
+    ALIGN_STRETCH = CSS_VALUE_STRETCH,
+    ALIGN_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN,
+    ALIGN_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,
+    ALIGN_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
+} AlignType;
 
 // Length/percentage value structure (replacing lexbor's lxb_css_value_length_percentage_t)
 typedef struct {
@@ -282,9 +285,22 @@ typedef struct {
     } u;
 } lxb_css_property_line_height_t;
 
-// Now include headers that depend on these constants
-#include "event.hpp"
-#include "flex.hpp"
+// FlexItemProp definition (needed by flex.hpp)
+typedef struct FlexItemProp {
+    int flex_basis;  // -1 for auto
+    float flex_grow;
+    float flex_shrink;
+    CssEnum align_self;  // AlignType
+    int order;
+    float aspect_ratio;
+    int baseline_offset;
+    // Flags for percentage values
+    int flex_basis_is_percent : 1;
+    int is_margin_top_auto : 1;
+    int is_margin_right_auto : 1;
+    int is_margin_bottom_auto : 1;
+    int is_margin_left_auto : 1;
+} FlexItemProp;
 
 // static inline float pack_as_nan(int value) {
 //     uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
@@ -360,11 +376,53 @@ typedef struct {
     bool has_kerning;  // whether the font has kerning
 } FontProp;
 
+struct FlexFlowProp {
+    // Integrated flex item properties (no separate allocation)
+    float flex_grow;
+    float flex_shrink;
+    int flex_basis;  // -1 for auto
+    int align_self;  // AlignType or CSS_VALUE_*
+    int order;
+
+    // Additional flex item properties from old implementation
+    float aspect_ratio;
+    float baseline_offset;
+
+    // Min/max constraints
+    float min_width, max_width;
+    float min_height, max_height;
+
+    // Grid item properties (following flex pattern)
+    int grid_row_start;          // Grid row start line
+    int grid_row_end;            // Grid row end line
+    int grid_column_start;       // Grid column start line
+    int grid_column_end;         // Grid column end line
+    char* grid_area;             // Named grid area
+    int justify_self;            // Item-specific justify alignment (CSS_VALUE_*)
+    int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
+
+    // Grid item computed properties
+    int computed_grid_row_start;
+    int computed_grid_row_end;
+    int computed_grid_column_start;
+    int computed_grid_column_end;
+
+    // Grid item flags
+    bool has_explicit_grid_row_start;
+    bool has_explicit_grid_row_end;
+    bool has_explicit_grid_column_start;
+    bool has_explicit_grid_column_end;
+    bool is_grid_auto_placed;
+};
+
 typedef struct {
     CssEnum cursor;
     Color color;
     CssEnum vertical_align;
     float opacity;  // CSS opacity value (0.0 to 1.0)
+    int position;  // PositionType
+    int visibility;  // Visibility    
+    FlexItemProp* fi;
 } InlineProp;
 
 typedef struct Spacing {
@@ -455,7 +513,6 @@ typedef struct ViewText : View {
 // multiple inheritance
 struct ViewGroup : DomElement {
     // DisplayValue display;
-
     View* child() { return (View*)first_child; }
 };
 
@@ -463,55 +520,7 @@ typedef struct ViewSpan : ViewGroup {
     FontProp* font;  // font style
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
-    // Integrated flex item properties (no separate allocation)
-    float flex_grow;
-    float flex_shrink;
-    int flex_basis;  // -1 for auto
-    int align_self;  // AlignType or CSS_VALUE_*
-    int order;
-    bool flex_basis_is_percent;
-
-    // Additional flex item properties from old implementation
-    float aspect_ratio;
-    float baseline_offset;
-
-    // Percentage flags for constraints
-    bool width_is_percent;
-    bool height_is_percent;
-    bool min_width_is_percent;
-    bool max_width_is_percent;
-    bool min_height_is_percent;
-    bool max_height_is_percent;
-
-    // Min/max constraints
-    float min_width, max_width;
-    float min_height, max_height;
-
-    // Position and visibility (from old FlexItem)
-    int position;  // PositionType
-    int visibility;  // Visibility
-
-    // Grid item properties (following flex pattern)
-    int grid_row_start;          // Grid row start line
-    int grid_row_end;            // Grid row end line
-    int grid_column_start;       // Grid column start line
-    int grid_column_end;         // Grid column end line
-    char* grid_area;             // Named grid area
-    int justify_self;            // Item-specific justify alignment (CSS_VALUE_*)
-    int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
-
-    // Grid item computed properties
-    int computed_grid_row_start;
-    int computed_grid_row_end;
-    int computed_grid_column_start;
-    int computed_grid_column_end;
-
-    // Grid item flags
-    bool has_explicit_grid_row_start;
-    bool has_explicit_grid_row_end;
-    bool has_explicit_grid_column_start;
-    bool has_explicit_grid_column_end;
-    bool is_grid_auto_placed;
+    FlexFlowProp* fi;  // flex related properties
 } ViewSpan;
 
 typedef struct {
@@ -701,6 +710,10 @@ typedef struct {
     CssEnum list_style_type;
     int item_index;
 } ListBlot;
+
+// Now include headers that depend on these constants
+#include "event.hpp"
+#include "flex.hpp"
 
 typedef struct {
     GLFWwindow *window;    // current window
