@@ -117,15 +117,24 @@ struct DomComment : public DomNode {
 
     // Constructor
     DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
-                                                       content(nullptr), length(0),
-                                                       native_element(nullptr),
-                                                       parent_element(nullptr) {}
+        content(nullptr), length(0), native_element(nullptr), parent_element(nullptr) {}
 };
 
 typedef struct {
     CssEnum outer;
     CssEnum inner;
 } DisplayValue;
+
+typedef struct InlineProp InlineProp;
+typedef struct FlexFlowProp FlexFlowProp;
+typedef struct BoundaryProp BoundaryProp;
+typedef struct BlockProp BlockProp;
+typedef struct ScrollProp ScrollProp;
+typedef struct PositionProp PositionProp;
+typedef struct EmbedProp EmbedProp;
+typedef struct TableCellProp TableCellProp;
+typedef struct ViewBlock ViewBlock;
+
 
 /**
  * DomElement - DOM element with integrated CSS styling
@@ -163,6 +172,23 @@ struct DomElement : DomNode {
 
     // view related fields
     DisplayValue display;
+
+    // span properties
+    FontProp* font;  // font style
+    BoundaryProp* bound;  // block boundary properties
+    InlineProp* in_line;  // inline specific style properties
+    FlexFlowProp* fi;  // flex related properties
+
+    // block properties
+    float content_width, content_height;  // width and height of the child content including padding
+    BlockProp* blk;  // block specific style properties
+    ScrollProp* scroller;  // handles overflow
+    // block content related properties for flexbox, image, iframe
+    EmbedProp* embed;
+    // positioning properties for CSS positioning
+    PositionProp* position;
+    TableCellProp* td;  // table cell specific properties
+    ViewBlock* last_child;
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), native_element(nullptr),

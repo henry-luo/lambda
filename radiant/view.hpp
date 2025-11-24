@@ -394,7 +394,7 @@ struct FlexFlowProp {
     bool is_grid_auto_placed;
 };
 
-typedef struct {
+struct InlineProp {
     CssEnum cursor;
     Color color;
     CssEnum vertical_align;
@@ -402,7 +402,7 @@ typedef struct {
     int position;  // PositionType
     int visibility;  // Visibility    
     FlexItemProp* fi;
-} InlineProp;
+};
 
 typedef struct Spacing {
     struct { float top, right, bottom, left; };  // for margin, padding, border
@@ -434,14 +434,14 @@ typedef struct {
     char* position; // positioning of background image
 } BackgroundProp;
 
-typedef struct {
+typedef struct BoundaryProp {
     Margin margin;
     Spacing padding;
     BorderProp* border;
     BackgroundProp* background;
 } BoundaryProp;
 
-typedef struct {
+typedef struct PositionProp {
     CssEnum position;     // static, relative, absolute, fixed, sticky
     float top, right, bottom, left;  // offset values in pixels
     int z_index;            // stacking order
@@ -453,7 +453,7 @@ typedef struct {
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
 } PositionProp;
 
-typedef struct {
+typedef struct BlockProp {
     CssEnum text_align;
     lxb_css_property_line_height_t *line_height;
     float text_indent;  // can be negative
@@ -496,10 +496,10 @@ struct ViewGroup : DomElement {
 };
 
 typedef struct ViewSpan : ViewGroup {
-    FontProp* font;  // font style
-    BoundaryProp* bound;  // block boundary properties
-    InlineProp* in_line;  // inline specific style properties
-    FlexFlowProp* fi;  // flex related properties
+    // FontProp* font;  // font style
+    // BoundaryProp* bound;  // block boundary properties
+    // InlineProp* in_line;  // inline specific style properties
+    // FlexFlowProp* fi;  // flex related properties
 } ViewSpan;
 
 typedef struct {
@@ -515,7 +515,7 @@ typedef struct {
     void reset();
 } ScrollPane;
 
-typedef struct {
+typedef struct ScrollProp {
     CssEnum overflow_x, overflow_y;
     ScrollPane* pane;
     bool has_hz_overflow, has_vt_overflow;
@@ -566,7 +566,7 @@ typedef struct GridProp {
     bool is_dense_packing;       // grid-auto-flow: dense
 } GridProp;
 
-typedef struct {
+typedef struct EmbedProp {
     ImageSurface* img;  // image surface
     DomDocument* doc;   // iframe document
     FlexProp* flex;
@@ -574,19 +574,14 @@ typedef struct {
 } EmbedProp;
 
 struct ViewBlock : ViewSpan {
-    float content_width, content_height;  // width and height of the child content including padding
-    BlockProp* blk;  // block specific style properties
-    ScrollProp* scroller;  // handles overflow
-    // block content related properties for flexbox, image, iframe
-    EmbedProp* embed;
-    // positioning properties for CSS positioning
-    PositionProp* position;
-
-    // Child navigation for flex layout tests
-    ViewBlock* first_child;
-    ViewBlock* last_child;
-    ViewBlock* next_sibling;
-    ViewBlock* prev_sibling;
+    // float content_width, content_height;  // width and height of the child content including padding
+    // BlockProp* blk;  // block specific style properties
+    // ScrollProp* scroller;  // handles overflow
+    // // block content related properties for flexbox, image, iframe
+    // EmbedProp* embed;
+    // // positioning properties for CSS positioning
+    // PositionProp* position;
+    // ViewBlock* last_child;
 };
 
 // Table-specific lightweight subclasses (no additional fields yet)
@@ -631,8 +626,8 @@ typedef struct ViewTableRow : ViewBlock {
     // Minimal metadata may be added later (e.g., computed baseline)
 } ViewTableRow;
 
-typedef struct ViewTableCell : ViewBlock {
-    // Cell spanning metadata
+struct TableCellProp {
+// Cell spanning metadata
     int col_span;  // Number of columns this cell spans (default: 1)
     int row_span;  // Number of rows this cell spans (default: 1)
     int col_index; // Starting column index (computed during layout)
@@ -645,6 +640,9 @@ typedef struct ViewTableCell : ViewBlock {
         CELL_VALIGN_BOTTOM = 2,
         CELL_VALIGN_BASELINE = 3
     } vertical_align;
+};
+
+typedef struct ViewTableCell : ViewBlock {
 } ViewTableCell;
 
 typedef enum HtmlVersion {
