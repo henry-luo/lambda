@@ -487,7 +487,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     }
 }
 
-void print_block(ViewBlock* block, StrBuf* buf, int indent) {
+void print_view_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
         block->view_name(), block->node_name(),
@@ -504,7 +504,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     if (view) {
         do {
             if (view->is_block()) {
-                print_block((ViewBlock*)view, buf, indent);
+                print_view_block((ViewBlock*)view, buf, indent);
             }
             else if (view->view_type == RDT_VIEW_INLINE) {
                 strbuf_append_char_n(buf, ' ', indent);
@@ -548,6 +548,10 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                     rect = rect->next;
                 }
             }
+            else if (view->view_type == RDT_VIEW_NONE) {
+                strbuf_append_char_n(buf, ' ', indent);
+                strbuf_append_format(buf, "nil-view: %s\n", view->node_name());
+            }
             else {
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_format(buf, "unknown-view: %d\n", view->view_type);
@@ -572,7 +576,7 @@ void write_string_to_file(const char *filename, const char *text) {
 
 void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio) {
     StrBuf* buf = strbuf_new_cap(1024);
-    print_block((ViewBlock*)view_root, buf, 0);
+    print_view_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
     log_debug("%s", buf->str);
     log_debug("=================\n");
@@ -584,6 +588,7 @@ void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio) {
     }
     write_string_to_file("./view_tree.txt", buf->str);
     strbuf_free(buf);
+
     // also generate JSON output
     print_view_tree_json(view_root, url, pixel_ratio);
 }
@@ -1114,9 +1119,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     View* child = ((ViewGroup*)block)->child();
     bool first_child = true;
     while (child) {
-        if (!first_child) {
-            strbuf_append_str(buf, ",\n");
-        }
+        if (child->view_type == RDT_VIEW_NONE) {  // skip the view
+            child = child->next();  continue; 
+        }  
+        if (!first_child) { strbuf_append_str(buf, ",\n"); }
         first_child = false;
 
         if (child->is_block()) {
@@ -1394,6 +1400,10 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     View* child = ((ViewGroup*)span)->child();
     bool first_child = true;
     while (child) {
+        if (child->view_type == RDT_VIEW_NONE) {
+            child = child->next();
+            continue;  // skip the view
+        }
         if (!first_child) {
             strbuf_append_str(buf, ",\n");
         }
