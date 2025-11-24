@@ -509,12 +509,12 @@ void apply_constraints(ViewBlock* item, int container_width, int container_heigh
     if (!item) return;
 
     // Resolve percentage-based values
-    int actual_width = resolve_percentage(item->width, item->width_is_percent, container_width);
-    int actual_height = resolve_percentage(item->height, item->height_is_percent, container_height);
-    int min_width = resolve_percentage(item->min_width, item->min_width_is_percent, container_width);
-    int max_width = resolve_percentage(item->max_width, item->max_width_is_percent, container_width);
-    int min_height = resolve_percentage(item->min_height, item->min_height_is_percent, container_height);
-    int max_height = resolve_percentage(item->max_height, item->max_height_is_percent, container_height);
+    int actual_width = resolve_percentage(item->width, false, container_width);
+    int actual_height = resolve_percentage(item->height, false, container_height);
+    int min_width = resolve_percentage(item->min_width, false, container_width);
+    int max_width = resolve_percentage(item->max_width, false, container_width);
+    int min_height = resolve_percentage(item->min_height, false, container_height);
+    int max_height = resolve_percentage(item->max_height, false, container_height);
 
     // Apply aspect ratio if specified
     if (item->aspect_ratio > 0) {

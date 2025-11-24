@@ -8,15 +8,12 @@
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
 
-extern "C" {
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
-}
 
-#include "../lib/log.h"
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 // Function declaration moved to layout.hpp

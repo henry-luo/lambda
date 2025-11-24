@@ -113,18 +113,6 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
         view, type, node_name, node, lycon->parent, parent_name);
 
-    // CRITICAL FIX: Initialize flex properties for ViewBlocks
-    if (type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM) {
-        ViewBlock* block = (ViewBlock*)view;
-        // Initialize flex item properties with proper defaults
-        block->flex_grow = 0.0f;
-        block->flex_shrink = 1.0f;
-        block->flex_basis = -1; // auto
-        block->align_self = ALIGN_AUTO; // FIXED: Use ALIGN_AUTO as per CSS spec
-        block->order = 0;
-        block->flex_basis_is_percent = false;
-    }
-
     // link the view
     if (lycon->prev_view) { lycon->prev_view->next_sibling = view; }
     else { if (lycon->parent) ((ViewGroup*)lycon->parent)->first_child = view; }
@@ -232,15 +220,6 @@ FontProp* alloc_font_prop(LayoutContext* lycon) {
     return prop;
 }
 
-FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
-    FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
-    // set defaults
-    prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
-    prop->align_self = ALIGN_AUTO; // FIXED: Use ALIGN_AUTO as per CSS spec
-    // prop->flex_grow = 0;  prop->order = 0;
-    return prop;
-}
-
 PositionProp* alloc_position_prop(LayoutContext* lycon) {
     PositionProp* prop = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
     // set defaults using actual Lexbor constants
@@ -267,6 +246,18 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
         prop->align_content = ALIGN_STRETCH;  // CSS spec default for multi-line flex
         prop->row_gap = 0;  prop->column_gap = 0;
         block->embed->flex = prop;
+    }
+}
+
+void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
+    if (!span->in_line) {
+        span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+    }
+    if (!span->in_line->fi) {
+        FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+        span->in_line->fi = prop;
+        prop->flex_grow = 0;  prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
+        prop->align_self = CSS_VALUE_AUTO; // ALIGN_AUTO as per CSS spec
     }
 }
 
