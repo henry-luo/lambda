@@ -584,9 +584,7 @@ struct ViewBlock : ViewSpan {
     // ViewBlock* last_child;
 };
 
-// Table-specific lightweight subclasses (no additional fields yet)
-// These keep table concerns out of the base ViewBlock while preserving layout/render compatibility.
-typedef struct ViewTable : ViewBlock {
+typedef struct TableProp {
     // Table layout algorithm mode
     enum {
         TABLE_LAYOUT_AUTO = 0,    // Content-based width calculation (default)
@@ -614,8 +612,11 @@ typedef struct ViewTable : ViewBlock {
 
     // Fixed layout height distribution
     int fixed_row_height;   // Height per row for table-layout:fixed with explicit height (0=auto)
+} TableProp;
 
-    // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
+// Table-specific lightweight subclasses (no additional fields yet)
+// These keep table concerns out of the base ViewBlock while preserving layout/render compatibility.
+typedef struct ViewTable : ViewBlock {
 } ViewTable;
 
 typedef struct ViewTableRowGroup : ViewBlock {

@@ -133,8 +133,8 @@ typedef struct ScrollProp ScrollProp;
 typedef struct PositionProp PositionProp;
 typedef struct EmbedProp EmbedProp;
 typedef struct TableCellProp TableCellProp;
+typedef struct TableProp TableProp;
 typedef struct ViewBlock ViewBlock;
-
 
 /**
  * DomElement - DOM element with integrated CSS styling
@@ -187,6 +187,7 @@ struct DomElement : DomNode {
     EmbedProp* embed;
     // positioning properties for CSS positioning
     PositionProp* position;
+    TableProp* tb;  // table specific properties
     TableCellProp* td;  // table cell specific properties
     ViewBlock* last_child;
 

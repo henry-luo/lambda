@@ -64,10 +64,10 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
                 CssValue* val = (CssValue*)collapse_decl->value;
                 if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                     if (val->data.keyword == CSS_VALUE_COLLAPSE || val->data.keyword == CSS_VALUE_COLLAPSE_TABLE) {
-                        table->border_collapse = true;
+                        table->tb->border_collapse = true;
                         log_debug("Table border-collapse: collapse (true)");
                     } else if (val->data.keyword == CSS_VALUE_SEPARATE) {
-                        table->border_collapse = false;
+                        table->tb->border_collapse = false;
                         log_debug("Table border-collapse: separate (false)");
                     }
                 }
@@ -84,8 +84,8 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
                 // border-spacing can be a single length or a list of two lengths
                 if (val->type == CSS_VALUE_TYPE_LENGTH) {
                     // Single value applies to both horizontal and vertical
-                    table->border_spacing_h = val->data.length.value;
-                    table->border_spacing_v = val->data.length.value;
+                    table->tb->border_spacing_h = val->data.length.value;
+                    table->tb->border_spacing_v = val->data.length.value;
                     log_debug("Table border-spacing: %.2fpx (both h and v)", val->data.length.value);
                 } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 2) {
                     // Two values: horizontal and vertical
@@ -93,19 +93,19 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
                     CssValue* v_val = val->data.list.values[1];
 
                     if (h_val && h_val->type == CSS_VALUE_TYPE_LENGTH) {
-                        table->border_spacing_h = h_val->data.length.value;
+                        table->tb->border_spacing_h = h_val->data.length.value;
                         log_debug("Table border-spacing horizontal: %.2fpx", h_val->data.length.value);
                     }
                     if (v_val && v_val->type == CSS_VALUE_TYPE_LENGTH) {
-                        table->border_spacing_v = v_val->data.length.value;
+                        table->tb->border_spacing_v = v_val->data.length.value;
                         log_debug("Table border-spacing vertical: %.2fpx", v_val->data.length.value);
                     }
                 } else if (val->type == CSS_VALUE_TYPE_NUMBER || val->type == CSS_VALUE_TYPE_INTEGER) {
                     // Handle numeric values (convert to length)
                     float spacing = (val->type == CSS_VALUE_TYPE_NUMBER) ?
                         val->data.number.value : (float)val->data.integer.value;
-                    table->border_spacing_h = spacing;
-                    table->border_spacing_v = spacing;
+                    table->tb->border_spacing_h = spacing;
+                    table->tb->border_spacing_v = spacing;
                     log_debug("Table border-spacing: %.2fpx (numeric, both h and v)", spacing);
                 }
             }
@@ -114,13 +114,13 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
 
     // Check if table-layout was already set to FIXED by CSS (via custom property)
     // If so, respect the CSS value and don't override it
-    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED) {
+    if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED) {
         log_debug("Table layout: already set to FIXED by CSS, skipping heuristic");
         return;
     }
 
     // Default to auto layout
-    table->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
+    table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
 
     // Use heuristic: if table has BOTH explicit width AND height, assume fixed layout
     // This matches common CSS patterns where fixed layout is used with constrained dimensions
@@ -156,7 +156,7 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
     // If both width and height are explicitly set, use fixed layout
     // This heuristic works for most real-world cases where fixed layout is desired
     if (has_explicit_width && has_explicit_height) {
-        table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
+        table->tb->table_layout = TableProp::TABLE_LAYOUT_FIXED;
         log_debug("Table layout: fixed (heuristic: table has explicit width AND height)");
     } else {
         log_debug("Table layout: auto (no explicit width+height combo)");
@@ -167,7 +167,7 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {
     if (!cellNode || !cell) return;
 
-    cell->td = (TableCellProp*)alloc_prop(lycon, sizeof(TableCellProp));
+    assert(cell->td);
     // Initialize defaults
     cell->td->col_span = 1;
     cell->td->row_span = 1;
@@ -743,13 +743,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
 
     // Initialize fixed layout fields
-    table->fixed_row_height = 0;  // 0 = auto height (calculate from content)
+    table->tb->fixed_row_height = 0;  // 0 = auto height (calculate from content)
     log_debug("Starting enhanced table auto layout");
     log_debug("Table layout mode: %s",
-           table->table_layout == ViewTable::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
+           table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
     log_debug("Table border-spacing: %fpx %fpx, border-collapse: %s",
-           table->border_spacing_h, table->border_spacing_v,
-           table->border_collapse ? "true" : "false");
+           table->tb->border_spacing_h, table->tb->border_spacing_v,
+           table->tb->border_collapse ? "true" : "false");
 
     // CRITICAL FIX: Handle caption positioning first
     ViewBlock* caption = nullptr;
@@ -833,8 +833,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
 
                     // Subtract border-spacing
-                    if (!table->border_collapse && table->border_spacing_h > 0) {
-                        table_content_width -= (columns + 1) * table->border_spacing_h;
+                    if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
+                        table_content_width -= (columns + 1) * table->tb->border_spacing_h;
                     }
 
                     log_debug("Table explicit width: %dpx, content width for cells: %dpx",
@@ -1069,7 +1069,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Apply table-layout algorithm
     int fixed_table_width = 0; // Store explicit width for fixed layout
-    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED) {
+    if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED) {
         log_debug("=== FIXED LAYOUT ALGORITHM ===");
 
         // STEP 1: Get explicit table width from CSS
@@ -1112,10 +1112,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // For border-collapse, no additional adjustments needed
         // For separate borders, subtract border-spacing
-        if (!table->border_collapse && table->border_spacing_h > 0) {
-            content_width -= (columns + 1) * table->border_spacing_h; // Spacing around and between columns
+        if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
+            content_width -= (columns + 1) * table->tb->border_spacing_h; // Spacing around and between columns
             log_debug("Subtracting border-spacing: (%d+1)*%.1f = %.1f",
-                   columns, table->border_spacing_h, (columns + 1) * table->border_spacing_h);
+                   columns, table->tb->border_spacing_h, (columns + 1) * table->tb->border_spacing_h);
         }
 
         log_debug("Content width for columns: %dpx", content_width);
@@ -1279,10 +1279,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Subtract border-spacing (if separate borders)
-            if (!table->border_collapse && table->border_spacing_v > 0 && total_rows > 0) {
-                content_height -= (int)((total_rows + 1) * table->border_spacing_v);
+            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && total_rows > 0) {
+                content_height -= (int)((total_rows + 1) * table->tb->border_spacing_v);
                 log_debug("Subtracting vertical border-spacing: (%d+1)*%.1f = %.1f",
-                       total_rows, table->border_spacing_v, (total_rows + 1) * table->border_spacing_v);
+                       total_rows, table->tb->border_spacing_v, (total_rows + 1) * table->tb->border_spacing_v);
             }
 
             // Distribute height equally across rows
@@ -1292,7 +1292,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Store the fixed row height for later application during positioning
             // We'll apply this when positioning rows in the main layout loop
-            table->fixed_row_height = height_per_row;
+            table->tb->fixed_row_height = height_per_row;
             log_debug("=== FIXED LAYOUT HEIGHT DISTRIBUTION COMPLETE ===");
         }
     }
@@ -1312,10 +1312,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
            table_width, table_width - 59.13);
 
     log_debug("table_width before border adjustments: %d, border_collapse=%d",
-           table_width, table->border_collapse);
+           table_width, table->tb->border_collapse);
 
     // Apply border spacing or border collapse adjustments
-    if (table->border_collapse) {
+    if (table->tb->border_collapse) {
         // Border-collapse: borders overlap, reduce total width
         if (columns > 1) {
             int reduction = (columns - 1);
@@ -1323,15 +1323,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table_width -= reduction; // Remove 1px per internal border
         }
         log_debug("Border-collapse applied - table width: %d", table_width);
-    } else if (table->border_spacing_h > 0) {
+    } else if (table->tb->border_spacing_h > 0) {
         // Separate borders: add spacing between columns AND around table edges
-        log_debug("Applying border-spacing %fpx to table width", table->border_spacing_h);
+        log_debug("Applying border-spacing %fpx to table width", table->tb->border_spacing_h);
         if (columns > 1) {
-            table_width += (columns - 1) * table->border_spacing_h; // Between columns
+            table_width += (columns - 1) * table->tb->border_spacing_h; // Between columns
         }
-        table_width += 2 * table->border_spacing_h; // Left and right edges
+        table_width += 2 * table->tb->border_spacing_h; // Left and right edges
         log_debug("Border-spacing applied (%dpx) - table width: %d (includes edge spacing)",
-               (int)table->border_spacing_h, table_width);
+               (int)table->tb->border_spacing_h, table_width);
     }
 
     // Add table padding to width
@@ -1344,7 +1344,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // CRITICAL FIX: For fixed layout, override calculated width with CSS width
-    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
+    if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
         log_debug("Fixed layout override - changing table_width from %d to %d",
                table_width, fixed_table_width);
         table_width = fixed_table_width;
@@ -1371,18 +1371,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     col_x_positions[0] = table_border_left + table_padding_left;
-    if (!table->border_collapse && table->border_spacing_h > 0) {
-        col_x_positions[0] += table->border_spacing_h;
-        log_debug("Added left border-spacing: +%dpx", table->border_spacing_h);
+    if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
+        col_x_positions[0] += table->tb->border_spacing_h;
+        log_debug("Added left border-spacing: +%dpx", table->tb->border_spacing_h);
     }
 
     // Calculate column positions based on border model
     for (int i = 1; i <= columns; i++) {
         col_x_positions[i] = col_x_positions[i-1] + col_widths[i-1];
 
-        if (!table->border_collapse && table->border_spacing_h > 0) {
+        if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
             // Add border spacing between columns
-            col_x_positions[i] += table->border_spacing_h;
+            col_x_positions[i] += table->tb->border_spacing_h;
         }
     }
 
@@ -1406,9 +1406,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Add top border-spacing for separate border model
-    if (!table->border_collapse && table->border_spacing_v > 0) {
-        current_y += table->border_spacing_v;
-        log_debug("Added top border-spacing: +%dpx", table->border_spacing_v);
+    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+        current_y += table->tb->border_spacing_v;
+        log_debug("Added top border-spacing: +%dpx", table->tb->border_spacing_v);
     }
 
     // Position caption if it exists
@@ -1431,12 +1431,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Add border-spacing between columns (if separate borders)
-            if (!table->border_collapse && table->border_spacing_h > 0 && columns > 1) {
-                tbody_content_width += (columns - 1) * table->border_spacing_h;
+            if (!table->tb->border_collapse && table->tb->border_spacing_h > 0 && columns > 1) {
+                tbody_content_width += (columns - 1) * table->tb->border_spacing_h;
             }
 
             // Position tbody based on border-collapse mode
-            if (table->border_collapse) {
+            if (table->tb->border_collapse) {
                 // Border-collapse: tbody starts at half the table border width
                 child->x = 1.5f; // Half of table border width (3px / 2)
                 child->y = 1.5f; // Half of table border width (3px / 2)
@@ -1671,16 +1671,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
 
                     // Apply fixed layout height if specified
-                    if (table->fixed_row_height > 0) {
-                        row->height = table->fixed_row_height;
-                        log_debug("Applied fixed layout row height: %dpx", table->fixed_row_height);
+                    if (table->tb->fixed_row_height > 0) {
+                        row->height = table->tb->fixed_row_height;
+                        log_debug("Applied fixed layout row height: %dpx", table->tb->fixed_row_height);
 
                         // CRITICAL: Update all cell heights in this row to match fixed row height
                         // Cells were calculated with auto height, but fixed layout overrides this
                         for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
                             if (cell->view_type == RDT_VIEW_TABLE_CELL) {
-                                cell->height = table->fixed_row_height;
-                                log_debug("Updated cell height to match fixed_row_height=%d", table->fixed_row_height);
+                                cell->height = table->tb->fixed_row_height;
+                                log_debug("Updated cell height to match fixed_row_height=%d", table->tb->fixed_row_height);
                             }
                         }
                     } else {
@@ -1689,9 +1689,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     current_y += row->height;
 
                     // Add vertical border-spacing after each row (except last row in group)
-                    if (!table->border_collapse && table->border_spacing_v > 0 && !is_last_row) {
-                        current_y += table->border_spacing_v;
-                        log_debug("Added vertical spacing after row: +%dpx", table->border_spacing_v);
+                    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0 && !is_last_row) {
+                        current_y += table->tb->border_spacing_v;
+                        log_debug("Added vertical spacing after row: +%dpx", table->tb->border_spacing_v);
                     }
                 }
             }
@@ -1702,8 +1702,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             child->height = (float)(current_y - group_start_y);
             // printf("DEBUG: Final row group dimensions - x=%.1f, y=%.1f, width=%.1f, height=%.1f\n",
             //        child->x, child->y, child->width, child->height);
-
-        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+        } 
+        else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             // Handle direct table rows (relative to table)
             ViewBlock* row = child;
 
@@ -1893,16 +1893,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
 
             // Apply fixed layout height if specified
-            if (table->fixed_row_height > 0) {
-                row->height = table->fixed_row_height;
-                log_debug("Applied fixed layout row height: %dpx", table->fixed_row_height);
+            if (table->tb->fixed_row_height > 0) {
+                row->height = table->tb->fixed_row_height;
+                log_debug("Applied fixed layout row height: %dpx", table->tb->fixed_row_height);
 
                 // CRITICAL: Update all cell heights in this row to match fixed row height
                 // Cells were calculated with auto height, but fixed layout overrides this
                 for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
                     if (cell->view_type == RDT_VIEW_TABLE_CELL) {
-                        cell->height = table->fixed_row_height;
-                        log_debug("Updated cell height to match fixed_row_height=%d", table->fixed_row_height);
+                        cell->height = table->tb->fixed_row_height;
+                        log_debug("Updated cell height to match fixed_row_height=%d", table->tb->fixed_row_height);
                     }
                 }
             } else {
@@ -1911,9 +1911,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             current_y += row->height;
 
             // Add vertical border-spacing after each row (except last)
-            if (!table->border_collapse && table->border_spacing_v > 0) {
-                current_y += table->border_spacing_v;
-                log_debug("Added vertical spacing after direct row: +%dpx", table->border_spacing_v);
+            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                current_y += table->tb->border_spacing_v;
+                log_debug("Added vertical spacing after direct row: +%dpx", table->tb->border_spacing_v);
             }
         }
     }
@@ -1930,11 +1930,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Add vertical border-spacing around table edges for separate border model
-    if (!table->border_collapse && table->border_spacing_v > 0) {
+    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
         // Border-spacing adds space around the entire table perimeter
         // Bottom spacing around the table (top was already added)
-        final_table_height += table->border_spacing_v;
-        log_debug("Added table edge bottom vertical spacing: +%dpx", table->border_spacing_v);
+        final_table_height += table->tb->border_spacing_v;
+        log_debug("Added table edge bottom vertical spacing: +%dpx", table->tb->border_spacing_v);
     }
 
     // CRITICAL FIX: Add table border to final dimensions
