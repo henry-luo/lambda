@@ -62,7 +62,7 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
 
     if (position_type == CSS_VALUE_ABSOLUTE) {
         // Find nearest positioned ancestor
-        ViewGroup* ancestor = element->parent;
+        ViewGroup* ancestor = element->parent_view();
         while (ancestor) {
             if (ancestor->is_block()) {
                 ViewBlock* ancestor_block = (ViewBlock*)ancestor;
@@ -71,24 +71,24 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
                     return ancestor_block;
                 }
             }
-            ancestor = ancestor->parent;
+            ancestor = ancestor->parent_view();
         }
 
         // No positioned ancestor found, use initial containing block (root)
         ViewBlock* root = element;
-        while (root->parent) {
-            root = (ViewBlock*)root->parent;
+        while (root->parent_view()) {
+            root = (ViewBlock*)root->parent_view();
         }
         return root;
     }
 
     // For relative positioning, use nearest block container
-    ViewGroup* ancestor = element->parent;
+    ViewGroup* ancestor = element->parent_view();
     while (ancestor) {
         if (ancestor->is_block()) {
             return (ViewBlock*)ancestor;
         }
-        ancestor = ancestor->parent;
+        ancestor = ancestor->parent_view();
     }
 
     return nullptr;
@@ -202,10 +202,8 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
 }
 
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
-    log_debug("layout_abs_block");
-    log_enter();
-    const char* tag_init = elmt->name();
-    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", tag_init, block->x, block->y, pa_block->advance_y);
+    log_debug("layout_abs_block");  log_enter();
+    log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f", elmt->node_name(), block->x, block->y, pa_block->advance_y);
 
     // find containing block
     ViewBlock* cb = find_containing_block(block, block->position->position);
@@ -542,15 +540,15 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
         }
     }
 
-    if (false && container && container->child) {  // Keep old code disabled for now
+    if (false && container && container->child()) {  // Keep old code disabled for now
         printf("DEBUG: Container has children, traversing...\n");
-        View* child_view = container->child;
+        View* child_view = container->child();
         int child_count = 0;
 
         while (child_view && child_count < 10) {  // Safety limit to prevent infinite loops
-            printf("DEBUG: Checking child %d, type=%d\n", child_count, child_view->type);
+            printf("DEBUG: Checking child %d, type=%d\n", child_count, child_view->view_type);
 
-            if (child_view->type == RDT_VIEW_BLOCK) {
+            if (child_view->view_type == RDT_VIEW_BLOCK) {
                 ViewBlock* child_block = (ViewBlock*)child_view;
                 printf("DEBUG: Found block child at (%d, %d) size (%d, %d)\n",
                        child_block->x, child_block->y, child_block->width, child_block->height);
@@ -588,7 +586,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
                     }
                 }
             }
-            child_view = child_view->next;
+            child_view = child_view->next();
             child_count++;
         }
         printf("DEBUG: Finished traversing children (count=%d)\n", child_count);
@@ -673,14 +671,10 @@ int find_clear_position(FloatContext* ctx, CssEnum clear_value) {
  * Apply clear property to an element
  */
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->position || block->position->clear == CSS_VALUE_NONE) {
-        return;
-    }
+    if (!block->position || block->position->clear == CSS_VALUE_NONE) { return; }
 
-    printf("DEBUG: Applying clear property (clear=%d) to element\n", block->position->clear);
-
-    const char* block_tag_before = block->node ? block->node->name() : "unknown";
-    log_debug("[CLEAR] Entry: block=%s, block=%p, block->y=%.2f", block_tag_before, (void*)block, block->y);
+    log_debug("DEBUG: Applying clear property (clear=%d) to element\n", block->position->clear);
+    log_debug("[CLEAR] Entry: block=%s, block=%p, block->y=%.2f", block->node_name(), (void*)block, block->y);
 
     // Get or create float context for the containing block
     ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_STATIC); // CSS_VALUE_STATIC for normal flow
@@ -688,7 +682,7 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
         containing_block = (ViewBlock*)lycon->view; // fallback to current context
     }
 
-    const char* cb_tag = containing_block && containing_block->node ? containing_block->node->name() : "unknown";
+    const char* cb_tag = containing_block ? containing_block->node_name() : "unknown";
     log_debug("[CLEAR] Found containing_block=%s at y=%.2f", cb_tag, containing_block ? containing_block->y : -1.0f);
 
     // Create float context (in production this would be cached/shared)
@@ -704,9 +698,8 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
     // For now, only apply if containing_block IS the immediate parent
     // TODO: Implement proper coordinate space conversion
     bool parent_match = (containing_block == block->parent);
-    const char* block_tag = block->node ? block->node->name() : "unknown";
     log_debug("[CLEAR] layout for %s: clear_y=%.2f, block->y=%.2f, containing_block=%p, parent=%p, match=%d",
-           block_tag, (float)clear_y, block->y, (void*)containing_block, (void*)block->parent, parent_match);
+           block->node_name(), (float)clear_y, block->y, (void*)containing_block, (void*)block->parent, parent_match);
 
     if (clear_y > block->y && parent_match) {
         log_debug("[CLEAR] Moving element from y=%.2f to y=%.2f to clear floats", block->y, (float)clear_y);

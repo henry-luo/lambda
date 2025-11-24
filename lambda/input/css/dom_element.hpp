@@ -1,14 +1,14 @@
 #ifndef DOM_ELEMENT_H
 #define DOM_ELEMENT_H
 
+#include <stdint.h>
+#include <stdbool.h>
 #include "../../../lib/avl_tree.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/strbuf.h"
 #include "css_style.hpp"
 #include "css_style_node.hpp"
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
-#include <stdint.h>
-#include <stdbool.h>
 
 /**
  * DOM Element Extension for CSS Styling
@@ -116,9 +116,10 @@ struct DomComment : public DomNode {
                                                        parent_element(nullptr) {}
 };
 
-// ============================================================================
-// DOM Element with Style Support
-// ============================================================================
+typedef struct {
+    CssEnum outer;
+    CssEnum inner;
+} DisplayValue;
 
 /**
  * DomElement - DOM element with integrated CSS styling
@@ -129,39 +130,40 @@ struct DomComment : public DomNode {
  * - Version tracking for cache invalidation
  * - Parent/child relationships for inheritance
  */
-struct DomElement : public DomNode {
+struct DomElement : DomNode {
     // Tree structure (only elements can have children)
     DomNode* first_child;        // First child node (Element, Text, or Comment)
 
     // Basic element information
     Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
-    void* tag_name_ptr;          // Tag name pointer from name_pool (for fast comparison)
+    // void* tag_name_ptr;          // Tag name pointer from name_pool (for fast comparison)
     uintptr_t tag_id;            // Tag ID for fast comparison (e.g., HTM_TAG_DIV)
     const char* id;              // Element ID attribute (cached)
-    const char** class_names;    // Array of class names (cached)
-    int class_count;             // Number of classes
 
-    // Style trees
+    // CSS style related
+    const char** class_names;    // Array of class names (cached)
+    int class_count;             // Number of classes    
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
     StyleTree* computed_style;   // Computed values (AVL tree, cached)
-
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
     bool needs_style_recompute;  // Flag indicating computed values are stale
-
-    // Pseudo-class state (for :hover, :focus, etc.)
+    // pseudo-class state (for :hover, :focus, etc.)
     uint32_t pseudo_state;       // Bitmask of pseudo-class states
 
-    // Document reference (provides Arena and Input*)
+    // document reference (provides Arena and Input*)
     DomDocument* doc;            // Parent document (provides arena and input)
+
+    // view related fields
+    DisplayValue display;
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), native_element(nullptr),
-                   tag_name(nullptr), tag_name_ptr(nullptr), tag_id(0), id(nullptr),
+                   tag_name(nullptr), tag_id(0), id(nullptr),
                    class_names(nullptr), class_count(0), specified_style(nullptr),
                    computed_style(nullptr), style_version(0), needs_style_recompute(false),
-                   pseudo_state(0), doc(nullptr) {}
+                   pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
 
     // Document styler reference
     DocumentStyler* styler;      // Parent document styler (optional, for styling operations)
@@ -590,7 +592,7 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool);
 // ============================================================================
 
 inline DomElement* DomNode::as_element() {
-    return is_element() ? static_cast<DomElement*>(this) : nullptr;
+    return is_element() ? ((DomElement*)this) : nullptr;
 }
 
 inline DomText* DomNode::as_text() {

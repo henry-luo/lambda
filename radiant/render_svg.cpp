@@ -49,9 +49,9 @@ void svg_color_to_string(Color color, char* result) {
 }
 
 void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
-    if (!text->node || !text->node->text_data()) return;
+    if (!text || !text->text_data()) return;
     // Extract the text content
-    unsigned char* str = text->node->text_data();
+    unsigned char* str = text->text_data();
 
     TextRect *text_rect = text->rect;
     NEXT_RECT:
@@ -227,14 +227,11 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 
     // Render children
-    if (block->child) {
+    if (block->child()) {
         svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n",
-                           block->node ? block->node->name() : "unknown");
+        strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n", block->node_name());
         ctx->indent_level++;
-
-        render_children_svg(ctx, block->child);
-
+        render_children_svg(ctx, block->child());
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
@@ -261,14 +258,11 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
     }
 
     // Render children
-    if (view_span->child) {
+    if (view_span->child()) {
         svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n",
-                           view_span->node ? view_span->node->name() : "unknown");
+        strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n", view_span->node_name());
         ctx->indent_level++;
-
-        render_children_svg(ctx, view_span->child);
-
+        render_children_svg(ctx, view_span->child());
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
@@ -281,7 +275,7 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
 
 void render_children_svg(SvgRenderContext* ctx, View* view) {
     while (view) {
-        switch (view->type) {
+        switch (view->view_type) {
             case RDT_VIEW_BLOCK:
             case RDT_VIEW_INLINE_BLOCK:
             case RDT_VIEW_TABLE:
@@ -301,10 +295,10 @@ void render_children_svg(SvgRenderContext* ctx, View* view) {
                 break;
 
             default:
-                log_debug("Unknown view type in SVG rendering: %d", view->type);
+                log_debug("Unknown view type in SVG rendering: %d", view->view_type);
                 break;
         }
-        view = view->next;
+        view = view->next();
     }
 }
 
@@ -312,13 +306,14 @@ void render_children_svg(SvgRenderContext* ctx, View* view) {
 void calculate_content_bounds(View* view, int* max_x, int* max_y) {
     if (!view) return;
 
-    if (view->type == RDT_VIEW_BLOCK) {
+    if (view->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
         int right = block->x + block->width;
         int bottom = block->y + block->height;
         if (right > *max_x) *max_x = right;
         if (bottom > *max_y) *max_y = bottom;
-    } else if (view->type == RDT_VIEW_TEXT) {
+    } 
+    else if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = (ViewText*)view;
         int right = text->x + text->width;
         int bottom = text->y + text->height;
@@ -327,12 +322,12 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
     }
 
     // Recursively check children
-    if (view->type >= RDT_VIEW_INLINE) {
+    if (view->view_type >= RDT_VIEW_INLINE) {
         ViewGroup* group = (ViewGroup*)view;
-        View* child = group->child;
+        View* child = group->child();
         while (child) {
             calculate_content_bounds(child, max_x, max_y);
-            child = child->next;
+            child = child->next();
         }
     }
 }
@@ -376,7 +371,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
         width, height);
 
     // Render the root view
-    if (root_view->type == RDT_VIEW_BLOCK) {
+    if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_block_view_svg(&ctx, (ViewBlock*)root_view);
     } else {
         render_children_svg(&ctx, root_view);

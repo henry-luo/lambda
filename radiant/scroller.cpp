@@ -268,7 +268,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     if (!block->scroller) { return; }
     // handle horizontal overflow
     log_debug("update scroller for block:%s, content_width:%.1f, content_height:%.1f, block_width:%.1f, block_height:%.1f",
-        block->node->name(), content_width, content_height, block->width, block->height);
+        block->node_name(), content_width, content_height, block->width, block->height);
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {}

@@ -67,10 +67,7 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
 
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
-    DomNode* child = nullptr;
-    if (grid_item->node && grid_item->node->is_element()) {
-        child = static_cast<DomElement*>(grid_item->node)->first_child;
-    }
+    DomNode* child = grid_item->child();
     if (child) {
         int child_count = 0;
         do {
@@ -95,13 +92,12 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     grid_item->content_height = lycon->block.advance_y - content_y_offset;
 
     log_debug("GRID - Final content dimensions: %dx%d\n",
-           grid_item->content_width, grid_item->content_height);
+        grid_item->content_width, grid_item->content_height);
 
     // Restore parent context
     *lycon = saved_context;
-
     log_debug("Enhanced grid item content layout complete: %dx%d\n",
-              grid_item->content_width, grid_item->content_height);
+        grid_item->content_width, grid_item->content_height);
 }
 
 // Layout content within a grid item for sizing (first pass)

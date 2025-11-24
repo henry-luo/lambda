@@ -58,16 +58,16 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
     printf("DEBUG: AUTO MARGIN CENTERING STARTING\n");
     log_debug("Applying auto margin centering");
 
-    if (!flex_container || !flex_container->child) return;
+    if (!flex_container || !flex_container->child()) return;
 
     FlexContainerLayout* flex_layout = lycon->flex_container;
     if (!flex_layout) return;
 
     // Check each flex item for auto margins
-    View* child = flex_container->child;
+    View* child = flex_container->child();
     int item_count = 0;
     while (child) {
-        if (child->type == RDT_VIEW_BLOCK) {
+        if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* item = (ViewBlock*)child;
             item_count++;
             printf("DEBUG: Checking item %d for auto margins\n", item_count);
@@ -118,7 +118,7 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                 }
             }
         }
-        child = child->next;
+        child = child->next();
     }
 
     log_debug("Auto margin centering completed");
@@ -262,17 +262,14 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
     log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
-    DomNode* child = nullptr;
-    if (flex_item->node && flex_item->node->is_element()) {
-        child = static_cast<DomElement*>(flex_item->node)->first_child;
-    }
+    DomNode* child = flex_item->child();
     if (child) {
         do {
-            log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->name(), lycon->parent);
+            log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->node_name(), lycon->parent);
             // Use standard layout flow - this handles all HTML content types
             // CRITICAL: lycon->parent is set to flex_item, so text Views become children of flex_item
             layout_flow_node(lycon, child);
-            log_debug("*** PASS3 TRACE: Completed layout of child %s", child->name());
+            log_debug("*** PASS3 TRACE: Completed layout of child %s", child->node_name());
             child = child->next_sibling;
         } while (child);
 
@@ -297,16 +294,16 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) {
     log_debug("Final flex content layout");
     // Layout content within each flex item with their final sizes
-    View* child = flex_container->child;
+    View* child = flex_container->child();
     while (child) {
-        if (child->type == RDT_VIEW_BLOCK) {
+        if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* flex_item = (ViewBlock*)child;
             log_debug("Final layout for flex item %p: %dx%d", flex_item, flex_item->width, flex_item->height);
 
             // Final layout of flex item contents with determined sizes
             layout_flex_item_content(lycon, flex_item);
         }
-        child = child->next;
+        child = child->next();
     }
     log_debug("Final flex content layout completed");
 }
@@ -320,22 +317,19 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // PASS 1: Create Views with measured sizes (combined measurement + View creation)
     log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
     int child_count = 0;
-    DomNode* measure_child = nullptr;
-    if (block->node->is_element()) {
-        measure_child = static_cast<DomElement*>(block->node)->first_child;
-    }
+    DomNode* measure_child = block->child();
     if (measure_child) {
         do {
         log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
         // Only create Views for element nodes, skip text nodes
         if (measure_child->is_element()) {
-            log_debug(">>> PASS1 TRACE: Creating View with measurement for %s (node=%p)", measure_child->name(), measure_child);
+            log_debug(">>> PASS1 TRACE: Creating View with measurement for %s (node=%p)", measure_child->node_name(), measure_child);
             // CRITICAL: Keep measurement logic, then create View
             measure_flex_child_content(lycon, measure_child);
             layout_flow_node_for_flex(lycon, measure_child);
-            log_debug(">>> PASS1 TRACE: Completed View creation for %s", measure_child->name());
+            log_debug(">>> PASS1 TRACE: Completed View creation for %s", measure_child->node_name());
         } else {
-            log_debug(">>> PASS1 TRACE: Skipping text node: %s", measure_child->name());
+            log_debug(">>> PASS1 TRACE: Skipping text node: %s", measure_child->node_name());
         }
         measure_child = measure_child->next_sibling;
         child_count++;

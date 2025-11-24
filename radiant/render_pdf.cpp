@@ -4,18 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-
-#ifndef _WIN32
 #include <hpdf.h>
-#endif
 
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-
-#ifndef _WIN32
 
 typedef struct PdfRenderContext {
     HPDF_Doc pdf_doc;
@@ -117,11 +112,11 @@ void pdf_render_text(PdfRenderContext* ctx, const char* text, float x, float y, 
 
 // Render text view
 void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
-    if (!text || !text->node || !text->node->text_data()) return;
+    if (!text || !text->text_data()) return;
 
     // Calculate absolute position using block context (like SVG renderer)
     // Extract the text content
-    unsigned char* str = text->node->text_data();
+    unsigned char* str = text->text_data();
     TextRect *text_rect = text->rect;
     NEXT_RECT:
     float x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
@@ -237,13 +232,13 @@ void render_inline_view_pdf(PdfRenderContext* ctx, ViewSpan* view_span) {
 
 // Render children recursively
 void render_children_pdf(PdfRenderContext* ctx, View* view) {
-    if (!view || view->type < RDT_VIEW_INLINE) return;
+    if (!view || view->view_type < RDT_VIEW_INLINE) return;
 
     ViewGroup* group = (ViewGroup*)view;
-    View* child = group->child;
+    View* child = group->child();
 
     while (child) {
-        switch (child->type) {
+        switch (child->view_type) {
             case RDT_VIEW_BLOCK:
             case RDT_VIEW_LIST_ITEM:
             case RDT_VIEW_TABLE:
@@ -267,7 +262,7 @@ void render_children_pdf(PdfRenderContext* ctx, View* view) {
                 break;
         }
 
-        child = child->next;
+        child = child->next();
     }
 }
 
@@ -328,9 +323,9 @@ HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width,
     }
 
     // Render the root view
-    if (root_view->type == RDT_VIEW_BLOCK) {
+    if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_block_view_pdf(&ctx, (ViewBlock*)root_view);
-    } else if (root_view->type >= RDT_VIEW_INLINE) {
+    } else if (root_view->view_type >= RDT_VIEW_INLINE) {
         render_children_pdf(&ctx, root_view);
     }
 
@@ -435,11 +430,3 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
     ui_context_cleanup(&ui_context);
     return 1;
 }
-
-#else
-// Windows stub implementation
-int render_html_to_pdf(const char* html_file, const char* pdf_file) {
-    printf("PDF rendering is not supported on Windows (libharu not available)\\n");
-    return 1;
-}
-#endif

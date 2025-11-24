@@ -61,7 +61,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         log_debug("font face is null");
         return;
     }
-    unsigned char* str = text_view->node->text_data();
+    unsigned char* str = text_view->text_data();
     TextRect* text_rect = text_view->rect;
     while (text_rect) {
         float x = rdcon->block.x + text_rect->x, y = rdcon->block.y + text_rect->y;
@@ -227,14 +227,14 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
 }
 
 void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
-    log_debug("view list item:%s", list_item->node->name());
+    log_debug("view list item:%s", list_item->node_name());
     rdcon->list.item_index++;
     render_block_view(rdcon, list_item);
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = (ViewBlock*)view;
-    log_debug("view list:%s", list->node->name());
+    log_debug("view list:%s", list->node_name());
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->blk->list_style_type;
     render_block_view(rdcon, list);
@@ -358,14 +358,14 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
-    log_debug("render block view:%s", block->node->name());
+    log_debug("render block view:%s", block->node_name());
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
         setup_font(rdcon->ui_context, &rdcon->font, block->font);
     }
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
-    if (block->type == RDT_VIEW_LIST_ITEM) {
+    if (block->view_type == RDT_VIEW_LIST_ITEM) {
         render_list_bullet(rdcon, block);
     }
     if (block->bound) {
@@ -382,7 +382,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         draw_debug_rect(rdcon->canvas, rc, &rdcon->block.clip);
     }
 
-    View* view = block->child;
+    View* view = block->child();
     if (view) {
         if (block->in_line && block->in_line->color.c) {
             rdcon->color = block->in_line->color;
@@ -526,7 +526,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
         // render html doc
         if (doc && doc->view_tree && doc->view_tree->root) {
             View* root_view = doc->view_tree->root;
-            if (root_view && root_view->type == RDT_VIEW_BLOCK) {
+            if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
                 log_debug("render doc root view:");
                 // load default font
                 FontBox pa_font = rdcon->font;
@@ -554,7 +554,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
-    View* view = view_span->child;
+    View* view = view_span->child();
     if (view) {
         if (view_span->font) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
@@ -572,9 +572,9 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 
 void render_children(RenderContext* rdcon, View* view) {
     do {
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-            view->type == RDT_VIEW_TABLE || view->type == RDT_VIEW_TABLE_ROW_GROUP ||
-            view->type == RDT_VIEW_TABLE_ROW || view->type == RDT_VIEW_TABLE_CELL) {
+        if (view->view_type == RDT_VIEW_BLOCK || view->view_type == RDT_VIEW_INLINE_BLOCK ||
+            view->view_type == RDT_VIEW_TABLE || view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+            view->view_type == RDT_VIEW_TABLE_ROW || view->view_type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->embed) {
                 if (block->embed->img) {
@@ -598,21 +598,21 @@ void render_children(RenderContext* rdcon, View* view) {
                 }
             }
         }
-        else if (view->type == RDT_VIEW_LIST_ITEM) {
+        else if (view->view_type == RDT_VIEW_LIST_ITEM) {
             render_litem_view(rdcon, (ViewBlock*)view);
         }
-        else if (view->type == RDT_VIEW_INLINE) {
+        else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
             render_inline_view(rdcon, span);
         }
-        else if (view->type == RDT_VIEW_TEXT) {
+        else if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             render_text_view(rdcon, text);
         }
         else {
-            log_debug("unknown view in rendering: %d", view->type);
+            log_debug("unknown view in rendering: %d", view->view_type);
         }
-        view = view->next;
+        view = view->next();
     } while (view);
 }
 
@@ -643,7 +643,7 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF, &rdcon.block.clip);
 
     View* root_view = view_tree->root;
-    if (root_view && root_view->type == RDT_VIEW_BLOCK) {
+    if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("Render root view");
         render_block_view(&rdcon, (ViewBlock*)root_view);
         // render positioned children

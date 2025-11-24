@@ -104,7 +104,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     log_debug("layout iframe");
     if (!(block->embed && block->embed->doc)) {
         // load iframe document
-        const char *value = block->node->get_attribute("src");
+        const char *value = block->get_attribute("src");
         if (value) {
             size_t value_len = strlen(value);
             StrBuf* src = strbuf_new_cap(value_len);
@@ -140,16 +140,14 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("layout block inner content");
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
-        uintptr_t elmt_name = block->node->tag();
+        uintptr_t elmt_name = block->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
             layout_iframe(lycon, block, block->display);
         }
         // else HTM_TAG_IMG
     } else {  // layout block child content
         DomNode *child = nullptr;
-        if (block->node->is_element()) {
-            child = static_cast<DomElement*>(block->node)->first_child;
-        }
+        if (block->is_element()) { child = block->child(); }
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (block->display.inner == CSS_VALUE_FLOW) {
@@ -162,12 +160,12 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
-                log_debug("Setting up flex container for %s", block->node->name());
+                log_debug("Setting up flex container for %s", block->node_name());
                 layout_flex_content(lycon, block);
-                log_debug("Finished flex container layout for %s", block->node->name());
+                log_debug("Finished flex container layout for %s", block->node_name());
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
-                log_debug("Setting up grid container for %s", block->node->name());
+                log_debug("Setting up grid container for %s", block->node_name());
                 GridContainerLayout* pa_grid = lycon->grid_container;
                 init_grid_container(lycon, block);
                 // Process DOM children into View objects first
@@ -196,14 +194,14 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
-                        block->display.outer, block->display.inner, block->node->name());
-                layout_table(lycon, block->node, block->display);
+                        block->display.outer, block->display.inner, block->node_name());
+                layout_table(lycon, block, block->display);
                 return;
             }
             else {
                 log_debug("unknown display type");
             }
-            lycon->parent = block->parent;
+            lycon->parent = block->parent_view();
         }
         finalize_block_flow(lycon, block, block->display.outer);
     }
@@ -417,9 +415,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
 
 void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
-    const char* tag = elmt->name();
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d",
-        tag, block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
+        elmt->node_name(), block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
 
     uintptr_t elmt_name = elmt->tag();
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
@@ -480,7 +477,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     // determine block width and height
     float content_width = -1;
     log_debug("Block '%s': given_width=%.2f,  given_height=%.2f, blk=%p, width_type=%d",
-        elmt->name(), lycon->block.given_width, lycon->block.given_height, (void*)block->blk,
+        elmt->node_name(), lycon->block.given_width, lycon->block.given_height, (void*)block->blk,
         block->blk ? block->blk->given_width_type : -1);
     bool cond1 = (lycon->block.given_width >= 0);
     bool cond2 = (!block->blk || block->blk->given_width_type != CSS_VALUE_AUTO);
@@ -559,7 +556,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
         log_debug("Y coordinate: before margin=%f, margin.top=%f, after margin=%f (tag=%s)",
-                  y_before_margin, block->bound->margin.top, block->y, tag);
+                  y_before_margin, block->bound->margin.top, block->y, block->node_name());
     }
     else {
         block->width = content_width;  block->height = content_height;
@@ -578,9 +575,9 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     if (block->bound) {
         // collapse bottom margin with last child block
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
-            block->bound->padding.bottom == 0 && block->child) {
-            View* last_child = block->child;
-            while (last_child && last_child->next) { last_child = last_child->next; }
+            block->bound->padding.bottom == 0 && block->child()) {
+            View* last_child = block->child();
+            while (last_child && last_child->next()) { last_child = last_child->next(); }
             if (last_child->is_block() && ((ViewBlock*)last_child)->bound) {
                 ViewBlock* last_child_block = (ViewBlock*)last_child;
                 if (last_child_block->bound->margin.bottom > 0) {
@@ -610,7 +607,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_enter();
     // display: CSS_VALUE_BLOCK, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_LIST_ITEM
-    log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->name(), display.outer, display.inner);
+    log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->node_name(), display.outer, display.inner);
 
     // Check if this block is a flex item
     ViewBlock* parent_block = (ViewBlock*)lycon->parent;
@@ -623,7 +620,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
     lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
-    log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->name());
+    log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->node_name());
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
@@ -717,7 +714,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (block->bound) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
-                if (block->parent->child == block) {  // first child
+                if (block->parent_view()->child() == block) {  // first child
                     if (block->bound->margin.top > 0) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                         // parent has top margin, but no border, no padding;  parent->parent to exclude html

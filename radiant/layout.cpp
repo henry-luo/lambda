@@ -101,8 +101,8 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
 float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     // Inherit line height from parent
     INHERIT:
-    ViewGroup* pa = block->parent;
-    while (pa && !pa->is_block()) { pa = pa->parent; }
+    ViewGroup* pa = block->parent_view();
+    while (pa && !pa->is_block()) { pa = pa->parent_view(); }
     if (pa) {
         ViewBlock* pa_block = (ViewBlock*)pa;
         if (pa_block->blk && pa_block->blk->line_height && pa_block->blk->line_height->type != CSS_VALUE_INHERIT) {
@@ -159,7 +159,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     FontBox pa_font = lycon->font;  CssEnum pa_line_align = lycon->line.vertical_align;
     log_debug("span_vertical_align");
-    View* child = span->child;
+    View* child = span->child();
     if (child) {
         if (span->font) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
@@ -169,7 +169,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
         }
         do {
             view_vertical_align(lycon, child);
-            child = child->next;
+            child = child->next();
         } while (child);
     }
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
@@ -177,9 +177,9 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
-    log_debug("view_vertical_align: view=%d", view->type);
+    log_debug("view_vertical_align: view=%d", view->view_type);
     float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
-    if (view->type == RDT_VIEW_TEXT) {
+    if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
         TextRect* rect = text_view->rect;
         while (rect) {
@@ -191,13 +191,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 line_height, lycon->line.max_ascender, item_baseline);
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
                 rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
-                rect->length, text_view->node->text_data() + rect->start_index);
+                rect->length, text_view->text_data() + rect->start_index);
             rect->y = lycon->block.advance_y + max(vertical_offset, 0);
             rect = rect->next;
         }
         adjust_text_bounds(text_view);
     }
-    else if (view->type == RDT_VIEW_INLINE_BLOCK) {
+    else if (view->view_type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
         float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
@@ -210,21 +210,21 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         log_debug("vertical-adjusted-inline-block: y=%f, adv_y=%f, offset=%f, line=%f, blk=%f, max_asc=%f, max_desc=%f",
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height, lycon->line.max_ascender, lycon->line.max_descender);
     }
-    else if (view->type == RDT_VIEW_INLINE) {
+    else if (view->view_type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
         ViewSpan* span = (ViewSpan*)view;
         span_vertical_align(lycon, span);
     }
     else {
-        log_debug("view_vertical_align: unknown view type %d", view->type);
+        log_debug("view_vertical_align: unknown view type %d", view->view_type);
     }
 }
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
-        log_debug("view line align: %d", view->type);
+        log_debug("view line align: %d", view->view_type);
         view->x += offset;
-        if (view->type == RDT_VIEW_TEXT) {
+        if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             text->x += offset;
             TextRect* rect = text->rect;
@@ -233,15 +233,15 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
                 rect = rect->next;
             }
         }
-        else if (view->type == RDT_VIEW_INLINE) {
+        else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = (ViewSpan*)view;
-            if (sp->child) view_line_align(lycon, offset, sp->child);
+            if (sp->child()) view_line_align(lycon, offset, sp->child());
         }
         // else if (view->is_block()) {
         //     view->x += offset;
         // }
         // else {} // br
-        view = view->next;
+        view = view->next();
     }
 }
 
@@ -267,10 +267,10 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
-    log_debug("layout node %s, advance_y: %f", node->name(), lycon->block.advance_y);
+    log_debug("layout node %s, advance_y: %f", node->node_name(), lycon->block.advance_y);
 
     // Skip HTML comments (Lambda CSS parser creates these as elements with name "!--")
-    const char* node_name = node->name();
+    const char* node_name = node->node_name();
     if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
         log_debug("skipping HTML comment node");
         return;
@@ -279,12 +279,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (node->is_element()) {
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
-        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->name(), display.outer, display.inner);
-        if (strcmp(node->name(), "table") == 0) {
+        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
+        if (strcmp(node->node_name(), "table") == 0) {
             log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
                    display.outer, display.inner, CSS_VALUE_TABLE);
         }
-        if (strcmp(node->name(), "tbody") == 0) {
+        if (strcmp(node->node_name(), "tbody") == 0) {
             printf("DEBUG: TBODY in layout_flow_node - outer=%d, inner=%d\n", display.outer, display.inner);
             printf("DEBUG: TBODY current position before layout_block: x=%.1f, y=%.1f\n",
                    ((View*)lycon->view)->x, ((View*)lycon->view)->y);
@@ -316,7 +316,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
     }
     else {
-        log_debug("layout unknown node type: %d", node->type());
+        log_debug("layout unknown node type: %d", node->node_type);
         // skip the node
     }
     log_debug("end flow node, block advance_y: %d", lycon->block.advance_y);
@@ -324,7 +324,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_debug("layout html root");
-    log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? (int)elmt->type() : -1);
+    log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? (int)elmt->node_type : -1);
     //log_debug("DEBUG: About to call apply_header_style");
     //apply_header_style(lycon);
     log_debug("DEBUG: apply_header_style complete");
@@ -355,8 +355,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     html->position = alloc_position_prop(lycon);
 
     // resolve CSS style
-    log_debug("DEBUG: About to resolve style for elmt, type=%d, name=%s",
-              elmt->type(), elmt->name());
+    log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->node_name());
     dom_node_resolve_style(elmt, lycon);
     log_debug("DEBUG: After resolve style");
 
@@ -379,7 +378,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
     while (child) {
         if (child->is_element()) {
-            const char* tag_name = child->name();
+            const char* tag_name = child->node_name();
             log_debug("  Checking child element: %s", tag_name);
             if (strcmp(tag_name, "body") == 0) {
                 body_node = child;
@@ -467,7 +466,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         // Validate pointer before calling virtual methods
         log_debug("DEBUG: root_node->node_type = %d", root_node->node_type);
         if (root_node->node_type >= DOM_NODE_ELEMENT && root_node->node_type <= DOM_NODE_DOCTYPE) {
-            log_debug("layout lambda css html root %s", root_node->name());
+            log_debug("layout lambda css html root %s", root_node->node_name());
         } else {
             log_error("Invalid node_type: %d (pointer may be corrupted)", root_node->node_type);
             return;
