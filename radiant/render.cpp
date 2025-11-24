@@ -198,7 +198,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         // // Initialize the lexbor text node structure properly
         // memset(&lxb_node, 0, sizeof(lxb_dom_text_t));
         // lxb_node.char_data.node.type = LXB_DOM_NODE_TYPE_TEXT;
-        // lxb_node.char_data.data.data = (lxb_char_t *)num->str;
+        // lxb_node.char_data.data.data = (unsigned char *)num->str;
         // lxb_node.char_data.data.length = num->length;
 
         // // Initialize the ViewText structure

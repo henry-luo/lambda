@@ -243,11 +243,6 @@ typedef enum { POS_STATIC, POS_ABSOLUTE } PositionType;
 typedef enum { WM_HORIZONTAL_TB, WM_VERTICAL_RL, WM_VERTICAL_LR } WritingMode;
 typedef enum { TD_LTR, TD_RTL } TextDirection;
 
-// Lexbor type replacements - define stubs for removed lexbor dependencies
-typedef int lxb_status_t;
-typedef unsigned char lxb_char_t;
-#define LXB_STATUS_OK 0
-
 // Length/percentage value structure (replacing lexbor's lxb_css_value_length_percentage_t)
 typedef struct {
     CssEnum type;  // CSS_VALUE__LENGTH or CSS_VALUE__PERCENTAGE
