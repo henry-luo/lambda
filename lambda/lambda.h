@@ -75,7 +75,12 @@ typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
-// Only define DateTime if not already defined by lib/datetime.h
+
+/*
+* The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
+*/
+
+// only define DateTime if not already defined by lib/datetime.h
 #ifndef _DATETIME_DEFINED_
 #ifdef __cplusplus
 #include "../lib/datetime.h"
@@ -85,10 +90,6 @@ typedef uint64_t DateTime;
 #define _DATETIME_DEFINED_
 #endif
 typedef struct Decimal Decimal;
-
-/*
-* The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
-*/
 
 #ifndef __cplusplus
 typedef uint64_t Item;
@@ -245,126 +246,126 @@ typedef struct Context {
 } Context;
 
 #ifndef LAMBDA_STATIC
-Array* array();
-ArrayInt* array_int();
-ArrayInt64* array_int64();
-ArrayFloat* array_float();
+    Array* array();
+    ArrayInt* array_int();
+    ArrayInt64* array_int64();
+    ArrayFloat* array_float();
 
-ArrayInt* array_int_new(int length);
-ArrayInt64* array_int64_new(int length);
-ArrayFloat* array_float_new(int length);
+    ArrayInt* array_int_new(int length);
+    ArrayInt64* array_int64_new(int length);
+    ArrayFloat* array_float_new(int length);
 
-Map* map(int type_index);
-Element* elmt(int type_index);
+    Map* map(int type_index);
+    Element* elmt(int type_index);
 
-// these getters use runtime num_stack
-Item array_get(Array *array, int index);
-Item array_int_get(ArrayInt *array, int index);
-Item array_int64_get(ArrayInt64* array, int index);
-Item array_float_get(ArrayFloat* array, int index);
-Item list_get(List *list, int index);
-Item map_get(Map* map, Item key);
-Item elmt_get(Element *elmt, Item key);
-Item item_at(Item data, int index);
+    // these getters use runtime num_stack
+    Item array_get(Array *array, int index);
+    Item array_int_get(ArrayInt *array, int index);
+    Item array_int64_get(ArrayInt64* array, int index);
+    Item array_float_get(ArrayFloat* array, int index);
+    Item list_get(List *list, int index);
+    Item map_get(Map* map, Item key);
+    Item elmt_get(Element *elmt, Item key);
+    Item item_at(Item data, int index);
 
-Bool is_truthy(Item item);
-Item v2it(List *list);
+    Bool is_truthy(Item item);
+    Item v2it(List *list);
 
-Item push_d(double dval);
-Item push_l(int64_t lval);
-Item push_k(DateTime dtval);
-Item push_c(int64_t cval);
+    Item push_d(double dval);
+    Item push_l(int64_t lval);
+    Item push_k(DateTime dtval);
+    Item push_c(int64_t cval);
 
-#define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
-#define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
-#define const_c2it(index)    c2it((uint64_t)*(rt->consts + index))
-#define const_s2it(index)    s2it((uint64_t)*(rt->consts + index))
-#define const_y2it(index)    y2it((uint64_t)*(rt->consts + index))
-#define const_k2it(index)    k2it((uint64_t)*(rt->consts + index))
-#define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
+    #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
+    #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
+    #define const_c2it(index)    c2it((uint64_t)*(rt->consts + index))
+    #define const_s2it(index)    s2it((uint64_t)*(rt->consts + index))
+    #define const_y2it(index)    y2it((uint64_t)*(rt->consts + index))
+    #define const_k2it(index)    k2it((uint64_t)*(rt->consts + index))
+    #define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
 
-#define const_s(index)      ((String*)rt->consts[index])
-#define const_c(index)      ((Decimal*)rt->consts[index])
-#define const_k(index)      (*(DateTime*)rt->consts[index])
+    #define const_s(index)      ((String*)rt->consts[index])
+    #define const_c(index)      ((Decimal*)rt->consts[index])
+    #define const_k(index)      (*(DateTime*)rt->consts[index])
 
-// item unboxing
-int64_t it2l(Item item);
-double it2d(Item item);
-bool it2b(Item item);
-int it2i(Item item);
-String* it2s(Item item);
+    // item unboxing
+    int64_t it2l(Item item);
+    double it2d(Item item);
+    bool it2b(Item item);
+    int it2i(Item item);
+    String* it2s(Item item);
 
-// generic field access function
-Item fn_index(Item item, Item index);
-Item fn_member(Item item, Item key);
-// length function
-int64_t fn_len(Item item);
-Item fn_int(Item a);
-int64_t fn_int64(Item a);
+    // generic field access function
+    Item fn_index(Item item, Item index);
+    Item fn_member(Item item, Item key);
+    // length function
+    int64_t fn_len(Item item);
+    Item fn_int(Item a);
+    int64_t fn_int64(Item a);
 
-Item fn_add(Item a, Item b);
-Item fn_mul(Item a, Item b);
-Item fn_sub(Item a, Item b);
-Item fn_div(Item a, Item b);
-Item fn_idiv(Item a, Item b);
-Item fn_pow(Item a, Item b);
-Item fn_mod(Item a, Item b);
-Item fn_abs(Item a);
-Item fn_round(Item a);
-Item fn_floor(Item a);
-Item fn_ceil(Item a);
-Item fn_min1(Item a);
-Item fn_min2(Item a, Item b);
-Item fn_max1(Item a);
-Item fn_max2(Item a, Item b);
-Item fn_sum(Item a);
-Item fn_avg(Item a);
-Item fn_pos(Item a);
-Item fn_neg(Item a);
+    Item fn_add(Item a, Item b);
+    Item fn_mul(Item a, Item b);
+    Item fn_sub(Item a, Item b);
+    Item fn_div(Item a, Item b);
+    Item fn_idiv(Item a, Item b);
+    Item fn_pow(Item a, Item b);
+    Item fn_mod(Item a, Item b);
+    Item fn_abs(Item a);
+    Item fn_round(Item a);
+    Item fn_floor(Item a);
+    Item fn_ceil(Item a);
+    Item fn_min1(Item a);
+    Item fn_min2(Item a, Item b);
+    Item fn_max1(Item a);
+    Item fn_max2(Item a, Item b);
+    Item fn_sum(Item a);
+    Item fn_avg(Item a);
+    Item fn_pos(Item a);
+    Item fn_neg(Item a);
 
-// truthy idioms
-Item fn_and(Item a, Item b);
-Item fn_or(Item a, Item b);
-Item op_and(Bool a, Bool b);
-Item op_or(Bool a, Bool b);
+    // truthy idioms
+    Item fn_and(Item a, Item b);
+    Item fn_or(Item a, Item b);
+    Item op_and(Bool a, Bool b);
+    Item op_or(Bool a, Bool b);
 
-Bool fn_eq(Item a, Item b);
-Bool fn_ne(Item a, Item b);
-Bool fn_lt(Item a, Item b);
-Bool fn_gt(Item a, Item b);
-Bool fn_le(Item a, Item b);
-Bool fn_ge(Item a, Item b);
-Bool fn_not(Item a);
-Bool fn_is(Item a, Item b);
-Bool fn_in(Item a, Item b);
+    Bool fn_eq(Item a, Item b);
+    Bool fn_ne(Item a, Item b);
+    Bool fn_lt(Item a, Item b);
+    Bool fn_gt(Item a, Item b);
+    Bool fn_le(Item a, Item b);
+    Bool fn_ge(Item a, Item b);
+    Bool fn_not(Item a);
+    Bool fn_is(Item a, Item b);
+    Bool fn_in(Item a, Item b);
 
-Range* fn_to(Item a, Item b);
-String* fn_string(Item item);
-String *fn_strcat(String *left, String *right);
-Item fn_normalize(Item str, Item type);
-Item fn_substring(Item str, Item start, Item end);
-Item fn_contains(Item str, Item substr);
-Item fn_join(Item a, Item b);
+    Range* fn_to(Item a, Item b);
+    String* fn_string(Item item);
+    String *fn_strcat(String *left, String *right);
+    Item fn_normalize(Item str, Item type);
+    Item fn_substring(Item str, Item start, Item end);
+    Item fn_contains(Item str, Item substr);
+    Item fn_join(Item a, Item b);
 
-Function* to_fn(fn_ptr ptr);
-Type* base_type(TypeId type_id);
-Type* const_type(int type_index);
+    Function* to_fn(fn_ptr ptr);
+    Type* base_type(TypeId type_id);
+    Type* const_type(int type_index);
 
-// returns the type of the item
-Type* fn_type(Item item);
+    // returns the type of the item
+    Type* fn_type(Item item);
 
-Item fn_input1(Item url);
-Item fn_input2(Item url, Item options);
-String* fn_format1(Item item);
-String* fn_format2(Item item, Item options);
-Item fn_fetch(Item url, Item options);
+    Item fn_input1(Item url);
+    Item fn_input2(Item url, Item options);
+    String* fn_format1(Item item);
+    String* fn_format2(Item item, Item options);
+    Item fn_fetch(Item url, Item options);
 
-Item fn_typeset_latex(Item input_file, Item output_file, Item options);
-DateTime fn_datetime();
+    Item fn_typeset_latex(Item input_file, Item output_file, Item options);
+    DateTime fn_datetime();
 
-// procedural functions
-Item pn_print(Item item);
-Item pn_cmd(Item cmd, Item args);
-Item pn_fetch(Item url, Item options);
+    // procedural functions
+    Item pn_print(Item item);
+    Item pn_cmd(Item cmd, Item args);
+    Item pn_fetch(Item url, Item options);
 
 #endif
