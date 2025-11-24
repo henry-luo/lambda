@@ -1,23 +1,23 @@
 #pragma once
-#include "dom.hpp"
+#include "../lib/log.h"
+#include "../lib/hashmap.h"
+#include "../lib/arraylist.h"
+#include "../lib/utf.h"
+#include "../lib/url.h"
+#include "../lambda/lambda-data.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 #include <GLFW/glfw3.h>
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_SFNT_NAMES_H
 #include <thorvg_capi.h>
-#ifdef __cplusplus
-}
-#endif
 
-// #include "lib/arraylist.h"
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define min(a, b) ((a) < (b) ? (a) : (b))
 
 // Forward declarations
 struct FontFaceDescriptor;
@@ -820,3 +820,7 @@ extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontPro
 extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+
+typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
+DomDocument* load_html_doc(Url *base, char* doc_filename);
+void free_document(DomDocument* doc);

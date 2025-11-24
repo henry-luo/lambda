@@ -1,8 +1,6 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "layout.hpp"
-#include "dom.hpp"
-#include "../lib/log.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
