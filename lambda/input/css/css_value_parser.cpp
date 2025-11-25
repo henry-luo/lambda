@@ -518,7 +518,7 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
     if (!parser || !tokens || token_count <= 0) return NULL;
 
     // Create a list value
-    CssValue* list = css_value_list_create(parser->pool, false);
+    CssValue* list = css_value_list_create(parser->pool);
     if (!list) return NULL;
 
     // Parse individual values separated by commas or whitespace
@@ -780,14 +780,13 @@ CSSColorMix* css_parse_color_mix_function(CssPropertyValueParser* parser,
     return NULL;
 }
 
-CssValue* css_value_list_create(Pool* pool, bool comma_separated) {
+CssValue* css_value_list_create(Pool* pool) {
     if (!pool) return NULL;
 
     CssValue* list = (CssValue*)pool_calloc(pool, sizeof(CssValue));
     if (!list) return NULL;
 
     list->type = CSS_VALUE_TYPE_LIST;
-    list->data.list.comma_separated = comma_separated;
     list->data.list.count = 0;
 
     // Allocate initial array with capacity of 4
@@ -912,11 +911,15 @@ CssValue* css_parse_hsl_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_HSL;
 
+    // Allocate color components
+    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
+    if (!value->data.color.data.components) return NULL;
+
     // Default to red hue - full implementation would parse tokens
-    value->data.color.data.hsla.h = 0.0;   // Red hue
-    value->data.color.data.hsla.s = 1.0;   // Full saturation
-    value->data.color.data.hsla.l = 0.5;   // 50% lightness
-    value->data.color.data.hsla.a = 1.0;   // Full opacity
+    value->data.color.data.components->component1 = 0.0;   // h: Red hue
+    value->data.color.data.components->component2 = 1.0;   // s: Full saturation
+    value->data.color.data.components->component3 = 0.5;   // l: 50% lightness
+    value->data.color.data.components->component4 = 1.0;   // a: Full opacity
 
     return value;
 }
@@ -932,11 +935,15 @@ CssValue* css_parse_hwb_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_HWB;
 
+    // Allocate color components
+    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
+    if (!value->data.color.data.components) return NULL;
+
     // Default HWB values - full implementation would parse tokens
-    value->data.color.data.hwba.h = 0.0;   // Red hue
-    value->data.color.data.hwba.w = 0.0;   // No whiteness
-    value->data.color.data.hwba.b = 0.0;   // No blackness
-    value->data.color.data.hwba.a = 1.0;   // Full opacity
+    value->data.color.data.components->component1 = 0.0;   // h: Red hue
+    value->data.color.data.components->component2 = 0.0;   // w: No whiteness
+    value->data.color.data.components->component3 = 0.0;   // b: No blackness
+    value->data.color.data.components->component4 = 1.0;   // a: Full opacity
 
     return value;
 }
@@ -952,11 +959,15 @@ CssValue* css_parse_lab_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_LAB;
 
+    // Allocate color components
+    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
+    if (!value->data.color.data.components) return NULL;
+
     // Default LAB values - full implementation would parse tokens
-    value->data.color.data.laba.l = 50.0;     // 50% lightness
-    value->data.color.data.laba.a = 0.0;      // No red/green component
-    value->data.color.data.laba.b = 0.0;      // No yellow/blue component
-    value->data.color.data.laba.alpha = 1.0;  // Full opacity
+    value->data.color.data.components->component1 = 50.0;   // l: 50% lightness
+    value->data.color.data.components->component2 = 0.0;    // a: No red/green component
+    value->data.color.data.components->component3 = 0.0;    // b: No yellow/blue component
+    value->data.color.data.components->component4 = 1.0;    // alpha: Full opacity
 
     return value;
 }
@@ -972,11 +983,15 @@ CssValue* css_parse_lch_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_LCH;
 
+    // Allocate color components
+    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
+    if (!value->data.color.data.components) return NULL;
+
     // Default LCH values - full implementation would parse tokens
-    value->data.color.data.lcha.l = 50.0;   // 50% lightness
-    value->data.color.data.lcha.c = 0.0;    // No chroma
-    value->data.color.data.lcha.h = 0.0;    // Red hue
-    value->data.color.data.lcha.a = 1.0;    // Full opacity
+    value->data.color.data.components->component1 = 50.0;   // l: 50% lightness
+    value->data.color.data.components->component2 = 0.0;    // c: No chroma
+    value->data.color.data.components->component3 = 0.0;    // h: Red hue
+    value->data.color.data.components->component4 = 1.0;    // a: Full opacity
 
     return value;
 }
@@ -992,11 +1007,15 @@ CssValue* css_parse_oklab_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_OKLAB;
 
+    // Allocate color components
+    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
+    if (!value->data.color.data.components) return NULL;
+
     // Default OKLAB values - full implementation would parse tokens
-    value->data.color.data.laba.l = 0.5;     // 50% lightness
-    value->data.color.data.laba.a = 0.0;     // No red/green component
-    value->data.color.data.laba.b = 0.0;     // No yellow/blue component
-    value->data.color.data.laba.alpha = 1.0; // Full opacity
+    value->data.color.data.components->component1 = 0.5;    // l: 50% lightness
+    value->data.color.data.components->component2 = 0.0;    // a: No red/green component
+    value->data.color.data.components->component3 = 0.0;    // b: No yellow/blue component
+    value->data.color.data.components->component4 = 1.0;    // alpha: Full opacity
 
     return value;
 }
@@ -1012,11 +1031,15 @@ CssValue* css_parse_oklch_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_COLOR;
     value->data.color.type = CSS_COLOR_OKLCH;
 
+    // Allocate color components
+    value->data.color.data.components = (CssColorComponents*)pool_alloc(parser->pool, sizeof(CssColorComponents));
+    if (!value->data.color.data.components) return NULL;
+
     // Default OKLCH values - full implementation would parse tokens
-    value->data.color.data.lcha.l = 0.5;    // 50% lightness
-    value->data.color.data.lcha.c = 0.0;    // No chroma
-    value->data.color.data.lcha.h = 0.0;    // Red hue
-    value->data.color.data.lcha.a = 1.0;    // Full opacity
+    value->data.color.data.components->component1 = 0.5;    // l: 50% lightness
+    value->data.color.data.components->component2 = 0.0;    // c: No chroma
+    value->data.color.data.components->component3 = 0.0;    // h: Red hue
+    value->data.color.data.components->component4 = 1.0;    // a: Full opacity
 
     return value;
 }

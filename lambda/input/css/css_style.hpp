@@ -151,7 +151,7 @@ typedef struct CssFunction {
 } CssFunction;
 
 // CSS Value Types for final computed values
-typedef enum CssValueType {
+typedef enum CssValueType : uint8_t {
     CSS_VALUE_TYPE_KEYWORD,        // keywords (auto, inherit, etc.)
     CSS_VALUE_TYPE_LENGTH,         // length values with units
     CSS_VALUE_TYPE_PERCENTAGE,     // percentage values
@@ -600,9 +600,18 @@ typedef union {
     };
 } Color;
 
+// Color components structure for HSL, HWB, LAB, LCH color spaces
+typedef struct {
+    double component1;  // h (hue) for HSL/HWB/LCH, l (lightness) for LAB
+    double component2;  // s (saturation) for HSL, w (whiteness) for HWB, a for LAB, c (chroma) for LCH
+    double component3;  // l (lightness) for HSL, b (blackness) for HWB, b for LAB, h (hue) for LCH
+    double component4;  // alpha channel for all formats
+} CssColorComponents;
+
 // Generic CSS value structure
 typedef struct CssValue {
     CssValueType type;
+    uint8_t reserved[3];  // padding for alignment
     union {
         // Numeric values
         struct {
@@ -625,10 +634,7 @@ typedef struct CssValue {
             union {
                 Color color;
                 struct { uint8_t r, g, b, a; } rgba;
-                struct { double h, s, l, a; } hsla;
-                struct { double h, w, b, a; } hwba;
-                struct { double l, a, b, alpha; } laba;
-                struct { double l, c, h, a; } lcha;
+                CssColorComponents* components;  // For HSLA, HWBA, LABA, LCHA (pointer to 4 doubles)
                 const char* keyword;
             } data;
         } color;
@@ -658,7 +664,6 @@ typedef struct CssValue {
         struct {
             struct CssValue** values;
             int count;
-            bool comma_separated;
         } list;
 
         // Function value
