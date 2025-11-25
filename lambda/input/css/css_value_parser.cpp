@@ -502,9 +502,13 @@ CssValue* css_parse_generic_function(CssPropertyValueParser* parser,
     }
 
     value->type = CSS_VALUE_TYPE_FUNCTION;
-    value->data.function.name = pool_strdup(parser->pool, function_name);
-    value->data.function.args = NULL;
-    value->data.function.arg_count = 0;
+    value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
+    if (!value->data.function) {
+        return NULL;
+    }
+    value->data.function->name = pool_strdup(parser->pool, function_name);
+    value->data.function->args = NULL;
+    value->data.function->arg_count = 0;
 
     return value;
 }CssValue* css_parse_value_list(CssPropertyValueParser* parser,
@@ -747,7 +751,8 @@ bool css_value_is_keyword(const CssValue* value, const char* keyword) {
 
 bool css_value_is_function(const CssValue* value, const char* function_name) {
     return value && value->type == CSS_VALUE_TYPE_FUNCTION &&
-           value->data.function.name && strcmp(value->data.function.name, function_name) == 0;
+           value->data.function && value->data.function->name && 
+           strcmp(value->data.function->name, function_name) == 0;
 }
 
 // CSS property value parser utility functions
@@ -823,9 +828,12 @@ CssValue* css_parse_min_max_function(CssPropertyValueParser* parser,
     if (!value) return NULL;
 
     value->type = CSS_VALUE_TYPE_FUNCTION;
-    value->data.function.name = (op_type == 0) ? "min" : "max";
-    value->data.function.arg_count = 0;
-    value->data.function.args = NULL;
+    value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
+    if (!value->data.function) return NULL;
+    
+    value->data.function->name = (op_type == 0) ? "min" : "max";
+    value->data.function->arg_count = 0;
+    value->data.function->args = NULL;
 
     return value;
 }
@@ -840,9 +848,12 @@ CssValue* css_parse_clamp_function(CssPropertyValueParser* parser,
     if (!value) return NULL;
 
     value->type = CSS_VALUE_TYPE_FUNCTION;
-    value->data.function.name = "clamp";
-    value->data.function.arg_count = 0;
-    value->data.function.args = NULL;
+    value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
+    if (!value->data.function) return NULL;
+    
+    value->data.function->name = "clamp";
+    value->data.function->arg_count = 0;
+    value->data.function->args = NULL;
 
     return value;
 }
@@ -858,9 +869,12 @@ CssValue* css_parse_math_function(CssPropertyValueParser* parser,
     if (!value) return NULL;
 
     value->type = CSS_VALUE_TYPE_FUNCTION;
-    value->data.function.name = "math";
-    value->data.function.args = NULL;
-    value->data.function.arg_count = 0;
+    value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
+    if (!value->data.function) return NULL;
+    
+    value->data.function->name = "math";
+    value->data.function->args = NULL;
+    value->data.function->arg_count = 0;
 
     (void)op_type;
 

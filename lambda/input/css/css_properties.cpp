@@ -1290,8 +1290,8 @@ static bool css_parse_function_local(const char* value_str, CssFunction* functio
     name[name_len] = '\0';
 
     function->name = name;
-    function->arguments = NULL; // Would parse arguments in full implementation
-    function->argument_count = 0;
+    function->args = NULL; // Would parse arguments in full implementation
+    function->arg_count = 0;
 
     return true;
 }

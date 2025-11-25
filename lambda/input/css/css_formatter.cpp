@@ -211,19 +211,19 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
             break;
 
         case CSS_VALUE_TYPE_FUNCTION:
-            if (value->data.function.name) {
-                stringbuf_append_str(formatter->output, value->data.function.name);
+            if (value->data.function && value->data.function->name) {
+                stringbuf_append_str(formatter->output, value->data.function->name);
                 stringbuf_append_str(formatter->output, "(");
                 // Format function arguments
-                for (size_t i = 0; i < value->data.function.arg_count; i++) {
+                for (size_t i = 0; i < (size_t)value->data.function->arg_count; i++) {
                     if (i > 0) {
                         stringbuf_append_str(formatter->output, ", ");
                     }
-                    if (value->data.function.args && value->data.function.args[i]) {
+                    if (value->data.function->args && value->data.function->args[i]) {
                         // Save current output, format arg value, restore
                         StringBuf* temp = formatter->output;
                         formatter->output = stringbuf_new(formatter->pool);
-                        css_format_value(formatter, value->data.function.args[i]);
+                        css_format_value(formatter, value->data.function->args[i]);
                         String* formatted_str = stringbuf_to_string(formatter->output);
                         formatter->output = temp;
                         if (formatted_str && formatted_str->chars) {
