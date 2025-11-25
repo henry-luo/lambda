@@ -1270,15 +1270,15 @@ TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
     // Verify DOM sibling chain traversal includes all three
     DomNode* node = parent->first_child;
     ASSERT_NE(node, (DomNode*)NULL);
-    EXPECT_EQ(node->type(), DOM_NODE_COMMENT);
+    EXPECT_EQ(node->node_type, DOM_NODE_COMMENT);
     
     node = node->next_sibling;
     ASSERT_NE(node, (DomNode*)NULL);
-    EXPECT_EQ(node->type(), DOM_NODE_TEXT);
+    EXPECT_EQ(node->node_type, DOM_NODE_TEXT);
     
     node = node->next_sibling;
     ASSERT_NE(node, (DomNode*)NULL);
-    EXPECT_EQ(node->type(), DOM_NODE_COMMENT);
+    EXPECT_EQ(node->node_type, DOM_NODE_COMMENT);
     
     node = node->next_sibling;
     EXPECT_EQ(node, (DomNode*)NULL);  // No more siblings
@@ -1669,11 +1669,11 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     
     // Verify DOM traversal still works
     DomNode* node = root->first_child;
-    EXPECT_EQ(node->type(), DOM_NODE_TEXT);
+    EXPECT_EQ(node->node_type, DOM_NODE_TEXT);
     node = node->next_sibling;
-    EXPECT_EQ(node->type(), DOM_NODE_COMMENT);
+    EXPECT_EQ(node->node_type, DOM_NODE_COMMENT);
     node = node->next_sibling;
-    EXPECT_EQ(node->type(), DOM_NODE_ELEMENT);
+    EXPECT_EQ(node->node_type, DOM_NODE_ELEMENT);
 }
 
 TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
