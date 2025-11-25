@@ -230,7 +230,7 @@ CssEnum map_font_weight(const CssValue* value) {
             default: return CSS_VALUE_NORMAL;
         }
     }
-    else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
+    else if (value->type == CSS_VALUE_TYPE_NUMBER) {
         // numeric weights: map to closest keyword or return as-is
         int weight = (int)value->data.number.value;
         // uses enum values for numeric weights, but for simplicity
@@ -501,20 +501,6 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         } else {
             // treat as pixels for most properties
             result = (float)value->data.number.value;
-        }
-        break;
-
-    case CSS_VALUE_TYPE_INTEGER:
-        // integer value
-        log_debug("integer value: %d", value->data.integer.value);
-        if (property == CSS_PROPERTY_LINE_HEIGHT) {
-            if (lycon->font.current_font_size < 0) {
-                log_debug("resolving font size for em value");
-                resolve_font_size(lycon, NULL);
-            }
-            result = value->data.integer.value * lycon->font.current_font_size;
-        } else {   // treat as pixels
-            result = (float)value->data.integer.value;
         }
         break;
 
@@ -859,7 +845,7 @@ struct MultiValue {
 
 void set_multi_value(MultiValue* mv, const CssValue* value) {
     if (!mv || !value) return;
-    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
+    if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER) {
         mv->length = (CssValue*)value;
     } else if (value->type == CSS_VALUE_TYPE_COLOR) {
         mv->color = (CssValue*)value;
@@ -2435,7 +2421,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
 
-            if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int z = (int)value->data.number.value;
                 block->position->z_index = z;
                 log_debug("[CSS] Z-index: %d", z);
@@ -3004,7 +2990,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_ORDER: {
             log_debug("[CSS] Processing order property");
             alloc_flex_item_prop(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int order_value = (int)value->data.number.value;
                 span->in_line->fi->order = order_value;
                 log_debug("[CSS] order: %d", order_value);

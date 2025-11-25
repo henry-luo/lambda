@@ -29,7 +29,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_RIGHT, "right", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BOTTOM, "bottom", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_LEFT, "left", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_Z_INDEX, "z-index", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_Z_INDEX, "z-index", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_FLOAT, "float", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CLEAR, "clear", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW, "overflow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
@@ -155,7 +155,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FLEX_GROW, "flex-grow", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_FLEX_SHRINK, "flex-shrink", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_FLEX_BASIS, "flex-basis", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_ORDER, "order", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "0", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_ORDER, "order", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "0", false, false, NULL, 0, validate_integer, NULL},
 
     // Grid Properties
     {CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, "grid-template-columns", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
@@ -235,7 +235,7 @@ static CssProperty property_definitions[] = {
 
     // Multi-column Layout Properties
     {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_COLUMNS, "columns", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_COLUMN_RULE_WIDTH, "column-rule-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
@@ -316,7 +316,7 @@ static CssProperty property_definitions[] = {
     // User Interface Properties
     {CSS_PROPERTY_RESIZE, "resize", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_CARET_COLOR, "caret-color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "auto", true, false, NULL, 0, validate_color, NULL},
-    {CSS_PROPERTY_NAV_INDEX, "nav-index", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_NAV_INDEX, "nav-index", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
     {CSS_PROPERTY_NAV_UP, "nav-up", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_NAV_RIGHT, "nav-right", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_NAV_DOWN, "nav-down", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
@@ -347,8 +347,8 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_PAGE_BREAK_BEFORE, "page-break-before", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_PAGE_BREAK_AFTER, "page-break-after", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_PAGE_BREAK_INSIDE, "page-break-inside", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_ORPHANS, "orphans", PROP_TYPE_INTEGER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
-    {CSS_PROPERTY_WIDOWS, "widows", PROP_TYPE_INTEGER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_ORPHANS, "orphans", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_WIDOWS, "widows", PROP_TYPE_NUMBER, PROP_INHERIT_YES, "2", false, false, NULL, 0, validate_integer, NULL},
 
     // Container Properties
     {CSS_PROPERTY_CONTAINER, "container", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},

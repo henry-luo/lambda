@@ -1453,7 +1453,8 @@
                             "lambda/input/css/css_properties.cpp",
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
-                            "lib/mempool.c"
+                            "lib/mempool.c",
+                            "lib/log.c"
                         ],
                         "binary": "test_css_style_node.exe"
                     },
@@ -1475,7 +1476,8 @@
                             "lambda/input/css/css_value.cpp",
                             "lib/mempool.c",
                             "lib/string.c",
-                            "lib/hashmap.c"
+                            "lib/hashmap.c",
+                            "lib/log.c"
                         ],
                         "binary": "test_css_system.exe"
                     },

@@ -719,20 +719,15 @@ const char** css_property_value_parser_get_errors(CssPropertyValueParser* parser
 
 // Type checking utilities
 bool css_value_is_length(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_TYPE_LENGTH ||
-                     value->type == CSS_VALUE_LENGTH_PERCENTAGE);
+    return value && value->type == CSS_VALUE_TYPE_LENGTH;
 }
 
 bool css_value_is_percentage(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                     value->type == CSS_VALUE_LENGTH_PERCENTAGE ||
-                     value->type == CSS_VALUE_NUMBER_PERCENTAGE);
+    return value && value->type == CSS_VALUE_TYPE_PERCENTAGE;
 }
 
 bool css_value_is_number(const CssValue* value) {
-    return value && (value->type == CSS_VALUE_TYPE_NUMBER ||
-                     value->type == CSS_VALUE_TYPE_INTEGER ||
-                     value->type == CSS_VALUE_NUMBER_PERCENTAGE);
+    return value && value->type == CSS_VALUE_TYPE_NUMBER;
 }
 
 bool css_value_is_color(const CssValue* value) {

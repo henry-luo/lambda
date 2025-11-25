@@ -154,8 +154,7 @@ typedef enum CssValueType {
     CSS_VALUE_TYPE_KEYWORD,        // keywords (auto, inherit, etc.)
     CSS_VALUE_TYPE_LENGTH,         // length values with units
     CSS_VALUE_TYPE_PERCENTAGE,     // percentage values
-    CSS_VALUE_TYPE_NUMBER,         // numeric values
-    CSS_VALUE_TYPE_INTEGER,        // integer values
+    CSS_VALUE_TYPE_NUMBER,         // numeric values (includes integers via is_integer flag)
     CSS_VALUE_TYPE_COLOR,          // color values
     CSS_VALUE_TYPE_STRING,         // string values
     CSS_VALUE_TYPE_URL,            // URL values
@@ -169,8 +168,6 @@ typedef enum CssValueType {
     CSS_VALUE_TYPE_ATTR,           // attr() function
     CSS_VALUE_TYPE_COLOR_MIX,      // color-mix() function
     CSS_VALUE_TYPE_CALC,           // calc() expressions
-    CSS_VALUE_LENGTH_PERCENTAGE,   // length or percentage values
-    CSS_VALUE_NUMBER_PERCENTAGE,   // number or percentage values
     CSS_VALUE_TYPE_CUSTOM,         // custom property references
     CSS_VALUE_TYPE_UNKNOWN         // unknown or invalid value
 } CssValueType;
@@ -618,11 +615,8 @@ typedef struct CssValue {
 
         struct {
             double value;
+            bool is_integer;
         } number;
-
-        struct {
-            int value;
-        } integer;
 
         // Color value
         struct {
@@ -971,8 +965,7 @@ void css_inherit_properties(CssComputedStyle* style, const CssComputedStyle* par
 typedef enum PropertyValueType {
     PROP_TYPE_KEYWORD,           // Named values (auto, none, inherit, etc.)
     PROP_TYPE_LENGTH,            // px, em, rem, %, etc.
-    PROP_TYPE_NUMBER,            // Unitless numbers
-    PROP_TYPE_INTEGER,           // Integer values
+    PROP_TYPE_NUMBER,            // Unitless numbers (includes integers via is_integer flag)
     PROP_TYPE_PERCENTAGE,        // Percentage values
     PROP_TYPE_COLOR,             // Color values
     PROP_TYPE_STRING,            // String literals
