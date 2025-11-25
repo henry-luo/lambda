@@ -80,19 +80,17 @@ struct DomText : public DomNode {
     // Text-specific fields (reference to Lambda String)
     const char* text;            // Text content (references native_string->chars)
     size_t length;               // Text length
+    // Lambda backing (required)
+    String* native_string;       // Pointer to backing Lambda String
 
     // view related fields
     TextRect *rect;  // first text rect
     FontProp *font;  // font for this text
     Color color;     // text color (for PDF text fill color)
 
-    // Lambda backing (required)
-    String* native_string;       // Pointer to backing Lambda String
-    DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
-
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-        native_string(nullptr), parent_element(nullptr), rect(nullptr), font(nullptr) { color.c = 0; }
+        native_string(nullptr), rect(nullptr), font(nullptr) { color.c = 0; }
 };
 
 // ============================================================================
@@ -109,14 +107,11 @@ struct DomComment : public DomNode {
     const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
     const char* content;         // Full content/text (points to native_element's String child)
     size_t length;               // Content length
-
-    // Lambda backing (required)
     Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
-    DomElement* parent_element;  // Parent DomElement (provides Input* via parent->document->input)
 
     // Constructor
     DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
-        content(nullptr), length(0), native_element(nullptr), parent_element(nullptr) {}
+        content(nullptr), length(0), native_element(nullptr) {}
 };
 
 typedef struct {

@@ -155,7 +155,7 @@ TEST_F(DomNodeBaseTest, CreateDomText) {
     // Verify text node properties
     EXPECT_EQ(text->node_type, DOM_NODE_TEXT);
     EXPECT_STREQ(dom_text_get_content(text), "Hello World");
-    EXPECT_EQ(text->parent_element, parent);
+    EXPECT_EQ(text->parent, parent);
     EXPECT_TRUE(dom_text_is_backed(text));
 }
 

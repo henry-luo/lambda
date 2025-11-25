@@ -1177,7 +1177,7 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     text_node->native_string = native_string;
     text_node->text = native_string->chars;  // Reference Lambda String's chars
     text_node->length = native_string->len;
-    text_node->parent_element = parent_element;
+    text_node->parent = parent_element;
 
     log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
 
@@ -1201,12 +1201,13 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         return false;
     }
 
-    if (!text_node->native_string || !text_node->parent_element) {
+    if (!text_node->native_string || !text_node->parent) {
         log_error("dom_text_set_content: text node not backed by Lambda");
         return false;
     }
 
-    if (!text_node->parent_element->doc) {
+    DomElement* parent = (DomElement*)text_node->parent;
+    if (!parent->doc) {
         log_error("dom_text_set_content: parent element has no document");
         return false;
     }
@@ -1219,7 +1220,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     }
 
     // Create new String via MarkBuilder
-    MarkEditor editor(text_node->parent_element->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item new_string_item = editor.builder()->createStringItem(new_content);
 
     if (!new_string_item.pointer || get_type_id(new_string_item) != LMD_TYPE_STRING) {
@@ -1229,7 +1230,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
 
     // Replace child in parent Element's items array
     Item result = editor.elmt_replace_child(
-        {.element = text_node->parent_element->native_element},
+        {.element = parent->native_element},
         child_idx,
         new_string_item
     );
@@ -1245,24 +1246,22 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     text_node->length = text_node->native_string->len;
 
     // In INLINE mode, parent element pointer unchanged, but update for consistency
-    text_node->parent_element->native_element = result.element;
-
+    parent->native_element = result.element;
     log_debug("dom_text_set_content: updated text at index %lld to '%s'", child_idx, new_content);
-
     return true;
 }
 
 bool dom_text_is_backed(DomText* text_node) {
-    return text_node && text_node->native_string && text_node->parent_element;
+    return text_node && text_node->native_string && text_node->parent;
 }
 
 int64_t dom_text_get_child_index(DomText* text_node) {
-    if (!text_node || !text_node->parent_element || !text_node->native_string) {
+    if (!text_node || !text_node->parent || !text_node->native_string) {
         log_error("dom_text_get_child_index: text node not backed");
         return -1;
     }
 
-    Element* parent_elem = text_node->parent_element->native_element;
+    Element* parent_elem = ((DomElement*)text_node->parent)->native_element;
     if (!parent_elem) {
         log_error("dom_text_get_child_index: parent has no native_element");
         return -1;
@@ -1292,7 +1291,8 @@ bool dom_text_remove(DomText* text_node) {
         return false;
     }
 
-    if (!text_node->parent_element->doc) {
+    DomElement* parent = (DomElement*)text_node->parent;
+    if (!parent->doc) {
         log_error("dom_text_remove: parent element has no document");
         return false;
     }
@@ -1305,9 +1305,9 @@ bool dom_text_remove(DomText* text_node) {
     }
 
     // Remove from Lambda parent Element's children array
-    MarkEditor editor(text_node->parent_element->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
-        {.element = text_node->parent_element->native_element},
+        {.element = parent->native_element},
         child_idx
     );
 
@@ -1317,7 +1317,7 @@ bool dom_text_remove(DomText* text_node) {
     }
 
     // Update parent
-    text_node->parent_element->native_element = result.element;
+    parent->native_element = result.element;
 
     // Remove from DOM sibling chain
     if (text_node->prev_sibling) {
@@ -1336,10 +1336,7 @@ bool dom_text_remove(DomText* text_node) {
     // Clear references
     text_node->parent = nullptr;
     text_node->native_string = nullptr;
-    text_node->parent_element = nullptr;
-
     log_debug("dom_text_remove: removed text node at index %lld", child_idx);
-
     return true;
 }
 
@@ -1460,7 +1457,6 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
 
     // Set Lambda backing
     comment_node->native_element = native_element;
-    comment_node->parent_element = parent_element;
     comment_node->tag_name = tag_name;  // Reference type name (no copy needed)
 
     // Extract content from first String child (if exists)
@@ -1496,16 +1492,16 @@ void dom_comment_destroy(DomComment* comment_node) {
 // ============================================================================
 
 bool dom_comment_is_backed(DomComment* comment_node) {
-    return comment_node && comment_node->native_element && comment_node->parent_element;
+    return comment_node && comment_node->native_element && comment_node->parent;
 }
 
 int64_t dom_comment_get_child_index(DomComment* comment_node) {
-    if (!comment_node || !comment_node->parent_element || !comment_node->native_element) {
+    if (!comment_node || !comment_node->parent || !comment_node->native_element) {
         log_error("dom_comment_get_child_index: comment node not backed");
         return -1;
     }
 
-    Element* parent_elem = comment_node->parent_element->native_element;
+    Element* parent_elem = ((DomElement*)comment_node->parent)->native_element;
     if (!parent_elem) {
         log_error("dom_comment_get_child_index: parent has no native_element");
         return -1;
@@ -1530,18 +1526,19 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
         return false;
     }
 
-    if (!comment_node->native_element || !comment_node->parent_element) {
+    if (!comment_node->native_element || !comment_node->parent) {
         log_error("dom_comment_set_content: comment not backed by Lambda");
         return false;
     }
 
-    if (!comment_node->parent_element->doc) {
+    DomElement* parent = (DomElement*)comment_node->parent;
+    if (!parent->doc) {
         log_error("dom_comment_set_content: parent element has no document");
         return false;
     }
 
     // Create new String via MarkBuilder
-    MarkEditor editor(comment_node->parent_element->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item new_string_item = editor.builder()->createStringItem(new_content);
 
     if (!new_string_item.pointer || get_type_id(new_string_item) != LMD_TYPE_STRING) {
@@ -1576,9 +1573,7 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     String* new_string = (String*)new_string_item.pointer;
     comment_node->content = new_string->chars;
     comment_node->length = new_string->len;
-
     log_debug("dom_comment_set_content: updated content to '%s'", new_content);
-
     return true;
 }
 
@@ -1656,8 +1651,8 @@ bool dom_comment_remove(DomComment* comment_node) {
         return false;
     }
 
-    DomElement* parent_elem = comment_node->parent_element;
-    if (!comment_node->native_element || !parent_elem || !parent_elem->doc) {
+    DomElement* parent = (DomElement*)comment_node->parent;
+    if (!comment_node->native_element || !parent || !parent->doc) {
         log_error("dom_comment_remove: comment not backed");
         return false;
     }
@@ -1670,9 +1665,9 @@ bool dom_comment_remove(DomComment* comment_node) {
     }
 
     // Remove from Lambda parent Element's children array
-    MarkEditor editor(parent_elem->doc->input, EDIT_MODE_INLINE);
+    MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item result = editor.elmt_delete_child(
-        {.element = parent_elem->native_element},
+        {.element = parent->native_element},
         child_idx
     );
 
@@ -1682,7 +1677,7 @@ bool dom_comment_remove(DomComment* comment_node) {
     }
 
     // Update parent
-    parent_elem->native_element = result.element;
+    parent->native_element = result.element;
 
     // Remove from DOM sibling chain
     if (comment_node->prev_sibling) {
@@ -1701,9 +1696,7 @@ bool dom_comment_remove(DomComment* comment_node) {
     // Clear references
     comment_node->parent = nullptr;
     comment_node->native_element = nullptr;
-
     log_debug("dom_comment_remove: removed comment at index %lld", child_idx);
-
     return true;
 }
 
