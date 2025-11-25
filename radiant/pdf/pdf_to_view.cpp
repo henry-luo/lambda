@@ -825,7 +825,7 @@ static void create_text_view(Input* input, ViewBlock* parent,
         dom_text->parent = nullptr;
         dom_text->next_sibling = nullptr;
         dom_text->prev_sibling = nullptr;
-        dom_text->parent_element = nullptr;  // PDF views don't have backing element
+        dom_text->parent = nullptr;  // PDF views don't have backing element
         dom_text->native_string = nullptr;
     }
 

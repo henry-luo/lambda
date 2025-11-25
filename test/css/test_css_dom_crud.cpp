@@ -921,8 +921,8 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     
     ASSERT_NE(text, nullptr);
     EXPECT_NE(text->native_string, nullptr);
-    EXPECT_NE(text->parent_element->doc->input, nullptr);
-    EXPECT_EQ(text->parent_element, parent);
+    EXPECT_NE(((DomElement*)text->parent)->doc->input, nullptr);
+    EXPECT_EQ(text->parent, parent);
     EXPECT_STREQ(text->text, "Hello World");
     EXPECT_EQ(text->length, 11u);
     EXPECT_TRUE(dom_text_is_backed(text));
@@ -1196,8 +1196,8 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     
     ASSERT_NE(comment, nullptr);
     EXPECT_NE(comment->native_element, nullptr);
-    EXPECT_NE(comment->parent_element->doc->input, nullptr);
-    EXPECT_EQ(comment->parent_element, parent);
+    EXPECT_NE(((DomElement*)comment->parent)->doc->input, nullptr);
+    EXPECT_EQ(comment->parent, parent);
     EXPECT_STREQ(comment->content, " Test comment ");
     EXPECT_EQ(comment->length, 14u);
     EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
