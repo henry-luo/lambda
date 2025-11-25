@@ -167,9 +167,9 @@ static void render_view_text(UiContext* uicon, ViewText* text_view, float offset
 
     // Get text color from ViewText (default to black if not set)
     float r = 0.0f, g = 0.0f, b = 0.0f;
-    if (text_view->color.c) {
-        color_to_rgb(text_view->color, &r, &g, &b);
-    }
+    // if (text_view->color.c) {
+    //     color_to_rgb(text_view->color, &r, &g, &b);
+    // }
 
     // Render the text with proper font properties
     char text_buffer[256];

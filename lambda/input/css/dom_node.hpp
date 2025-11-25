@@ -141,6 +141,35 @@ protected:
 // DOM Text Node API
 // ============================================================================
 
+typedef struct TextRect TextRect;
+typedef struct FontProp FontProp;
+
+/**
+ * DomText - Text node in DOM tree
+ * Represents text content between elements
+ * 
+ * Always backed by Lambda String (references chars, no copy).
+ * Maintains synchronization with Lambda tree via MarkEditor through parent element.
+ */
+struct DomText : public DomNode {
+    // Text-specific fields (reference to Lambda String)
+    const char* text;            // Text content (references native_string->chars)
+    size_t length;               // Text length
+    // Lambda backing (required)
+    String* native_string;       // Pointer to backing Lambda String
+
+    // view related fields
+    TextRect *rect;  // first text rect
+    FontProp *font;  // font for this text
+
+    // PDF rendering related
+    // Color color;     // text color (for PDF text fill color) - can consider move into FontProp
+
+    // Constructor
+    DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
+        native_string(nullptr), rect(nullptr) {}
+};
+
 /**
  * Create a new DomText node backed by Lambda String
  * @param native_string Pointer to Lambda String (will be referenced, not copied)
@@ -206,6 +235,23 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content);
 // ============================================================================
 
 /**
+ * DomComment - Comment, DOCTYPE, or XML declaration node
+ * Represents comments (<!-- -->), DOCTYPE declarations, and XML declarations
+ * Always backed by Lambda Element (tag "!--" or "!DOCTYPE")
+ */
+struct DomComment : public DomNode {
+    // Comment-specific fields
+    const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
+    const char* content;         // Full content/text (points to native_element's String child)
+    size_t length;               // Content length
+    Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
+
+    // Constructor
+    DomComment(DomNodeType type = DOM_NODE_COMMENT) : DomNode(type), tag_name(nullptr),
+        content(nullptr), length(0), native_element(nullptr) {}
+};
+
+/**
  * Create a new DomComment node (backed by Lambda Element)
  * @param native_element Lambda Element with tag "!--" or "!DOCTYPE" (required)
  * @param parent_element Parent DomElement (provides document context)
@@ -262,5 +308,6 @@ bool dom_comment_is_backed(DomComment* comment_node);
  * @return Content string
  */
 const char* dom_comment_get_content(DomComment* comment_node);
+
 
 #endif // DOM_NODE_HPP

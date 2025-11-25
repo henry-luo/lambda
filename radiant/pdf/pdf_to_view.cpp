@@ -848,16 +848,16 @@ static void create_text_view(Input* input, ViewBlock* parent,
              parser->state.fill_color[1],
              parser->state.fill_color[2]);
 
-    text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
-    text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
-    text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
-    text_view->color.a = 255; // Fully opaque
-    // NOTE: Don't set text_view->color.c - it's a union with r,g,b,a and would overwrite them!
+    // text_view->color.r = (uint8_t)(parser->state.fill_color[0] * 255.0);
+    // text_view->color.g = (uint8_t)(parser->state.fill_color[1] * 255.0);
+    // text_view->color.b = (uint8_t)(parser->state.fill_color[2] * 255.0);
+    // text_view->color.a = 255; // Fully opaque
+    // // NOTE: Don't set text_view->color.c - it's a union with r,g,b,a and would overwrite them!
 
-    log_debug("Applied text color: r=%u, g=%u, b=%u (RGB)",
-             (unsigned)text_view->color.r,
-             (unsigned)text_view->color.g,
-             (unsigned)text_view->color.b);
+    // log_debug("Applied text color: r=%u, g=%u, b=%u (RGB)",
+    //          (unsigned)text_view->color.r,
+    //          (unsigned)text_view->color.g,
+    //          (unsigned)text_view->color.b);
 
     // Add to parent
     append_child_view((View*)parent, (View*)text_view);
