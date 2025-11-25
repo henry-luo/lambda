@@ -490,15 +490,32 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     float result = 0.0f;
     switch (value->type) {
     case CSS_VALUE_TYPE_NUMBER:
-        // unitless number - treat as pixels for most properties
+        // unitless number
         log_debug("number value: %.2f", value->data.number.value);
-        result = (float)value->data.number.value;
+        if (property == CSS_PROPERTY_LINE_HEIGHT) {
+            if (lycon->font.current_font_size < 0) {
+                log_debug("resolving font size for em value");
+                resolve_font_size(lycon, NULL);
+            }
+            result = value->data.number.value * lycon->font.current_font_size;
+        } else {
+            // treat as pixels for most properties
+            result = (float)value->data.number.value;
+        }
         break;
 
     case CSS_VALUE_TYPE_INTEGER:
-        // integer value - treat as pixels
+        // integer value
         log_debug("integer value: %d", value->data.integer.value);
-        result = (float)value->data.integer.value;
+        if (property == CSS_PROPERTY_LINE_HEIGHT) {
+            if (lycon->font.current_font_size < 0) {
+                log_debug("resolving font size for em value");
+                resolve_font_size(lycon, NULL);
+            }
+            result = value->data.integer.value * lycon->font.current_font_size;
+        } else {   // treat as pixels
+            result = (float)value->data.integer.value;
+        }
         break;
 
     case CSS_VALUE_TYPE_LENGTH: {
