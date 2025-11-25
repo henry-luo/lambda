@@ -691,10 +691,8 @@ void style_node_print_cascade(StyleNode* node) {
     }
 }
 
-void style_tree_get_statistics(StyleTree* style_tree,
-                              int* total_nodes,
-                              int* total_declarations,
-                              double* avg_weak_count) {
+void style_tree_get_statistics(StyleTree* style_tree, int* total_nodes,
+    int* total_declarations, double* avg_weak_count) {
     if (!style_tree) {
         if (total_nodes) *total_nodes = 0;
         if (total_declarations) *total_declarations = 0;

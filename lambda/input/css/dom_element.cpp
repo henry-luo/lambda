@@ -138,11 +138,6 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
         return false;
     }
 
-    element->computed_style = style_tree_create(doc->pool);
-    if (!element->computed_style) {
-        return false;
-    }
-
     // Initialize version tracking
     element->style_version = 1;
     element->needs_style_recompute = true;
@@ -206,10 +201,6 @@ void dom_element_clear(DomElement* element) {
     if (element->specified_style) {
         style_tree_clear(element->specified_style);
     }
-    if (element->computed_style) {
-        style_tree_clear(element->computed_style);
-    }
-
     // Reset version tracking
     element->style_version++;
     element->needs_style_recompute = true;
@@ -226,9 +217,6 @@ void dom_element_destroy(DomElement* element) {
     // Destroy style trees
     if (element->specified_style) {
         style_tree_destroy(element->specified_style);
-    }
-    if (element->computed_style) {
-        style_tree_destroy(element->computed_style);
     }
 
     // Clear cached fields (but don't free - owned by pool/element)
@@ -1081,11 +1069,6 @@ void dom_element_get_style_stats(DomElement* element,
         if (specified_count) *specified_count = total_nodes;
         if (total_declarations) *total_declarations = total_decls;
     }
-
-    if (element->computed_style && computed_count) {
-        style_tree_get_statistics(element->computed_style, &total_nodes, &total_decls, &avg_weak);
-        *computed_count = total_nodes;
-    }
 }
 
 DomElement* dom_element_clone(DomElement* source, Pool* pool) {
@@ -1133,10 +1116,6 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     // Deep copy style trees using style_tree_clone
     if (source->specified_style) {
         clone->specified_style = style_tree_clone(source->specified_style, pool);
-    }
-
-    if (source->computed_style) {
-        clone->computed_style = style_tree_clone(source->computed_style, pool);
     }
 
     // Copy pseudo state
