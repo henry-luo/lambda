@@ -47,6 +47,9 @@ uintptr_t DomNode::tag_name_to_id(const char* tag_name) {
     if (strcasecmp(tag_name, "thead") == 0) return HTM_TAG_THEAD;
     if (strcasecmp(tag_name, "tbody") == 0) return HTM_TAG_TBODY;
     if (strcasecmp(tag_name, "tfoot") == 0) return HTM_TAG_TFOOT;
+    if (strcasecmp(tag_name, "caption") == 0) return HTM_TAG_CAPTION;
+    if (strcasecmp(tag_name, "colgroup") == 0) return HTM_TAG_COLGROUP;
+    if (strcasecmp(tag_name, "col") == 0) return HTM_TAG_COL;
     if (strcasecmp(tag_name, "form") == 0) return HTM_TAG_FORM;
     if (strcasecmp(tag_name, "input") == 0) return HTM_TAG_INPUT;
     if (strcasecmp(tag_name, "button") == 0) return HTM_TAG_BUTTON;
