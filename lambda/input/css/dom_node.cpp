@@ -6,121 +6,220 @@
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
 #include "../../../lib/string.h"
+#include "../../../lib/hashmap.h"
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
+#include <strings.h>  // For strcasecmp
+
 /**
- * Convert HTML tag name string to Lexbor tag ID
+ * HTML Element Information
+ * Maps tag names to their numeric IDs for fast lookup
+ */
+struct HtmlElementInfo {
+    const char* tag_name;    // HTML tag name (lowercase)
+    uintptr_t tag_id;        // HTM_TAG_* constant
+};
+
+// Static table of HTML elements ordered by tag ID
+// This provides O(1) lookup by ID and enables hashtable initialization
+static const HtmlElementInfo html_elements[] = {
+    // Core HTML elements (sorted by HTM_TAG_* enum order)
+    {"a", HTM_TAG_A},
+    {"abbr", HTM_TAG_ABBR},
+    {"address", HTM_TAG_ADDRESS},
+    {"animatemotion", HTM_TAG_ANIMATEMOTION},
+    {"animatetransform", HTM_TAG_ANIMATETRANSFORM},
+    {"area", HTM_TAG_AREA},
+    {"article", HTM_TAG_ARTICLE},
+    {"aside", HTM_TAG_ASIDE},
+    {"audio", HTM_TAG_AUDIO},
+    {"b", HTM_TAG_B},
+    {"base", HTM_TAG_BASE},
+    {"bdi", HTM_TAG_BDI},
+    {"bdo", HTM_TAG_BDO},
+    {"blockquote", HTM_TAG_BLOCKQUOTE},
+    {"body", HTM_TAG_BODY},
+    {"br", HTM_TAG_BR},
+    {"button", HTM_TAG_BUTTON},
+    {"canvas", HTM_TAG_CANVAS},
+    {"caption", HTM_TAG_CAPTION},
+    {"center", HTM_TAG_CENTER},
+    {"cite", HTM_TAG_CITE},
+    {"code", HTM_TAG_CODE},
+    {"col", HTM_TAG_COL},
+    {"colgroup", HTM_TAG_COLGROUP},
+    {"data", HTM_TAG_DATA},
+    {"datalist", HTM_TAG_DATALIST},
+    {"dd", HTM_TAG_DD},
+    {"del", HTM_TAG_DEL},
+    {"details", HTM_TAG_DETAILS},
+    {"dfn", HTM_TAG_DFN},
+    {"dialog", HTM_TAG_DIALOG},
+    {"div", HTM_TAG_DIV},
+    {"dl", HTM_TAG_DL},
+    {"dt", HTM_TAG_DT},
+    {"em", HTM_TAG_EM},
+    {"embed", HTM_TAG_EMBED},
+    {"fieldset", HTM_TAG_FIELDSET},
+    {"figcaption", HTM_TAG_FIGCAPTION},
+    {"figure", HTM_TAG_FIGURE},
+    {"footer", HTM_TAG_FOOTER},
+    {"form", HTM_TAG_FORM},
+    {"h1", HTM_TAG_H1},
+    {"h2", HTM_TAG_H2},
+    {"h3", HTM_TAG_H3},
+    {"h4", HTM_TAG_H4},
+    {"h5", HTM_TAG_H5},
+    {"h6", HTM_TAG_H6},
+    {"head", HTM_TAG_HEAD},
+    {"header", HTM_TAG_HEADER},
+    {"hgroup", HTM_TAG_HGROUP},
+    {"hr", HTM_TAG_HR},
+    {"html", HTM_TAG_HTML},
+    {"i", HTM_TAG_I},
+    {"iframe", HTM_TAG_IFRAME},
+    {"img", HTM_TAG_IMG},
+    {"input", HTM_TAG_INPUT},
+    {"ins", HTM_TAG_INS},
+    {"kbd", HTM_TAG_KBD},
+    {"label", HTM_TAG_LABEL},
+    {"legend", HTM_TAG_LEGEND},
+    {"li", HTM_TAG_LI},
+    {"lineargradient", HTM_TAG_LINEARGRADIENT},
+    {"link", HTM_TAG_LINK},
+    {"main", HTM_TAG_MAIN},
+    {"map", HTM_TAG_MAP},
+    {"mark", HTM_TAG_MARK},
+    {"menu", HTM_TAG_MENU},
+    {"meta", HTM_TAG_META},
+    {"meter", HTM_TAG_METER},
+    {"nav", HTM_TAG_NAV},
+    {"noscript", HTM_TAG_NOSCRIPT},
+    {"object", HTM_TAG_OBJECT},
+    {"ol", HTM_TAG_OL},
+    {"optgroup", HTM_TAG_OPTGROUP},
+    {"option", HTM_TAG_OPTION},
+    {"output", HTM_TAG_OUTPUT},
+    {"p", HTM_TAG_P},
+    {"param", HTM_TAG_PARAM},
+    {"picture", HTM_TAG_PICTURE},
+    {"pre", HTM_TAG_PRE},
+    {"progress", HTM_TAG_PROGRESS},
+    {"q", HTM_TAG_Q},
+    {"radialgradient", HTM_TAG_RADIALGRADIENT},
+    {"s", HTM_TAG_S},
+    {"samp", HTM_TAG_SAMP},
+    {"script", HTM_TAG_SCRIPT},
+    {"section", HTM_TAG_SECTION},
+    {"select", HTM_TAG_SELECT},
+    {"small", HTM_TAG_SMALL},
+    {"source", HTM_TAG_SOURCE},
+    {"span", HTM_TAG_SPAN},
+    {"strong", HTM_TAG_STRONG},
+    {"style", HTM_TAG_STYLE},
+    {"sub", HTM_TAG_SUB},
+    {"summary", HTM_TAG_SUMMARY},
+    {"sup", HTM_TAG_SUP},
+    {"svg", HTM_TAG_SVG},
+    {"table", HTM_TAG_TABLE},
+    {"tbody", HTM_TAG_TBODY},
+    {"td", HTM_TAG_TD},
+    {"template", HTM_TAG_TEMPLATE},
+    {"textarea", HTM_TAG_TEXTAREA},
+    {"tfoot", HTM_TAG_TFOOT},
+    {"th", HTM_TAG_TH},
+    {"thead", HTM_TAG_THEAD},
+    {"time", HTM_TAG_TIME},
+    {"title", HTM_TAG_TITLE},
+    {"tr", HTM_TAG_TR},
+    {"track", HTM_TAG_TRACK},
+    {"u", HTM_TAG_U},
+    {"ul", HTM_TAG_UL},
+    {"var", HTM_TAG_VAR},
+    {"video", HTM_TAG_VIDEO},
+    {"wbr", HTM_TAG_WBR},
+};
+
+static const size_t html_elements_count = sizeof(html_elements) / sizeof(html_elements[0]);
+
+// Global hashtable for tag name lookups (initialized once)
+static HashMap* g_tag_name_map = nullptr;
+
+/**
+ * Hash function for HtmlElementInfo (case-insensitive tag name hash)
+ */
+static uint64_t html_element_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const HtmlElementInfo* elem = (const HtmlElementInfo*)item;
+    // use lowercase tag name for hashing
+    return hashmap_sip(elem->tag_name, strlen(elem->tag_name), seed0, seed1);
+}
+
+/**
+ * Compare function for HtmlElementInfo (case-insensitive tag name comparison)
+ */
+static int html_element_compare(const void* a, const void* b, void* udata) {
+    const HtmlElementInfo* elem_a = (const HtmlElementInfo*)a;
+    const HtmlElementInfo* elem_b = (const HtmlElementInfo*)b;
+    // case-insensitive comparison of tag names
+    return strcasecmp(elem_a->tag_name, elem_b->tag_name);
+}
+
+/**
+ * Initialize the tag name hashtable (called once on first use)
+ */
+static void init_tag_name_map() {
+    if (g_tag_name_map) return;
+    
+    // create hashtable with capacity for all HTML elements
+    g_tag_name_map = hashmap_new(
+        sizeof(HtmlElementInfo),
+        html_elements_count,
+        0, 0,  // random seeds (0 uses default)
+        html_element_hash,
+        html_element_compare,
+        nullptr,  // no element free function needed (static data)
+        nullptr   // no user data
+    );
+    
+    if (!g_tag_name_map) {
+        log_error("Failed to create tag name hashtable");
+        return;
+    }
+    
+    // populate hashtable with all HTML elements
+    for (size_t i = 0; i < html_elements_count; i++) {
+        hashmap_set(g_tag_name_map, &html_elements[i]);
+    }
+    
+    log_debug("Initialized tag name hashtable with %zu elements", html_elements_count);
+}
+
+/**
+ * Convert HTML tag name string to tag ID using hashtable lookup
  * This is called once during element creation to populate the tag_id field
  */
 uintptr_t DomNode::tag_name_to_id(const char* tag_name) {
     if (!tag_name) return 0;
-
-    // Use case-insensitive comparison for HTML tags
-    // Map common HTML tags to their Lexbor constants
-    if (strcasecmp(tag_name, "img") == 0) return HTM_TAG_IMG;
-    if (strcasecmp(tag_name, "div") == 0) return HTM_TAG_DIV;
-    if (strcasecmp(tag_name, "span") == 0) return HTM_TAG_SPAN;
-    if (strcasecmp(tag_name, "p") == 0) return HTM_TAG_P;
-    if (strcasecmp(tag_name, "h1") == 0) return HTM_TAG_H1;
-    if (strcasecmp(tag_name, "h2") == 0) return HTM_TAG_H2;
-    if (strcasecmp(tag_name, "h3") == 0) return HTM_TAG_H3;
-    if (strcasecmp(tag_name, "h4") == 0) return HTM_TAG_H4;
-    if (strcasecmp(tag_name, "h5") == 0) return HTM_TAG_H5;
-    if (strcasecmp(tag_name, "h6") == 0) return HTM_TAG_H6;
-    if (strcasecmp(tag_name, "a") == 0) return HTM_TAG_A;
-    if (strcasecmp(tag_name, "body") == 0) return HTM_TAG_BODY;
-    if (strcasecmp(tag_name, "head") == 0) return HTM_TAG_HEAD;
-    if (strcasecmp(tag_name, "html") == 0) return HTM_TAG_HTML;
-    if (strcasecmp(tag_name, "title") == 0) return HTM_TAG_TITLE;
-    if (strcasecmp(tag_name, "meta") == 0) return HTM_TAG_META;
-    if (strcasecmp(tag_name, "link") == 0) return HTM_TAG_LINK;
-    if (strcasecmp(tag_name, "style") == 0) return HTM_TAG_STYLE;
-    if (strcasecmp(tag_name, "script") == 0) return HTM_TAG_SCRIPT;
-    if (strcasecmp(tag_name, "br") == 0) return HTM_TAG_BR;
-    if (strcasecmp(tag_name, "hr") == 0) return HTM_TAG_HR;
-    if (strcasecmp(tag_name, "ul") == 0) return HTM_TAG_UL;
-    if (strcasecmp(tag_name, "ol") == 0) return HTM_TAG_OL;
-    if (strcasecmp(tag_name, "li") == 0) return HTM_TAG_LI;
-    if (strcasecmp(tag_name, "table") == 0) return HTM_TAG_TABLE;
-    if (strcasecmp(tag_name, "tr") == 0) return HTM_TAG_TR;
-    if (strcasecmp(tag_name, "td") == 0) return HTM_TAG_TD;
-    if (strcasecmp(tag_name, "th") == 0) return HTM_TAG_TH;
-    if (strcasecmp(tag_name, "thead") == 0) return HTM_TAG_THEAD;
-    if (strcasecmp(tag_name, "tbody") == 0) return HTM_TAG_TBODY;
-    if (strcasecmp(tag_name, "tfoot") == 0) return HTM_TAG_TFOOT;
-    if (strcasecmp(tag_name, "caption") == 0) return HTM_TAG_CAPTION;
-    if (strcasecmp(tag_name, "colgroup") == 0) return HTM_TAG_COLGROUP;
-    if (strcasecmp(tag_name, "col") == 0) return HTM_TAG_COL;
-    if (strcasecmp(tag_name, "form") == 0) return HTM_TAG_FORM;
-    if (strcasecmp(tag_name, "input") == 0) return HTM_TAG_INPUT;
-    if (strcasecmp(tag_name, "button") == 0) return HTM_TAG_BUTTON;
-    if (strcasecmp(tag_name, "select") == 0) return HTM_TAG_SELECT;
-    if (strcasecmp(tag_name, "option") == 0) return HTM_TAG_OPTION;
-    if (strcasecmp(tag_name, "textarea") == 0) return HTM_TAG_TEXTAREA;
-    if (strcasecmp(tag_name, "label") == 0) return HTM_TAG_LABEL;
-    if (strcasecmp(tag_name, "fieldset") == 0) return HTM_TAG_FIELDSET;
-    if (strcasecmp(tag_name, "legend") == 0) return HTM_TAG_LEGEND;
-    if (strcasecmp(tag_name, "iframe") == 0) return HTM_TAG_IFRAME;
-    if (strcasecmp(tag_name, "embed") == 0) return HTM_TAG_EMBED;
-    if (strcasecmp(tag_name, "object") == 0) return HTM_TAG_OBJECT;
-    if (strcasecmp(tag_name, "param") == 0) return HTM_TAG_PARAM;
-    if (strcasecmp(tag_name, "video") == 0) return HTM_TAG_VIDEO;
-    if (strcasecmp(tag_name, "audio") == 0) return HTM_TAG_AUDIO;
-    if (strcasecmp(tag_name, "source") == 0) return HTM_TAG_SOURCE;
-    if (strcasecmp(tag_name, "track") == 0) return HTM_TAG_TRACK;
-    if (strcasecmp(tag_name, "canvas") == 0) return HTM_TAG_CANVAS;
-    if (strcasecmp(tag_name, "svg") == 0) return HTM_TAG_SVG;
-    if (strcasecmp(tag_name, "lineargradient") == 0) return HTM_TAG_LINEARGRADIENT;
-    if (strcasecmp(tag_name, "radialgradient") == 0) return HTM_TAG_RADIALGRADIENT;
-    if (strcasecmp(tag_name, "animatetransform") == 0) return HTM_TAG_ANIMATETRANSFORM;
-    if (strcasecmp(tag_name, "animatemotion") == 0) return HTM_TAG_ANIMATEMOTION;
-    if (strcasecmp(tag_name, "strong") == 0) return HTM_TAG_STRONG;
-    if (strcasecmp(tag_name, "em") == 0) return HTM_TAG_EM;
-    if (strcasecmp(tag_name, "b") == 0) return HTM_TAG_B;
-    if (strcasecmp(tag_name, "i") == 0) return HTM_TAG_I;
-    if (strcasecmp(tag_name, "u") == 0) return HTM_TAG_U;
-    if (strcasecmp(tag_name, "s") == 0) return HTM_TAG_S;
-    if (strcasecmp(tag_name, "small") == 0) return HTM_TAG_SMALL;
-    if (strcasecmp(tag_name, "mark") == 0) return HTM_TAG_MARK;
-    if (strcasecmp(tag_name, "del") == 0) return HTM_TAG_DEL;
-    if (strcasecmp(tag_name, "ins") == 0) return HTM_TAG_INS;
-    if (strcasecmp(tag_name, "sub") == 0) return HTM_TAG_SUB;
-    if (strcasecmp(tag_name, "sup") == 0) return HTM_TAG_SUP;
-    if (strcasecmp(tag_name, "q") == 0) return HTM_TAG_Q;
-    if (strcasecmp(tag_name, "cite") == 0) return HTM_TAG_CITE;
-    if (strcasecmp(tag_name, "abbr") == 0) return HTM_TAG_ABBR;
-    if (strcasecmp(tag_name, "dfn") == 0) return HTM_TAG_DFN;
-    if (strcasecmp(tag_name, "time") == 0) return HTM_TAG_TIME;
-    if (strcasecmp(tag_name, "code") == 0) return HTM_TAG_CODE;
-    if (strcasecmp(tag_name, "var") == 0) return HTM_TAG_VAR;
-    if (strcasecmp(tag_name, "samp") == 0) return HTM_TAG_SAMP;
-    if (strcasecmp(tag_name, "kbd") == 0) return HTM_TAG_KBD;
-    if (strcasecmp(tag_name, "address") == 0) return HTM_TAG_ADDRESS;
-    if (strcasecmp(tag_name, "main") == 0) return HTM_TAG_MAIN;
-    if (strcasecmp(tag_name, "section") == 0) return HTM_TAG_SECTION;
-    if (strcasecmp(tag_name, "article") == 0) return HTM_TAG_ARTICLE;
-    if (strcasecmp(tag_name, "aside") == 0) return HTM_TAG_ASIDE;
-    if (strcasecmp(tag_name, "nav") == 0) return HTM_TAG_NAV;
-    if (strcasecmp(tag_name, "header") == 0) return HTM_TAG_HEADER;
-    if (strcasecmp(tag_name, "footer") == 0) return HTM_TAG_FOOTER;
-    if (strcasecmp(tag_name, "hgroup") == 0) return HTM_TAG_HGROUP;
-    if (strcasecmp(tag_name, "figure") == 0) return HTM_TAG_FIGURE;
-    if (strcasecmp(tag_name, "figcaption") == 0) return HTM_TAG_FIGCAPTION;
-    if (strcasecmp(tag_name, "details") == 0) return HTM_TAG_DETAILS;
-    if (strcasecmp(tag_name, "summary") == 0) return HTM_TAG_SUMMARY;
-    if (strcasecmp(tag_name, "dialog") == 0) return HTM_TAG_DIALOG;
-    if (strcasecmp(tag_name, "data") == 0) return HTM_TAG_DATA;
-    if (strcasecmp(tag_name, "output") == 0) return HTM_TAG_OUTPUT;
-    if (strcasecmp(tag_name, "progress") == 0) return HTM_TAG_PROGRESS;
-    if (strcasecmp(tag_name, "meter") == 0) return HTM_TAG_METER;
-    if (strcasecmp(tag_name, "menu") == 0) return HTM_TAG_MENU;
-    if (strcasecmp(tag_name, "center") == 0) return HTM_TAG_CENTER;
-    if (strcasecmp(tag_name, "pre") == 0) return HTM_TAG_PRE;
-    if (strcasecmp(tag_name, "blockquote") == 0) return HTM_TAG_BLOCKQUOTE;
-    if (strcasecmp(tag_name, "dd") == 0) return HTM_TAG_DD;
-    if (strcasecmp(tag_name, "dt") == 0) return HTM_TAG_DT;
-    if (strcasecmp(tag_name, "dl") == 0) return HTM_TAG_DL;
-
-    // For unknown tags, return 0 (similar to Lexbor's HTM_TAG__UNDEF behavior)
+    
+    // lazy initialization of hashtable on first use
+    if (!g_tag_name_map) {
+        init_tag_name_map();
+    }
+    
+    if (!g_tag_name_map) {
+        log_error("Tag name hashtable not initialized");
+        return 0;
+    }
+    
+    // lookup tag name in hashtable (O(1) average case)
+    // strcasecmp in comparison function handles case-insensitive matching
+    HtmlElementInfo search_key = {tag_name, 0};
+    const HtmlElementInfo* result = (const HtmlElementInfo*)hashmap_get(g_tag_name_map, &search_key);
+    
+    if (result) {
+        return result->tag_id;
+    }
+    
+    // for unknown tags, return 0 (similar to HTM_TAG__UNDEF behavior)
     return 0;
 }
 

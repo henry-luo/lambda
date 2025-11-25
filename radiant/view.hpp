@@ -27,11 +27,9 @@ typedef struct FontFaceDescriptor FontFaceDescriptor;
 // Define lexbor tag and CSS value constants first, before including headers that need them
 enum {
     HTM_TAG__UNDEF,
-    HTM_TAG__END_OF_FILE,
-    HTM_TAG__TEXT,
-    HTM_TAG__DOCUMENT,
-    HTM_TAG__EM_COMMENT,
-    HTM_TAG__EM_DOCTYPE,
+    HTM_TAG__TEXT,          // text node
+    HTM_TAG__EM_COMMENT,    // for HTML comments
+    HTM_TAG__EM_DOCTYPE,    // for DOCTYPE declaration
     HTM_TAG_A,
     HTM_TAG_ABBR,
     HTM_TAG_ACRONYM,
