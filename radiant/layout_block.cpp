@@ -208,20 +208,18 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 }
 
 float adjust_min_max_width(ViewBlock* block, float width) {
-    fprintf(stderr, "[ADJUST] adjust_min_max_width: input=%.2f, blk=%p\n", width, (void*)block->blk);
     if (block->blk) {
-        fprintf(stderr, "[ADJUST] min=%.2f, max=%.2f\n", block->blk->given_min_width, block->blk->given_max_width);
         if (block->blk->given_max_width >= 0 && width > block->blk->given_max_width) {
             width = block->blk->given_max_width;
-            fprintf(stderr, "[ADJUST] Clamped to max: %.2f\n", width);
+            log_debug("[ADJUST] Clamped to max: %.2f", width);
         }
         // Note: given_min_width overrides given_max_width if both are specified
         if (block->blk->given_min_width >= 0 && width < block->blk->given_min_width) {
             width = block->blk->given_min_width;
-            fprintf(stderr, "[ADJUST] Clamped to min: %.2f\n", width);
+            log_debug("[ADJUST] Clamped to min: %.2f", width);
         }
     }
-    fprintf(stderr, "[ADJUST] adjust_min_max_width: output=%.2f\n", width);
+    log_debug("[ADJUST] adjust_min_max_width: output=%.2f", width);
     return width;
 }
 
