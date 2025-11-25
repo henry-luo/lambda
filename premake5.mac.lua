@@ -4453,6 +4453,7 @@ project "test_css_style_node"
         "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_value.cpp",
         "lib/mempool.c",
+        "lib/log.c",
     }
     
     includedirs {
@@ -4525,6 +4526,7 @@ project "test_css_system"
         "lib/mempool.c",
         "lib/string.c",
         "lib/hashmap.c",
+        "lib/log.c",
     }
     
     includedirs {

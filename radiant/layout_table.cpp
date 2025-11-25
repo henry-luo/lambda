@@ -100,10 +100,9 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
                         table->tb->border_spacing_v = v_val->data.length.value;
                         log_debug("Table border-spacing vertical: %.2fpx", v_val->data.length.value);
                     }
-                } else if (val->type == CSS_VALUE_TYPE_NUMBER || val->type == CSS_VALUE_TYPE_INTEGER) {
+                } else if (val->type == CSS_VALUE_TYPE_NUMBER) {
                     // Handle numeric values (convert to length)
-                    float spacing = (val->type == CSS_VALUE_TYPE_NUMBER) ?
-                        val->data.number.value : (float)val->data.integer.value;
+                    float spacing = (float)val->data.number.value;
                     table->tb->border_spacing_h = spacing;
                     table->tb->border_spacing_v = spacing;
                     log_debug("Table border-spacing: %.2fpx (numeric, both h and v)", spacing);
