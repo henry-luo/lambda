@@ -98,7 +98,10 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         log_debug("normal lineHeight: %f", lycon->block.line_height);
     } else {
         // resolve length/number/percentage
-        float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
+        float resolved_height = 
+        value.type == CSS_VALUE_TYPE_NUMBER ?
+            value.data.number.value * lycon->font.current_font_size :
+            resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
         lycon->block.line_height = resolved_height;
         log_debug("resolved line height: %f", lycon->block.line_height);
     }
