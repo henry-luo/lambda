@@ -128,7 +128,7 @@ TEST_F(DomNodeBaseTest, CreateDomElement) {
     ASSERT_NE(root, nullptr);
 
     // Test DomNodeBase API
-    EXPECT_EQ(root->type(), DOM_NODE_ELEMENT);
+    EXPECT_EQ(root->node_type, DOM_NODE_ELEMENT);
     EXPECT_TRUE(root->is_element());
     EXPECT_FALSE(root->is_text());
 
@@ -166,7 +166,7 @@ TEST_F(DomNodeBaseTest, GetTagName) {
     ASSERT_NE(root, nullptr);
 
     // Test simplified API
-    const char* tag_name = root->name();
+    const char* tag_name = root->node_name();
     ASSERT_NE(tag_name, nullptr);
     EXPECT_STREQ(tag_name, "div");
 }
@@ -237,7 +237,7 @@ TEST_F(DomNodeBaseTest, NavigateFirstChild) {
     EXPECT_TRUE(child->is_element());
     EXPECT_EQ(child->parent, root);
 
-    const char* child_tag = child->name();
+    const char* child_tag = child->node_name();
     EXPECT_STREQ(child_tag, "p");
 }
 
@@ -250,17 +250,17 @@ TEST_F(DomNodeBaseTest, NavigateMultipleChildren) {
     // First child
     DomNode* first = static_cast<DomElement*>(root)->first_child;
     ASSERT_NE(first, nullptr);
-    EXPECT_STREQ(first->name(), "p");
+    EXPECT_STREQ(first->node_name(), "p");
 
     // Second child (sibling of first)
     DomNode* second = first->next_sibling;
     ASSERT_NE(second, nullptr);
-    EXPECT_STREQ(second->name(), "span");
+    EXPECT_STREQ(second->node_name(), "span");
 
     // Third child (sibling of second)
     DomNode* third = second->next_sibling;
     ASSERT_NE(third, nullptr);
-    EXPECT_STREQ(third->name(), "a");
+    EXPECT_STREQ(third->node_name(), "a");
 
     // No more siblings
     DomNode* none = third->next_sibling;
@@ -277,7 +277,7 @@ TEST_F(DomNodeBaseTest, NavigateTextNode) {
     DomNode* text_node = static_cast<DomElement*>(root)->first_child;
     ASSERT_NE(text_node, nullptr);
     EXPECT_TRUE(text_node->is_text());
-    EXPECT_EQ(text_node->type(), DOM_NODE_TEXT);
+    EXPECT_EQ(text_node->node_type, DOM_NODE_TEXT);
 
     // Get text data using simplified API
     unsigned char* text_data = text_node->text_data();
@@ -306,7 +306,7 @@ TEST_F(DomNodeBaseTest, NavigateMixedContent) {
     DomNode* em = text1->next_sibling;
     ASSERT_NE(em, nullptr);
     EXPECT_TRUE(em->is_element());
-    EXPECT_STREQ(em->name(), "em");
+    EXPECT_STREQ(em->node_name(), "em");
 
     // Third child: text
     DomNode* text2 = em->next_sibling;
@@ -324,12 +324,12 @@ TEST_F(DomNodeBaseTest, NavigateNestedStructure) {
     // div -> ul
     DomNode* ul = static_cast<DomElement*>(root)->first_child;
     ASSERT_NE(ul, nullptr);
-    EXPECT_STREQ(ul->name(), "ul");
+    EXPECT_STREQ(ul->node_name(), "ul");
 
     // ul -> li (first)
     DomNode* li1 = static_cast<DomElement*>(ul)->first_child;
     ASSERT_NE(li1, nullptr);
-    EXPECT_STREQ(li1->name(), "li");
+    EXPECT_STREQ(li1->node_name(), "li");
 
     // li -> text
     DomNode* text1 = static_cast<DomElement*>(li1)->first_child;
@@ -339,7 +339,7 @@ TEST_F(DomNodeBaseTest, NavigateNestedStructure) {
     // li (second)
     DomNode* li2 = li1->next_sibling;
     ASSERT_NE(li2, nullptr);
-    EXPECT_STREQ(li2->name(), "li");
+    EXPECT_STREQ(li2->node_name(), "li");
 
     // li2 -> text
     DomNode* text2 = static_cast<DomElement*>(li2)->first_child;
@@ -387,8 +387,8 @@ TEST_F(DomNodeBaseTest, SimplifiedAPIConsistency) {
     ASSERT_NE(root, nullptr);
 
     // Test consistent API across nodes
-    EXPECT_STREQ(root->name(), "section");
-    EXPECT_EQ(root->type(), DOM_NODE_ELEMENT);
+    EXPECT_STREQ(root->node_name(), "section");
+    EXPECT_EQ(root->node_type, DOM_NODE_ELEMENT);
     // Note: tag_id is not set by build_dom_tree_from_element, only tag_name
     // The tag() method returns tag_id which defaults to 0
 
@@ -398,11 +398,11 @@ TEST_F(DomNodeBaseTest, SimplifiedAPIConsistency) {
     // Test child navigation
     DomNode* h1 = static_cast<DomElement*>(root)->first_child;
     ASSERT_NE(h1, nullptr);
-    EXPECT_STREQ(h1->name(), "h1");
+    EXPECT_STREQ(h1->node_name(), "h1");
 
     DomNode* p = h1->next_sibling;
     ASSERT_NE(p, nullptr);
-    EXPECT_STREQ(p->name(), "p");
+    EXPECT_STREQ(p->node_name(), "p");
 }
 
 TEST_F(DomNodeBaseTest, ParentNavigation) {
@@ -414,15 +414,15 @@ TEST_F(DomNodeBaseTest, ParentNavigation) {
     // Navigate down
     DomNode* section = static_cast<DomElement*>(root)->first_child;
     ASSERT_NE(section, nullptr);
-    EXPECT_STREQ(section->name(), "section");
+    EXPECT_STREQ(section->node_name(), "section");
 
     DomNode* article = static_cast<DomElement*>(section)->first_child;
     ASSERT_NE(article, nullptr);
-    EXPECT_STREQ(article->name(), "article");
+    EXPECT_STREQ(article->node_name(), "article");
 
     DomNode* p = static_cast<DomElement*>(article)->first_child;
     ASSERT_NE(p, nullptr);
-    EXPECT_STREQ(p->name(), "p");
+    EXPECT_STREQ(p->node_name(), "p");
 
     // Navigate up via parent
     EXPECT_EQ(p->parent, article);
@@ -443,14 +443,14 @@ TEST_F(DomNodeBaseTest, PrevSiblingNavigation) {
     DomNode* third = second->next_sibling;
 
     ASSERT_NE(third, nullptr);
-    EXPECT_STREQ(third->name(), "a");
+    EXPECT_STREQ(third->node_name(), "a");
 
     // Navigate backward using prev_sibling
     EXPECT_EQ(third->prev_sibling, second);
-    EXPECT_STREQ(third->prev_sibling->name(), "span");
+    EXPECT_STREQ(third->prev_sibling->node_name(), "span");
 
     EXPECT_EQ(second->prev_sibling, first);
-    EXPECT_STREQ(second->prev_sibling->name(), "p");
+    EXPECT_STREQ(second->prev_sibling->node_name(), "p");
 
     EXPECT_EQ(first->prev_sibling, nullptr);  // First child has no previous sibling
 }
@@ -545,7 +545,7 @@ TEST_F(DomNodeBaseTest, MultipleAttributeTypes) {
 
     DomElement* root = parse_html_and_build_dom(html);
     ASSERT_NE(root, nullptr);
-    EXPECT_STREQ(root->name(), "input");
+    EXPECT_STREQ(root->node_name(), "input");
 
     // Different attribute types
     const char* type_attr = root->get_attribute("type");
@@ -578,22 +578,22 @@ TEST_F(DomNodeBaseTest, DeepNestingNavigation) {
     DomNode* ul = static_cast<DomElement*>(root)->first_child;
     while (ul && !ul->is_element()) ul = ul->next_sibling;
     ASSERT_NE(ul, nullptr);
-    EXPECT_STREQ(ul->name(), "ul");
+    EXPECT_STREQ(ul->node_name(), "ul");
 
     DomNode* li = static_cast<DomElement*>(ul)->first_child;
     while (li && !li->is_element()) li = li->next_sibling;
     ASSERT_NE(li, nullptr);
-    EXPECT_STREQ(li->name(), "li");
+    EXPECT_STREQ(li->node_name(), "li");
 
     DomNode* span = static_cast<DomElement*>(li)->first_child;
     while (span && !span->is_element()) span = span->next_sibling;
     ASSERT_NE(span, nullptr);
-    EXPECT_STREQ(span->name(), "span");
+    EXPECT_STREQ(span->node_name(), "span");
 
     DomNode* em = static_cast<DomElement*>(span)->first_child;
     while (em && !em->is_element()) em = em->next_sibling;
     ASSERT_NE(em, nullptr);
-    EXPECT_STREQ(em->name(), "em");
+    EXPECT_STREQ(em->node_name(), "em");
 
     // Verify parent chain
     EXPECT_EQ(em->parent, span);
@@ -622,7 +622,7 @@ TEST_F(DomNodeBaseTest, SiblingCountAndOrder) {
     child = static_cast<DomElement*>(root)->first_child;
     int i = 0;
     while (child) {
-        EXPECT_STREQ(child->name(), expected[i]);
+        EXPECT_STREQ(child->node_name(), expected[i]);
         i++;
         child = child->next_sibling;
     }
@@ -658,7 +658,7 @@ TEST_F(DomNodeBaseTest, MixedContentWithWhitespace) {
 
     ASSERT_NE(child, nullptr);
     EXPECT_TRUE(child->is_element());
-    EXPECT_STREQ(child->name(), "span");
+    EXPECT_STREQ(child->node_name(), "span");
 }
 
 TEST_F(DomNodeBaseTest, TextNodeManipulation) {
@@ -714,7 +714,7 @@ TEST_F(DomNodeBaseTest, ElementTreeStructure) {
 
     DomElement* root = parse_html_and_build_dom(html);
     ASSERT_NE(root, nullptr);
-    EXPECT_STREQ(root->name(), "html");
+    EXPECT_STREQ(root->node_name(), "html");
 
     // Count top-level children (head, body)
     int top_count = 0;
@@ -729,7 +729,7 @@ TEST_F(DomNodeBaseTest, ElementTreeStructure) {
 
     // Navigate to body
     DomNode* body = static_cast<DomElement*>(root)->first_child;
-    while (body && strcmp(body->name(), "body") != 0) {
+    while (body && strcmp(body->node_name(), "body") != 0) {
         body = body->next_sibling;
     }
     ASSERT_NE(body, nullptr);
@@ -821,7 +821,7 @@ TEST_F(DomNodeBaseTest, TableStructureNavigation) {
 
     DomElement* root = parse_html_and_build_dom(html);
     ASSERT_NE(root, nullptr);
-    EXPECT_STREQ(root->name(), "table");
+    EXPECT_STREQ(root->node_name(), "table");
 
     // HTML parsers often insert tbody automatically, so navigate through it
     DomNode* tbody_or_row1 = static_cast<DomElement*>(root)->first_child;
@@ -830,31 +830,31 @@ TEST_F(DomNodeBaseTest, TableStructureNavigation) {
 
     // If we got tbody, navigate into it
     DomNode* row1 = nullptr;
-    if (strcmp(tbody_or_row1->name(), "tbody") == 0) {
+    if (strcmp(tbody_or_row1->node_name(), "tbody") == 0) {
         row1 = static_cast<DomElement*>(tbody_or_row1)->first_child;
         while (row1 && !row1->is_element()) row1 = row1->next_sibling;
     } else {
         row1 = tbody_or_row1;
     }
     ASSERT_NE(row1, nullptr);
-    EXPECT_STREQ(row1->name(), "tr");
+    EXPECT_STREQ(row1->node_name(), "tr");
 
     // Second row
     DomNode* row2 = row1->next_sibling;
     while (row2 && !row2->is_element()) row2 = row2->next_sibling;
     ASSERT_NE(row2, nullptr);
-    EXPECT_STREQ(row2->name(), "tr");
+    EXPECT_STREQ(row2->node_name(), "tr");
 
     // Cells in first row
     DomNode* cell1 = static_cast<DomElement*>(row1)->first_child;
     while (cell1 && !cell1->is_element()) cell1 = cell1->next_sibling;
     ASSERT_NE(cell1, nullptr);
-    EXPECT_STREQ(cell1->name(), "td");
+    EXPECT_STREQ(cell1->node_name(), "td");
 
     DomNode* cell2 = cell1->next_sibling;
     while (cell2 && !cell2->is_element()) cell2 = cell2->next_sibling;
     ASSERT_NE(cell2, nullptr);
-    EXPECT_STREQ(cell2->name(), "td");
+    EXPECT_STREQ(cell2->node_name(), "td");
 }
 
 TEST_F(DomNodeBaseTest, ListStructureNavigation) {
@@ -868,13 +868,13 @@ TEST_F(DomNodeBaseTest, ListStructureNavigation) {
 
     DomElement* root = parse_html_and_build_dom(html);
     ASSERT_NE(root, nullptr);
-    EXPECT_STREQ(root->name(), "ul");
+    EXPECT_STREQ(root->node_name(), "ul");
 
     // Count list items
     int item_count = 0;
     DomNode* li = static_cast<DomElement*>(root)->first_child;
     while (li) {
-        if (li->is_element() && strcmp(li->name(), "li") == 0) {
+        if (li->is_element() && strcmp(li->node_name(), "li") == 0) {
             item_count++;
         }
         li = li->next_sibling;
@@ -889,7 +889,7 @@ TEST_F(DomNodeBaseTest, NodeTypeIdentification) {
     ASSERT_NE(root, nullptr);
 
     // Root is element
-    EXPECT_EQ(root->type(), DOM_NODE_ELEMENT);
+    EXPECT_EQ(root->node_type, DOM_NODE_ELEMENT);
     EXPECT_TRUE(root->is_element());
     EXPECT_FALSE(root->is_text());
     EXPECT_FALSE(root->is_comment());
@@ -897,7 +897,7 @@ TEST_F(DomNodeBaseTest, NodeTypeIdentification) {
     // First child is text
     DomNode* text1 = static_cast<DomElement*>(root)->first_child;
     if (text1 && text1->is_text()) {
-        EXPECT_EQ(text1->type(), DOM_NODE_TEXT);
+        EXPECT_EQ(text1->node_type, DOM_NODE_TEXT);
         EXPECT_TRUE(text1->is_text());
         EXPECT_FALSE(text1->is_element());
     }
@@ -909,7 +909,7 @@ TEST_F(DomNodeBaseTest, NodeTypeIdentification) {
     }
     if (child) {
         EXPECT_TRUE(child->is_element());
-        EXPECT_STREQ(child->name(), "em");
+        EXPECT_STREQ(child->node_name(), "em");
     }
 }
 
@@ -926,14 +926,14 @@ TEST_F(DomNodeBaseTest, TagIdPopulation) {
     ASSERT_NE(root, nullptr);
 
     // Verify root html element has correct tag ID
-    EXPECT_STREQ(root->name(), "html");
+    EXPECT_STREQ(root->node_name(), "html");
     EXPECT_NE(root->tag_id, 0UL);  // Should be set, not 0
     EXPECT_EQ(root->tag(), root->tag_id);  // tag() should return tag_id
 
     // Navigate to body
     DomNode* body = nullptr;
     for (DomNode* child = static_cast<DomElement*>(root)->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && strcmp(child->name(), "body") == 0) {
+        if (child->is_element() && strcmp(child->node_name(), "body") == 0) {
             body = child;
             break;
         }
@@ -949,7 +949,7 @@ TEST_F(DomNodeBaseTest, TagIdPopulation) {
     // Find div element
     DomNode* div = nullptr;
     for (DomNode* child = static_cast<DomElement*>(body)->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && strcmp(child->name(), "div") == 0) {
+        if (child->is_element() && strcmp(child->node_name(), "div") == 0) {
             div = child;
             break;
         }
@@ -964,7 +964,7 @@ TEST_F(DomNodeBaseTest, TagIdPopulation) {
     // Find p element
     DomNode* p = nullptr;
     for (DomNode* child = static_cast<DomElement*>(div)->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && strcmp(child->name(), "p") == 0) {
+        if (child->is_element() && strcmp(child->node_name(), "p") == 0) {
             p = child;
             break;
         }
@@ -979,7 +979,7 @@ TEST_F(DomNodeBaseTest, TagIdPopulation) {
     // Find span element
     DomNode* span = nullptr;
     for (DomNode* child = static_cast<DomElement*>(div)->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && strcmp(child->name(), "span") == 0) {
+        if (child->is_element() && strcmp(child->node_name(), "span") == 0) {
             span = child;
             break;
         }
@@ -994,7 +994,7 @@ TEST_F(DomNodeBaseTest, TagIdPopulation) {
     // Find img element
     DomNode* img = nullptr;
     for (DomNode* child = static_cast<DomElement*>(div)->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && strcmp(child->name(), "img") == 0) {
+        if (child->is_element() && strcmp(child->node_name(), "img") == 0) {
             img = child;
             break;
         }

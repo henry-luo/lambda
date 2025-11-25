@@ -1252,23 +1252,6 @@ TEST_F(DomIntegrationTest, QuirksMode_MultipleClasses_CaseInsensitive) {
 // Hybrid Attribute Storage Tests
 // ============================================================================
 
-TEST_F(DomIntegrationTest, SelectorCache_TagNamePointer) {
-    // Test that tag_name_ptr is set correctly
-    DomElement* div1 = dom_element_create(doc, "div", nullptr);
-    DomElement* div2 = dom_element_create(doc, "div", nullptr);
-    DomElement* span = dom_element_create(doc, "span", nullptr);
-
-    ASSERT_NE(div1->tag_name_ptr, nullptr);
-    ASSERT_NE(div2->tag_name_ptr, nullptr);
-    ASSERT_NE(span->tag_name_ptr, nullptr);
-
-    // Same tag names should point to same string (if from name_pool)
-    // For now, just verify they're set
-    EXPECT_EQ(div1->tag_name_ptr, (void*)div1->tag_name);
-    EXPECT_EQ(div2->tag_name_ptr, (void*)div2->tag_name);
-    EXPECT_EQ(span->tag_name_ptr, (void*)span->tag_name);
-}
-
 TEST_F(DomIntegrationTest, SelectorCache_GetEntry) {
     // Test selector_matcher_get_entry function
     CssSimpleSelector* div_sel = create_type_selector("div");
@@ -2278,16 +2261,16 @@ TEST_F(DomIntegrationTest, MixedTree_AllNodeTypes) {
 
     // Verify chain
     DomNode* current = div->first_child;
-    EXPECT_EQ(current->type(), DOM_NODE_COMMENT);
+    EXPECT_EQ(current->node_type, DOM_NODE_COMMENT);
 
     current = ((DomComment*)current)->next_sibling;
-    EXPECT_EQ(current->type(), DOM_NODE_TEXT);
+    EXPECT_EQ(current->node_type, DOM_NODE_TEXT);
 
     current = ((DomText*)current)->next_sibling;
-    EXPECT_EQ(current->type(), DOM_NODE_ELEMENT);
+    EXPECT_EQ(current->node_type, DOM_NODE_ELEMENT);
 
     current = ((DomElement*)current)->next_sibling;
-    EXPECT_EQ(current->type(), DOM_NODE_TEXT);
+    EXPECT_EQ(current->node_type, DOM_NODE_TEXT);
 }
 
 TEST_F(DomIntegrationTest, MixedTree_NavigateSiblings) {
@@ -2477,7 +2460,7 @@ TEST_F(DomIntegrationTest, MixedTree_CommentsBetweenElements) {
         if (current->is_element()) {
             element_count++;
         }
-        DomNodeType type = current->type();
+        DomNodeType type = current->node_type;
         if (type == DOM_NODE_ELEMENT) {
             current = ((DomElement*)current)->next_sibling;
         } else if (type == DOM_NODE_TEXT) {
@@ -2505,7 +2488,7 @@ TEST_F(DomIntegrationTest, MixedTree_DoctypeAtStart) {
     dom_element_append_child(html, head);
     dom_element_append_child(html, body);
 
-    EXPECT_EQ(doctype->type(), DOM_NODE_DOCTYPE);
+    EXPECT_EQ(doctype->node_type, DOM_NODE_DOCTYPE);
     EXPECT_STREQ(doctype->tag_name, "!DOCTYPE");
 }
 
