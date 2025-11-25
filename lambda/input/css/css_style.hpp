@@ -12,6 +12,7 @@
 // Forward declarations
 typedef struct CssSelectorComponent CssSelectorComponent;
 typedef struct CssCalcNode CssCalcNode;
+typedef struct CssValue CssValue;
 
 /**
  * CSS Style System
@@ -145,8 +146,8 @@ typedef struct CssKeyword {
 
 typedef struct CssFunction {
     const char* name;            // Function name (calc, var, rgb, etc.)
-    void** arguments;            // Array of function arguments
-    int argument_count;          // Number of arguments
+    CssValue** args;             // Array of CssValue arguments
+    int arg_count;               // Number of arguments
 } CssFunction;
 
 // CSS Value Types for final computed values
@@ -661,11 +662,7 @@ typedef struct CssValue {
         } list;
 
         // Function value
-        struct {
-            const char* name;
-            struct CssValue** args;
-            int arg_count;
-        } function;
+        CssFunction* function;
 
         // CSS Variable reference
         CSSVarRef* var_ref;
