@@ -533,9 +533,6 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         const char* rule_name = (rule->type == CSS_RULE_MEDIA) ? "media" :
                                (rule->type == CSS_RULE_SUPPORTS) ? "supports" : "container";
 
-        fprintf(stderr, "[CSS Formatter] Formatting conditional @%s with %zu nested rules\n",
-                rule_name, rule->data.conditional_rule.rule_count);
-
         stringbuf_append_str(formatter->output, "@");
         stringbuf_append_str(formatter->output, rule_name);
 
@@ -623,9 +620,6 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
 
     } else if (rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_KEYFRAMES) {
         // Format generic at-rules (@font-face, @keyframes, etc.)
-        fprintf(stderr, "[CSS Formatter] Formatting generic @-rule: %s\n",
-                rule->data.generic_rule.name ? rule->data.generic_rule.name : "null");
-
         stringbuf_append_str(formatter->output, "@");
         if (rule->data.generic_rule.name) {
             stringbuf_append_str(formatter->output, rule->data.generic_rule.name);
@@ -643,8 +637,8 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
     }
 
     String* result = stringbuf_to_string(formatter->output);
-    fprintf(stderr, "[CSS Formatter] Returning from css_format_rule (rule type %d), buffer='%.80s...'\n",
-            rule ? rule->type : -1, result->chars ? result->chars : "(null)");
+    log_debug("[CSS Formatter] Returning from css_format_rule (rule type %d), buffer='%.80s...'",
+        rule ? rule->type : -1, result->chars ? result->chars : "(null)");
     return (result && result->chars) ? result->chars : "";
 }
 
