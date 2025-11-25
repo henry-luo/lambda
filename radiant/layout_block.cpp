@@ -579,7 +579,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
                 if (child->view_type) { last_placed = child; }
                 child = child->next();
             }
-            if (last_placed->is_block() && ((ViewBlock*)last_placed)->bound) {
+            if (last_placed && last_placed->is_block() && ((ViewBlock*)last_placed)->bound) {
                 ViewBlock* last_child_block = (ViewBlock*)last_placed;
                 if (last_child_block->bound->margin.bottom > 0) {
                     float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);

@@ -315,19 +315,15 @@ static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declar
     // Compare with current winning declaration
     if (node->winning_decl) {
         int cmp = css_declaration_cascade_compare(declaration, node->winning_decl);
-
         // DEBUG: Log cascade comparison
-        fprintf(stderr, "[CASCADE] Prop %d: new(spec:%u,ord:%d) vs cur(spec:%u,ord:%d) => cmp=%d\n",
-                declaration->property_id,
-                css_specificity_to_value(declaration->specificity),
-                declaration->source_order,
-                css_specificity_to_value(node->winning_decl->specificity),
-                node->winning_decl->source_order,
-                cmp);
+        log_debug("[CASCADE] Prop %d: new(spec:%u,ord:%d) vs cur(spec:%u,ord:%d) => cmp=%d",
+            declaration->property_id, css_specificity_to_value(declaration->specificity),
+            declaration->source_order, css_specificity_to_value(node->winning_decl->specificity),
+            node->winning_decl->source_order, cmp);
 
         if (cmp > 0) {
             // New declaration wins - demote current to weak list
-            fprintf(stderr, "[CASCADE] New declaration WINS\n");
+            log_debug("[CASCADE] New declaration WINS");
             WeakDeclaration* weak = weak_declaration_create(node->winning_decl, pool);
             if (weak) {
                 weak_list_insert(&node->weak_list, weak);
@@ -338,31 +334,28 @@ static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declar
             css_declaration_ref(declaration);
         } else if (cmp < 0) {
             // New declaration loses - add to weak list
-            fprintf(stderr, "[CASCADE] New declaration LOSES\n");
+            log_debug("[CASCADE] New declaration LOSES");
             WeakDeclaration* weak = weak_declaration_create(declaration, pool);
             if (weak) {
                 weak_list_insert(&node->weak_list, weak);
             }
         } else {
             // Equal specificity - replace existing
-            fprintf(stderr, "[CASCADE] Equal specificity - REPLACING\n");
+            log_debug("[CASCADE] Equal specificity - REPLACING");
             css_declaration_unref(node->winning_decl);
             node->winning_decl = declaration;
             css_declaration_ref(declaration);
         }
     } else {
         // First declaration for this property
-        fprintf(stderr, "[CASCADE] Property %d: first declaration (spec:%u, order:%d)\n",
-                declaration->property_id,
-                css_specificity_to_value(declaration->specificity),
-                declaration->source_order);
+        log_debug("[CASCADE] Property %d: first declaration (spec:%u, order:%d)", declaration->property_id,
+            css_specificity_to_value(declaration->specificity), declaration->source_order);
         node->winning_decl = declaration;
         css_declaration_ref(declaration);
     }
 
     // Mark for recomputation
     node->needs_recompute = true;
-
     return true;
 }
 
