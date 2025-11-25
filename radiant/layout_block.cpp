@@ -573,10 +573,14 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         // collapse bottom margin with last child block
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
             block->bound->padding.bottom == 0 && block->child()) {
-            View* last_child = block->child();
-            while (last_child && last_child->next()) { last_child = last_child->next(); }
-            if (last_child->is_block() && ((ViewBlock*)last_child)->bound) {
-                ViewBlock* last_child_block = (ViewBlock*)last_child;
+            View* last_placed = NULL;  // exclude those skipped text nodes
+            View* child = block->child();
+            while (child) {
+                if (child->view_type) { last_placed = child; }
+                child = child->next();
+            }
+            if (last_placed->is_block() && ((ViewBlock*)last_placed)->bound) {
+                ViewBlock* last_child_block = (ViewBlock*)last_placed;
                 if (last_child_block->bound->margin.bottom > 0) {
                     float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
                     block->height -= last_child_block->bound->margin.bottom;
