@@ -106,7 +106,7 @@ struct DomElement : DomNode {
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes    
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
-    StyleTree* computed_style;   // Computed values (AVL tree, cached)
+    // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
     bool needs_style_recompute;  // Flag indicating computed values are stale
@@ -140,7 +140,7 @@ struct DomElement : DomNode {
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
-        computed_style(nullptr), style_version(0), needs_style_recompute(false),
+        style_version(0), needs_style_recompute(false),
         pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
 };
 
