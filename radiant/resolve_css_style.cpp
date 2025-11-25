@@ -2,82 +2,6 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
-// ============================================================================
-// Value Conversion Functions
-// ============================================================================
-
-float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon, CssPropertyId prop_id) {
-    if (!value) return 0.0f;
-
-    switch (value->type) {
-        case CSS_VALUE_TYPE_LENGTH: {
-            float num = value->data.length.value;
-
-            switch (value->data.length.unit) {
-                case CSS_UNIT_PX:
-                    return num;
-
-                case CSS_UNIT_EM:
-                    // relative to current font size
-                    if (lycon) {
-                        return num * lycon->font.current_font_size;
-                    }
-                    return num * 16.0f; // default font size
-
-                case CSS_UNIT_REM:
-                    // relative to root font size
-                    return num * 16.0f; // TODO: get from root element
-
-                case CSS_UNIT_PT:
-                    return num * (96.0f / 72.0f); // 1pt = 1/72 inch, 96dpi
-
-                case CSS_UNIT_PC:
-                    return num * 16.0f; // 1pc = 12pt = 16px
-
-                case CSS_UNIT_IN:
-                    return num * 96.0f; // 96dpi
-
-                case CSS_UNIT_CM:
-                    return num * 37.795f; // 1cm = 37.795px at 96dpi
-
-                case CSS_UNIT_MM:
-                    return num * 3.7795f; // 1mm = 3.7795px at 96dpi
-
-                case CSS_UNIT_VW:
-                    // viewport width percentage
-                    if (lycon && lycon->width > 0) {
-                        return (num / 100.0f) * lycon->width;
-                    }
-                    return 0.0f;
-
-                case CSS_UNIT_VH:
-                    // viewport height percentage
-                    if (lycon && lycon->height > 0) {
-                        return (num / 100.0f) * lycon->height;
-                    }
-                    return 0.0f;
-
-                default:
-                    return num; // assume pixels for unknown units
-            }
-        }
-
-        case CSS_VALUE_TYPE_PERCENTAGE: {
-            // percentage resolution depends on property context
-            // for now, return raw percentage (needs parent context)
-            return (float)value->data.percentage.value;
-        }
-
-        case CSS_VALUE_TYPE_NUMBER: {
-            // unitless number, treat as pixels for most properties
-            return (float)value->data.number.value;
-        }
-
-        default:
-            return 0.0f;
-    }
-}
-
 Color resolve_color_value(const CssValue* value) {
     Color result;
     result.r = 0;
@@ -87,27 +11,27 @@ Color resolve_color_value(const CssValue* value) {
 
     if (!value) return result;
     switch (value->type) {
-        case CSS_VALUE_TYPE_COLOR: {
-            // Access color data from CssValue anonymous struct
-            switch (value->data.color.type) {
-                case CSS_COLOR_RGB:
-                    result = value->data.color.data.color;
-                    break;
-                case CSS_COLOR_HSL:
-                    // TODO: convert HSL to RGB
-                    // for now, leave as black
-                    break;
-                default:
-                    break;
-            }
+    case CSS_VALUE_TYPE_COLOR: {
+        // Access color data from CssValue anonymous struct
+        switch (value->data.color.type) {
+        case CSS_COLOR_RGB:
+            result = value->data.color.data.color;
             break;
-        }
-        case CSS_VALUE_TYPE_KEYWORD: {
-            // map color keyword to RGB
-            result = color_name_to_rgb(value->data.keyword);
-        }
+        case CSS_COLOR_HSL:
+            // TODO: convert HSL to RGB
+            // for now, leave as black
+            break;
         default:
             break;
+        }
+        break;
+    }
+    case CSS_VALUE_TYPE_KEYWORD: {
+        // map color keyword to RGB
+        result = color_name_to_rgb(value->data.keyword);
+    }
+    default:
+        break;
     }
     return result;
 }
@@ -319,10 +243,7 @@ CssEnum map_font_weight(const CssValue* value) {
     return CSS_VALUE_NORMAL; // default
 }
 
-// ============================================================================
 // Specificity Calculation
-// ============================================================================
-
 int32_t get_lambda_specificity(const CssDeclaration* decl) {
     if (!decl) {
         log_debug("[CSS] get_lambda_specificity: decl is NULL");
@@ -499,11 +420,9 @@ DisplayValue resolve_display_value(void* child) {
             display.outer = CSS_VALUE_INLINE;
             display.inner = CSS_VALUE_FLOW;
         }
-
         // TODO: Check for CSS display property in child->style (DomElement)
         // For now, using tag-based defaults is sufficient
     }
-
     return display;
 }
 
@@ -985,13 +904,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
-            if (!span->font) {
-                span->font = alloc_font_prop(lycon);
-            }
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
 
-            float font_size = 0.0f;
-            bool valid = false;
-
+            float font_size = 0.0f;  bool valid = false;
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Special handling for em units: em is relative to parent font size for font-size property
                 if (value->data.length.unit == CSS_UNIT_EM) {
@@ -1000,7 +915,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] Font size em: %.2fem -> %.2f px (parent size: %.2f px)",
                               value->data.length.value, font_size, parent_size);
                 } else {
-                    font_size = convert_lambda_length_to_px(value, lycon, prop_id);
+                    font_size = resolve_length_value(lycon, prop_id, value);
                     log_debug("[CSS] Font size length: %.2f px (after conversion)", font_size);
                 }
                 // Per CSS spec, negative font-size values are invalid, but 0 is valid
@@ -1454,7 +1369,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float pos_x = convert_lambda_length_to_px(value, lycon, prop_id);
+                float pos_x = resolve_length_value(lycon, prop_id, value);
                 log_debug("[CSS] background-position-x: %.2fpx", pos_x);
                 // TODO: Store position-x when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -1479,7 +1394,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float pos_y = convert_lambda_length_to_px(value, lycon, prop_id);
+                float pos_y = resolve_length_value(lycon, prop_id, value);
                 log_debug("[CSS] background-position-y: %.2fpx", pos_y);
                 // TODO: Store position-y when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -1526,7 +1441,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float width = convert_lambda_length_to_px(value, lycon, prop_id);
+                float width = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->width.top = width;
                 span->bound->border->width.top_specificity = specificity;
                 log_debug("[CSS] Border-top-width: %.2f px", width);
@@ -1570,7 +1485,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float width = convert_lambda_length_to_px(value, lycon, prop_id);
+                float width = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->width.right = width;
                 span->bound->border->width.right_specificity = specificity;
                 log_debug("[CSS] Border-right-width: %.2f px", width);
@@ -1613,7 +1528,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float width = convert_lambda_length_to_px(value, lycon, prop_id);
+                float width = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->width.bottom = width;
                 span->bound->border->width.bottom_specificity = specificity;
                 log_debug("[CSS] Border-bottom-width: %.2f px", width);
@@ -1656,7 +1571,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float width = convert_lambda_length_to_px(value, lycon, prop_id);
+                float width = resolve_length_value(lycon, prop_id, value);
                 span->bound->border->width.left = width;
                 span->bound->border->width.left_specificity = specificity;
                 log_debug("[CSS] Border-left-width: %.2f px", width);
@@ -1831,7 +1746,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     CssValue* val = values[i];
                     if (val->type == CSS_VALUE_TYPE_LENGTH) {
                         // Width - convert to pixels
-                        border_width = convert_lambda_length_to_px(val, lycon, prop_id);
+                        border_width = resolve_length_value(lycon, prop_id, val);
                     }
                     else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
                         // Could be width keyword, style, or color
@@ -1868,7 +1783,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             } else {
                 // Single value
                 if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                    border_width = convert_lambda_length_to_px(value, lycon, prop_id);
+                    border_width = resolve_length_value(lycon, prop_id, value);
                 } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                     CssEnum keyword = value->data.keyword;
                     if (keyword == CSS_VALUE_THIN) {
@@ -2837,9 +2752,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] letter-spacing: FontProp is NULL");
                 break;
             }
-
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float spacing = convert_lambda_length_to_px(value, lycon, prop_id);
+                float spacing = resolve_length_value(lycon, prop_id, value);
                 // Note: Adding letter_spacing field to FontProp would be needed
                 log_debug("[CSS] letter-spacing: %.2fpx (field not yet added to FontProp)", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
@@ -2854,9 +2768,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] word-spacing: FontProp is NULL");
                 break;
             }
-
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float spacing = convert_lambda_length_to_px(value, lycon, prop_id);
+                float spacing = resolve_length_value(lycon, prop_id, value);
                 // Note: Adding word_spacing field to FontProp would be needed
                 log_debug("[CSS] word-spacing: %.2fpx (field not yet added to FontProp)", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NORMAL) {
@@ -2992,7 +2905,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-                float gap_value = convert_lambda_length_to_px(value, lycon, prop_id);
+                float gap_value = resolve_length_value(lycon, prop_id, value);
                 block->embed->flex->row_gap = (int)gap_value;
                 log_debug("[CSS] row-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -3016,7 +2929,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-                float gap_value = convert_lambda_length_to_px(value, lycon, prop_id);
+                float gap_value = resolve_length_value(lycon, prop_id, value);
                 block->embed->flex->column_gap = (int)gap_value;
                 log_debug("[CSS] column-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -3059,7 +2972,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->in_line->fi->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: auto");
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                float basis_value = convert_lambda_length_to_px(value, lycon, prop_id);
+                float basis_value = resolve_length_value(lycon, prop_id, value);
                 span->in_line->fi->flex_basis = (int)basis_value;
                 span->in_line->fi->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
@@ -3373,7 +3286,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_BORDER_SPACING: {
             log_debug("[CSS] Processing border-spacing property");
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                double spacing = convert_lambda_length_to_px(value, lycon, prop_id);
+                double spacing = resolve_length_value(lycon, prop_id, value);
                 log_debug("[CSS] border-spacing: %.2fpx", spacing);
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 log_debug("[CSS] border-spacing: %s", css_enum_info(value->data.keyword)->name);
