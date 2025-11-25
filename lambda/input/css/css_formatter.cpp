@@ -84,6 +84,40 @@ static void append_space(CssFormatter* formatter) {
     }
 }
 
+// Helper function to determine if a property uses comma-separated lists
+static bool property_uses_comma_separated_list(CssPropertyId property_id) {
+    switch (property_id) {
+        // Properties that use comma-separated lists
+        case CSS_PROPERTY_FONT_FAMILY:
+        case CSS_PROPERTY_BACKGROUND_IMAGE:
+        case CSS_PROPERTY_TRANSITION:
+        case CSS_PROPERTY_TRANSITION_PROPERTY:
+        case CSS_PROPERTY_TRANSITION_DURATION:
+        case CSS_PROPERTY_TRANSITION_TIMING_FUNCTION:
+        case CSS_PROPERTY_TRANSITION_DELAY:
+        case CSS_PROPERTY_ANIMATION:
+        case CSS_PROPERTY_ANIMATION_NAME:
+        case CSS_PROPERTY_ANIMATION_DURATION:
+        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION:
+        case CSS_PROPERTY_ANIMATION_DELAY:
+        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT:
+        case CSS_PROPERTY_ANIMATION_DIRECTION:
+        case CSS_PROPERTY_ANIMATION_FILL_MODE:
+        case CSS_PROPERTY_ANIMATION_PLAY_STATE:
+        case CSS_PROPERTY_BOX_SHADOW:
+        case CSS_PROPERTY_TEXT_SHADOW:
+        case CSS_PROPERTY_BACKGROUND:
+        case CSS_PROPERTY_BACKGROUND_POSITION:
+        case CSS_PROPERTY_BACKGROUND_SIZE:
+        case CSS_PROPERTY_BACKGROUND_REPEAT:
+        case CSS_PROPERTY_TRANSFORM:
+        case CSS_PROPERTY_FILTER:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static const char* unit_to_string(CssUnit unit) {
     switch (unit) {
         case CSS_UNIT_PX: return "px";
@@ -116,8 +150,16 @@ static const char* unit_to_string(CssUnit unit) {
 // Value Formatting
 // ============================================================================
 
+// Internal helper with property context
+static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyId property_id);
+
 // Format value (complete implementation)
 void css_format_value(CssFormatter* formatter, CssValue* value) {
+    css_format_value_with_property(formatter, value, CSS_PROPERTY_UNKNOWN);
+}
+
+// Internal implementation with property context
+static void css_format_value_with_property(CssFormatter* formatter, CssValue* value, CssPropertyId property_id) {
     if (!formatter || !value) return;
 
     // Don't reset buffer - append to existing content
@@ -172,15 +214,19 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
                         r, g, b, a / 255.0);
                 }
             } else if (value->data.color.type == CSS_COLOR_HSL) {
-                double h = value->data.color.data.hsla.h;
-                double s = value->data.color.data.hsla.s;
-                double l = value->data.color.data.hsla.l;
-                double a = value->data.color.data.hsla.a;
+                if (value->data.color.data.components) {
+                    double h = value->data.color.data.components->component1;
+                    double s = value->data.color.data.components->component2;
+                    double l = value->data.color.data.components->component3;
+                    double a = value->data.color.data.components->component4;
 
-                if (a >= 1.0) {
-                    stringbuf_append_format(formatter->output, "hsl(%.1f, %.1f%%, %.1f%%)", h, s * 100, l * 100);
+                    if (a >= 1.0) {
+                        stringbuf_append_format(formatter->output, "hsl(%.1f, %.1f%%, %.1f%%)", h, s * 100, l * 100);
+                    } else {
+                        stringbuf_append_format(formatter->output, "hsla(%.1f, %.1f%%, %.1f%%, %.2f)", h, s * 100, l * 100, a);
+                    }
                 } else {
-                    stringbuf_append_format(formatter->output, "hsla(%.1f, %.1f%%, %.1f%%, %.2f)", h, s * 100, l * 100, a);
+                    stringbuf_append_str(formatter->output, "hsl(0, 0%, 0%)");
                 }
             } else {
                 // Fallback to black
@@ -237,10 +283,12 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
 
         case CSS_VALUE_TYPE_LIST:
             // Format value list (space-separated or comma-separated)
+            // Determine separator based on property type
             if (value->data.list.values) {
+                bool use_comma = property_uses_comma_separated_list(property_id);
                 for (size_t i = 0; i < value->data.list.count; i++) {
                     if (i > 0) {
-                        if (value->data.list.comma_separated) {
+                        if (use_comma) {
                             stringbuf_append_str(formatter->output, ", ");
                         } else {
                             stringbuf_append_str(formatter->output, " ");
@@ -250,7 +298,7 @@ void css_format_value(CssFormatter* formatter, CssValue* value) {
                         // Recursively format list values
                         StringBuf* temp = formatter->output;
                         formatter->output = stringbuf_new(formatter->pool);
-                        css_format_value(formatter, value->data.list.values[i]);
+                        css_format_value_with_property(formatter, value->data.list.values[i], property_id);
                         String* formatted_str = stringbuf_to_string(formatter->output);
                         formatter->output = temp;
                         if (formatted_str && formatted_str->chars) {
@@ -296,10 +344,10 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyId proper
     stringbuf_append_str(formatter->output, ":");
     append_space(formatter);
 
-    // Format value - use temporary buffer
+    // Format value - use temporary buffer with property context
     StringBuf* temp = formatter->output;
     formatter->output = stringbuf_new(formatter->pool);
-    css_format_value(formatter, value);
+    css_format_value_with_property(formatter, value, property_id);
     String* value_str = stringbuf_to_string(formatter->output);
     formatter->output = temp;
 

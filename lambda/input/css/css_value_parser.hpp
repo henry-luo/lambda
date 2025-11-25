@@ -80,7 +80,7 @@ CssValue* css_parse_oklch_function(CssPropertyValueParser* parser, const CssToke
 CssValue* css_parse_generic_function(CssPropertyValueParser* parser, const char* function_name, const CssToken* tokens, int token_count);
 
 // CSS Value list functions
-CssValue* css_value_list_create(Pool* pool, bool space_separated);
+CssValue* css_value_list_create(Pool* pool);
 void css_value_list_add(CssValue* list, CssValue* value);
 
 #ifdef __cplusplus
