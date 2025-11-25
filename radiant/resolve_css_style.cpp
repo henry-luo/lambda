@@ -590,7 +590,6 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         double num = value->data.length.value;
         CssUnit unit = value->data.length.unit;
         log_debug("length value: %.2f, unit: %d", num, unit);
-
         switch (unit) {
         // absolute units
         case CSS_UNIT_Q:  // 1Q = 1cm / 40
@@ -682,7 +681,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     }
     case CSS_VALUE_TYPE_PERCENTAGE: {
         double percentage = value->data.percentage.value;
-        if (property == CSS_PROPERTY_FONT_SIZE) {
+        if (property == CSS_PROPERTY_FONT_SIZE || property == CSS_PROPERTY_LINE_HEIGHT || property == CSS_PROPERTY_VERTICAL_ALIGN) {
             // font-size percentage is relative to parent font size
             result = percentage * lycon->font.style->font_size / 100.0;
         } else {
@@ -1067,10 +1066,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 log_debug("[CSS] Font weight keyword: '%s' -> Lexbor enum: %d",
-                         css_enum_info(value->data.keyword)->name, lexbor_weight);
+                    css_enum_info(value->data.keyword)->name, lexbor_weight);
             } else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
                 log_debug("[CSS] Font weight number: %d -> Lexbor enum: %d",
-                         (int)value->data.number.value, lexbor_weight);
+                    (int)value->data.number.value, lexbor_weight);
             }
             break;
         }
@@ -1124,49 +1123,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_LINE_HEIGHT: {
             log_debug("[CSS] Processing line-height property");
-            if (!block) { break; }
-            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-
-            // Allocate lxb_css_property_line_height_t structure (compatible with Lexbor)
-            lxb_css_property_line_height_t* line_height =
-                (lxb_css_property_line_height_t*)alloc_prop(lycon, sizeof(lxb_css_property_line_height_t));
-
-            if (!line_height) {
-                log_debug("[CSS] Failed to allocate line_height structure");
-                break;
-            }
-
-            // Line height can be number (multiplier), length, percentage, or 'normal'
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                // Unitless number - multiply by font size
-                line_height->type = CSS_VALUE__NUMBER;
-                line_height->u.number.num = value->data.number.value;
-                log_debug("[CSS] Line height number: %.2f", value->data.number.value);
-                block->blk->line_height = line_height;
-            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                line_height->type = CSS_VALUE__LENGTH;
-                line_height->u.length.num = value->data.length.value;
-                line_height->u.length.is_float = true;
-                line_height->u.length.unit = value->data.length.unit;
-                log_debug("[CSS] Line height length: %.2f px (unit: %d)", value->data.length.value, value->data.length.unit);
-                block->blk->line_height = line_height;
-            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                line_height->type = CSS_VALUE__PERCENTAGE;
-                line_height->u.percentage.num = value->data.percentage.value;
-                log_debug("[CSS] Line height percentage: %.2f%%", value->data.percentage.value);
-                block->blk->line_height = line_height;
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum keyword = value->data.keyword;
-                if (keyword == CSS_VALUE_NORMAL) {
-                    line_height->type = CSS_VALUE_NORMAL;
-                    log_debug("[CSS] Line height keyword: normal");
-                    block->blk->line_height = line_height;
-                } else if (keyword == CSS_VALUE_INHERIT) {
-                    line_height->type = CSS_VALUE_INHERIT;
-                    log_debug("[CSS] Line height keyword: inherit");
-                    block->blk->line_height = line_height;
-                }
-            }
+            if (!span->blk) { span->blk = alloc_block_prop(lycon); }
+            span->blk->line_height = value;  // will be resolved later
             break;
         }
 

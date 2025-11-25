@@ -246,24 +246,6 @@ typedef enum AlignType {
     ALIGN_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
 } AlignType;
 
-// Line height property structure (replacing lexbor's lxb_css_property_line_height_t)
-typedef struct {
-    CssEnum type;  // CSS_VALUE__NUMBER, CSS_VALUE__LENGTH, CSS_VALUE__PERCENTAGE, CSS_VALUE_NORMAL
-    union {
-        struct {
-            float num;
-        } number;
-        struct {
-            float num;
-            CssUnit unit;
-            bool is_float;
-        } length;
-        struct {
-            float num;
-        } percentage;
-    } u;
-} lxb_css_property_line_height_t;
-
 // FlexItemProp definition (needed by flex.hpp)
 typedef struct FlexItemProp {
     int flex_basis;  // -1 for auto
@@ -455,7 +437,7 @@ typedef struct PositionProp {
 
 typedef struct BlockProp {
     CssEnum text_align;
-    lxb_css_property_line_height_t *line_height;
+    const CssValue* line_height;
     float text_indent;  // can be negative
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
