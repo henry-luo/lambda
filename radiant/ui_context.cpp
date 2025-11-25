@@ -27,7 +27,7 @@ void configure_freetype_subpixel(FT_Library library) {
     // Enable LCD filtering for sub-pixel rendering
     FT_Error error = FT_Library_SetLcdFilter(library, FT_LCD_FILTER_DEFAULT);
     if (error) {
-        log_warn("Failed to set LCD filter: %d", error);
+        log_info("Failed to set LCD filter: %d", error);
     } else {
         log_debug("LCD filter enabled for sub-pixel rendering");
     }
