@@ -292,13 +292,11 @@ float map_lambda_font_size_keyword(CssEnum keyword_enum) {
     }
 }
 
-// map Lambda CSS font-weight keywords/numbers to Lexbor PropValue enum
-CssEnum map_lambda_font_weight_to_lexbor(const CssValue* value) {
+// map CSS font-weight keywords/numbers to PropValue enum
+CssEnum map_font_weight(const CssValue* value) {
     if (!value) return CSS_VALUE_NORMAL;
-
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
-
         // The keyword is already an enum, just return appropriate values
         switch (keyword) {
             case CSS_VALUE_NORMAL: return CSS_VALUE_NORMAL;
@@ -311,15 +309,13 @@ CssEnum map_lambda_font_weight_to_lexbor(const CssValue* value) {
     else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
         // numeric weights: map to closest keyword or return as-is
         int weight = (int)value->data.number.value;
-
-        // Lexbor uses enum values for numeric weights too, but for simplicity
+        // uses enum values for numeric weights, but for simplicity
         // we'll map common numeric values to their keyword equivalents
         if (weight <= 350) return CSS_VALUE_LIGHTER;
         if (weight <= 550) return CSS_VALUE_NORMAL;  // 400
         if (weight <= 750) return CSS_VALUE_BOLD;    // 700
         return CSS_VALUE_BOLDER;  // 900
     }
-
     return CSS_VALUE_NORMAL; // default
 }
 
@@ -1059,18 +1055,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->font = alloc_font_prop(lycon);
                 log_debug("[CSS]   Created new FontProp with defaults");
             }
-
-            // Map Lambda CSS value to Lexbor PropValue enum
-            CssEnum lexbor_weight = map_lambda_font_weight_to_lexbor(value);
-            span->font->font_weight = lexbor_weight;
-
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                log_debug("[CSS] Font weight keyword: '%s' -> Lexbor enum: %d",
-                    css_enum_info(value->data.keyword)->name, lexbor_weight);
-            } else if (value->type == CSS_VALUE_TYPE_NUMBER || value->type == CSS_VALUE_TYPE_INTEGER) {
-                log_debug("[CSS] Font weight number: %d -> Lexbor enum: %d",
-                    (int)value->data.number.value, lexbor_weight);
-            }
+            // map CSS font weight to enum
+            span->font->font_weight = map_font_weight(value);
             break;
         }
 
@@ -1706,12 +1692,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_val = value->data.keyword;
-                span->bound->border->top_style = lexbor_val;
-                const CssEnumInfo* info = css_enum_info(lexbor_val);
-                log_debug("[CSS] Border-top-style: %s -> %d", info ? info->name : "unknown", lexbor_val);
+                CssEnum val = value->data.keyword;
+                span->bound->border->top_style = val;
+                const CssEnumInfo* info = css_enum_info(val);
+                log_debug("[CSS] Border-top-style: %s -> %d", info ? info->name : "unknown", val);
             }
             break;
         }
@@ -1724,12 +1709,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_val = value->data.keyword;
-                span->bound->border->right_style = lexbor_val;
-                const CssEnumInfo* info = css_enum_info(lexbor_val);
-                log_debug("[CSS] Border-right-style: %s -> %d", info ? info->name : "unknown", lexbor_val);
+                CssEnum val = value->data.keyword;
+                span->bound->border->right_style = val;
+                const CssEnumInfo* info = css_enum_info(val);
+                log_debug("[CSS] Border-right-style: %s -> %d", info ? info->name : "unknown", val);
             }
             break;
         }
@@ -1742,12 +1726,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_val = value->data.keyword;
-                span->bound->border->bottom_style = lexbor_val;
-                const CssEnumInfo* info = css_enum_info(lexbor_val);
-                log_debug("[CSS] Border-bottom-style: %s -> %d", info ? info->name : "unknown", lexbor_val);
+                CssEnum val = value->data.keyword;
+                span->bound->border->bottom_style = val;
+                const CssEnumInfo* info = css_enum_info(val);
+                log_debug("[CSS] Border-bottom-style: %s -> %d", info ? info->name : "unknown", val);
             }
             break;
         }
@@ -1760,12 +1743,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_val = value->data.keyword;
-                span->bound->border->left_style = lexbor_val;
-                const CssEnumInfo* info = css_enum_info(lexbor_val);
-                log_debug("[CSS] Border-left-style: %s -> %d", info ? info->name : "unknown", lexbor_val);
+                CssEnum val = value->data.keyword;
+                span->bound->border->left_style = val;
+                const CssEnumInfo* info = css_enum_info(val);
+                log_debug("[CSS] Border-left-style: %s -> %d", info ? info->name : "unknown", val);
             }
             break;
         }
@@ -2374,7 +2356,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         }
 
         // ===== GROUP 15: Additional Border Properties =====
-
         case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS: {
             log_debug("[CSS] Processing border-top-left-radius property");
             if (!span->bound) {
@@ -2449,12 +2430,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_val = value->data.keyword;
-                block->position->position = lexbor_val;
-                const CssEnumInfo* info = css_enum_info(lexbor_val);
-                log_debug("[CSS] Position: %s -> %d", info ? info->name : "unknown", lexbor_val);
+                CssEnum val = value->data.keyword;
+                block->position->position = val;
+                const CssEnumInfo* info = css_enum_info(val);
+                log_debug("[CSS] Position: %s -> %d", info ? info->name : "unknown", val);
             }
             break;
         }
@@ -2735,12 +2715,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] font-style: FontProp is NULL");
                 break;
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    span->font->font_style = lexbor_value;
-                    log_debug("[CSS] font-style: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    span->font->font_style = val;
+                    log_debug("[CSS] font-style: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2758,12 +2737,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
                     // Note: Adding text_transform field to BlockProp would be needed
                     // For now, log the value that would be set
                     log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)",
-                             css_enum_info(value->data.keyword)->name, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2781,11 +2760,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
                     // Note: Adding text_overflow field to BlockProp would be needed
                     log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)",
-                             css_enum_info(value->data.keyword)->name, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2801,13 +2780,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     break;
                 }
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
                     // Note: Adding word_break field to BlockProp would be needed
                     log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
-                             css_enum_info(value->data.keyword)->name, lexbor_value);
+                             css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2825,11 +2803,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
                     // Note: Adding word_wrap field to BlockProp would be needed
                     log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)",
-                             css_enum_info(value->data.keyword)->name, lexbor_value);
+                        css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2843,11 +2821,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
                     // Note: Adding font_variant field to FontProp would be needed
                     log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)",
-                             css_enum_info(value->data.keyword)->name, lexbor_value);
+                        css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2917,10 +2895,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    block->embed->flex->direction = lexbor_value;
-                    log_debug("[CSS] flex-direction: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->flex->direction = val;
+                    log_debug("[CSS] flex-direction: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2932,15 +2910,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] flex-wrap: Cannot apply to non-block element");
                 break;
             }
-
-            // Allocate FlexProp if needed
             alloc_flex_prop(lycon, block);
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    block->embed->flex->wrap = lexbor_value;
-                    log_debug("[CSS] flex-wrap: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->flex->wrap = val;
+                    log_debug("[CSS] flex-wrap: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2957,10 +2932,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    block->embed->flex->justify = lexbor_value;
-                    log_debug("[CSS] justify-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->flex->justify = val;
+                    log_debug("[CSS] justify-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2977,10 +2952,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    block->embed->flex->align_items = lexbor_value;
-                    log_debug("[CSS] align-items: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->flex->align_items = val;
+                    log_debug("[CSS] align-items: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -2997,10 +2972,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    block->embed->flex->align_content = lexbor_value;
-                    log_debug("[CSS] align-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->flex->align_content = val;
+                    log_debug("[CSS] align-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -3111,10 +3086,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing align-self property");
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum lexbor_value = value->data.keyword;
-                if (lexbor_value > 0) {
-                    span->in_line->fi->align_self = lexbor_value;
-                    log_debug("[CSS] align-self: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, lexbor_value);
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    span->in_line->fi->align_self = val;
+                    log_debug("[CSS] align-self: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
