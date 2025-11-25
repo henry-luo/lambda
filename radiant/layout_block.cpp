@@ -400,11 +400,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
     // setup line height
-    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== CSS_VALUE_INHERIT) {  // inherit from parent
-        lycon->block.line_height = inherit_line_height(lycon, block);
-    } else {
-        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
-    }
+    setup_line_height(lycon, block);
+
     // setup initial ascender and descender
     lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
     lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;

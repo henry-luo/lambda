@@ -54,62 +54,54 @@ float calc_normal_line_height(FT_Face face) {
     return line_height;
 }
 
-float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_height) {
-    float height;
-    if (line_height) {
-        switch (line_height->type) {
-        case CSS_VALUE__NUMBER:
-            height = line_height->u.number.num * fbox->style->font_size;
-            log_debug("property number: %lf", line_height->u.number.num);
-            return height;
-        case CSS_VALUE__LENGTH:
-            height = line_height->u.length.num;  // px
-            log_debug("property unit: %d", line_height->u.length.unit);
-            return height;
-        case CSS_VALUE__PERCENTAGE:
-            height = line_height->u.percentage.num / 100.0 * fbox->style->font_size;
-            log_debug("property percentage: %lf", line_height->u.percentage.num);
-            return height;
-        }
-    }
-    // default as 'normal'
-
-    // FT_Pos asc  = fbox->ft_face->size->metrics.ascender;  // 26.6 fixed-point pixels
-    // FT_Pos desc = fbox->ft_face->size->metrics.descender; // 26.6 fixed-point pixels
-    // FT_Pos gap, lineHeight;
-
-    // // Chrome seems to just use font height, not asc+desc, for line-height
-    // // Get OS/2 table using proper FreeType API
-    // // TT_OS2* os2_table = (TT_OS2*)FT_Get_Sfnt_Table(fbox->face.ft_face, FT_SFNT_OS2);
-    // // if (os2_table && os2_table->sTypoLineGap != 0) {
-    // //     // Scale the OS/2 line gap to current font size
-    // //     gap = FT_MulFix(os2_table->sTypoLineGap, fbox->face.ft_face->size->metrics.y_scale);
-    // //     log_debug("Using scaled OS/2 sTypoLineGap: %f", gap / 64.0f);
-    // //     lineHeight = asc - desc + gap;
-    // // } else {
-    //     lineHeight = fbox->ft_face->size->metrics.height;
-    // // }
-
-    float lineHeight = calc_normal_line_height(fbox->ft_face);
-    log_debug("got lineHeight: %f", lineHeight);
-    return lineHeight;
-}
-
-float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
+CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     // Inherit line height from parent
     INHERIT:
-    ViewGroup* pa = block->parent_view();
-    while (pa && !pa->is_block()) { pa = pa->parent_view(); }
-    if (pa) {
-        ViewBlock* pa_block = (ViewBlock*)pa;
-        if (pa_block->blk && pa_block->blk->line_height && pa_block->blk->line_height->type != CSS_VALUE_INHERIT) {
-            return calc_line_height(&lycon->font, pa_block->blk->line_height);
+    ViewGroup* parent = block->parent_view();
+    if (parent) { // parent can be block or span
+        // inherit the specified css value, not the resolved value
+        if (parent->blk && parent->blk->line_height) {
+            if (parent->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD && 
+                parent->blk->line_height->data.keyword == CSS_VALUE_INHERIT) {
+                block = (ViewBlock*)parent;
+                goto INHERIT;
+            }
+            return *parent->blk->line_height;
         }
-        block = pa_block;
+        block = (ViewBlock*)parent;
         goto INHERIT;
     }
-    // else initial value - 'normal'
-    return calc_line_height(&lycon->font, NULL);
+    else { // initial value - 'normal'
+        CssValue normal_value;
+        normal_value.type = CSS_VALUE_TYPE_KEYWORD;
+        normal_value.data.keyword = CSS_VALUE_NORMAL;
+        return normal_value;
+    }
+}
+
+void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
+    CssValue value;
+    if (block->blk && block->blk->line_height) {
+        if (block->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+            block->blk->line_height->data.keyword == CSS_VALUE_INHERIT) {
+            value = inherit_line_height(lycon, block);
+        } else {
+            value = *block->blk->line_height;
+        }
+    } else { // normal initial value
+        value.type = CSS_VALUE_TYPE_KEYWORD;
+        value.data.keyword = CSS_VALUE_NORMAL;
+    }
+    if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
+        // 'normal' line height
+        lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
+        log_debug("normal lineHeight: %f", lycon->block.line_height);
+    } else {
+        // resolve length/number/percentage
+        float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
+        lycon->block.line_height = resolved_height;
+        log_debug("resolved line height: %f", lycon->block.line_height);
+    }
 }
 
 // DomNode style resolution function
