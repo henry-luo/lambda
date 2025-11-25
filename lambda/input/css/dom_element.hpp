@@ -29,7 +29,6 @@
 
 // Forward declarations
 typedef struct Element Element;
-typedef struct DocumentStyler DocumentStyler;
 typedef struct Input Input;
 typedef struct Arena Arena;
 typedef struct ViewTree ViewTree;  // From radiant/view.hpp
@@ -146,17 +145,17 @@ typedef struct ViewBlock ViewBlock;
  * - Parent/child relationships for inheritance
  */
 struct DomElement : DomNode {
-    // Tree structure (only elements can have children)
-    DomNode* first_child;        // First child node (Element, Text, or Comment)
-
     // Basic element information
     Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
-    // void* tag_name_ptr;          // Tag name pointer from name_pool (for fast comparison)
-    uintptr_t tag_id;            // Tag ID for fast comparison (e.g., HTM_TAG_DIV)
-    const char* id;              // Element ID attribute (cached)
 
-    // CSS style related
+    // Tree structure (only elements can have children)
+    DomNode* first_child;        // First child node (Element, Text, or Comment)
+    DomNode* last_child;         // only constructed/used in view tree, at the moment
+
+    // HTML/CSS style related
+    uintptr_t tag_id;            // Tag ID for fast comparison (e.g., HTM_TAG_DIV)
+    const char* id;              // Element ID attribute (cached)    
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes    
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
@@ -189,17 +188,13 @@ struct DomElement : DomNode {
     PositionProp* position;
     TableProp* tb;  // table specific properties
     TableCellProp* td;  // table cell specific properties
-    ViewBlock* last_child;
-
+    
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), native_element(nullptr),
-                   tag_name(nullptr), tag_id(0), id(nullptr),
-                   class_names(nullptr), class_count(0), specified_style(nullptr),
-                   computed_style(nullptr), style_version(0), needs_style_recompute(false),
-                   pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
-
-    // Document styler reference
-    DocumentStyler* styler;      // Parent document styler (optional, for styling operations)
+        tag_name(nullptr), tag_id(0), id(nullptr),
+        class_names(nullptr), class_count(0), specified_style(nullptr),
+        computed_style(nullptr), style_version(0), needs_style_recompute(false),
+        pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
 };
 
 // Pseudo-class state flags
@@ -606,10 +601,8 @@ bool dom_element_matches_nth_child(DomElement* element, int a, int b);
  * @param computed_count Output: number of computed properties
  * @param total_declarations Output: total number of declarations in cascade
  */
-void dom_element_get_style_stats(DomElement* element,
-                                 int* specified_count,
-                                 int* computed_count,
-                                 int* total_declarations);
+void dom_element_get_style_stats(DomElement* element, int* specified_count,
+    int* computed_count, int* total_declarations);
 
 /**
  * Clone a DomElement (deep copy)
@@ -618,50 +611,5 @@ void dom_element_get_style_stats(DomElement* element,
  * @return Cloned element or NULL on failure
  */
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
-
-// ============================================================================
-// DomNode Inline Method Implementations
-// These must be defined after DomElement, DomText, DomComment are complete
-// ============================================================================
-
-inline DomElement* DomNode::as_element() {
-    return is_element() ? ((DomElement*)this) : nullptr;
-}
-
-inline DomText* DomNode::as_text() {
-    return is_text() ? static_cast<DomText*>(this) : nullptr;
-}
-
-inline DomComment* DomNode::as_comment() {
-    return is_comment() ? static_cast<DomComment*>(this) : nullptr;
-}
-
-inline const DomElement* DomNode::as_element() const {
-    return is_element() ? static_cast<const DomElement*>(this) : nullptr;
-}
-
-inline const DomText* DomNode::as_text() const {
-    return is_text() ? static_cast<const DomText*>(this) : nullptr;
-}
-
-inline const DomComment* DomNode::as_comment() const {
-    return is_comment() ? static_cast<const DomComment*>(this) : nullptr;
-}
-
-// Convenience method implementations
-inline uintptr_t DomNode::tag() const {
-    const DomElement* elem = as_element();
-    return elem ? elem->tag_id : 0;
-}
-
-inline unsigned char* DomNode::text_data() const {
-    const DomText* text = as_text();
-    return text ? (unsigned char*)text->text : nullptr;
-}
-
-inline const char* DomNode::get_attribute(const char* attr_name) const {
-    const DomElement* elem = as_element();
-    return elem ? dom_element_get_attribute(const_cast<DomElement*>(elem), attr_name) : nullptr;
-}
 
 #endif // DOM_ELEMENT_H

@@ -734,7 +734,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 else {
                     // check sibling margin collapsing
                     float collapse = 0;
-                    View* prev_sibling = block->previous_view();
+                    View* prev_sibling = block->prev_sibling;
                     if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
                         ViewBlock* prev_block = (ViewBlock*)prev_sibling;
                         if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {

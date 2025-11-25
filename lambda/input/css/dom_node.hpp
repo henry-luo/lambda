@@ -60,7 +60,6 @@ struct DomNode {
 
     // view related fields
     ViewType view_type;
-    View* next() { return (View*)next_sibling; }
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
 
@@ -74,17 +73,36 @@ struct DomNode {
     inline bool is_comment() const { return node_type == DOM_NODE_COMMENT || node_type == DOM_NODE_DOCTYPE; }
 
     // safe downcasting helpers (implementations in dom_element.hpp after derived types are defined)
-    inline DomElement* as_element();
-    inline DomText* as_text();
-    inline DomComment* as_comment();
-    inline const DomElement* as_element() const;
-    inline const DomText* as_text() const;
-    inline const DomComment* as_comment() const;
+    inline DomElement* as_element() {
+        return is_element() ? ((DomElement*)this) : nullptr;
+    }
 
-    // convenience methods for common operations (implementations in dom_element.hpp)
-    inline uintptr_t tag() const;                                    // Get tag ID for element nodes
-    inline unsigned char* text_data() const;                         // Get text content for text nodes
-    inline const char* get_attribute(const char* attr_name) const;   // Get attribute for element nodes
+    inline DomText* as_text() {
+        return is_text() ? ((DomText*)this) : nullptr;
+    }
+
+    inline DomComment* as_comment() {
+        return is_comment() ? ((DomComment*)this) : nullptr;
+    }
+
+    inline const DomElement* as_element() const {
+        return is_element() ? ((const DomElement*)this) : nullptr;
+    }
+
+    inline const DomText* as_text() const {
+        return is_text() ? ((const DomText*)this) : nullptr;
+    }
+
+    inline const DomComment* as_comment() const {
+        return is_comment() ? ((const DomComment*)this) : nullptr;
+    }    
+
+    // static helper for tag name to ID conversion
+    static uintptr_t tag_name_to_id(const char* tag_name);
+    uintptr_t tag() const;
+    unsigned char* text_data() const;
+    // Get attribute for element nodes
+    const char* get_attribute(const char* attr_name) const;
 
     // tree manipulation methods (implementations in dom_node.cpp)
     bool append_child(DomNode* child);
@@ -95,22 +113,21 @@ struct DomNode {
     void print(StrBuf* buf = nullptr, int indent = 0) const;
     void free_tree();
 
-    // static helper for tag name to ID conversion
-    static uintptr_t tag_name_to_id(const char* tag_name);
-
+    // view related methods =========================================
+    inline View* next() { return (View*)next_sibling; }
     inline ViewGroup* parent_view() { return (ViewGroup*)this->parent; }
 
-    // view related methods
     inline bool is_group() { return view_type >= RDT_VIEW_INLINE; }
 
-    inline bool is_inline() { return view_type == RDT_VIEW_TEXT || view_type == RDT_VIEW_INLINE || view_type == RDT_VIEW_INLINE_BLOCK; }
+    inline bool is_inline() { 
+        return view_type == RDT_VIEW_TEXT || view_type == RDT_VIEW_INLINE || view_type == RDT_VIEW_INLINE_BLOCK; 
+    }
 
     inline bool is_block() {
         return view_type == RDT_VIEW_BLOCK || view_type == RDT_VIEW_INLINE_BLOCK || view_type == RDT_VIEW_LIST_ITEM ||
             view_type == RDT_VIEW_TABLE || view_type == RDT_VIEW_TABLE_ROW_GROUP || view_type == RDT_VIEW_TABLE_ROW || view_type == RDT_VIEW_TABLE_CELL;
     }
 
-    View* previous_view();
     const char* view_name();    
 
 protected:

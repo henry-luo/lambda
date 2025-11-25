@@ -31,7 +31,6 @@ extern "C" {
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
-#include "../lambda/input/css/document_styler.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
 #include "../radiant/view.hpp"
