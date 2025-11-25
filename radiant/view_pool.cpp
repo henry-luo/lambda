@@ -22,10 +22,6 @@ const char* View::view_name() {
     }
 }
 
-View* View::previous_view() {
-    return (View*)this->prev_sibling;
-}
-
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     View* view = (View*)node;
     switch (type) {
