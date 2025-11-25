@@ -264,23 +264,22 @@ DisplayValue resolve_display_value(void* child) {
     DomNode* node = (DomNode*)child;
     if (node && node->is_element()) {
         // resolve display from CSS if available
-        const char* tag_name = node->node_name();
+        DomElement* dom_elem = node->as_element();
+        uintptr_t tag_id = dom_elem ? dom_elem->tag_id : HTM_TAG__UNDEF;
 
         // first, try to get display from CSS
-        DomElement* dom_elem = node->as_element();
         if (dom_elem && dom_elem->specified_style) {
             StyleTree* style_tree = dom_elem->specified_style;
             if (style_tree->tree) {
                 // look for display property in the AVL tree
                 AvlNode* node = avl_tree_search(style_tree->tree, CSS_PROPERTY_DISPLAY);
                 if (node) {
-                    log_debug("[CSS] found display property for <%s>", tag_name);
+                    log_debug("[CSS] found display property for tag_id=%lu", tag_id);
                     StyleNode* style_node = (StyleNode*)node->declaration;
                     if (style_node && style_node->winning_decl) {
                         CssDeclaration* decl = style_node->winning_decl;
                         if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum keyword = decl->value->data.keyword;
-
                             // Map keyword to display values
                             if (keyword == CSS_VALUE_FLEX) {
                                 display.outer = CSS_VALUE_BLOCK;
@@ -361,58 +360,56 @@ DisplayValue resolve_display_value(void* child) {
             }
         }
 
-        // Fall back to default display values based on tag name
-        if (strcmp(tag_name, "body") == 0 || strcmp(tag_name, "h1") == 0 ||
-            strcmp(tag_name, "h2") == 0 || strcmp(tag_name, "h3") == 0 ||
-            strcmp(tag_name, "h4") == 0 || strcmp(tag_name, "h5") == 0 ||
-            strcmp(tag_name, "h6") == 0 || strcmp(tag_name, "p") == 0 ||
-            strcmp(tag_name, "div") == 0 || strcmp(tag_name, "center") == 0 ||
-            strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0 ||
-            strcmp(tag_name, "header") == 0 || strcmp(tag_name, "main") == 0 ||
-            strcmp(tag_name, "section") == 0 || strcmp(tag_name, "footer") == 0 ||
-            strcmp(tag_name, "article") == 0 || strcmp(tag_name, "aside") == 0 ||
-            strcmp(tag_name, "nav") == 0 || strcmp(tag_name, "address") == 0 ||
-            strcmp(tag_name, "blockquote") == 0 || strcmp(tag_name, "details") == 0 ||
-            strcmp(tag_name, "dialog") == 0 || strcmp(tag_name, "figure") == 0 ||
-            strcmp(tag_name, "menu") == 0) {
+        // Fall back to default display values based on tag ID
+        if (tag_id == HTM_TAG_BODY || tag_id == HTM_TAG_H1 ||
+            tag_id == HTM_TAG_H2 || tag_id == HTM_TAG_H3 ||
+            tag_id == HTM_TAG_H4 || tag_id == HTM_TAG_H5 ||
+            tag_id == HTM_TAG_H6 || tag_id == HTM_TAG_P ||
+            tag_id == HTM_TAG_DIV || tag_id == HTM_TAG_CENTER ||
+            tag_id == HTM_TAG_UL || tag_id == HTM_TAG_OL ||
+            tag_id == HTM_TAG_HEADER || tag_id == HTM_TAG_MAIN ||
+            tag_id == HTM_TAG_SECTION || tag_id == HTM_TAG_FOOTER ||
+            tag_id == HTM_TAG_ARTICLE || tag_id == HTM_TAG_ASIDE ||
+            tag_id == HTM_TAG_NAV || tag_id == HTM_TAG_ADDRESS ||
+            tag_id == HTM_TAG_BLOCKQUOTE || tag_id == HTM_TAG_DETAILS ||
+            tag_id == HTM_TAG_DIALOG || tag_id == HTM_TAG_FIGURE ||
+            tag_id == HTM_TAG_MENU) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
-        } else if (strcmp(tag_name, "li") == 0 || strcmp(tag_name, "summary") == 0) {
+        } else if (tag_id == HTM_TAG_LI || tag_id == HTM_TAG_SUMMARY) {
             display.outer = CSS_VALUE_LIST_ITEM;
             display.inner = CSS_VALUE_FLOW;
-        } else if (strcmp(tag_name, "img") == 0 || strcmp(tag_name, "video") == 0 ||
-                    strcmp(tag_name, "input") == 0 || strcmp(tag_name, "select") == 0 ||
-                    strcmp(tag_name, "textarea") == 0 || strcmp(tag_name, "button") == 0 ||
-                    strcmp(tag_name, "iframe") == 0) {
+        } else if (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
+            tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
+            tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
+            tag_id == HTM_TAG_IFRAME) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (strcmp(tag_name, "hr") == 0) {
+        } else if (tag_id == HTM_TAG_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (strcmp(tag_name, "script") == 0 || strcmp(tag_name, "style") == 0 ||
-                    strcmp(tag_name, "svg") == 0) {
+        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
-        } else if (strcmp(tag_name, "table") == 0) {
+        } else if (tag_id == HTM_TAG_TABLE) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE;
-        } else if (strcmp(tag_name, "caption") == 0) {
+        } else if (tag_id == HTM_TAG_CAPTION) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
-        } else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 ||
-                    strcmp(tag_name, "tfoot") == 0) {
+        } else if (tag_id == HTM_TAG_THEAD || tag_id == HTM_TAG_TBODY || tag_id == HTM_TAG_TFOOT) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_ROW_GROUP;
-        } else if (strcmp(tag_name, "tr") == 0) {
+        } else if (tag_id == HTM_TAG_TR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_ROW;
-        } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
+        } else if (tag_id == HTM_TAG_TH || tag_id == HTM_TAG_TD) {
             display.outer = CSS_VALUE_TABLE_CELL;
             display.inner = CSS_VALUE_TABLE_CELL;
-        } else if (strcmp(tag_name, "colgroup") == 0) {
+        } else if (tag_id == HTM_TAG_COLGROUP) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_COLUMN_GROUP;
-        } else if (strcmp(tag_name, "col") == 0) {
+        } else if (tag_id == HTM_TAG_COL) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE_COLUMN;
         } else {
