@@ -151,15 +151,9 @@ make clean-all          # Clean all build artifacts
 ```bash
 make build-test         # Build all test executables
 make test               # Run ALL tests (baseline + extended)
-make test-baseline      # Core functionality only (must pass 100%)
+make test-baseline      # Core functionalities (must pass 100%)
 make test-extended      # HTTP/HTTPS, ongoing features
 ```
-
-**Test organization**:
-- `test/*.exe` - GTest C++ unit tests (e.g., `test_lambda_gtest.exe`)
-- `test/input/` - test data
-- `test/lambda/` - Lambda script integration tests
-- `test/layout/` - CSS layout engine tests (browser reference comparison)
 
 **Running single test**: `./test/test_lambda_gtest.exe --gtest_filter=TestSuite.TestCase`
 
@@ -278,7 +272,9 @@ if (type == LMD_TYPE_STRING) {
 - `log.c/h` - Structured logging
 
 ### Testing (`test/`)
+
 - `test_run.sh` - Main test runner (parallel execution)
+- `test/*.exe` - GTest C++ unit tests (e.g., `test_lambda_gtest.exe`)
 - `test/*.cpp` - GTest unit tests
 - `test/lambda/*.ls` - Lambda script integration tests
 - `test/input/` - Test data files
