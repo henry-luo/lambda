@@ -310,7 +310,7 @@ clean-tree-sitter-minimal:
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar clean-radiant generate-grammar debug release rebuild test test-all test-baseline test-extended test-input run help install uninstall \
 	    lambda radiant window format lint check docs intellisense analyze-size \
-	    build-windows build-linux build-debug build-release clean-all distclean \
+	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
@@ -337,11 +337,6 @@ help:
 	@echo "MINGW64 Targets (Universal CRT Avoidance):"
 	@echo "  build-mingw64 - Enforce MINGW64 environment build (fails if not in MINGW64)"
 	@echo "                  Ensures traditional MSVCRT.dll usage instead of Universal CRT"
-	@echo ""
-	@echo "Cross-compilation:"
-	@echo "  build-windows - Same as cross-compile (now defaults to MINGW64)"
-	@echo "  build-linux   - Cross-compile for Linux (musl static)"
-	@echo "  build-test-linux - Cross-compile tests for Linux"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
@@ -771,8 +766,6 @@ test-parallel: build
 
 test-library: build
 	@echo "Running library test suite..."
-	@echo "Pre-compiling URL test with correct dependencies..."
-	@clang -fms-extensions -Ilib/mem-pool/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -o test/test_url.exe test/test_url.c build/url.o build/url_parser.o build/strbuf.o build/variable.o build/buffer.o build/utils.o -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --target=library --raw; \
 	else \
