@@ -66,6 +66,71 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **CSS Engine**: `lambda/input/css/` - complete CSS parser, cascade resolver
 - **Radiant Engine**: `radiant/` - HTML/CSS/SVG layout and rendering with FreeType, GLFW, FontConfig
 
+## Lambda CLI Commands
+
+### Basic Usage
+```bash
+./lambda.exe                          # Start interactive REPL (default)
+./lambda.exe script.ls                # Run a functional Lambda script (JIT with C2MIR)
+./lambda.exe --mir script.ls          # Run with MIR JIT compilation (only prototyping)
+./lambda.exe --transpile-only script.ls  # Transpile to C only (no execution)
+./lambda.exe --help                   # Show help message for Lambda CLI
+./lambda.exe run script.ls            # Run a procedural Lambda script with main() procedure
+```
+
+### REPL Commands (Interactive Mode)
+```
+.quit, .q, .exit    # Exit REPL
+.help, .h           # Show help
+.clear              # Clear REPL history
+```
+
+### Document Validation
+```bash
+./lambda.exe validate data.json -s schema.ls     # Validate against custom schema
+./lambda.exe validate data.json                  # Validate with doc_schema.ls (default)
+```
+
+### Format Conversion
+```bash
+./lambda.exe convert input.json -t yaml -o output.yaml      # Auto-detect input format
+./lambda.exe convert input.md -f markdown -t html -o out.html  # Explicit formats
+```
+**Supported formats**: json, xml, html, markdown, yaml, toml, csv, latex, pdf, and 15+ more
+
+### Layout Analysis & Rendering
+```bash
+./lambda.exe layout page.html                    # Analyze CSS layout, show view tree
+./lambda.exe render page.html -o output.svg      # Render to SVG
+./lambda.exe render page.html -o output.pdf      # Render to PDF
+./lambda.exe render page.html -o output.png      # Render to PNG
+./lambda.exe render page.html -o output.jpg      # Render to JPEG
+```
+
+### Document Viewer
+```bash
+./lambda.exe view                     # Open default (test/html/index.html)
+./lambda.exe view document.pdf        # Open PDF in interactive viewer
+./lambda.exe view page.html           # Open HTML in browser window
+```
+
+### Common CLI Patterns
+```bash
+# Development: test script with JIT
+./lambda.exe script.ls
+
+# Production: transpile first, inspect C code
+./lambda.exe --transpile-only script.ls > _transpiled.c
+cat _transpiled.c
+
+# Pipeline: convert and validate
+./lambda.exe convert data.csv -t json -o data.json
+./lambda.exe validate data.json -s my_schema.ls
+
+# CSS debugging: analyze layout
+./lambda.exe layout problematic.html
+```
+
 ## Build System & Development Workflow
 
 ### Build Commands
@@ -74,7 +139,7 @@ make build              # Incremental build (Premake5-based, fastest)
 make debug              # Debug build with AddressSanitizer
 make release            # Optimized release build (-O3 + LTO)
 make rebuild            # Force complete rebuild
-make clean              # Clean build artifacts
+make clean-all          # Clean all build artifacts
 ```
 
 **Build architecture**:
@@ -88,8 +153,6 @@ make build-test         # Build all test executables
 make test               # Run ALL tests (baseline + extended)
 make test-baseline      # Core functionality only (must pass 100%)
 make test-extended      # HTTP/HTTPS, ongoing features
-make test-library       # Library-specific tests
-make test-validator     # Schema validation tests
 ```
 
 **Test organization**:

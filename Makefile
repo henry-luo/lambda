@@ -315,7 +315,7 @@ clean-tree-sitter-minimal:
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant \
-	    test-radiant capture-layout test-layout layout
+	    test-radiant capture-layout test-layout layout count-loc
 
 # Help target - shows available commands
 help:
@@ -396,6 +396,7 @@ help:
 	@echo "  format        - Format source code with clang-format"
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
+	@echo "  count-loc     - Count lines of code in the repository"
 	@echo "  test-layout              - Run Radiant layout integration tests (all suites)"
 	@echo "                             Uses Radiant engine (Lexbor-based HTML/CSS rendering)"
 	@echo "                             Usage: make test-layout suite=baseline (run specific suite)"
@@ -1594,3 +1595,7 @@ layout:
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
 		exit 1; \
 	fi
+
+# Count lines of code in the repository
+count-loc:
+	@./utils/count_loc.sh
