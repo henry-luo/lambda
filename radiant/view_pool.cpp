@@ -39,7 +39,6 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             table->tb->border_spacing_h = 2.0f;
             table->tb->border_spacing_v = 2.0f;
             table->tb->border_collapse = false; // default is separate borders
-            view = (View*)table;
             break;
         }
         case RDT_VIEW_TABLE_CELL: {
