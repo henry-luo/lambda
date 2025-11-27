@@ -1,0 +1,43 @@
+# Ignore node modules
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# Electron
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Package lock (we keep package-lock.json)
+# But ignore yarn.lock if someone uses yarn
+yarn.lock
+pnpm-lock.yaml

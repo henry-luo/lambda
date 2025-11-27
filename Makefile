@@ -1596,6 +1596,17 @@ layout:
 		exit 1; \
 	fi
 
+# layout-devtool: Launch the Layout DevTool Electron app
+# Usage: make layout-devtool
+layout-devtool:
+	@echo "🚀 Launching Layout DevTool..."
+	@if [ -d "utils/layout-devtool" ]; then \
+		cd utils/layout-devtool && npm run electron:dev; \
+	else \
+		echo "❌ Error: Layout DevTool not found at utils/layout-devtool"; \
+		exit 1; \
+	fi
+
 # Count lines of code in the repository
 count-loc:
 	@./utils/count_loc.sh
