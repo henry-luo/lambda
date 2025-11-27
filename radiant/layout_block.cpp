@@ -161,7 +161,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
                 log_debug("Setting up flex container for %s", block->node_name());
-                // layout_flex_content(lycon, block);
+                layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node_name());
             }
             else if (block->display.inner == CSS_VALUE_GRID) {

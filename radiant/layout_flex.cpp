@@ -220,17 +220,25 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // that were calculated during box-sizing in the block layout phase
 
     // Phase 5: Calculate cross sizes for lines
+    log_debug("Phase 5: About to calculate line cross sizes");
     calculate_line_cross_sizes(flex_layout);
+    log_debug("Phase 5: Completed calculating line cross sizes");
 
     // Phase 6: Align items on main axis
     // Phase 6: Align items on main axis
+    log_debug("Phase 6: About to align items on main axis for %d lines", line_count);
     for (int i = 0; i < line_count; i++) {
+        log_debug("Phase 6: Aligning line %d on main axis", i);
         align_items_main_axis(flex_layout, &flex_layout->lines[i]);
+        log_debug("Phase 6: Completed aligning line %d on main axis", i);
     }
 
     // Phase 7: Align items on cross axis
+    log_debug("Phase 7: About to align items on cross axis for %d lines", line_count);
     for (int i = 0; i < line_count; i++) {
+        log_debug("Phase 7: Aligning line %d on cross axis", i);
         align_items_cross_axis(flex_layout, &flex_layout->lines[i]);
+        log_debug("Phase 7: Completed aligning line %d on cross axis", i);
     }
 
     // Phase 8: Align content (lines) if there are multiple lines
@@ -268,6 +276,14 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
     while (child) {
         log_debug("*** COLLECT_FLEX_ITEMS TRACE: Found child view %p (type=%d, node=%s)",
             child, child->view_type, child->node_name());
+
+        // CRITICAL FIX: Skip text nodes - flex items must be elements
+        if (!child->is_element()) {
+            log_debug("*** COLLECT_FLEX_ITEMS TRACE: Skipped text node %p", child);
+            child = child->next_sibling;
+            continue;
+        }
+
         // Filter out absolutely positioned and hidden items
         ViewGroup* child_elmt = (ViewGroup*)child->as_element();
         bool is_absolute = child_elmt && child_elmt->in_line && child_elmt->in_line->position &&
@@ -299,6 +315,14 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
     child = container->first_child;
     while (child) {
         log_debug("*** COLLECT_FLEX_ITEMS TRACE: Processing child view %p for collection", child);
+
+        // CRITICAL FIX: Skip text nodes - flex items must be elements
+        if (!child->is_element()) {
+            log_debug("*** COLLECT_FLEX_ITEMS TRACE: Skipped text node %p in collection", child);
+            child = child->next_sibling;
+            continue;
+        }
+
         // Filter out absolutely positioned and hidden items
         ViewGroup* child_elmt = (ViewGroup*)child->as_element();
         bool is_absolute = child_elmt && child_elmt->in_line && child_elmt->in_line->position &&
@@ -1043,14 +1067,23 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
 // Align items on cross axis (align-items)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
+    log_debug("align_items_cross_axis: ENTRY - flex_layout=%p, line=%p, item_count=%d",
+              flex_layout, line, line ? line->item_count : -1);
     if (!flex_layout || !line || line->item_count == 0) return;
 
     // Find maximum baseline for baseline alignment
     int max_baseline = find_max_baseline(line);
+    log_debug("align_items_cross_axis: max_baseline=%d", max_baseline);
 
     for (int i = 0; i < line->item_count; i++) {
+        log_debug("align_items_cross_axis: Processing item %d", i);
         ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-        if (!item && !item->fi) continue;
+        log_debug("align_items_cross_axis: item=%p, item->as_element()=%p", line->items[i], item);
+        // CRITICAL FIX: Use OR (||) not AND (&&) - if item is null, skip without checking fi
+        if (!item || !item->fi) {
+            log_debug("align_items_cross_axis: Skipping item %d (item=%p, fi=%p)", i, item, item ? item->fi : nullptr);
+            continue;
+        }
         // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
         int align_type = item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items;
         printf("DEBUG: ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d\n",
