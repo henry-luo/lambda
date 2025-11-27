@@ -311,6 +311,19 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
 // Enhanced multi-pass flex layout
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("Starting multi-pass flex layout for container %p", block);
+
+    // DEBUG: Dump the DOM tree structure before flex layout
+    log_debug(">>> DOM STRUCTURE DEBUG: Dumping children of container %s", block->node_name());
+    int dom_child_count = 0;
+    DomNode* dom_child = block->first_child;
+    while (dom_child) {
+        log_debug(">>> DOM CHILD %d: node=%p, name=%s, is_element=%d, next_sibling=%p",
+                  dom_child_count, dom_child, dom_child->node_name(), dom_child->is_element(), dom_child->next_sibling);
+        dom_child = dom_child->next_sibling;
+        dom_child_count++;
+    }
+    log_debug(">>> DOM STRUCTURE DEBUG: Total %d children found", dom_child_count);
+
     FlexContainerLayout* pa_flex = lycon->flex_container;
     init_flex_container(lycon, block);
 
@@ -318,9 +331,12 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
     int child_count = 0;
     DomNode* measure_child = block->first_child;
+    log_debug(">>> PASS1 DEBUG: block=%p, first_child=%p", block, measure_child);
     if (measure_child) {
         do {
         log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
+        log_debug(">>> PASS1 DEBUG: child node_name=%s, is_element=%d, next_sibling=%p",
+                  measure_child->node_name(), measure_child->is_element(), measure_child->next_sibling);
         // Only create Views for element nodes, skip text nodes
         if (measure_child->is_element()) {
             log_debug(">>> PASS1 TRACE: Creating View with measurement for %s (node=%p)", measure_child->node_name(), measure_child);
@@ -331,7 +347,9 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
         } else {
             log_debug(">>> PASS1 TRACE: Skipping text node: %s", measure_child->node_name());
         }
-        measure_child = measure_child->next_sibling;
+        DomNode* next = measure_child->next_sibling;
+        log_debug(">>> PASS1 DEBUG: About to advance to next_sibling=%p", next);
+        measure_child = next;
         child_count++;
         } while (measure_child);
     }

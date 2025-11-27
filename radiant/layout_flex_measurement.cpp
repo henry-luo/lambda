@@ -141,9 +141,13 @@ ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* 
         // Initialize with unconstrained dimensions for intrinsic measurement
         temp_view->width = 0;
         temp_view->height = 0;
+        // CRITICAL FIX: Do NOT set next_sibling to nullptr!
+        // In the merged DOM/View tree, temp_view IS the actual DOM node,
+        // so modifying next_sibling breaks the DOM sibling chain!
+        // temp_view->next_sibling = nullptr;  // REMOVED - breaks DOM chain
+
         // CRITICAL: Ensure this View is not linked to any parent
         temp_view->parent = nullptr;
-        temp_view->next_sibling = nullptr;
         log_debug("*** TEMP_VIEW TRACE: Created isolated temp view %p for %s", temp_view, child->node_name());
     }
     return temp_view;
