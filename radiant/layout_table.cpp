@@ -164,8 +164,6 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
 
 // Parse cell attributes (colspan, rowspan)
 static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewTableCell* cell) {
-    if (!cellNode || !cell) return;
-
     assert(cell->td);
     // Initialize defaults
     cell->td->col_span = 1;
@@ -237,7 +235,6 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
 // Create and initialize a table cell view
 static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode) {
     ViewTableCell* cell = (ViewTableCell*)alloc_view(lycon, RDT_VIEW_TABLE_CELL, cellNode);
-    if (!cell) return nullptr;
 
     // Save current layout context
     DomNode* saved_elmt = lycon->elmt;
@@ -262,22 +259,12 @@ static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode)
 
 // Create and initialize a table row view
 static ViewTableRow* create_table_row(LayoutContext* lycon, DomNode* rowNode) {
-    ViewTableRow* row = (ViewTableRow*)alloc_view(lycon, RDT_VIEW_TABLE_ROW, rowNode);
-    if (!row) return nullptr;
-
-    // Note: CSS styles should already be resolved by the layout system
-
-    return row;
+    return (ViewTableRow*)alloc_view(lycon, RDT_VIEW_TABLE_ROW, rowNode);
 }
 
 // Create and initialize a table row group view
 static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNode* groupNode) {
-    ViewTableRowGroup* group = (ViewTableRowGroup*)alloc_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, groupNode);
-    if (!group) return nullptr;
-
-    // Note: CSS styles should already be resolved by the layout system
-
-    return group;
+    return (ViewTableRowGroup*)alloc_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, groupNode);
 }
 
 // Build table structure from DOM
@@ -559,10 +546,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     return table;
 }
 
-// =============================================================================
-// LAYOUT ALGORITHM
-// =============================================================================
-
 // Layout cell content with correct parent width (after cell dimensions are set)
 // This re-lays out children that were previously laid out with incorrect (0px) parent width.
 // This fixes the child block width inheritance issue.
@@ -608,13 +591,6 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     if (content_width < 0) content_width = 0;
     if (content_height < 0) content_height = 0;
 
-    // Clear existing children (they were laid out with wrong parent width)
-    // We need to save and clear the child list, then re-layout from DOM
-
-    // Note: Not freeing memory here, assuming it will be garbage collected later
-    // or that the layout system handles this
-    cell->first_child = nullptr;
-
     // Set up layout context for cell content with CORRECT positioning
     // CRITICAL FIX: Set line.left and advance_x to content_start_x to apply padding offset
     lycon->block.content_width = content_width;
@@ -629,18 +605,17 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->elmt = tcell;
 
     log_debug("Pass 2: Re-layout cell content - cell=%dx%d, border=(%d,%d), padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
-              cell->width, cell->height, border_left, border_top,
-              padding_left, padding_right, padding_top, padding_bottom,
-              content_start_x, content_start_y, content_width, content_height);
+        cell->width, cell->height, border_left, border_top,
+        padding_left, padding_right, padding_top, padding_bottom,
+        content_start_x, content_start_y, content_width, content_height);
 
     // Re-layout children with correct parent width
     // Child blocks without explicit width will now inherit content_width via pa_block.width
-    DomNode* cc = nullptr;
     if (tcell->is_element()) {
-        cc = static_cast<DomElement*>(tcell)->first_child;
-    }
-    for (; cc; cc = cc->next_sibling) {
-        layout_flow_node(lycon, cc);
+        DomNode* cc = static_cast<DomElement*>(tcell)->first_child;
+        for (; cc; cc = cc->next_sibling) {
+            layout_flow_node(lycon, cc);
+        }
     }
 
     // Restore layout context
@@ -684,7 +659,8 @@ static int measure_cell_min_width(ViewTableCell* cell) {
             // Use exact text width, no arbitrary margins
             child_width = text->width;
             log_debug("Text child width: %.1fpx", child_width);
-        } else if (child->view_type == RDT_VIEW_BLOCK) {
+        }
+        else if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* block = (ViewBlock*)child;
             // CRITICAL: Block children may have incorrect width at this point
             // Try to read explicit CSS width if available
