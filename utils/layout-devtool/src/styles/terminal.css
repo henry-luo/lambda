@@ -1,0 +1,56 @@
+/* Terminal Panel Styles */
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e1e;
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #3e3e3e;
+  flex-shrink: 0;
+}
+
+.terminal-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #cccccc;
+}
+
+.terminal-content {
+  flex: 1;
+  padding: 8px;
+  overflow: hidden;
+}
+
+/* Override xterm default styles for better integration */
+.terminal-content .xterm {
+  height: 100%;
+  padding: 0;
+}
+
+.terminal-content .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+.terminal-content .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+
+.terminal-content .xterm-viewport::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.terminal-content .xterm-viewport::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 5px;
+}
+
+.terminal-content .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
+}
