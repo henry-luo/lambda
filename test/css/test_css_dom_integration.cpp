@@ -112,6 +112,20 @@ protected:
         return sel;
     }
 
+    // Helper: Create DomElement with Lambda backing for tree manipulation tests
+    DomElement* create_element_with_backing(const char* tag_name) {
+        // Create Lambda Element using MarkBuilder
+        MarkBuilder builder(input);
+        Item lambda_elem = builder.createElement(tag_name);
+        if (!lambda_elem.element) {
+            return nullptr;
+        }
+
+        // Create DomElement with Lambda backing
+        DomElement* dom_elem = dom_element_create(doc, tag_name, lambda_elem.element);
+        return dom_elem;
+    }
+
     // Helper: Parse HTML and build DOM
     DomElement* parse_html_and_build_dom(const char* html_content) {
         String* type_str = create_string(pool, "html");
@@ -162,7 +176,7 @@ protected:
 // ============================================================================
 
 TEST_F(DomIntegrationTest, CreateDomElement) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     ASSERT_NE(element, nullptr);
     EXPECT_STREQ(element->tag_name, "div");
     EXPECT_EQ(element->id, nullptr);
@@ -172,7 +186,7 @@ TEST_F(DomIntegrationTest, CreateDomElement) {
 }
 
 TEST_F(DomIntegrationTest, DomElementClasses) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     ASSERT_NE(element, nullptr);
 
     // Add classes
@@ -198,7 +212,7 @@ TEST_F(DomIntegrationTest, DomElementClasses) {
 }
 
 TEST_F(DomIntegrationTest, ApplyDeclaration) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     ASSERT_NE(element, nullptr);
 
     CssDeclaration* decl = create_declaration(CSS_PROPERTY_COLOR, "red", 0, 1, 0);
@@ -212,7 +226,7 @@ TEST_F(DomIntegrationTest, ApplyDeclaration) {
 }
 
 TEST_F(DomIntegrationTest, StyleVersioning) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     ASSERT_NE(element, nullptr);
 
     uint32_t initial_version = element->style_version;
@@ -230,8 +244,8 @@ TEST_F(DomIntegrationTest, StyleVersioning) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, AppendChild) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("span");
 
     EXPECT_TRUE(dom_element_append_child(parent, child));
     EXPECT_EQ(child->parent, parent);
@@ -240,10 +254,10 @@ TEST_F(DomIntegrationTest, AppendChild) {
 }
 
 TEST_F(DomIntegrationTest, MultipleChildren) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child1 = dom_element_create(doc, "span", nullptr);
-    DomElement* child2 = dom_element_create(doc, "span", nullptr);
-    DomElement* child3 = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child1 = create_element_with_backing("span");
+    DomElement* child2 = create_element_with_backing("span");
+    DomElement* child3 = create_element_with_backing("span");
 
     dom_element_append_child(parent, child1);
     dom_element_append_child(parent, child2);
@@ -261,10 +275,10 @@ TEST_F(DomIntegrationTest, MultipleChildren) {
 }
 
 TEST_F(DomIntegrationTest, InsertBefore) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child1 = dom_element_create(doc, "span", nullptr);
-    DomElement* child2 = dom_element_create(doc, "span", nullptr);
-    DomElement* child3 = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child1 = create_element_with_backing("span");
+    DomElement* child2 = create_element_with_backing("span");
+    DomElement* child3 = create_element_with_backing("span");
 
     dom_element_append_child(parent, child1);
     dom_element_append_child(parent, child3);
@@ -276,9 +290,9 @@ TEST_F(DomIntegrationTest, InsertBefore) {
 }
 
 TEST_F(DomIntegrationTest, RemoveChild) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child1 = dom_element_create(doc, "span", nullptr);
-    DomElement* child2 = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child1 = create_element_with_backing("span");
+    DomElement* child2 = create_element_with_backing("span");
 
     dom_element_append_child(parent, child1);
     dom_element_append_child(parent, child2);
@@ -290,10 +304,10 @@ TEST_F(DomIntegrationTest, RemoveChild) {
 }
 
 TEST_F(DomIntegrationTest, StructuralQueries) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child1 = dom_element_create(doc, "span", nullptr);
-    DomElement* child2 = dom_element_create(doc, "span", nullptr);
-    DomElement* child3 = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child1 = create_element_with_backing("span");
+    DomElement* child2 = create_element_with_backing("span");
+    DomElement* child3 = create_element_with_backing("span");
 
     dom_element_append_child(parent, child1);
     dom_element_append_child(parent, child2);
@@ -317,8 +331,8 @@ TEST_F(DomIntegrationTest, StructuralQueries) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, TypeSelectorMatching) {
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* span = dom_element_create(doc, "span", nullptr);
+    DomElement* div = create_element_with_backing("div");
+    DomElement* span = create_element_with_backing("span");
 
     CssSimpleSelector* div_sel = create_type_selector("div");
     CssSimpleSelector* span_sel = create_type_selector("span");
@@ -329,7 +343,7 @@ TEST_F(DomIntegrationTest, TypeSelectorMatching) {
 }
 
 TEST_F(DomIntegrationTest, ClassSelectorMatching) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "my-class");
     dom_element_add_class(element, "another-class");
 
@@ -383,9 +397,9 @@ TEST_F(DomIntegrationTest, AttributeSelectorMatching) {
 
 TEST_F(DomIntegrationTest, UniversalSelectorMatching) {
     // Universal selector (*) matches any element
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* span = dom_element_create(doc, "span", nullptr);
-    DomElement* p = dom_element_create(doc, "p", nullptr);
+    DomElement* div = create_element_with_backing("div");
+    DomElement* span = create_element_with_backing("span");
+    DomElement* p = create_element_with_backing("p");
 
     CssSimpleSelector* universal = (CssSimpleSelector*)pool_calloc(pool, sizeof(CssSimpleSelector));
     universal->type = CSS_SELECTOR_TYPE_UNIVERSAL;
@@ -487,7 +501,7 @@ TEST_F(DomIntegrationTest, AttributeSelector_All7Types) {
 
 TEST_F(DomIntegrationTest, PseudoClass_UserAction) {
     // Test user action pseudo-classes
-    DomElement* link = dom_element_create(doc, "a", nullptr);
+    DomElement* link = create_element_with_backing("a");
 
     // :hover
     dom_element_set_pseudo_state(link, PSEUDO_STATE_HOVER);
@@ -512,7 +526,7 @@ TEST_F(DomIntegrationTest, PseudoClass_UserAction) {
 
 TEST_F(DomIntegrationTest, PseudoClass_InputStates) {
     // Test form input pseudo-classes
-    DomElement* input = dom_element_create(doc, "input", nullptr);
+    DomElement* input = create_element_with_backing("input");
 
     // :enabled / :disabled
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ENABLED, nullptr, input));
@@ -521,34 +535,34 @@ TEST_F(DomIntegrationTest, PseudoClass_InputStates) {
     EXPECT_FALSE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_ENABLED, nullptr, input));
 
     // :checked
-    DomElement* checkbox = dom_element_create(doc, "input", nullptr);
+    DomElement* checkbox = create_element_with_backing("input");
     dom_element_set_attribute(checkbox, "type", "checkbox");
     dom_element_set_pseudo_state(checkbox, PSEUDO_STATE_CHECKED);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_CHECKED, nullptr, checkbox));
 
     // :required / :optional
-    DomElement* required_input = dom_element_create(doc, "input", nullptr);
+    DomElement* required_input = create_element_with_backing("input");
     dom_element_set_pseudo_state(required_input, PSEUDO_STATE_REQUIRED);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_REQUIRED, nullptr, required_input));
 
-    DomElement* optional_input = dom_element_create(doc, "input", nullptr);
+    DomElement* optional_input = create_element_with_backing("input");
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_OPTIONAL, nullptr, optional_input));
 
     // :valid / :invalid
-    DomElement* valid_input = dom_element_create(doc, "input", nullptr);
+    DomElement* valid_input = create_element_with_backing("input");
     dom_element_set_pseudo_state(valid_input, PSEUDO_STATE_VALID);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_VALID, nullptr, valid_input));
 
-    DomElement* invalid_input = dom_element_create(doc, "input", nullptr);
+    DomElement* invalid_input = create_element_with_backing("input");
     dom_element_set_pseudo_state(invalid_input, PSEUDO_STATE_INVALID);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_INVALID, nullptr, invalid_input));
 
     // :read-only / :read-write
-    DomElement* readonly_input = dom_element_create(doc, "input", nullptr);
+    DomElement* readonly_input = create_element_with_backing("input");
     dom_element_set_pseudo_state(readonly_input, PSEUDO_STATE_READ_ONLY);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_READ_ONLY, nullptr, readonly_input));
 
-    DomElement* readwrite_input = dom_element_create(doc, "input", nullptr);
+    DomElement* readwrite_input = create_element_with_backing("input");
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_READ_WRITE, nullptr, readwrite_input));
 }
 
@@ -557,7 +571,7 @@ TEST_F(DomIntegrationTest, PseudoClass_InputStates) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, PseudoStateMatching) {
-    DomElement* element = dom_element_create(doc, "button", nullptr);
+    DomElement* element = create_element_with_backing("button");
 
     dom_element_set_pseudo_state(element, PSEUDO_STATE_HOVER);
     EXPECT_TRUE(selector_matcher_matches_pseudo_class(matcher, CSS_SELECTOR_PSEUDO_HOVER, nullptr, element));
@@ -568,10 +582,10 @@ TEST_F(DomIntegrationTest, PseudoStateMatching) {
 }
 
 TEST_F(DomIntegrationTest, StructuralPseudoClasses) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child1 = dom_element_create(doc, "span", nullptr);
-    DomElement* child2 = dom_element_create(doc, "span", nullptr);
-    DomElement* child3 = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child1 = create_element_with_backing("span");
+    DomElement* child2 = create_element_with_backing("span");
+    DomElement* child3 = create_element_with_backing("span");
 
     dom_element_append_child(parent, child1);
     dom_element_append_child(parent, child2);
@@ -587,10 +601,10 @@ TEST_F(DomIntegrationTest, StructuralPseudoClasses) {
 }
 
 TEST_F(DomIntegrationTest, NthChildMatching) {
-    DomElement* parent = dom_element_create(doc, "ul", nullptr);
+    DomElement* parent = create_element_with_backing("ul");
 
     for (int i = 0; i < 10; i++) {
-        DomElement* child = dom_element_create(doc, "li", nullptr);
+        DomElement* child = create_element_with_backing("li");
         dom_element_append_child(parent, child);
     }
 
@@ -607,11 +621,11 @@ TEST_F(DomIntegrationTest, NthChildMatching) {
 }
 
 TEST_F(DomIntegrationTest, NthChild_AdvancedFormulas) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
+    DomElement* parent = create_element_with_backing("div");
 
     // Create 20 children for comprehensive testing
     for (int i = 0; i < 20; i++) {
-        DomElement* child = dom_element_create(doc, "span", nullptr);
+        DomElement* child = create_element_with_backing("span");
         dom_element_append_child(parent, child);
     }
 
@@ -657,10 +671,10 @@ TEST_F(DomIntegrationTest, NthChild_AdvancedFormulas) {
 }
 
 TEST_F(DomIntegrationTest, NthLastChild) {
-    DomElement* parent = dom_element_create(doc, "ul", nullptr);
+    DomElement* parent = create_element_with_backing("ul");
 
     for (int i = 0; i < 10; i++) {
-        DomElement* child = dom_element_create(doc, "li", nullptr);
+        DomElement* child = create_element_with_backing("li");
         dom_element_append_child(parent, child);
     }
 
@@ -718,7 +732,7 @@ TEST_F(DomIntegrationTest, CompoundSelectors) {
 
 TEST_F(DomIntegrationTest, ComplexSelectors_MultipleClasses) {
     // Test .class1.class2.class3 (element must have all classes)
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "button");
     dom_element_add_class(element, "primary");
     dom_element_add_class(element, "large");
@@ -733,7 +747,7 @@ TEST_F(DomIntegrationTest, ComplexSelectors_MultipleClasses) {
     EXPECT_TRUE(selector_matcher_matches_compound(matcher, compound, element));
 
     // Missing one class - should not match
-    DomElement* partial = dom_element_create(doc, "div", nullptr);
+    DomElement* partial = create_element_with_backing("div");
     dom_element_add_class(partial, "button");
     dom_element_add_class(partial, "primary");
     EXPECT_FALSE(selector_matcher_matches_compound(matcher, compound, partial));
@@ -763,9 +777,9 @@ TEST_F(DomIntegrationTest, ComplexSelectors_WithAttributes) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, DescendantCombinator) {
-    DomElement* grandparent = dom_element_create(doc, "div", nullptr);
-    DomElement* parent = dom_element_create(doc, "ul", nullptr);
-    DomElement* child = dom_element_create(doc, "li", nullptr);
+    DomElement* grandparent = create_element_with_backing("div");
+    DomElement* parent = create_element_with_backing("ul");
+    DomElement* child = create_element_with_backing("li");
 
     dom_element_append_child(grandparent, parent);
     dom_element_append_child(parent, child);
@@ -783,8 +797,8 @@ TEST_F(DomIntegrationTest, DescendantCombinator) {
 }
 
 TEST_F(DomIntegrationTest, ChildCombinator) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("span");
 
     dom_element_append_child(parent, child);
 
@@ -797,10 +811,10 @@ TEST_F(DomIntegrationTest, ChildCombinator) {
 }
 
 TEST_F(DomIntegrationTest, SiblingCombinators) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child1 = dom_element_create(doc, "h1", nullptr);
-    DomElement* child2 = dom_element_create(doc, "p", nullptr);
-    DomElement* child3 = dom_element_create(doc, "p", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child1 = create_element_with_backing("h1");
+    DomElement* child2 = create_element_with_backing("p");
+    DomElement* child3 = create_element_with_backing("p");
 
     dom_element_append_child(parent, child1);
     dom_element_append_child(parent, child2);
@@ -822,12 +836,12 @@ TEST_F(DomIntegrationTest, SiblingCombinators) {
 
 TEST_F(DomIntegrationTest, AdjacentSiblingCombinator_Complex) {
     // Test h1 + p (p immediately after h1)
-    DomElement* container = dom_element_create(doc, "article", nullptr);
-    DomElement* heading = dom_element_create(doc, "h1", nullptr);
-    DomElement* para1 = dom_element_create(doc, "p", nullptr);
-    DomElement* para2 = dom_element_create(doc, "p", nullptr);
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* para3 = dom_element_create(doc, "p", nullptr);
+    DomElement* container = create_element_with_backing("article");
+    DomElement* heading = create_element_with_backing("h1");
+    DomElement* para1 = create_element_with_backing("p");
+    DomElement* para2 = create_element_with_backing("p");
+    DomElement* div = create_element_with_backing("div");
+    DomElement* para3 = create_element_with_backing("p");
 
     dom_element_append_child(container, heading);
     dom_element_append_child(container, para1);    // Matches h1 + p
@@ -847,12 +861,12 @@ TEST_F(DomIntegrationTest, AdjacentSiblingCombinator_Complex) {
 
 TEST_F(DomIntegrationTest, GeneralSiblingCombinator_Complex) {
     // Test h2 ~ p (any p that follows h2)
-    DomElement* section = dom_element_create(doc, "section", nullptr);
-    DomElement* h2 = dom_element_create(doc, "h2", nullptr);
-    DomElement* para1 = dom_element_create(doc, "p", nullptr);
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* para2 = dom_element_create(doc, "p", nullptr);
-    DomElement* para3 = dom_element_create(doc, "p", nullptr);
+    DomElement* section = create_element_with_backing("section");
+    DomElement* h2 = create_element_with_backing("h2");
+    DomElement* para1 = create_element_with_backing("p");
+    DomElement* div = create_element_with_backing("div");
+    DomElement* para2 = create_element_with_backing("p");
+    DomElement* para3 = create_element_with_backing("p");
 
     dom_element_append_child(section, h2);
     dom_element_append_child(section, para1);    // Matches h2 ~ p
@@ -880,10 +894,10 @@ TEST_F(DomIntegrationTest, GeneralSiblingCombinator_Complex) {
 
 TEST_F(DomIntegrationTest, DescendantCombinator_DeepNesting) {
     // Test div p (any p inside div, at any depth)
-    DomElement* outer_div = dom_element_create(doc, "div", nullptr);
-    DomElement* middle_section = dom_element_create(doc, "section", nullptr);
-    DomElement* inner_div = dom_element_create(doc, "div", nullptr);
-    DomElement* para = dom_element_create(doc, "p", nullptr);
+    DomElement* outer_div = create_element_with_backing("div");
+    DomElement* middle_section = create_element_with_backing("section");
+    DomElement* inner_div = create_element_with_backing("div");
+    DomElement* para = create_element_with_backing("p");
 
     dom_element_append_child(outer_div, middle_section);
     dom_element_append_child(middle_section, inner_div);
@@ -903,10 +917,10 @@ TEST_F(DomIntegrationTest, DescendantCombinator_DeepNesting) {
 
 TEST_F(DomIntegrationTest, ChildCombinator_DirectOnly) {
     // Test div > p (only direct children)
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* direct_p = dom_element_create(doc, "p", nullptr);
-    DomElement* section = dom_element_create(doc, "section", nullptr);
-    DomElement* nested_p = dom_element_create(doc, "p", nullptr);
+    DomElement* div = create_element_with_backing("div");
+    DomElement* direct_p = create_element_with_backing("p");
+    DomElement* section = create_element_with_backing("section");
+    DomElement* nested_p = create_element_with_backing("p");
 
     dom_element_append_child(div, direct_p);       // Direct child
     dom_element_append_child(div, section);
@@ -927,12 +941,12 @@ TEST_F(DomIntegrationTest, ChildCombinator_DirectOnly) {
 
 TEST_F(DomIntegrationTest, SelectorMatchingPerformance) {
     // Create a large DOM tree
-    DomElement* root = dom_element_create(doc, "html", nullptr);
-    DomElement* body = dom_element_create(doc, "body", nullptr);
+    DomElement* root = create_element_with_backing("html");
+    DomElement* body = create_element_with_backing("body");
     dom_element_append_child(root, body);
 
     for (int i = 0; i < 100; i++) {
-        DomElement* div = dom_element_create(doc, "div", nullptr);
+        DomElement* div = create_element_with_backing("div");
         dom_element_add_class(div, "test-class");
         dom_element_append_child(body, div);
     }
@@ -960,7 +974,7 @@ TEST_F(DomIntegrationTest, SelectorMatchingPerformance) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, EdgeCase_NullParameters) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     CssSimpleSelector* selector = create_type_selector("div");
 
     // Test null matcher
@@ -987,7 +1001,7 @@ TEST_F(DomIntegrationTest, EdgeCase_EmptyStrings) {
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_DuplicateClasses) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
 
     // Adding same class multiple times
     EXPECT_TRUE(dom_element_add_class(element, "duplicate"));
@@ -1004,10 +1018,10 @@ TEST_F(DomIntegrationTest, EdgeCase_DuplicateClasses) {
 
 TEST_F(DomIntegrationTest, EdgeCase_MaxChildren) {
     // Test with many children
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
+    DomElement* parent = create_element_with_backing("div");
 
     for (int i = 0; i < 1000; i++) {
-        DomElement* child = dom_element_create(doc, "span", nullptr);
+        DomElement* child = create_element_with_backing("span");
         dom_element_append_child(parent, child);
     }
 
@@ -1027,8 +1041,8 @@ TEST_F(DomIntegrationTest, EdgeCase_CircularPrevention) {
     // stack overflow from infinite recursion in invalidation.
 
     // For now, just verify basic parent-child relationship works
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("span");
     dom_element_append_child(parent, child);
 
     EXPECT_EQ(child->parent, parent);
@@ -1036,8 +1050,8 @@ TEST_F(DomIntegrationTest, EdgeCase_CircularPrevention) {
 }
 
 TEST_F(DomIntegrationTest, EdgeCase_SelfRemoval) {
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
-    DomElement* child = dom_element_create(doc, "span", nullptr);
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("span");
 
     dom_element_append_child(parent, child);
 
@@ -1046,7 +1060,7 @@ TEST_F(DomIntegrationTest, EdgeCase_SelfRemoval) {
 }
 
 TEST_F(DomIntegrationTest, Stress_ManySelectors) {
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
 
     // Add many classes
     for (int i = 0; i < 100; i++) {
@@ -1066,11 +1080,11 @@ TEST_F(DomIntegrationTest, Stress_ManySelectors) {
 
 TEST_F(DomIntegrationTest, Stress_DeepDOMTree) {
     // Create very deep DOM tree (100 levels)
-    DomElement* root = dom_element_create(doc, "div", nullptr);
+    DomElement* root = create_element_with_backing("div");
     DomElement* current = root;
 
     for (int i = 0; i < 100; i++) {
-        DomElement* child = dom_element_create(doc, "div", nullptr);
+        DomElement* child = create_element_with_backing("div");
         dom_element_append_child(current, child);
         current = child;
     }
@@ -1118,7 +1132,7 @@ TEST_F(DomIntegrationTest, UtilityFunctions) {
 
 TEST_F(DomIntegrationTest, CompleteStyleApplication) {
     // Create element
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_set_attribute(element, "id", "main");
     dom_element_add_class(element, "container");
 
@@ -1146,7 +1160,7 @@ TEST_F(DomIntegrationTest, CompleteStyleApplication) {
 TEST_F(DomIntegrationTest, SelectorMatcherStatistics) {
     selector_matcher_reset_statistics(matcher);
 
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     CssSimpleSelector* div_sel = create_type_selector("div");
 
     // Perform some matches
@@ -1173,7 +1187,7 @@ TEST_F(DomIntegrationTest, SelectorMatcherStatistics) {
 
 TEST_F(DomIntegrationTest, QuirksMode_CaseSensitiveClasses_Default) {
     // Default: case-sensitive class matching
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "MyClass");
 
     CssSimpleSelector* lower_sel = create_class_selector("myclass");
@@ -1188,7 +1202,7 @@ TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveClasses) {
     // Enable quirks mode - should make classes case-insensitive
     selector_matcher_set_quirks_mode(matcher, true);
 
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "MyClass");
 
     CssSimpleSelector* lower_sel = create_class_selector("myclass");
@@ -1203,7 +1217,7 @@ TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveClasses) {
 
 TEST_F(DomIntegrationTest, QuirksMode_CaseSensitiveAttributes_Default) {
     // Default: case-sensitive attribute values
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_set_attribute(element, "data-test", "ValueMixed");
 
     // Use the actual selector matching function
@@ -1219,7 +1233,7 @@ TEST_F(DomIntegrationTest, QuirksMode_FineGrainedControl_Classes) {
     selector_matcher_set_case_sensitive_classes(matcher, false);
     // Keep attributes case-sensitive (default)
 
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "MyClass");
     dom_element_set_attribute(element, "data-test", "MyValue");
 
@@ -1237,7 +1251,7 @@ TEST_F(DomIntegrationTest, QuirksMode_FineGrainedControl_Classes) {
 TEST_F(DomIntegrationTest, QuirksMode_MultipleClasses_CaseInsensitive) {
     selector_matcher_set_quirks_mode(matcher, true);
 
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "FirstClass");
     dom_element_add_class(element, "SecondClass");
     dom_element_add_class(element, "ThirdClass");
@@ -1291,13 +1305,13 @@ TEST_F(DomIntegrationTest, SelectorCache_MultipleEntries) {
 TEST_F(DomIntegrationTest, AdvancedSelector_DeepHierarchy_Descendant) {
     // Test: html > body > main > section > article > div > p
     // Create a deep DOM tree (7 levels)
-    DomElement* html = dom_element_create(doc, "html", nullptr);
-    DomElement* body = dom_element_create(doc, "body", nullptr);
-    DomElement* main_el = dom_element_create(doc, "main", nullptr);
-    DomElement* section = dom_element_create(doc, "section", nullptr);
-    DomElement* article = dom_element_create(doc, "article", nullptr);
-    DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* p = dom_element_create(doc, "p", nullptr);
+    DomElement* html = create_element_with_backing("html");
+    DomElement* body = create_element_with_backing("body");
+    DomElement* main_el = create_element_with_backing("main");
+    DomElement* section = create_element_with_backing("section");
+    DomElement* article = create_element_with_backing("article");
+    DomElement* div = create_element_with_backing("div");
+    DomElement* p = create_element_with_backing("p");
 
     dom_element_append_child(html, body);
     dom_element_append_child(body, main_el);
@@ -1324,14 +1338,14 @@ TEST_F(DomIntegrationTest, AdvancedSelector_DeepHierarchy_Descendant) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_SiblingChain) {
     // Test: div with multiple siblings and adjacent/general sibling selectors
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
+    DomElement* parent = create_element_with_backing("div");
 
-    DomElement* h1 = dom_element_create(doc, "h1", nullptr);
-    DomElement* p1 = dom_element_create(doc, "p", nullptr);
-    DomElement* p2 = dom_element_create(doc, "p", nullptr);
-    DomElement* div1 = dom_element_create(doc, "div", nullptr);
-    DomElement* p3 = dom_element_create(doc, "p", nullptr);
-    DomElement* span = dom_element_create(doc, "span", nullptr);
+    DomElement* h1 = create_element_with_backing("h1");
+    DomElement* p1 = create_element_with_backing("p");
+    DomElement* p2 = create_element_with_backing("p");
+    DomElement* div1 = create_element_with_backing("div");
+    DomElement* p3 = create_element_with_backing("p");
+    DomElement* span = create_element_with_backing("span");
 
     dom_element_add_class(h1, "title");
     dom_element_add_class(p1, "intro");
@@ -1372,7 +1386,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_SiblingChain) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_IDvsClass) {
     // Test specificity: #id (1,0,0) vs .class.class.class (0,3,0)
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_set_attribute(element, "id", "unique");
     dom_element_add_class(element, "class1");
     dom_element_add_class(element, "class2");
@@ -1398,7 +1412,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_IDvsClass) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_MultipleRules) {
     // Test cascade with multiple overlapping rules
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_set_attribute(element, "id", "main");
     dom_element_add_class(element, "container");
     dom_element_add_class(element, "primary");
@@ -1427,7 +1441,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_MultipleRules) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_EqualSpecificity) {
     // Test: When specificity is equal, last rule wins (source order)
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "box");
 
     // All have same specificity (0,1,1)
@@ -1503,7 +1517,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_HierarchyWithAttributes) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_MultipleClassCombinations) {
     // Test: Element with multiple classes, test various combinations
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "btn");
     dom_element_add_class(element, "btn-primary");
     dom_element_add_class(element, "btn-lg");
@@ -1531,12 +1545,12 @@ TEST_F(DomIntegrationTest, AdvancedSelector_HierarchyWithNthChild) {
     //   <li>Item 5</li>
     // </ul>
 
-    DomElement* ul = dom_element_create(doc, "ul", nullptr);
-    DomElement* li1 = dom_element_create(doc, "li", nullptr);
-    DomElement* li2 = dom_element_create(doc, "li", nullptr);
-    DomElement* li3 = dom_element_create(doc, "li", nullptr);
-    DomElement* li4 = dom_element_create(doc, "li", nullptr);
-    DomElement* li5 = dom_element_create(doc, "li", nullptr);
+    DomElement* ul = create_element_with_backing("ul");
+    DomElement* li1 = create_element_with_backing("li");
+    DomElement* li2 = create_element_with_backing("li");
+    DomElement* li3 = create_element_with_backing("li");
+    DomElement* li4 = create_element_with_backing("li");
+    DomElement* li5 = create_element_with_backing("li");
 
     dom_element_add_class(li3, "special");
 
@@ -1587,10 +1601,10 @@ TEST_F(DomIntegrationTest, AdvancedSelector_NestedListsWithClasses) {
     //   </li>
     // </ul>
 
-    DomElement* ul1 = dom_element_create(doc, "ul", nullptr);
-    DomElement* li1 = dom_element_create(doc, "li", nullptr);
-    DomElement* ul2 = dom_element_create(doc, "ul", nullptr);
-    DomElement* li2 = dom_element_create(doc, "li", nullptr);
+    DomElement* ul1 = create_element_with_backing("ul");
+    DomElement* li1 = create_element_with_backing("li");
+    DomElement* ul2 = create_element_with_backing("ul");
+    DomElement* li2 = create_element_with_backing("li");
 
     dom_element_add_class(ul1, "menu");
     dom_element_add_class(li1, "item");
@@ -1617,7 +1631,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_NestedListsWithClasses) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_ComplexCascade_MultipleProperties) {
     // Test: Multiple properties with overlapping rules
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_set_attribute(element, "id", "box");
     dom_element_add_class(element, "styled");
 
@@ -1692,7 +1706,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_AttributeVariations) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_PseudoClassCombinations) {
     // Test: Multiple pseudo-classes on same element
-    DomElement* input = dom_element_create(doc, "input", nullptr);
+    DomElement* input = create_element_with_backing("input");
     dom_element_set_attribute(input, "type", "text");
     dom_element_set_attribute(input, "required", "true");
 
@@ -1823,7 +1837,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_FormElementHierarchy) {
 
 TEST_F(DomIntegrationTest, AdvancedSelector_SpecificityTieBreaker_SourceOrder) {
     // Test: When specificity is identical, source order determines winner
-    DomElement* element = dom_element_create(doc, "div", nullptr);
+    DomElement* element = create_element_with_backing("div");
     dom_element_add_class(element, "box");
     dom_element_add_class(element, "widget");
 
@@ -1853,20 +1867,20 @@ TEST_F(DomIntegrationTest, AdvancedSelector_TableStructure) {
     //   <tfoot><tr><td>Footer</td></tr></tfoot>
     // </table>
 
-    DomElement* table = dom_element_create(doc, "table", nullptr);
-    DomElement* thead = dom_element_create(doc, "thead", nullptr);
-    DomElement* tbody = dom_element_create(doc, "tbody", nullptr);
-    DomElement* tfoot = dom_element_create(doc, "tfoot", nullptr);
+    DomElement* table = create_element_with_backing("table");
+    DomElement* thead = create_element_with_backing("thead");
+    DomElement* tbody = create_element_with_backing("tbody");
+    DomElement* tfoot = create_element_with_backing("tfoot");
 
-    DomElement* thead_tr = dom_element_create(doc, "tr", nullptr);
-    DomElement* th = dom_element_create(doc, "th", nullptr);
+    DomElement* thead_tr = create_element_with_backing("tr");
+    DomElement* th = create_element_with_backing("th");
 
-    DomElement* tbody_tr = dom_element_create(doc, "tr", nullptr);
-    DomElement* td1 = dom_element_create(doc, "td", nullptr);
-    DomElement* td2 = dom_element_create(doc, "td", nullptr);
+    DomElement* tbody_tr = create_element_with_backing("tr");
+    DomElement* td1 = create_element_with_backing("td");
+    DomElement* td2 = create_element_with_backing("td");
 
-    DomElement* tfoot_tr = dom_element_create(doc, "tr", nullptr);
-    DomElement* td3 = dom_element_create(doc, "td", nullptr);
+    DomElement* tfoot_tr = create_element_with_backing("tr");
+    DomElement* td3 = create_element_with_backing("td");
 
     // Add classes for styling
     dom_element_add_class(thead, "table-header");
@@ -2064,7 +2078,7 @@ TEST_F(DomIntegrationTest, DomComment_EmptyContent) {
 
 TEST_F(DomIntegrationTest, DomComment_NullParameters) {
     // Test NULL parameter handling
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
+    DomElement* parent = create_element_with_backing("div");
     ASSERT_NE(parent, nullptr);
     
     // NULL content should create empty comment
@@ -2124,7 +2138,7 @@ TEST_F(DomIntegrationTest, NodeType_IsElement) {
     GTEST_SKIP() << "Standalone node creation no longer supported"; 
     DomElement* element = nullptr; DomText* text = nullptr; DomComment* comment = nullptr;
     return;
-    element = dom_element_create(doc, "div", nullptr);
+    element = create_element_with_backing("div");
 //     DomText* text = dom_text_create(pool, "text");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "content");
 
@@ -2138,7 +2152,7 @@ TEST_F(DomIntegrationTest, NodeType_IsText) {
     GTEST_SKIP() << "Standalone node creation no longer supported"; 
     DomElement* element = nullptr; DomText* text = nullptr; DomComment* comment = nullptr;
     return;
-    element = dom_element_create(doc, "div", nullptr);
+    element = create_element_with_backing("div");
 //     DomText* text = dom_text_create(pool, "text");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "content");
 
@@ -2151,7 +2165,7 @@ TEST_F(DomIntegrationTest, NodeType_IsComment) {
     GTEST_SKIP() << "Standalone node creation no longer supported"; 
     DomElement* element = nullptr; DomText* text = nullptr; DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
     return;
-    element = dom_element_create(doc, "div", nullptr);
+    element = create_element_with_backing("div");
 //     DomText* text = dom_text_create(pool, "text");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "content");
 //     DomComment* doctype = dom_comment_create(pool, DOM_NODE_DOCTYPE, "!DOCTYPE", "html");
@@ -2170,7 +2184,7 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithTextChild) {
     GTEST_SKIP() << "Standalone node creation no longer supported"; 
     DomElement* div = nullptr; DomText* text = nullptr;
     return;
-    div = dom_element_create(doc, "div", nullptr);
+    div = create_element_with_backing("div");
 //     DomText* text = dom_text_create(pool, "Hello World");
 
     // Manually link text node as child
@@ -2188,7 +2202,7 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithCommentChild) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
+//     DomElement* div = create_element_with_backing("div");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", " TODO: Add content ");
 
     // Manually link comment node as child
@@ -2204,10 +2218,10 @@ TEST_F(DomIntegrationTest, MixedTree_ElementTextElement) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
-//     DomElement* span1 = dom_element_create(doc, "span", nullptr);
+//     DomElement* div = create_element_with_backing("div");
+//     DomElement* span1 = create_element_with_backing("span");
 //     DomText* text = dom_text_create(pool, " middle text ");
-//     DomElement* span2 = dom_element_create(doc, "span", nullptr);
+//     DomElement* span2 = create_element_with_backing("span");
 
     // Manually link children
     dom_element_append_child(div, span1);
@@ -2233,10 +2247,10 @@ TEST_F(DomIntegrationTest, MixedTree_AllNodeTypes) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
+//     DomElement* div = create_element_with_backing("div");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", " Comment ");
 //     DomText* text1 = dom_text_create(pool, "Text before");
-//     DomElement* span = dom_element_create(doc, "span", nullptr);
+//     DomElement* span = create_element_with_backing("span");
 //     DomText* text2 = dom_text_create(pool, "Text after");
 
     // Manually link all children
@@ -2278,9 +2292,9 @@ TEST_F(DomIntegrationTest, MixedTree_NavigateSiblings) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-    DomElement* parent = dom_element_create(doc, "div", nullptr);
+    DomElement* parent = create_element_with_backing("div");
 //     DomText* text1 = dom_text_create(pool, "First");
-    DomElement* elem = dom_element_create(doc, "span", nullptr);
+    DomElement* elem = create_element_with_backing("span");
 //     DomText* text2 = dom_text_create(pool, "Second");
 
     // Manually link children
@@ -2311,9 +2325,9 @@ TEST_F(DomIntegrationTest, MixedTree_RemoveTextNode) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
+//     DomElement* div = create_element_with_backing("div");
 //     DomText* text = dom_text_create(pool, "Remove me");
-//     DomElement* span = dom_element_create(doc, "span", nullptr);
+//     DomElement* span = create_element_with_backing("span");
 
     // Manually link text and span as children
     text->parent = div;
@@ -2341,8 +2355,8 @@ TEST_F(DomIntegrationTest, MixedTree_InsertTextBefore) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
-//     DomElement* span = dom_element_create(doc, "span", nullptr);
+//     DomElement* div = create_element_with_backing("div");
+//     DomElement* span = create_element_with_backing("span");
 //     DomText* text = dom_text_create(pool, "Insert before span");
 
     // First add span
@@ -2363,7 +2377,7 @@ TEST_F(DomIntegrationTest, MixedTree_MultipleTextNodes) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-    DomElement* p = dom_element_create(doc, "p", nullptr);
+    DomElement* p = create_element_with_backing("p");
 //     DomText* text1 = dom_text_create(pool, "First ");
 //     DomText* text2 = dom_text_create(pool, "second ");
 //     DomText* text3 = dom_text_create(pool, "third.");
@@ -2391,9 +2405,9 @@ TEST_F(DomIntegrationTest, MixedTree_NestedWithText) {
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
     // <div>Text1<span>Inner text</span>Text2</div>
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
+//     DomElement* div = create_element_with_backing("div");
 //     DomText* text1 = dom_text_create(pool, "Text1");
-//     DomElement* span = dom_element_create(doc, "span", nullptr);
+//     DomElement* span = create_element_with_backing("span");
 //     DomText* inner_text = dom_text_create(pool, "Inner text");
 //     DomText* text2 = dom_text_create(pool, "Text2");
 
@@ -2424,12 +2438,12 @@ TEST_F(DomIntegrationTest, MixedTree_CommentsBetweenElements) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
-    DomElement* h1 = dom_element_create(doc, "h1", nullptr);
+//     DomElement* div = create_element_with_backing("div");
+    DomElement* h1 = create_element_with_backing("h1");
 //     DomComment* comment1 = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", " Section 1 ");
-    DomElement* p1 = dom_element_create(doc, "p", nullptr);
+    DomElement* p1 = create_element_with_backing("p");
 //     DomComment* comment2 = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", " Section 2 ");
-    DomElement* p2 = dom_element_create(doc, "p", nullptr);
+    DomElement* p2 = create_element_with_backing("p");
 
     // Link all nodes as children of div
     dom_element_append_child(div, h1);
@@ -2477,10 +2491,10 @@ TEST_F(DomIntegrationTest, MixedTree_DoctypeAtStart) {
     DomElement* div = nullptr; DomElement* span = nullptr; DomElement* span1 = nullptr; DomElement* span2 = nullptr;
     DomText* text = nullptr; DomText* text1 = nullptr; DomText* text2 = nullptr; DomText* inner_text = nullptr; DomText* text3 = nullptr;
     DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
-    DomElement* html = dom_element_create(doc, "html", nullptr);
+    DomElement* html = create_element_with_backing("html");
 //     DomComment* doctype = dom_comment_create(pool, DOM_NODE_DOCTYPE, "!DOCTYPE", "html");
-    DomElement* head = dom_element_create(doc, "head", nullptr);
-    DomElement* body = dom_element_create(doc, "body", nullptr);
+    DomElement* head = create_element_with_backing("head");
+    DomElement* body = create_element_with_backing("body");
 
     // Simulate: <!DOCTYPE html><html><head></head><body></body></html>
     // Note: In real DOM, DOCTYPE is typically not a child of html,
@@ -2519,10 +2533,10 @@ TEST_F(DomIntegrationTest, Memory_CommentNodeDestroy) {
 TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
     GTEST_SKIP() << "Standalone node creation no longer supported"; return;
     DomText* text = nullptr; DomComment* comment = nullptr; DomElement* div = nullptr; DomElement* span = nullptr;
-//     DomElement* div = dom_element_create(doc, "div", nullptr);
+//     DomElement* div = create_element_with_backing("div");
 //     DomText* text = dom_text_create(pool, "Text");
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", "Comment");
-//     DomElement* span = dom_element_create(doc, "span", nullptr);
+//     DomElement* span = create_element_with_backing("span");
 
     // Manually link nodes
     text->parent = div;
