@@ -2931,7 +2931,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float grow_value = (float)value->data.number.value;
-                span->in_line->fi->flex_grow = grow_value;
+                span->fi->flex_grow = grow_value;
                 log_debug("[CSS] flex-grow: %.2f", grow_value);
             }
             break;
@@ -2942,7 +2942,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 float shrink_value = (float)value->data.number.value;
-                span->in_line->fi->flex_shrink = shrink_value;
+                span->fi->flex_shrink = shrink_value;
                 log_debug("[CSS] flex-shrink: %.2f", shrink_value);
             }
             break;
@@ -2952,18 +2952,18 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing flex-basis property");
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
-                span->in_line->fi->flex_basis = -1; // -1 indicates auto
-                span->in_line->fi->flex_basis_is_percent = false;
+                span->fi->flex_basis = -1; // -1 indicates auto
+                span->fi->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: auto");
             } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float basis_value = resolve_length_value(lycon, prop_id, value);
-                span->in_line->fi->flex_basis = (int)basis_value;
-                span->in_line->fi->flex_basis_is_percent = false;
+                span->fi->flex_basis = (int)basis_value;
+                span->fi->flex_basis_is_percent = false;
                 log_debug("[CSS] flex-basis: %.2fpx", basis_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                span->in_line->fi->flex_basis = (int)value->data.percentage.value;
-                span->in_line->fi->flex_basis_is_percent = true;
-                log_debug("[CSS] flex-basis: %d%%", span->in_line->fi->flex_basis);
+                span->fi->flex_basis = (int)value->data.percentage.value;
+                span->fi->flex_basis_is_percent = true;
+                log_debug("[CSS] flex-basis: %d%%", span->fi->flex_basis);
             }
             break;
         }
@@ -2973,7 +2973,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int order_value = (int)value->data.number.value;
-                span->in_line->fi->order = order_value;
+                span->fi->order = order_value;
                 log_debug("[CSS] order: %d", order_value);
             }
             break;
@@ -2985,7 +2985,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    span->in_line->fi->align_self = val;
+                    span->fi->align_self = val;
                     log_debug("[CSS] align-self: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
@@ -3014,7 +3014,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Syntax: none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
 
             ViewSpan* span = (ViewSpan*)lycon->view;
-
             // Initialize with defaults
             float flex_grow = 1.0f;      // default when using shorthand
             float flex_shrink = 1.0f;    // default
@@ -3040,10 +3039,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] flex: initial -> grow=0 shrink=1 basis=auto");
                 }
 
-                span->in_line->fi->flex_grow = flex_grow;
-                span->in_line->fi->flex_shrink = flex_shrink;
-                span->in_line->fi->flex_basis = flex_basis;
-                span->in_line->fi->flex_basis_is_percent = flex_basis_is_percent;
+                span->fi->flex_grow = flex_grow;
+                span->fi->flex_shrink = flex_shrink;
+                span->fi->flex_basis = flex_basis;
+                span->fi->flex_basis_is_percent = flex_basis_is_percent;
                 break;
             }
 
@@ -3056,7 +3055,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 bool found_basis = false;
 
                 log_debug("[CSS] flex shorthand with %zu values", count);
-
                 // Parse up to 3 values: grow, shrink, basis
                 for (size_t i = 0; i < count && i < 3; i++) {
                     CssValue* val = values[i];
@@ -3101,10 +3099,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] flex: <grow> -> grow=%.2f shrink=1 basis=0", flex_grow);
                 }
 
-                span->in_line->fi->flex_grow = flex_grow;
-                span->in_line->fi->flex_shrink = flex_shrink;
-                span->in_line->fi->flex_basis = flex_basis;
-                span->in_line->fi->flex_basis_is_percent = flex_basis_is_percent;
+                span->fi->flex_grow = flex_grow;
+                span->fi->flex_shrink = flex_shrink;
+                span->fi->flex_basis = flex_basis;
+                span->fi->flex_basis_is_percent = flex_basis_is_percent;
 
                 log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
                          flex_grow, flex_shrink, flex_basis,
@@ -3116,10 +3114,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 flex_shrink = 1.0f;
                 flex_basis = 0;  // 0px when single unitless number
 
-                span->in_line->fi->flex_grow = flex_grow;
-                span->in_line->fi->flex_shrink = flex_shrink;
-                span->in_line->fi->flex_basis = flex_basis;
-                span->in_line->fi->flex_basis_is_percent = false;
+                span->fi->flex_grow = flex_grow;
+                span->fi->flex_shrink = flex_shrink;
+                span->fi->flex_basis = flex_basis;
+                span->fi->flex_basis_is_percent = false;
                 log_debug("[CSS] flex: %.2f -> grow=%.2f shrink=1 basis=0", flex_grow, flex_grow);
             }
             break;

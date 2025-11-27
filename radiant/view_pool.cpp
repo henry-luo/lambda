@@ -197,12 +197,9 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
-    if (!span->in_line) {
-        span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
-    }
-    if (!span->in_line->fi) {
+    if (!span->fi) {
         FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
-        span->in_line->fi = prop;
+        span->fi = prop;
         prop->flex_grow = 0;  prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
         prop->align_self = CSS_VALUE_AUTO; // ALIGN_AUTO as per CSS spec
     }

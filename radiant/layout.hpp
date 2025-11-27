@@ -64,7 +64,7 @@ typedef enum LineFillStatus {
 // Integrated flex container layout state
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
-    struct ViewBlock** flex_items;  // Array of child flex items
+    View** flex_items;  // Array of child flex items
     int item_count;
     int allocated_items;  // For dynamic array growth
 

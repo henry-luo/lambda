@@ -220,7 +220,7 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
     if (!flex_container) return;
 
     log_debug("Measuring all flex children content");
-    DomNode* child = flex_container->child();
+    DomNode* child = flex_container->first_child;
     int child_count = 0;  const int MAX_CHILDREN = 100; // Safety limit
     while (child && child_count < MAX_CHILDREN) {
         measure_flex_child_content(lycon, child);

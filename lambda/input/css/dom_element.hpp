@@ -72,7 +72,8 @@ typedef struct {
 } DisplayValue;
 
 typedef struct InlineProp InlineProp;
-typedef struct FlexFlowProp FlexFlowProp;
+typedef struct FlexItemProp FlexFlowProp;
+typedef struct GridItemProp GridItemProp;
 typedef struct BoundaryProp BoundaryProp;
 typedef struct BlockProp BlockProp;
 typedef struct ScrollProp ScrollProp;
@@ -123,7 +124,11 @@ struct DomElement : DomNode {
     FontProp* font;  // font style
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
-    FlexFlowProp* fi;  // flex related properties
+    union {
+        FlexItemProp* fi;
+        GridItemProp* gi;
+        TableCellProp* td;  // table cell specific properties
+    };
 
     // block properties
     float content_width, content_height;  // width and height of the child content including padding
@@ -134,7 +139,6 @@ struct DomElement : DomNode {
     // positioning properties for CSS positioning
     PositionProp* position;
     TableProp* tb;  // table specific properties
-    TableCellProp* td;  // table cell specific properties
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),

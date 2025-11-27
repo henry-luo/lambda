@@ -472,10 +472,8 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                     DisplayValue cell_display = resolve_display_value(cellNode);
                     log_debug("Processing direct cell candidate - tag=%s, display.outer=%d, display.inner=%d",
                            cellNode->node_name(), cell_display.outer, cell_display.inner);
-
                     uintptr_t ctag = cellNode->tag();
-                    if (ctag == HTM_TAG_TD || ctag == HTM_TAG_TH ||
-                        cell_display.inner == CSS_VALUE_TABLE_CELL) {
+                    if (ctag == HTM_TAG_TD || ctag == HTM_TAG_TH || cell_display.inner == CSS_VALUE_TABLE_CELL) {
                         ViewTableCell* cell = create_table_cell(lycon, cellNode);
                     }
                 }
