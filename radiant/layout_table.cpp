@@ -269,11 +269,6 @@ static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNode* 
 
 // Build table structure from DOM
 ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
-    if (!tableNode || !tableNode->is_element()) {
-        log_debug("ERROR: Invalid table node");
-        return nullptr;
-    }
-
     log_debug("Building table structure");
     // Save layout context
     ViewGroup* saved_parent = lycon->parent;
@@ -298,7 +293,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
         DisplayValue child_display = resolve_display_value(child);
 
         uintptr_t tag = child->tag();
-
         log_debug("Processing table child - tag=%s, display.outer=%d, display.inner=%d",
                child->node_name(), child_display.outer, child_display.inner);
 
@@ -351,7 +345,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 }
 
                 log_debug("Caption laid out - height=%d", caption->height);
-
                 // Restore layout context
                 lycon->block = cap_saved_block;
                 lycon->line = cap_saved_line;
@@ -379,7 +372,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                     DisplayValue row_display = resolve_display_value(rowNode);
 
                     log_debug("Processing row candidate - tag=%s, display.outer=%d, display.inner=%d",
-                           rowNode->node_name(), row_display.outer, row_display.inner);
+                        rowNode->node_name(), row_display.outer, row_display.inner);
 
                     if (rowNode->tag() == HTM_TAG_TR || row_display.inner == CSS_VALUE_TABLE_ROW) {
                         ViewTableRow* row = create_table_row(lycon, rowNode);
@@ -396,11 +389,11 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                 DisplayValue cell_display = resolve_display_value(cellNode);
 
                                 log_debug("Processing cell candidate - tag=%s, display.outer=%d, display.inner=%d",
-                                       cellNode->node_name(), cell_display.outer, cell_display.inner);
+                                    cellNode->node_name(), cell_display.outer, cell_display.inner);
 
                                 uintptr_t ctag = cellNode->tag();
                                 log_debug("Cell check: ctag=%lu, HTM_TAG_TD=%lu, inner_display=%d, TABLE_CELL=%d",
-                                       ctag, HTM_TAG_TD, cell_display.inner, CSS_VALUE_TABLE_CELL);
+                                    ctag, HTM_TAG_TD, cell_display.inner, CSS_VALUE_TABLE_CELL);
                                 if (ctag == HTM_TAG_TD || ctag == HTM_TAG_TH ||
                                     cell_display.inner == CSS_VALUE_TABLE_CELL) {
                                     log_debug("Creating table cell via create_table_cell");
@@ -477,7 +470,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 for (DomNode* cellNode = first_element_child(child); cellNode; cellNode = next_element_sibling(cellNode)) {
                     // Check for table cell by CSS display property or HTML tag
                     DisplayValue cell_display = resolve_display_value(cellNode);
-
                     log_debug("Processing direct cell candidate - tag=%s, display.outer=%d, display.inner=%d",
                            cellNode->node_name(), cell_display.outer, cell_display.inner);
 
@@ -485,49 +477,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                     if (ctag == HTM_TAG_TD || ctag == HTM_TAG_TH ||
                         cell_display.inner == CSS_VALUE_TABLE_CELL) {
                         ViewTableCell* cell = create_table_cell(lycon, cellNode);
-                        if (cell) {
-                            // Layout cell content
-                            ViewGroup* cell_saved_parent = lycon->parent;
-                            View* cell_saved_prev = lycon->prev_view;
-
-                            // CRITICAL FIX: Reset layout context for cell content
-                            // Save current context state
-                            Blockbox saved_block = lycon->block;
-                            Linebox saved_line = lycon->line;
-
-                            // Set cell as parent and reset layout state for cell content
-                            lycon->parent = (ViewGroup*)cell;
-                            lycon->prev_view = nullptr;
-                            lycon->elmt = cellNode;
-
-                            // Reset block layout state for cell content area
-                            lycon->block.advance_y = 0;
-                            lycon->block.content_width = cell->width - 2; // subtract border
-                            lycon->block.content_height = cell->height - 2; // subtract border
-                            lycon->line.left = 0;
-                            lycon->line.right = lycon->block.content_width;
-                            lycon->line.advance_x = 0;
-                            lycon->line.is_line_start = true;
-
-                            // Initial layout for content measurement
-                            // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
-                            // We'll re-layout later with correct parent width after cell dimensions are set
-                            // Text rectangles from this pass will be cleared before re-layout to avoid duplicates
-                            DomNode* cc = nullptr;
-                            if (cellNode->is_element()) {
-                                cc = static_cast<DomElement*>(cellNode)->first_child;
-                            }
-                            for (; cc; cc = cc->next_sibling) {
-                                layout_flow_node(lycon, cc);
-                            }
-
-                            // Restore layout context
-                            lycon->block = saved_block;
-                            lycon->line = saved_line;
-                            lycon->parent = cell_saved_parent;
-                            lycon->prev_view = (View*)cell;
-                            lycon->elmt = child;
-                        }
                     }
                 }
 
@@ -744,11 +693,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Initialize fixed layout fields
     table->tb->fixed_row_height = 0;  // 0 = auto height (calculate from content)
     log_debug("Starting enhanced table auto layout");
-    log_debug("Table layout mode: %s",
-           table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
+    log_debug("Table layout mode: %s", table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
     log_debug("Table border-spacing: %fpx %fpx, border-collapse: %s",
-           table->tb->border_spacing_h, table->tb->border_spacing_v,
-           table->tb->border_collapse ? "true" : "false");
+        table->tb->border_spacing_h, table->tb->border_spacing_v, table->tb->border_collapse ? "true" : "false");
 
     // CRITICAL FIX: Handle caption positioning first
     ViewBlock* caption = nullptr;
@@ -2001,24 +1948,9 @@ void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display
     log_debug("Step 2 - Calculating table layout");
     table_auto_layout(lycon, table);
     log_debug("Table layout calculated - size: %dx%d", table->width, table->height);
-
-    // Step 3: Position table relative to parent (body)
-    log_debug("Step 3 - Positioning table");
-    log_debug("Table position before override: x=%d, y=%d", table->x, table->y);
-    log_debug("Layout context: line.left=%d, block.advance_y=%d", lycon->line.left, lycon->block.advance_y);
-
-    // CRITICAL FIX: The block layout system should already position the table correctly
-    // relative to its parent. Adding parent position would double-apply body margins.
-    // Let's trust the existing block layout positioning.
-    ViewBlock* parent = (ViewBlock*)table->parent;
-    if (parent && parent->tag() == HTM_TAG_BODY) {
-        log_debug("Parent body found at position: (%d,%d), but not adding to table position",
-               parent->x, parent->y);
-        log_debug("Block layout should already position table correctly relative to body");
-    }
     log_debug("Table final position: x=%d, y=%d (trusting block layout positioning)", table->x, table->y);
 
-    // Step 4: Update layout context for proper block integration
+    // Step 3: Update layout context for proper block integration
     // CRITICAL: Set advance_y to table height so finalize_block_flow works correctly
     // The block layout system uses advance_y to calculate the final block height
     lycon->block.advance_y = table->height;
