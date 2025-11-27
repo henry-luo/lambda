@@ -15,6 +15,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Lambda render
   renderLambdaView: (testPath) => ipcRenderer.invoke('render-lambda-view', testPath),
 
+  // Log file
+  readLogFile: () => ipcRenderer.invoke('read-log-file'),
+
+  // View tree file
+  readViewTreeFile: () => ipcRenderer.invoke('read-view-tree-file'),
+
   // Terminal output listener
   onTerminalOutput: (callback) => {
     ipcRenderer.on('terminal-output', (event, data) => callback(data));
