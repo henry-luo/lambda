@@ -432,6 +432,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                         // Initial layout for content measurement
                                         // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                                         // We'll re-layout later with correct parent width after cell dimensions are set
+                                        // Text rectangles from this pass will be cleared before re-layout to avoid duplicates
                                         DomNode* cc = nullptr;
                                         if (cellNode->is_element()) {
                                             cc = static_cast<DomElement*>(cellNode)->first_child;
@@ -511,6 +512,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                             // Initial layout for content measurement
                             // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                             // We'll re-layout later with correct parent width after cell dimensions are set
+                            // Text rectangles from this pass will be cleared before re-layout to avoid duplicates
                             DomNode* cc = nullptr;
                             if (cellNode->is_element()) {
                                 cc = static_cast<DomElement*>(cellNode)->first_child;
@@ -546,12 +548,34 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     return table;
 }
 
+// Recursively clear text rectangles from all descendant text nodes
+static void clear_text_rectangles(DomNode* node) {
+    if (!node) return;
+
+    if (node->is_text() && node->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = static_cast<ViewText*>(node);
+        text->rect = nullptr; // Clear old rectangles (pool-allocated, no free needed)
+    }
+
+    if (node->is_element()) {
+        DomNode* child = static_cast<DomElement*>(node)->first_child;
+        for (; child; child = child->next_sibling) {
+            clear_text_rectangles(child);
+        }
+    }
+}
+
 // Layout cell content with correct parent width (after cell dimensions are set)
 // This re-lays out children that were previously laid out with incorrect (0px) parent width.
 // This fixes the child block width inheritance issue.
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
     if (!tcell) return;
+
+    // CRITICAL FIX: Clear existing text rectangles from first layout pass
+    // Text nodes accumulate rectangles in a linked list, so we must clear them
+    // recursively before re-layout to prevent duplicate rectangles in the view tree
+    clear_text_rectangles(tcell);
 
     // Save layout context to restore later
     Blockbox saved_block = lycon->block;
