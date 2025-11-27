@@ -1077,6 +1077,31 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_format(buf, "\"opacity\": %.2f,\n", block->in_line->opacity);
     }
 
+    // Flex item properties (for elements inside flex containers)
+    if (block->fi) {
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"flexGrow\": %.0f,\n", block->fi->flex_grow);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"flexShrink\": %.0f,\n", block->fi->flex_shrink);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        if (block->fi->flex_basis == -1) {
+            strbuf_append_str(buf, "\"flexBasis\": \"auto\",\n");
+        } else {
+            strbuf_append_format(buf, "\"flexBasis\": \"%dpx\",\n", block->fi->flex_basis);
+        }
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        const char* align_self_str = "auto";
+        if (block->fi->align_self != CSS_VALUE_AUTO) {
+            const CssEnumInfo* align_self_value = css_enum_info(block->fi->align_self);
+            if (align_self_value && align_self_value->name) {
+                align_self_str = (const char*)align_self_value->name;
+            }
+        }
+        strbuf_append_format(buf, "\"alignSelf\": \"%s\",\n", align_self_str);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"order\": %d,\n", block->fi->order);
+    }
+
     // Remove trailing comma from last property
     // Note: we need to track if this is the last property, for now just ensure consistency
     strbuf_append_char_n(buf, ' ', indent + 4);

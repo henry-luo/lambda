@@ -256,7 +256,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("FINAL FLEX POSITIONS:");
     for (int i = 0; i < item_count; i++) {
         View* item = items[i];
-        log_debug("FINAL_ITEM %d - pos: (%d,%d), size: %dx%d", i, item->x, item->y, item->width, item->height);
+        ViewGroup* item_elmt = (ViewGroup*)item->as_element();
+        int order_val = item_elmt && item_elmt->fi ? item_elmt->fi->order : -999;
+        log_debug("FINAL_ITEM %d (order=%d, ptr=%p) - pos: (%d,%d), size: %dx%d", i, order_val, item, item->x, item->y, item->width, item->height);
     }
 
     flex_layout->needs_reflow = false;
@@ -382,6 +384,15 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
 // Sort flex items by CSS order property
 void sort_flex_items_by_order(View** items, int count) {
     if (!items || count <= 1) return;
+    
+    // Log initial order
+    log_debug("sort_flex_items_by_order: Sorting %d items", count);
+    for (int i = 0; i < count; i++) {
+        ViewGroup* item = (ViewGroup*)items[i]->as_element();
+        int order_val = item && item->fi ? item->fi->order : 0;
+        log_debug("  Before sort: items[%d] order=%d", i, order_val);
+    }
+    
     // simple insertion sort by order, maintaining document order for equal values
     for (int i = 1; i < count; ++i) {
         ViewGroup* key = (ViewGroup*)items[i]->as_element();
@@ -392,8 +403,19 @@ void sort_flex_items_by_order(View** items, int count) {
         while (j >= 0 && item_j_order > key_order) {
             items[j + 1] = items[j];
             j--;
+            if (j >= 0) {
+                item_j = (ViewGroup*)items[j]->as_element();
+                item_j_order = item_j ? item_j->fi ? item_j->fi->order : 0 : 0;
+            }
         }
         items[j + 1] = key;
+    }
+    
+    // Log final order
+    for (int i = 0; i < count; i++) {
+        ViewGroup* item = (ViewGroup*)items[i]->as_element();
+        int order_val = item && item->fi ? item->fi->order : 0;
+        log_debug("  After sort: items[%d] order=%d", i, order_val);
     }
 }
 
@@ -666,6 +688,13 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
 
         printf("DEBUG: LINE %d COMPLETE - items: %d, main_size: %d, free_space: %d\n",
                flex_layout->line_count, line->item_count, main_size, line->free_space);
+
+        // Log item order values in this line
+        for (int i = 0; i < line->item_count; i++) {
+            ViewGroup* item_elmt = (ViewGroup*)line->items[i]->as_element();
+            int order_val = item_elmt && item_elmt->fi ? item_elmt->fi->order : 0;
+            log_debug("  Line item[%d] order=%d", i, order_val);
+        }
 
         // Calculate total flex grow/shrink for this line
         line->total_flex_grow = 0;
@@ -1044,7 +1073,10 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         } else {
             // *** FIX 5: Set position, advance by item size, add spacing, then add gap ***
             int item_size = get_main_axis_size(item, flex_layout);
+            int order_val = item && item->fi ? item->fi->order : -999;
+            log_debug("align_items_main_axis: Positioning item %d (order=%d, ptr=%p) at position %d, size=%d", i, order_val, item, current_pos, item_size);
             set_main_axis_position(item, current_pos, flex_layout);
+            log_debug("align_items_main_axis: After set, item->x=%d, item->y=%d", item->x, item->y);
             current_pos += item_size;
 
             // Add justify-content spacing (for space-between, space-around, etc.)
@@ -1431,6 +1463,8 @@ void set_main_axis_position(ViewGroup* item, int position, FlexContainerLayout* 
         }
     }
 
+    log_debug("set_main_axis_position: item=%p, position=%d, border_offset=%d", item, position, border_offset);
+
     if (is_main_axis_horizontal(flex_layout)) {
         printf("DEBUG: DIRECTION_CHECK - flex_layout->direction=%d, CSS_VALUE_ROW_REVERSE=%d\n",
                flex_layout->direction, CSS_VALUE_ROW_REVERSE);
@@ -1444,7 +1478,10 @@ void set_main_axis_position(ViewGroup* item, int position, FlexContainerLayout* 
                    container_width, position, item_width, border_offset, calculated_x, item->x);
         } else {
             // Normal left-to-right positioning
-            item->x = position + border_offset;
+            int final_x = position + border_offset;
+            log_debug("set_main_axis_position: Setting item->x to %d (before: %.0f)", final_x, item->x);
+            item->x = final_x;
+            log_debug("set_main_axis_position: After setting, item->x = %.0f", item->x);
             printf("DEBUG: NORMAL_ROW - position=%d, border_offset=%d, final_x=%d\n",
                    position, border_offset, item->x);
         }
