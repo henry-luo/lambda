@@ -484,7 +484,7 @@ void print_view_block(ViewBlock* block, StrBuf* buf, int indent) {
 }
 
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
-    View* view = view_group->child();
+    View* view = view_group->first_child;
     if (view) {
         do {
             if (view->is_block()) {
@@ -1093,11 +1093,11 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewGroup*)block)->child();
+    View* child = ((ViewGroup*)block)->first_child;
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {  // skip the view
-            child = child->next();  continue;
+            child = child->next_sibling;  continue;
         }
         if (!first_child) { strbuf_append_str(buf, ",\n"); }
         first_child = false;
@@ -1374,11 +1374,11 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewGroup*)span)->child();
+    View* child = ((ViewGroup*)span)->first_child;
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
-            child = child->next();
+            child = child->next_sibling;
             continue;  // skip the view
         }
         if (!first_child) {

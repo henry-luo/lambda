@@ -469,11 +469,7 @@ typedef struct ViewText : DomText {
     // Color color;     // text color (for PDF text fill color)
 } ViewText;
 
-// multiple inheritance
 struct ViewGroup : DomElement {
-    // DisplayValue display;
-    View* child() { return (View*)first_child; }
-
     // exclude those skipped text nodes
     View* first_placed_child() {
         View* child = (View*)first_child;

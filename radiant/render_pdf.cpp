@@ -235,7 +235,7 @@ void render_children_pdf(PdfRenderContext* ctx, View* view) {
     if (!view || view->view_type < RDT_VIEW_INLINE) return;
 
     ViewGroup* group = (ViewGroup*)view;
-    View* child = group->child();
+    View* child = group->first_child;
 
     while (child) {
         switch (child->view_type) {

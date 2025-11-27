@@ -105,10 +105,10 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
     // Count children to verify
     int child_count = 0;
     ViewGroup* group = (ViewGroup*)root_view;
-    View* child = group->child();
+    View* child = group->first_child;
     while (child) {
         child_count++;
-        child = child->next();
+        child = child->next_sibling;
     }
     log_info("Root view has %d children", child_count);
 
@@ -186,10 +186,10 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
     // Count children to verify
     int child_count = 0;
     ViewGroup* group = (ViewGroup*)root_view;
-    View* child = group->child();
+    View* child = group->first_child;
     while (child) {
         child_count++;
-        child = child->next();
+        child = child->next_sibling;
     }
     log_info("Page %d has %d view elements", page_index + 1, child_count);
 
