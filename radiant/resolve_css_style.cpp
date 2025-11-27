@@ -1095,7 +1095,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->in_line) {
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum cursor_value = value->data.keyword;
                 if (cursor_value != CSS_VALUE__UNDEF) {
@@ -1141,9 +1140,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_MIN_WIDTH: {
             log_debug("[CSS] Processing min-width property");
             if (!block) break;
-            if (!block->blk) {
-                block->blk = alloc_block_prop(lycon);
-            }
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             block->blk->given_min_width = resolve_length_value(lycon, CSS_PROPERTY_MIN_WIDTH, value);
             log_debug("[CSS] Min-width: %.2f px", block->blk->given_min_width);
             break;
@@ -1152,9 +1149,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_MAX_WIDTH: {
             log_debug("[CSS] Processing max-width property");
             if (!block) break;
-            if (!block->blk) {
-                block->blk = alloc_block_prop(lycon);
-            }
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             block->blk->given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
             log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
             break;
@@ -1163,9 +1158,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_MIN_HEIGHT: {
             log_debug("[CSS] Processing min-height property");
             if (!block) break;
-            if (!block->blk) {
-                block->blk = alloc_block_prop(lycon);
-            }
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             block->blk->given_min_height = resolve_length_value(lycon, CSS_PROPERTY_MIN_HEIGHT, value);
             log_debug("[CSS] Min-height: %.2f px", block->blk->given_min_height);
             break;
@@ -1174,9 +1167,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_MAX_HEIGHT: {
             log_debug("[CSS] Processing max-height property");
             if (!block) break;
-            if (!block->blk) {
-                block->blk = alloc_block_prop(lycon);
-            }
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             block->blk->given_max_height = resolve_length_value(lycon, CSS_PROPERTY_MAX_HEIGHT, value);
             log_debug("[CSS] Max-height: %.2f px", block->blk->given_max_height);
             break;
@@ -2417,7 +2408,6 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int z = (int)value->data.number.value;
                 block->position->z_index = z;
@@ -2549,7 +2539,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing visibility property");
             if (!span->in_line) {
                 span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
-            }            
+            }
             // Visibility applies to all elements, stored in ViewSpan
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum visibility_value = value->data.keyword;
@@ -2604,14 +2594,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         // ===== GROUP 11: Box Sizing =====
         case CSS_PROPERTY_BOX_SIZING: {
             log_debug("[CSS] Processing box-sizing property");
-            if (!block || !block->blk) {
-                if (block) {
-                    block->blk = alloc_block_prop(lycon);
-                } else {
-                    break; // inline elements don't have box-sizing
-                }
-            }
-
+            if (!block) break;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum boxsizing_value = value->data.keyword;
                 if (boxsizing_value > 0) {
@@ -2942,7 +2926,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
-        case CSS_PROPERTY_FLEX_GROW: {        
+        case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
@@ -2953,7 +2937,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
-        case CSS_PROPERTY_FLEX_SHRINK: {           
+        case CSS_PROPERTY_FLEX_SHRINK: {
             log_debug("[CSS] Processing flex-shrink property");
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
@@ -2964,7 +2948,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
-        case CSS_PROPERTY_FLEX_BASIS: {          
+        case CSS_PROPERTY_FLEX_BASIS: {
             log_debug("[CSS] Processing flex-basis property");
             alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
@@ -3125,7 +3109,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] flex shorthand resolved: grow=%.2f shrink=%.2f basis=%.2f%s",
                          flex_grow, flex_shrink, flex_basis,
                          flex_basis_is_percent ? "%" : (flex_basis == -1 ? " (auto)" : "px"));
-            } 
+            }
             else if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Single number without list wrapper: just flex-grow
                 flex_grow = (float)value->data.number.value;

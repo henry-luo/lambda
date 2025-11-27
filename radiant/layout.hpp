@@ -186,7 +186,6 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 // Called for each property in DomElement->specified_style
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
-int resolve_justify_content(CssEnum value); // Returns Lexbor constant directly
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
