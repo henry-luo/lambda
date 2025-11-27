@@ -244,23 +244,6 @@ typedef enum AlignType {
     ALIGN_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
 } AlignType;
 
-// FlexItemProp definition (needed by flex.hpp)
-typedef struct FlexItemProp {
-    int flex_basis;  // -1 for auto
-    float flex_grow;
-    float flex_shrink;
-    CssEnum align_self;  // AlignType
-    int order;
-    float aspect_ratio;
-    int baseline_offset;
-    // Flags for percentage values
-    int flex_basis_is_percent : 1;
-    int is_margin_top_auto : 1;
-    int is_margin_right_auto : 1;
-    int is_margin_bottom_auto : 1;
-    int is_margin_left_auto : 1;
-} FlexItemProp;
-
 // static inline float pack_as_nan(int value) {
 //     uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
 //     float f;
@@ -335,22 +318,7 @@ struct FontProp {
     bool has_kerning;  // whether the font has kerning
 };
 
-struct FlexFlowProp {
-    // Integrated flex item properties (no separate allocation)
-    float flex_grow;
-    float flex_shrink;
-    int flex_basis;  // -1 for auto
-    int align_self;  // AlignType or CSS_VALUE_*
-    int order;
-
-    // Additional flex item properties from old implementation
-    float aspect_ratio;
-    float baseline_offset;
-
-    // Min/max constraints
-    float min_width, max_width;
-    float min_height, max_height;
-
+struct GridItemProp{
     // Grid item properties (following flex pattern)
     int grid_row_start;          // Grid row start line
     int grid_row_end;            // Grid row end line
@@ -374,6 +342,23 @@ struct FlexFlowProp {
     bool is_grid_auto_placed;
 };
 
+// FlexItemProp definition (needed by flex.hpp)
+typedef struct FlexItemProp {
+    int flex_basis;  // -1 for auto
+    float flex_grow;
+    float flex_shrink;
+    CssEnum align_self;  // AlignType
+    int order;
+    float aspect_ratio;
+    int baseline_offset;
+    // Flags for percentage values
+    int flex_basis_is_percent : 1;
+    int is_margin_top_auto : 1;
+    int is_margin_right_auto : 1;
+    int is_margin_bottom_auto : 1;
+    int is_margin_left_auto : 1;
+} FlexItemProp;
+
 struct InlineProp {
     CssEnum cursor;
     Color color;
@@ -381,7 +366,6 @@ struct InlineProp {
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int position;  // PositionType
     int visibility;  // Visibility
-    FlexItemProp* fi;
 };
 
 typedef struct Spacing {

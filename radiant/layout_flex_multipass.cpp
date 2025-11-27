@@ -58,13 +58,13 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
     printf("DEBUG: AUTO MARGIN CENTERING STARTING\n");
     log_debug("Applying auto margin centering");
 
-    if (!flex_container || !flex_container->child()) return;
+    if (!flex_container || !flex_container->first_child) return;
 
     FlexContainerLayout* flex_layout = lycon->flex_container;
     if (!flex_layout) return;
 
     // Check each flex item for auto margins
-    View* child = flex_container->child();
+    View* child = flex_container->first_child;
     int item_count = 0;
     while (child) {
         if (child->view_type == RDT_VIEW_BLOCK) {
@@ -175,8 +175,8 @@ void align_items_main_axis_enhanced(FlexContainerLayout* flex_layout, FlexLineIn
 // Check if any items have main axis auto margins
 bool has_main_axis_auto_margins(FlexLineInfo* line) {
     for (int i = 0; i < line->item_count; i++) {
-        ViewBlock* item = line->items[i];
-        if (item->bound && (item->bound->margin.left_type == CSS_VALUE_AUTO || item->bound->margin.right_type == CSS_VALUE_AUTO ||
+        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        if (item && item->bound && (item->bound->margin.left_type == CSS_VALUE_AUTO || item->bound->margin.right_type == CSS_VALUE_AUTO ||
             item->bound->margin.top_type == CSS_VALUE_AUTO || item->bound->margin.bottom_type == CSS_VALUE_AUTO)) {
             return true;
         }
@@ -190,8 +190,8 @@ void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInf
 
     // For now, implement simple centering for items with auto margins
     for (int i = 0; i < line->item_count; i++) {
-        ViewBlock* item = line->items[i];
-
+        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        if (!item) continue;
         bool main_start_auto = is_main_axis_horizontal(flex_layout) ?
             item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO;
         bool main_end_auto = is_main_axis_horizontal(flex_layout) ?
@@ -262,7 +262,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
     log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
-    DomNode* child = flex_item->child();
+    DomNode* child = flex_item->first_child;
     if (child) {
         do {
             log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->node_name(), lycon->parent);
@@ -294,7 +294,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) {
     log_debug("Final flex content layout");
     // Layout content within each flex item with their final sizes
-    View* child = flex_container->child();
+    View* child = flex_container->first_child;
     while (child) {
         if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* flex_item = (ViewBlock*)child;
@@ -317,7 +317,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // PASS 1: Create Views with measured sizes (combined measurement + View creation)
     log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
     int child_count = 0;
-    DomNode* measure_child = block->child();
+    DomNode* measure_child = block->first_child;
     if (measure_child) {
         do {
         log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
