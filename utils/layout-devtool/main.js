@@ -63,6 +63,16 @@ class LayoutDevTool {
       return null;
     });
 
+    // Read log file
+    ipcMain.handle('read-log-file', async () => {
+      return await this.readLogFile();
+    });
+
+    // Read view tree file
+    ipcMain.handle('read-view-tree-file', async () => {
+      return await this.readViewTreeFile();
+    });
+
     // Stream process output
     ipcMain.on('process-output', (event, data) => {
       if (this.mainWindow) {
@@ -174,6 +184,28 @@ class LayoutDevTool {
     } catch (error) {
       console.error('Failed to load reference:', error);
       return null;
+    }
+  }
+
+  async readLogFile() {
+    try {
+      const logPath = path.join(this.projectRoot, 'log.txt');
+      const content = await fs.readFile(logPath, 'utf8');
+      return content;
+    } catch (error) {
+      console.error('Failed to read log file:', error);
+      return '';
+    }
+  }
+
+  async readViewTreeFile() {
+    try {
+      const viewTreePath = path.join(this.projectRoot, 'view_tree.txt');
+      const content = await fs.readFile(viewTreePath, 'utf8');
+      return content;
+    } catch (error) {
+      console.error('Failed to read view_tree.txt:', error);
+      return '';
     }
   }
 

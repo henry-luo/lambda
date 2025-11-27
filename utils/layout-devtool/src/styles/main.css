@@ -2,6 +2,7 @@
 @import './tree.css';
 @import './comparison.css';
 @import './terminal.css';
+@import './bottom-panel.css';
 
 * {
   margin: 0;

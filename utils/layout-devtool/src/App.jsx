@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import TestTree from './components/TestTree';
 import ComparisonPanel from './components/ComparisonPanel';
-import TerminalPanel from './components/TerminalPanel';
+import BottomPanel from './components/BottomPanel';
 
 function App() {
   const [selectedTest, setSelectedTest] = useState(null);
@@ -129,7 +129,7 @@ function App() {
           </div>
           <div className="resize-handle-horizontal" onMouseDown={handleBottomMouseDown} />
           <div className="bottom-panel" style={{ height: `${terminalHeight}px` }}>
-            <TerminalPanel ref={terminalRef} />
+            <BottomPanel ref={terminalRef} />
           </div>
         </div>
       </div>
