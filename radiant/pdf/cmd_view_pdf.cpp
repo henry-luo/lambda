@@ -267,7 +267,7 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
     // Note: ViewBlock inherits from ViewSpan which inherits from ViewGroup
     // The children are in the 'child' field from ViewGroup, not 'first_child'
     ViewGroup* group = (ViewGroup*)block;
-    View* child = group->child();
+    View* child = group->first_child;
     int child_count = 0;
     while (child) {
         child_count++;
@@ -277,10 +277,10 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
     log_debug("Block has %d children", child_count);
 
     // Render children with original offset (children have absolute coordinates)
-    child = group->child();
+    child = group->first_child;
     while (child) {
         render_view_recursive(uicon, child, offset_x, offset_y, scale);
-        child = child->next();
+        child = child->next_sibling;
     }
 }
 
@@ -308,10 +308,10 @@ static void render_view_recursive(UiContext* uicon, View* view, float offset_x, 
         case RDT_VIEW_INLINE: {
             // Render inline spans - they may contain text or other inline elements
             ViewSpan* span = (ViewSpan*)view;
-            View* child = span->child();
+            View* child = (View*)span->first_child;
             while (child) {
                 render_view_recursive(uicon, child, offset_x, offset_y, scale);
-                child = child->next();
+                child = child->next_sibling;
             }
             break;
         }

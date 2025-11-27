@@ -227,11 +227,11 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 
     // Render children
-    if (block->child()) {
+    if (block->first_child) {
         svg_indent(ctx);
         strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n", block->node_name());
         ctx->indent_level++;
-        render_children_svg(ctx, block->child());
+        render_children_svg(ctx, block->first_child);
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
@@ -258,11 +258,11 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
     }
 
     // Render children
-    if (view_span->child()) {
+    if (view_span->first_child) {
         svg_indent(ctx);
         strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n", view_span->node_name());
         ctx->indent_level++;
-        render_children_svg(ctx, view_span->child());
+        render_children_svg(ctx, view_span->first_child);
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
@@ -312,7 +312,7 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
         int bottom = block->y + block->height;
         if (right > *max_x) *max_x = right;
         if (bottom > *max_y) *max_y = bottom;
-    } 
+    }
     else if (view->view_type == RDT_VIEW_TEXT) {
         ViewText* text = (ViewText*)view;
         int right = text->x + text->width;
@@ -324,10 +324,10 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
     // Recursively check children
     if (view->view_type >= RDT_VIEW_INLINE) {
         ViewGroup* group = (ViewGroup*)view;
-        View* child = group->child();
+        View* child = group->first_child;
         while (child) {
             calculate_content_bounds(child, max_x, max_y);
-            child = child->next();
+            child = child->next_sibling;
         }
     }
 }

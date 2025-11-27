@@ -355,9 +355,9 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
                 // Set caption height from laid out content
                 caption->height = (int)lycon->block.advance_y;
-                if (caption->height == 0 && ((ViewGroup*)caption)->child()) {
+                if (caption->height == 0 && ((ViewGroup*)caption)->first_child) {
                     // Fallback: measure first child height
-                    View* first_child = ((ViewGroup*)caption)->child();
+                    View* first_child = ((ViewGroup*)caption)->first_child;
                     if (first_child->view_type == RDT_VIEW_TEXT) {
                         caption->height = ((ViewText*)first_child)->height;
                     }
@@ -614,7 +614,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     // Note: Not freeing memory here, assuming it will be garbage collected later
     // or that the layout system handles this
     cell->first_child = nullptr;
-    
+
     // Set up layout context for cell content with CORRECT positioning
     // CRITICAL FIX: Set line.left and advance_x to content_start_x to apply padding offset
     lycon->block.content_width = content_width;
@@ -677,7 +677,7 @@ static int measure_cell_min_width(ViewTableCell* cell) {
 
     // Measure actual content width WITHOUT arbitrary adjustments
     // NOTE: With lazy child layout, children may not be laid out yet, so this may find no children
-    for (View* child = ((ViewGroup*)cell)->child(); child; child = child->next()) {
+    for (View* child = ((ViewGroup*)cell)->first_child; child; child = child->next_sibling) {
         float child_width = 0.0f;
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
@@ -755,7 +755,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int caption_height = 0;
 
     // Find and position caption
-    for (ViewBlock* child = (ViewBlock*)table->child(); child; child = (ViewBlock*)child->next()) {
+    for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
         if (child->tag() == HTM_TAG_CAPTION) {
             caption = child;
             // Caption should have proper dimensions from content layout
@@ -768,13 +768,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Step 1: Count columns and rows
     int columns = 0;  int rows = 0;
-    for (ViewBlock* child = (ViewBlock*)table->child(); child; child = (ViewBlock*)child->next()) {
+    for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            for (ViewBlock* row = (ViewBlock*)child->child(); row; row = (ViewBlock*)row->next()) {
+            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     rows++;
                     int row_cells = 0;
-                    for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
+                    for (ViewBlock* cell = (ViewBlock*)row->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                         if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                             ViewTableCell* tcell = (ViewTableCell*)cell;
                             row_cells += tcell->td->col_span;
@@ -783,11 +783,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     if (row_cells > columns) columns = row_cells;
                 }
             }
-        } 
+        }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             rows++;
             int row_cells = 0;
-            for (ViewBlock* cell = (ViewBlock*)child->child(); cell; cell = (ViewBlock*)cell->next()) {
+            for (ViewBlock* cell = (ViewBlock*)child->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                 if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                     ViewTableCell* tcell = (ViewTableCell*)cell;
                     row_cells += tcell->td->col_span;
@@ -852,12 +852,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Assign column indices and measure content with grid support
     int current_row = 0;
-    for (ViewBlock* child = (ViewBlock*)table->child(); child; child = (ViewBlock*)child->next()) {
+    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            for (ViewBlock* row = (ViewBlock*)child->child(); row; row = (ViewBlock*)row->next()) {
+            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     int col = 0;
-                    for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
+                    for (ViewBlock* cell = (ViewBlock*)row->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                         if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                             ViewTableCell* tcell = (ViewTableCell*)cell;
 
@@ -961,10 +961,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     current_row++;
                 }
             }
-        } 
+        }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             int col = 0;
-            for (ViewBlock* cell = (ViewBlock*)child->child(); cell; cell = (ViewBlock*)cell->next()) {
+            for (ViewBlock* cell = (ViewBlock*)child->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                 if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                     ViewTableCell* tcell = (ViewTableCell*)cell;
 
@@ -1008,7 +1008,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     cell_width += 2;
                                     log_debug("Direct row cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
                                             percentage, table_content_width, css_content_width, cell_width);
-                                } 
+                                }
                                 else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                                     // Absolute width
                                     int css_content_width = (int)width_decl->value->data.length.value;
@@ -1033,7 +1033,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // If no explicit width, measure content
                     if (cell_width == 0) {
                         cell_width = measure_cell_min_width(tcell);
-                    }                    
+                    }
                     if (tcell->td->col_span == 1) {
                         if (cell_width > col_widths[col]) {
                             col_widths[col] = cell_width;
@@ -1124,17 +1124,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
         // Find first row
         ViewTableRow* first_row = nullptr;
-        for (ViewBlock* child = (ViewBlock*)table->child(); child; child = (ViewBlock*)child->next()) {
+        for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
             if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
                 ViewTableRowGroup* group = (ViewTableRowGroup*)child;
-                for (ViewBlock* row_child = (ViewBlock*)group->child(); row_child; row_child = (ViewBlock*)row_child->next()) {
+                for (ViewBlock* row_child = (ViewBlock*)group->first_child; row_child; row_child = (ViewBlock*)row_child->next_sibling) {
                     if (row_child->view_type == RDT_VIEW_TABLE_ROW) {
                         first_row = (ViewTableRow*)row_child;
                         break;
                     }
                 }
                 if (first_row) break;
-            } 
+            }
             else if (child->view_type == RDT_VIEW_TABLE_ROW) {
                 first_row = (ViewTableRow*)child;
                 break;
@@ -1145,9 +1145,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         if (first_row) {
             int col = 0;
             log_debug("Reading first row cell widths...");
-            for (ViewBlock* cell_view = (ViewBlock*)first_row->child();
+            for (ViewBlock* cell_view = (ViewBlock*)first_row->first_child;
                  cell_view && col < columns;
-                 cell_view = (ViewBlock*)cell_view->next()) {
+                 cell_view = (ViewBlock*)cell_view->next_sibling) {
                 if (cell_view->view_type == RDT_VIEW_TABLE_CELL) {
                     ViewTableCell* cell = (ViewTableCell*)cell_view;
 
@@ -1417,7 +1417,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         caption->width = table_width;
     }
 
-    for (ViewBlock* child = (ViewBlock*)table->child(); child; child = (ViewBlock*)child->next()) {
+    for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             int group_start_y = current_y;
 
@@ -1453,12 +1453,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             // Count rows in this group to identify the last row
             int row_count = 0;
-            for (ViewBlock* count_row = (ViewBlock*)child->child(); count_row; count_row = (ViewBlock*)count_row->next()) {
+            for (ViewBlock* count_row = (ViewBlock*)child->first_child; count_row; count_row = (ViewBlock*)count_row->next_sibling) {
                 if (count_row->view_type == RDT_VIEW_TABLE_ROW) row_count++;
             }
             int current_row_index = 0;
 
-            for (ViewBlock* row = (ViewBlock*)child->child(); row; row = (ViewBlock*)row->next()) {
+            for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     current_row_index++;
                     bool is_last_row = (current_row_index == row_count);
@@ -1471,7 +1471,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                     // Calculate row height and position cells
                     int row_height = 0;
-                    for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
+                    for (ViewBlock* cell = (ViewBlock*)row->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                         if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                             ViewTableCell* tcell = (ViewTableCell*)cell;
 
@@ -1482,7 +1482,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                    cell->x, cell->y, cell->width, cell->height);
 
                             // RADIANT RELATIVE POSITIONING: Text positioned relative to cell parent
-                            for (View* text_child = ((ViewGroup*)cell)->child(); text_child; text_child = text_child->next()) {
+                            for (View* text_child = ((ViewGroup*)cell)->first_child; text_child; text_child = text_child->next_sibling) {
                                 if (text_child->view_type == RDT_VIEW_TEXT) {
                                     ViewText* text = (ViewText*)text_child;
 
@@ -1541,12 +1541,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             }
 
                             // STEP 2: Measure content height precisely (for auto height or minimum)
-                            for (View* cc = ((ViewGroup*)cell)->child(); cc; cc = cc->next()) {
+                            for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
                                 if (cc->view_type == RDT_VIEW_TEXT) {
                                     ViewText* text = (ViewText*)cc;
                                     int text_height = text->height > 0 ? text->height : 17; // Default line height
                                     if (text_height > content_height) content_height = text_height;
-                                } 
+                                }
                                 else if (cc->view_type == RDT_VIEW_BLOCK || cc->view_type == RDT_VIEW_INLINE || cc->view_type == RDT_VIEW_INLINE_BLOCK) {
                                     ViewBlock* block = (ViewBlock*)cc;
 
@@ -1635,7 +1635,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     y_adjustment = (cell_content_area - child_height) / 2;
                                     log_debug("Vertical-align middle: cell_content_area=%d, child_height=%d, adjustment=%d",
                                         cell_content_area, child_height, y_adjustment);
-                                } 
+                                }
                                 else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
                                     y_adjustment = cell_content_area - child_height;
                                     log_debug("Vertical-align bottom: cell_content_area=%d, child_height=%d, adjustment=%d",
@@ -1644,7 +1644,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                                 // Apply adjustment to all children
                                 if (y_adjustment > 0) {
-                                    for (View* cc = ((ViewGroup*)cell)->child(); cc; cc = cc->next()) {
+                                    for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
                                         cc->y += y_adjustment;
                                         log_debug("Applied vertical-align adjustment: child y=%d (added %d)",
                                             cc->y, y_adjustment);
@@ -1676,7 +1676,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                         // CRITICAL: Update all cell heights in this row to match fixed row height
                         // Cells were calculated with auto height, but fixed layout overrides this
-                        for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
+                        for (ViewBlock* cell = (ViewBlock*)row->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                             if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                                 cell->height = table->tb->fixed_row_height;
                                 log_debug("Updated cell height to match fixed_row_height=%d", table->tb->fixed_row_height);
@@ -1701,7 +1701,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             child->height = (float)(current_y - group_start_y);
             // printf("DEBUG: Final row group dimensions - x=%.1f, y=%.1f, width=%.1f, height=%.1f\n",
             //        child->x, child->y, child->width, child->height);
-        } 
+        }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
             // Handle direct table rows (relative to table)
             ViewBlock* row = child;
@@ -1711,7 +1711,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             log_debug("Direct row positioned at x=%d, y=%d (relative to table), width=%d",
                    row->x, row->y, row->width);
             int row_height = 0;
-            for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
+            for (ViewBlock* cell = (ViewBlock*)row->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                 if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                     ViewTableCell* tcell = (ViewTableCell*)cell;
 
@@ -1722,7 +1722,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                            cell->x, cell->y, cell->width, cell->height);
 
                     // RADIANT RELATIVE POSITIONING: Text positioned relative to cell parent
-                    for (View* text_child = ((ViewGroup*)cell)->child(); text_child; text_child = text_child->next()) {
+                    for (View* text_child = ((ViewGroup*)cell)->first_child; text_child; text_child = text_child->next_sibling) {
                         if (text_child->view_type == RDT_VIEW_TEXT) {
                             ViewText* text = (ViewText*)text_child;
 
@@ -1775,12 +1775,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
 
                     // STEP 2: Measure content height precisely (for auto height or minimum)
-                    for (View* cc = ((ViewGroup*)cell)->child(); cc; cc = cc->next()) {
+                    for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
                         if (cc->view_type == RDT_VIEW_TEXT) {
                             ViewText* text = (ViewText*)cc;
                             int text_height = text->height > 0 ? text->height : 17;
                             if (text_height > content_height) content_height = text_height;
-                        } 
+                        }
                         else if (cc->view_type == RDT_VIEW_BLOCK || cc->view_type == RDT_VIEW_INLINE || cc->view_type == RDT_VIEW_INLINE_BLOCK) {
                             ViewBlock* block = (ViewBlock*)cc;
 
@@ -1858,7 +1858,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             y_adjustment = (cell_content_area - child_height) / 2;
                             log_debug("Vertical-align middle: cell_content_area=%d, child_height=%d, adjustment=%d",
                                    cell_content_area, child_height, y_adjustment);
-                        } 
+                        }
                         else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
                             y_adjustment = cell_content_area - child_height;
                             log_debug("Vertical-align bottom: cell_content_area=%d, child_height=%d, adjustment=%d",
@@ -1867,7 +1867,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                         // Apply adjustment to all children
                         if (y_adjustment > 0) {
-                            for (View* cc = ((ViewGroup*)cell)->child(); cc; cc = cc->next()) {
+                            for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
                                 cc->y += y_adjustment;
                                 log_debug("Applied vertical-align adjustment: child y=%d (added %d)",
                                        cc->y, y_adjustment);
@@ -1898,7 +1898,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                 // CRITICAL: Update all cell heights in this row to match fixed row height
                 // Cells were calculated with auto height, but fixed layout overrides this
-                for (ViewBlock* cell = (ViewBlock*)row->child(); cell; cell = (ViewBlock*)cell->next()) {
+                for (ViewBlock* cell = (ViewBlock*)row->first_child; cell; cell = (ViewBlock*)cell->next_sibling) {
                     if (cell->view_type == RDT_VIEW_TABLE_CELL) {
                         cell->height = table->tb->fixed_row_height;
                         log_debug("Updated cell height to match fixed_row_height=%d", table->tb->fixed_row_height);

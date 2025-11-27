@@ -61,7 +61,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     if (parent) { // parent can be block or span
         // inherit the specified css value, not the resolved value
         if (parent->blk && parent->blk->line_height) {
-            if (parent->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD && 
+            if (parent->blk->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
                 parent->blk->line_height->data.keyword == CSS_VALUE_INHERIT) {
                 block = (ViewBlock*)parent;
                 goto INHERIT;
@@ -98,7 +98,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         log_debug("normal lineHeight: %f", lycon->block.line_height);
     } else {
         // resolve length/number/percentage
-        float resolved_height = 
+        float resolved_height =
         value.type == CSS_VALUE_TYPE_NUMBER ?
             value.data.number.value * lycon->font.current_font_size :
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
@@ -151,7 +151,7 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     FontBox pa_font = lycon->font;  CssEnum pa_line_align = lycon->line.vertical_align;
     log_debug("span_vertical_align");
-    View* child = span->child();
+    View* child = span->first_child;
     if (child) {
         if (span->font) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
@@ -227,7 +227,7 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = (ViewSpan*)view;
-            if (sp->child()) view_line_align(lycon, offset, sp->child());
+            if (sp->first_child) view_line_align(lycon, offset, sp->first_child);
         }
         // else if (view->is_block()) {
         //     view->x += offset;

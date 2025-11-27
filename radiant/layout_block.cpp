@@ -147,7 +147,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         // else HTM_TAG_IMG
     } else {  // layout block child content
         DomNode *child = nullptr;
-        if (block->is_element()) { child = block->child(); }
+        if (block->is_element()) { child = block->first_child; }
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (block->display.inner == CSS_VALUE_FLOW) {
@@ -570,7 +570,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     if (block->bound) {
         // collapse bottom margin with last child block
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
-            block->bound->padding.bottom == 0 && block->child()) {
+            block->bound->padding.bottom == 0 && block->first_child) {
             View* last_placed = block->last_placed_child();
             if (last_placed && last_placed->is_block() && ((ViewBlock*)last_placed)->bound) {
                 ViewBlock* last_child_block = (ViewBlock*)last_placed;

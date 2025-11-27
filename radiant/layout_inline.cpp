@@ -2,7 +2,7 @@
 
 // Compute bounding box of a ViewSpan based on union of child views
 void compute_span_bounding_box(ViewSpan* span) {
-    View* child = span->child();
+    View* child = span->first_child;
     if (!child) {
         // If no child views, keep current position and zero size
         span->width = 0;
@@ -133,6 +133,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     compute_span_bounding_box(span);
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->prev_view = (View*)span;
-    log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type, 
-        span->child(), span->x, span->y, span->width, span->height);
+    log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
+        span->first_child, span->x, span->y, span->width, span->height);
 }

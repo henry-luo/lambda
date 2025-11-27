@@ -382,7 +382,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         draw_debug_rect(rdcon->canvas, rc, &rdcon->block.clip);
     }
 
-    View* view = block->child();
+    View* view = block->first_child;
     if (view) {
         if (block->in_line && block->in_line->color.c) {
             rdcon->color = block->in_line->color;
@@ -554,7 +554,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
-    View* view = view_span->child();
+    View* view = view_span->first_child;
     if (view) {
         if (view_span->font) {
             setup_font(rdcon->ui_context, &rdcon->font, view_span->font);

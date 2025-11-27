@@ -540,9 +540,9 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
         }
     }
 
-    if (false && container && container->child()) {  // Keep old code disabled for now
+    if (false && container && container->first_child) {  // Keep old code disabled for now
         printf("DEBUG: Container has children, traversing...\n");
-        View* child_view = container->child();
+        View* child_view = container->first_child;
         int child_count = 0;
 
         while (child_view && child_count < 10) {  // Safety limit to prevent infinite loops

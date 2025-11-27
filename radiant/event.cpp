@@ -93,7 +93,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     log_debug("targetting inline: %s", view_span->node_name());
     log_enter();
     FontBox pa_font = evcon->font;
-    View* view = view_span->child();
+    View* view = view_span->first_child;
     if (view) {
         if (view_span->font) {
             setup_font(evcon->ui_context, &evcon->font, view_span->font);
@@ -146,7 +146,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     // target static positioned children
-    view = block->child();
+    view = block->first_child;
     if (view) {
         if (block->font) {
             setup_font(evcon->ui_context, &evcon->font, block->font);
@@ -365,11 +365,11 @@ View* find_view(View* view, DomNode* node) {
 
     if (view->is_group()) {
         ViewGroup* group = (ViewGroup*)view;
-        View* child = group->child();
+        View* child = group->first_child;
         while (child) {
             View* found = find_view(child, node);
             if (found) { return found; }
-            child = child->next();
+            child = child->next_sibling;
         }
     }
     return NULL;
