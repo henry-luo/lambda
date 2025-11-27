@@ -1,5 +1,7 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/css_style.hpp"
 #include <stdlib.h>
 
 // Forward declarations
@@ -20,19 +22,67 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // calculate offset from top/right/bottom/left properties
     int offset_x = 0, offset_y = 0;
 
-    // horizontal offset: left takes precedence over right
-    if (block->position->has_left) {
+    // Get parent's text direction to determine horizontal offset precedence
+    // The CSS 'direction' property determines which value wins when both left and right are specified
+    TextDirection parent_direction = TD_LTR;  // default to LTR
+    ViewGroup* parent = block->parent_view();
+    if (parent && parent->is_element()) {
+        DomElement* parent_elem = (DomElement*)parent;
+        if (parent_elem->specified_style) {
+            // Query the computed 'direction' property from parent
+            CssValue* direction_value = (CssValue*)style_tree_get_computed_value(
+                parent_elem->specified_style,
+                CSS_PROPERTY_DIRECTION,
+                parent_elem->parent && parent_elem->parent->is_element() ?
+                    ((DomElement*)parent_elem->parent)->specified_style : NULL
+            );
+
+            if (direction_value && direction_value->type == CSS_VALUE_TYPE_KEYWORD &&
+                direction_value->data.keyword == CSS_VALUE_RTL) {
+                parent_direction = TD_RTL;
+                log_debug("Parent has direction: rtl");
+            }
+        }
+    }
+
+    // horizontal offset: precedence depends on containing block's direction
+    // CSS spec: If both left and right are not 'auto':
+    // - If direction is 'ltr', left wins and right is ignored
+    // - If direction is 'rtl', right wins and left is ignored (but equal values cancel in RTL)
+    bool both_horizontal = block->position->has_left && block->position->has_right;
+
+    if (both_horizontal) {
+        if (parent_direction == TD_RTL) {
+            // RTL: right takes precedence, but equal values cancel out
+            if (block->position->left == block->position->right) {
+                // In RTL with equal left/right values, they geometrically cancel
+                offset_x = 0;
+                log_debug("Over-constrained relative positioning (RTL): left=%d equals right=%d, offset=0",
+                         block->position->left, block->position->right);
+            } else {
+                // RTL with different values: right wins
+                offset_x = -block->position->right;
+                log_debug("Over-constrained relative positioning (RTL): right=%d wins, left=%d ignored",
+                         block->position->right, block->position->left);
+            }
+        } else {
+            // LTR: left takes precedence (always, even if equal to right)
+            offset_x = block->position->left;
+            log_debug("Over-constrained relative positioning (LTR): left=%d wins, right=%d ignored",
+                     block->position->left, block->position->right);
+        }
+    } else if (block->position->has_left) {
         offset_x = block->position->left;
     } else if (block->position->has_right) {
         offset_x = -block->position->right;
-    }
-    // vertical offset: top takes precedence over bottom
+    }    // vertical offset: top takes precedence over bottom
     if (block->position->has_top) {
         offset_y = block->position->top;
     } else if (block->position->has_bottom) {
         offset_y = -block->position->bottom;
     }
-    log_debug("Calculated relative offset: x=%d, y=%d", offset_x, offset_y);
+    log_debug("Calculated relative offset: x=%d, y=%d (parent direction=%s)",
+             offset_x, offset_y, parent_direction == TD_RTL ? "RTL" : "LTR");
 
     // apply offset to visual position (doesn't affect layout of other elements)
     block->x += offset_x;  block->y += offset_y;
@@ -41,9 +91,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
 
     // todo: add to chain of positioned elements for z-index stacking
     // find containing block; add to its positioned children list;
-}
-
-/**
+}/**
  * Find the containing block for a positioned element
  * For relative/static: nearest block container ancestor
  * For absolute: nearest positioned ancestor or initial containing block
