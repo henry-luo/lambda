@@ -380,7 +380,7 @@ struct InlineProp {
     CssEnum vertical_align;
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int position;  // PositionType
-    int visibility;  // Visibility    
+    int visibility;  // Visibility
     FlexItemProp* fi;
 };
 
@@ -473,6 +473,27 @@ typedef struct ViewText : DomText {
 struct ViewGroup : DomElement {
     // DisplayValue display;
     View* child() { return (View*)first_child; }
+
+    // exclude those skipped text nodes
+    View* first_placed_child() {
+        View* child = (View*)first_child;
+        while (child) {
+            if (child->view_type) return child;
+            child = (View*)child->next_sibling;
+        }
+        return nullptr;
+    }
+
+    // exclude those skipped text nodes
+    View* last_placed_child() {
+        View* last_placed = nullptr;
+        View* child = (View*)first_child;
+        while (child) {
+            if (child->view_type) { last_placed = child; }
+            child = (View*)child->next_sibling;
+        }
+        return last_placed;
+    }
 };
 
 typedef struct ViewSpan : ViewGroup {
