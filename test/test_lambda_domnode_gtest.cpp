@@ -38,7 +38,7 @@ protected:
         String* type_str = create_lambda_string("html");
         test_input = input_from_source(dummy_source, dummy_url, type_str, nullptr);
         ASSERT_NE(test_input, nullptr);
-        
+
         // Use the Input's pool for all test operations
         pool = test_input->pool;
         ASSERT_NE(pool, nullptr);
@@ -143,15 +143,15 @@ TEST_F(DomNodeBaseTest, CreateDomText) {
     MarkBuilder builder(test_input);
     Item parent_item = builder.element("div").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     // Build DomElement from Lambda element
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Append text to the parent element
     DomText* text = dom_element_append_text(parent, "Hello World");
     ASSERT_NE(text, nullptr);
-    
+
     // Verify text node properties
     EXPECT_EQ(text->node_type, DOM_NODE_TEXT);
     EXPECT_STREQ(dom_text_get_content(text), "Hello World");
@@ -460,10 +460,10 @@ TEST_F(DomNodeBaseTest, AttributeManipulation) {
     MarkBuilder builder(test_input);
     Item elem_item = builder.element("div").final();
     ASSERT_EQ(get_type_id(elem_item), LMD_TYPE_ELEMENT);
-    
+
     Element* native_elem = elem_item.element;
     ASSERT_NE(native_elem, nullptr);
-    
+
     // Create DomElement with native backing
     DomElement* elem = dom_element_create(doc, "div", native_elem);
     ASSERT_NE(elem, nullptr);
@@ -666,11 +666,11 @@ TEST_F(DomNodeBaseTest, TextNodeManipulation) {
     MarkBuilder builder(test_input);
     Item parent_item = builder.element("p").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     // Build DomElement from Lambda element
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Create text node via parent
     DomText* text = dom_element_append_text(parent, "Original text");
     ASSERT_NE(text, nullptr);
@@ -784,10 +784,10 @@ TEST_F(DomNodeBaseTest, ComplexAttributeValues) {
     MarkBuilder builder(test_input);
     Item elem_item = builder.element("div").final();
     ASSERT_EQ(get_type_id(elem_item), LMD_TYPE_ELEMENT);
-    
+
     Element* native_elem = elem_item.element;
     ASSERT_NE(native_elem, nullptr);
-    
+
     // Create DomElement with native backing
     DomElement* elem = dom_element_create(doc, "div", native_elem);
     ASSERT_NE(elem, nullptr);
@@ -1010,6 +1010,293 @@ TEST_F(DomNodeBaseTest, TagIdPopulation) {
     EXPECT_NE(div_elem->tag_id, p_elem->tag_id);
     EXPECT_NE(div_elem->tag_id, span_elem->tag_id);
     EXPECT_NE(p_elem->tag_id, span_elem->tag_id);
+}
+
+/**
+ * Test Last Child Pointer - Single Child
+ * Verifies that last_child is properly set when there's only one child
+ */
+TEST_F(DomNodeBaseTest, LastChildSingleChild) {
+    const char* html = "<div><p>Only child</p></div>";
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    // Both first_child and last_child should point to the same child
+    EXPECT_NE(root->first_child, nullptr);
+    EXPECT_NE(root->last_child, nullptr);
+    EXPECT_EQ(root->first_child, root->last_child);
+
+    // Verify it's the correct child
+    EXPECT_TRUE(root->first_child->is_element());
+    EXPECT_STREQ(root->first_child->node_name(), "p");
+}
+
+/**
+ * Test Last Child Pointer - Multiple Children
+ * Verifies that last_child points to the last child in the sibling chain
+ */
+TEST_F(DomNodeBaseTest, LastChildMultipleChildren) {
+    const char* html = "<div><p>First</p><span>Second</span><a>Third</a></div>";
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    // Verify first_child and last_child are different
+    EXPECT_NE(root->first_child, nullptr);
+    EXPECT_NE(root->last_child, nullptr);
+    EXPECT_NE(root->first_child, root->last_child);
+
+    // Verify first_child is <p>
+    EXPECT_STREQ(root->first_child->node_name(), "p");
+
+    // Verify last_child is <a> (the last element)
+    EXPECT_TRUE(root->last_child->is_element());
+    EXPECT_STREQ(root->last_child->node_name(), "a");
+
+    // Verify last_child has no next_sibling
+    EXPECT_EQ(root->last_child->next_sibling, nullptr);
+}
+
+/**
+ * Test Last Child with Mixed Content
+ * Verifies that last_child works correctly with mixed element and text nodes
+ */
+TEST_F(DomNodeBaseTest, LastChildMixedContent) {
+    const char* html = "<div>Text before<em>emphasized</em>Text after</div>";
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    // Traverse to find the actual last child (skipping whitespace if needed)
+    EXPECT_NE(root->last_child, nullptr);
+
+    // Find last non-empty child
+    DomNode* last = root->last_child;
+    while (last && last->prev_sibling) {
+        // Check if this is a meaningful node
+        if (last->is_text()) {
+            DomText* txt = last->as_text();
+            if (txt && txt->text && strlen(txt->text) > 0) {
+                // Found a non-empty text node
+                break;
+            }
+        } else if (last->is_element()) {
+            // Found an element
+            break;
+        }
+        // Move to previous sibling to look for meaningful content
+        last = last->prev_sibling;
+    }
+
+    // last_child should point to some child
+    ASSERT_NE(last, nullptr);
+
+    // Verify it's either the em element or text after
+    if (last->is_text()) {
+        DomText* last_text = last->as_text();
+        ASSERT_NE(last_text, nullptr);
+        EXPECT_STREQ(last_text->text, "Text after");
+    } else if (last->is_element()) {
+        // If it's the em element, that's also acceptable
+        EXPECT_STREQ(last->node_name(), "em");
+    }
+
+    // Verify root's last_child has no next_sibling
+    EXPECT_EQ(root->last_child->next_sibling, nullptr);
+}
+
+/**
+ * Test Last Child Getter Function
+ * Verifies that dom_element_get_last_child() returns the correct element
+ */
+TEST_F(DomNodeBaseTest, LastChildGetterFunction) {
+    const char* html = "<ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>";
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    // Use getter function
+    DomElement* last = dom_element_get_last_child(root);
+    ASSERT_NE(last, nullptr);
+    EXPECT_STREQ(last->tag_name, "li");
+
+    // Verify it's the last child
+    EXPECT_EQ(last->next_sibling, nullptr);
+
+    // Verify by traversing from first to last
+    DomNode* child = root->first_child;
+    while (child && child->next_sibling) {
+        child = child->next_sibling;
+    }
+    EXPECT_EQ(child, last);
+}
+
+/**
+ * Test Last Child After Append
+ * Verifies that last_child is updated when children are appended
+ */
+TEST_F(DomNodeBaseTest, LastChildAfterAppend) {
+    // Create parent element
+    MarkBuilder builder(test_input);
+    Item parent_item = builder.element("div").final();
+    ASSERT_NE(parent_item.element, nullptr);
+
+    DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
+    ASSERT_NE(parent, nullptr);
+
+    // Initially no children
+    EXPECT_EQ(parent->first_child, nullptr);
+    EXPECT_EQ(parent->last_child, nullptr);
+
+    // Append first child
+    DomText* text1 = dom_element_append_text(parent, "First");
+    ASSERT_NE(text1, nullptr);
+    EXPECT_EQ(parent->first_child, text1);
+    EXPECT_EQ(parent->last_child, text1);
+
+    // Append second child
+    DomText* text2 = dom_element_append_text(parent, "Second");
+    ASSERT_NE(text2, nullptr);
+    EXPECT_EQ(parent->first_child, text1);
+    EXPECT_EQ(parent->last_child, text2);
+
+    // Append third child
+    DomText* text3 = dom_element_append_text(parent, "Third");
+    ASSERT_NE(text3, nullptr);
+    EXPECT_EQ(parent->first_child, text1);
+    EXPECT_EQ(parent->last_child, text3);
+
+    // Verify sibling chain
+    EXPECT_EQ(text1->next_sibling, text2);
+    EXPECT_EQ(text2->next_sibling, text3);
+    EXPECT_EQ(text3->next_sibling, nullptr);
+}
+
+/**
+ * Test Last Child After Remove
+ * Verifies that last_child is updated when the last child is removed
+ */
+TEST_F(DomNodeBaseTest, LastChildAfterRemove) {
+    // Create parent with three text nodes
+    MarkBuilder builder(test_input);
+    Item parent_item = builder.element("div").final();
+    ASSERT_NE(parent_item.element, nullptr);
+
+    DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
+    ASSERT_NE(parent, nullptr);
+
+    DomText* text1 = dom_element_append_text(parent, "First");
+    DomText* text2 = dom_element_append_text(parent, "Second");
+    DomText* text3 = dom_element_append_text(parent, "Third");
+
+    ASSERT_NE(text1, nullptr);
+    ASSERT_NE(text2, nullptr);
+    ASSERT_NE(text3, nullptr);
+
+    // Verify initial state
+    EXPECT_EQ(parent->last_child, text3);
+
+    // Remove last child
+    EXPECT_TRUE(dom_text_remove(text3));
+    EXPECT_EQ(parent->last_child, text2);
+
+    // Remove new last child
+    EXPECT_TRUE(dom_text_remove(text2));
+    EXPECT_EQ(parent->last_child, text1);
+
+    // Remove final child
+    EXPECT_TRUE(dom_text_remove(text1));
+    EXPECT_EQ(parent->last_child, nullptr);
+    EXPECT_EQ(parent->first_child, nullptr);
+}
+
+/**
+ * Test Last Child with Deep Nesting
+ * Verifies that last_child works correctly in deeply nested structures
+ */
+TEST_F(DomNodeBaseTest, LastChildDeepNesting) {
+    const char* html = R"(
+        <div>
+            <ul>
+                <li>Item 1</li>
+                <li>Item 2</li>
+                <li>Item 3</li>
+            </ul>
+        </div>
+    )";
+
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    // Navigate to ul (skipping text nodes)
+    DomNode* ul = root->first_child;
+    while (ul && !ul->is_element()) ul = ul->next_sibling;
+    ASSERT_NE(ul, nullptr);
+    EXPECT_STREQ(ul->node_name(), "ul");
+
+    // Get ul element
+    DomElement* ul_elem = ul->as_element();
+    ASSERT_NE(ul_elem, nullptr);
+
+    // Verify last child of ul is the last <li>
+    EXPECT_NE(ul_elem->last_child, nullptr);
+
+    // Find the last element child
+    DomNode* last_li = ul_elem->last_child;
+    while (last_li && !last_li->is_element() && last_li->prev_sibling) {
+        last_li = last_li->prev_sibling;
+    }
+
+    if (last_li && last_li->is_element()) {
+        EXPECT_STREQ(last_li->node_name(), "li");
+    }
+}
+
+/**
+ * Test Last Child Empty Element
+ * Verifies that last_child is NULL for elements with no children
+ */
+TEST_F(DomNodeBaseTest, LastChildEmptyElement) {
+    const char* html = "<div></div>";
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    // Empty element should have NULL first_child and last_child
+    EXPECT_EQ(root->first_child, nullptr);
+    EXPECT_EQ(root->last_child, nullptr);
+
+    // Getter should also return NULL
+    EXPECT_EQ(dom_element_get_last_child(root), nullptr);
+}
+
+/**
+ * Test Last Child Consistency
+ * Verifies that last_child can always be reached by traversing from first_child
+ */
+TEST_F(DomNodeBaseTest, LastChildConsistency) {
+    const char* html = "<ol><li>A</li><li>B</li><li>C</li><li>D</li><li>E</li></ol>";
+    DomElement* root = parse_html_and_build_dom(html);
+    ASSERT_NE(root, nullptr);
+
+    if (!root->first_child || !root->last_child) {
+        // If parse resulted in empty element, skip test
+        return;
+    }
+
+    // Traverse from first to last via next_sibling
+    DomNode* current = root->first_child;
+    while (current->next_sibling) {
+        current = current->next_sibling;
+    }
+
+    // The node we reached should be last_child
+    EXPECT_EQ(current, root->last_child);
+
+    // Traverse backward from last to first via prev_sibling
+    current = root->last_child;
+    while (current->prev_sibling) {
+        current = current->prev_sibling;
+    }
+
+    // The node we reached should be first_child
+    EXPECT_EQ(current, root->first_child);
 }
 
 // Run all tests

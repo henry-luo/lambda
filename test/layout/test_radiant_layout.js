@@ -685,7 +685,7 @@ class RadiantLayoutTester {
                 const browserDesc = browserIsText ?
                     `text:"${(browserNode.text || '').substring(0, 10)}..."` :
                     `<${browserNode.tag}>`;
-                console.log(`${indent()}⚠️  Comparing: ${radiantDesc} vs ${browserDesc}`);
+                console.log(`${indent()}⚠️  Comparing: radiant ${radiantDesc} vs. browser ${browserDesc}`);
                 console.log(`${indent()}   ❌ TYPE MISMATCH`);
             }
         }

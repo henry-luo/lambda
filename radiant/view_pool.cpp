@@ -75,8 +75,8 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     view->view_type = type;  view->parent = lycon->parent;
 
     const char* parent_name = lycon->parent ? lycon->parent->node_name() : "no_parent";
-    log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
-        view, type, node->node_name(), node, lycon->parent, parent_name);
+    log_debug("*** ALLOC_VIEW: view (type=%d) for node %s (%p), parent=%p (%s)",
+        type, node->node_name(), node, lycon->parent, parent_name);
 
     // link the view
     if (!lycon->line.start_view) lycon->line.start_view = view;
@@ -85,10 +85,10 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         ViewBlock* block_parent = (ViewBlock*)lycon->parent;
         // Link in ViewBlock hierarchy
         if (block_parent->last_child) {
-            block_parent->last_child->next_sibling = block_child;
-            block_child->prev_sibling = block_parent->last_child;
+            // block_parent->last_child->next_sibling = block_child;
+            // block_child->prev_sibling = block_parent->last_child;
         } else {
-            block_parent->first_child = block_child;
+            // block_parent->first_child = block_child;
         }
         block_parent->last_child = block_child;
     }
@@ -546,11 +546,11 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             }
             else if (view->view_type == RDT_VIEW_NONE) {
                 strbuf_append_char_n(buf, ' ', indent);
-                strbuf_append_format(buf, "nil-view: %s\n", view->node_name());
+                strbuf_append_format(buf, "[nil-view: %s]\n", view->node_name());
             }
             else {
                 strbuf_append_char_n(buf, ' ', indent);
-                strbuf_append_format(buf, "unknown-view: %d\n", view->view_type);
+                strbuf_append_format(buf, "[unknown-view: %d]\n", view->view_type);
             }
             // a check for robustness
             if (view == view->next()) { log_debug("invalid next view");  return; }
@@ -680,7 +680,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             if (block->parent == nullptr) {
                 tag_name = "html";  // Root element should be html, not html-root
                 log_debug("WORKAROUND: Mapping root #null -> html");
-            } 
+            }
             else if (block->parent && strcmp(block->parent->node_name(), "html") == 0) {
                 tag_name = "body";
                 log_debug("WORKAROUND: Mapping child of html #null -> body");
@@ -1109,8 +1109,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {  // skip the view
-            child = child->next();  continue; 
-        }  
+            child = child->next();  continue;
+        }
         if (!first_child) { strbuf_append_str(buf, ",\n"); }
         first_child = false;
 

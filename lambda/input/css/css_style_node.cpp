@@ -323,7 +323,6 @@ static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declar
 
         if (cmp > 0) {
             // New declaration wins - demote current to weak list
-            log_debug("[CASCADE] New declaration WINS");
             WeakDeclaration* weak = weak_declaration_create(node->winning_decl, pool);
             if (weak) {
                 weak_list_insert(&node->weak_list, weak);
@@ -334,22 +333,18 @@ static bool style_node_apply_declaration(StyleNode* node, CssDeclaration* declar
             css_declaration_ref(declaration);
         } else if (cmp < 0) {
             // New declaration loses - add to weak list
-            log_debug("[CASCADE] New declaration LOSES");
             WeakDeclaration* weak = weak_declaration_create(declaration, pool);
             if (weak) {
                 weak_list_insert(&node->weak_list, weak);
             }
         } else {
             // Equal specificity - replace existing
-            log_debug("[CASCADE] Equal specificity - REPLACING");
             css_declaration_unref(node->winning_decl);
             node->winning_decl = declaration;
             css_declaration_ref(declaration);
         }
     } else {
         // First declaration for this property
-        log_debug("[CASCADE] Property %d: first declaration (spec:%u, order:%d)", declaration->property_id,
-            css_specificity_to_value(declaration->specificity), declaration->source_order);
         node->winning_decl = declaration;
         css_declaration_ref(declaration);
     }
