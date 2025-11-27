@@ -364,6 +364,10 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     // Set up basic CSS properties (minimal setup for flex items)
     dom_node_resolve_style(node, lycon);
 
+    // CRITICAL FIX: Ensure flex item properties are allocated
+    // Even if no flex CSS properties are specified, we need fi for the flex algorithm
+    alloc_flex_item_prop(lycon, block);
+
     // Initialize dimensions (will be set by flex algorithm)
     block->width = 0;  block->height = 0;
     block->content_width = 0;  block->content_height = 0;
