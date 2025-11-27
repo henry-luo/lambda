@@ -571,12 +571,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         // collapse bottom margin with last child block
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
             block->bound->padding.bottom == 0 && block->child()) {
-            View* last_placed = NULL;  // exclude those skipped text nodes
-            View* child = block->child();
-            while (child) {
-                if (child->view_type) { last_placed = child; }
-                child = child->next();
-            }
+            View* last_placed = block->last_placed_child();
             if (last_placed && last_placed->is_block() && ((ViewBlock*)last_placed)->bound) {
                 ViewBlock* last_child_block = (ViewBlock*)last_placed;
                 if (last_child_block->bound->margin.bottom > 0) {
@@ -713,7 +708,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (block->bound) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
-                if (block->parent_view()->child() == block) {  // first child
+                if (block->parent_view()->first_placed_child() == block) {  // first child
                     if (block->bound->margin.top > 0) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                         // parent has top margin, but no border, no padding;  parent->parent to exclude html
@@ -736,9 +731,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 else {
                     // check sibling margin collapsing
                     float collapse = 0;
-                    View* prev_sibling = block->prev_sibling;
-                    if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
-                        ViewBlock* prev_block = (ViewBlock*)prev_sibling;
+                    View* prev_view = block->prev_placed_view();
+                    if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
+                        ViewBlock* prev_block = (ViewBlock*)prev_view;
                         if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
                             collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
                             block->y -= collapse;

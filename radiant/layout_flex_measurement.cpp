@@ -290,19 +290,6 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
     view->parent = lycon->parent;
     view->view_type = RDT_VIEW_BLOCK;
 
-    // Add to parent's child list
-    if (lycon->parent) {
-        if (!lycon->parent->first_child) {
-            lycon->parent->first_child = (View*)view;
-        } else {
-            View* last_child = lycon->parent->first_child;
-            while (last_child->next_sibling) {
-                last_child = last_child->next_sibling;
-            }
-            last_child->next_sibling = (View*)view;
-        }
-    }
-
     // Update layout context
     lycon->prev_view = (View*)view;
     return view;

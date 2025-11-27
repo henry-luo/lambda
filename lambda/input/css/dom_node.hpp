@@ -95,7 +95,7 @@ struct DomNode {
 
     inline const DomComment* as_comment() const {
         return is_comment() ? ((const DomComment*)this) : nullptr;
-    }    
+    }
 
     // static helper for tag name to ID conversion
     static uintptr_t tag_name_to_id(const char* tag_name);
@@ -115,12 +115,20 @@ struct DomNode {
 
     // view related methods =========================================
     inline View* next() { return (View*)next_sibling; }
+    inline View* prev_placed_view() {
+        View* prev_view = (View*)this->prev_sibling;
+        while (prev_view) {
+            if (prev_view->view_type) { return prev_view; }
+            prev_view = (View*)prev_view->prev_sibling;
+        }
+        return nullptr;
+    }
     inline ViewGroup* parent_view() { return (ViewGroup*)this->parent; }
 
     inline bool is_group() { return view_type >= RDT_VIEW_INLINE; }
 
-    inline bool is_inline() { 
-        return view_type == RDT_VIEW_TEXT || view_type == RDT_VIEW_INLINE || view_type == RDT_VIEW_INLINE_BLOCK; 
+    inline bool is_inline() {
+        return view_type == RDT_VIEW_TEXT || view_type == RDT_VIEW_INLINE || view_type == RDT_VIEW_INLINE_BLOCK;
     }
 
     inline bool is_block() {
@@ -128,7 +136,7 @@ struct DomNode {
             view_type == RDT_VIEW_TABLE || view_type == RDT_VIEW_TABLE_ROW_GROUP || view_type == RDT_VIEW_TABLE_ROW || view_type == RDT_VIEW_TABLE_CELL;
     }
 
-    const char* view_name();    
+    const char* view_name();
 
 protected:
     // Constructor (only callable by derived classes)
@@ -147,7 +155,7 @@ typedef struct FontProp FontProp;
 /**
  * DomText - Text node in DOM tree
  * Represents text content between elements
- * 
+ *
  * Always backed by Lambda String (references chars, no copy).
  * Maintains synchronization with Lambda tree via MarkEditor through parent element.
  */

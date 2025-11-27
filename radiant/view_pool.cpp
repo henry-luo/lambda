@@ -80,18 +80,6 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
 
     // link the view
     if (!lycon->line.start_view) lycon->line.start_view = view;
-    if (view->is_block() && lycon->parent && lycon->parent->is_block()) {
-        ViewBlock* block_child = (ViewBlock*)view;
-        ViewBlock* block_parent = (ViewBlock*)lycon->parent;
-        // Link in ViewBlock hierarchy
-        if (block_parent->last_child) {
-            // block_parent->last_child->next_sibling = block_child;
-            // block_child->prev_sibling = block_parent->last_child;
-        } else {
-            // block_parent->first_child = block_child;
-        }
-        block_parent->last_child = block_child;
-    }
     lycon->view = view;
     return view;
 }
