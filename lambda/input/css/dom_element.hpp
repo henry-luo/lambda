@@ -49,19 +49,19 @@ struct DomDocument {
     Input* input;                // Lambda Input context for MarkEditor operations
     Pool* pool;                  // Pool for arena chunks
     Arena* arena;                // Memory arena for all DOM node allocations
-    
+
     // Document content
     Url* url;                    // Document URL
     Element* html_root;          // Parsed HTML tree in Mark notation (Lambda tree)
     DomElement* root;            // Root element of DOM tree (optional)
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
-    
+
     // Layout and state
     ViewTree* view_tree;         // View tree after layout
     StateStore* state;           // Document state (cursor, caret, etc.)
 
     // Constructor
-    DomDocument() : input(nullptr), pool(nullptr), arena(nullptr), 
+    DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     view_tree(nullptr), state(nullptr) {}
 };
@@ -98,13 +98,13 @@ struct DomElement : DomNode {
 
     // Tree structure (only elements can have children)
     DomNode* first_child;        // First child node (Element, Text, or Comment)
-    DomNode* last_child;         // only constructed/used in view tree, at the moment
+    DomNode* last_child;         // Last child node
 
     // HTML/CSS style related
     uintptr_t tag_id;            // Tag ID for fast comparison (e.g., HTM_TAG_DIV)
-    const char* id;              // Element ID attribute (cached)    
+    const char* id;              // Element ID attribute (cached)
     const char** class_names;    // Array of class names (cached)
-    int class_count;             // Number of classes    
+    int class_count;             // Number of classes
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
     // we do not store computed_style;
     // Version tracking for cache invalidation
@@ -135,9 +135,9 @@ struct DomElement : DomNode {
     PositionProp* position;
     TableProp* tb;  // table specific properties
     TableCellProp* td;  // table cell specific properties
-    
+
     // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), native_element(nullptr),
+    DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
         style_version(0), needs_style_recompute(false),
@@ -411,6 +411,7 @@ DomElement* dom_element_get_parent(DomElement* element);
  * @return First child or NULL if none
  */
 DomElement* dom_element_get_first_child(DomElement* element);
+DomElement* dom_element_get_last_child(DomElement* element);
 
 /**
  * Get next sibling element
@@ -430,10 +431,10 @@ DomElement* dom_element_get_prev_sibling(DomElement* element);
  * Link child element to parent in DOM sibling chain only.
  * Use this when the child is ALREADY in the parent's Lambda tree.
  * Does NOT modify the Lambda tree - only updates DOM navigation pointers.
- * 
+ *
  * Typical use case: Building DOM wrappers from existing Lambda tree structure
  * where parent-child relationships already exist in the Lambda data.
- * 
+ *
  * @param parent Parent element
  * @param child Child element to link (must already exist in parent's Lambda tree)
  * @return true on success, false on error
@@ -443,13 +444,13 @@ bool dom_element_link_child(DomElement* parent, DomElement* child);
 /**
  * Append child element to parent, updating BOTH Lambda tree AND DOM sibling chain.
  * Use this when adding a NEW child that is NOT yet in the parent's Lambda tree.
- * 
+ *
  * Requires both parent and child to have Lambda backing (native_element).
  * Creates a new parent-child relationship in both the Lambda tree structure
  * and the DOM navigation chain.
- * 
+ *
  * For children already in the Lambda tree, use dom_element_link_child() instead.
- * 
+ *
  * @param parent Parent element (must have Lambda backing)
  * @param child Child element (must have Lambda backing)
  * @return true on success, false on failure

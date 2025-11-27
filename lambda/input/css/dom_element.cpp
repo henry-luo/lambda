@@ -117,9 +117,10 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
 
     // Initialize DomElement fields
     element->first_child = NULL;
+    element->last_child = NULL;
     element->doc = doc;
     element->native_element = native_element;
-    
+
     // Copy tag name
     size_t tag_len = strlen(tag_name);
     char* tag_copy = (char*)arena_alloc(doc->arena, tag_len + 1);
@@ -150,10 +151,10 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     // Initialize cached attribute fields from native element (if exists)
     if (native_element) {
         ElementReader reader(native_element);
-        
+
         // Cache ID attribute
         element->id = reader.get_attr_string("id");
-        
+
         // Parse class attribute into array
         const char* class_str = reader.get_attr_string("class");
         if (class_str && class_str[0] != '\0') {
@@ -162,7 +163,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
             for (const char* p = class_str; *p; p++) {
                 if (*p == ' ' || *p == '\t') count++;
             }
-            
+
             // Allocate array from arena
             element->class_names = (const char**)arena_alloc(doc->arena, count * sizeof(const char*));
             if (element->class_names) {
@@ -170,7 +171,7 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
                 char* class_copy = (char*)arena_alloc(doc->arena, strlen(class_str) + 1);
                 if (class_copy) {
                     strcpy(class_copy, class_str);
-                    
+
                     int index = 0;
                     char* token = strtok(class_copy, " \t\n\r");
                     while (token && index < count) {
@@ -242,23 +243,23 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
     // If native_element exists, use MarkEditor for updates
     if (element->native_element && element->doc) {
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
-        
+
         // Create string value item
         Item value_item = editor.builder()->createStringItem(value);
-        
+
         // Update attribute via MarkEditor
         Item result = editor.elmt_update_attr(
-            {.element = element->native_element}, 
-            name, 
+            {.element = element->native_element},
+            name,
             value_item
         );
-        
+
         if (result.element) {
             // In INLINE mode, element pointer remains the same (in-place mutation)
             // In IMMUTABLE mode, a new element would be created
             // Since we're using INLINE mode, this assignment is a no-op but kept for consistency
             element->native_element = result.element;
-            
+
             // Handle special attributes
             if (strcmp(name, "id") == 0) {
                 // Cache ID for fast access
@@ -272,18 +273,18 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                 // Parse and apply inline styles
                 dom_element_apply_inline_style(element, value);
             }
-            
+
             // Invalidate style cache
             element->style_version++;
             element->needs_style_recompute = true;
-            
+
             return true;
         }
-        
+
         log_error("dom_element_set_attribute: MarkEditor failed to update attribute");
         return false;
     }
-    
+
     // No native element - log warning
     log_warn("dom_element_set_attribute: element has no native_element or input context");
     return false;
@@ -293,13 +294,13 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
     if (!element || !name || name[0] == '\0') {
         return nullptr;
     }
-    
+
     // Use ElementReader for read-only access
     if (element->native_element) {
         ElementReader reader(element->native_element);
         return reader.get_attr_string(name);
     }
-    
+
     return nullptr;
 }
 
@@ -310,27 +311,27 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
 
     if (element->native_element && element->doc) {
         MarkEditor editor(element->doc->input, EDIT_MODE_INLINE);
-        
+
         // Delete attribute via MarkEditor
         Item result = editor.elmt_delete_attr(
-            {.element = element->native_element}, 
+            {.element = element->native_element},
             name
         );
-        
+
         if (result.element) {
             // In INLINE mode, element pointer remains the same
             // This assignment is a no-op but kept for consistency
             element->native_element = result.element;
-            
+
             // Clear cached fields
             if (strcmp(name, "id") == 0) {
                 element->id = nullptr;
             }
-            
+
             // Invalidate style cache
             element->style_version++;
             element->needs_style_recompute = true;
-            
+
             return true;
         }
     }
@@ -342,12 +343,12 @@ bool dom_element_has_attribute(DomElement* element, const char* name) {
     if (!element || !name) {
         return false;
     }
-    
+
     if (element->native_element) {
         ElementReader reader(element->native_element);
         return reader.has_attr(name);
     }
-    
+
     return false;
 }
 
@@ -356,38 +357,38 @@ const char** dom_element_get_attribute_names(DomElement* element, int* count) {
         if (count) *count = 0;
         return nullptr;
     }
-    
+
     *count = 0;
     if (!element->native_element) return nullptr;
-    
+
     ElementReader reader(element->native_element);
     int attr_count = reader.attrCount();
     if (attr_count == 0) return nullptr;
-    
+
     // Allocate array from arena
     const char** names = (const char**)arena_alloc(
-        element->doc->arena, 
+        element->doc->arena,
         attr_count * sizeof(const char*)
     );
     if (!names) return nullptr;
-    
+
     // Iterate through shape to collect names
     const TypeElmt* type = (const TypeElmt*)element->native_element->type;
     if (!type || !type->shape) {
         *count = 0;
         return nullptr;
     }
-    
+
     const ShapeEntry* field = type->shape;
     int index = 0;
-    
+
     while (field && index < attr_count) {
         if (field->name && field->name->str) {
             names[index++] = field->name->str;
         }
         field = field->next;
     }
-    
+
     *count = index;
     return names;
 }
@@ -758,6 +759,10 @@ DomElement* dom_element_get_first_child(DomElement* element) {
     return element ? static_cast<DomElement*>(element->first_child) : NULL;
 }
 
+DomElement* dom_element_get_last_child(DomElement* element) {
+    return element ? static_cast<DomElement*>(element->last_child) : NULL;
+}
+
 DomElement* dom_element_get_next_sibling(DomElement* element) {
     return element ? static_cast<DomElement*>(element->next_sibling) : NULL;
 }
@@ -770,7 +775,7 @@ DomElement* dom_element_get_prev_sibling(DomElement* element) {
  * Link child element to parent in DOM sibling chain only.
  * Use this when the child is ALREADY in the parent's Lambda tree.
  * Does NOT modify the Lambda tree - only updates DOM navigation pointers.
- * 
+ *
  * @param parent Parent element
  * @param child Child element to link (must already exist in parent's Lambda tree)
  * @return true on success, false on error
@@ -788,17 +793,23 @@ bool dom_element_link_child(DomElement* parent, DomElement* child) {
     if (!parent->first_child) {
         // First child
         parent->first_child = child;
+        parent->last_child = child;
         child->prev_sibling = NULL;
         child->next_sibling = NULL;
     } else {
-        // Find last child and append
-        DomNode* last = parent->first_child;
-        while (last->next_sibling) {
-            last = last->next_sibling;
+        // Append to last child (use last_child for efficiency)
+        DomNode* last = parent->last_child;
+        if (!last) {
+            // Fallback if last_child not properly maintained
+            last = parent->first_child;
+            while (last->next_sibling) {
+                last = last->next_sibling;
+            }
         }
         last->next_sibling = child;
         child->prev_sibling = last;
         child->next_sibling = NULL;
+        parent->last_child = child;
     }
 
     log_debug("dom_element_link_child: linked child to DOM chain (Lambda tree unchanged)");
@@ -808,10 +819,10 @@ bool dom_element_link_child(DomElement* parent, DomElement* child) {
 /**
  * Append child element to parent, updating BOTH Lambda tree AND DOM sibling chain.
  * Use this when adding a NEW child that is NOT yet in the parent's Lambda tree.
- * 
+ *
  * For children already in the Lambda tree (e.g., when building DOM wrappers from
  * existing Lambda structures), use dom_element_link_child() instead.
- * 
+ *
  * @param parent Parent element (must have Lambda backing)
  * @param child Child element (must have Lambda backing)
  * @return true on success, false on error
@@ -885,6 +896,9 @@ bool dom_element_remove_child(DomElement* parent, DomElement* child) {
 
     if (child->next_sibling) {
         child->next_sibling->prev_sibling = child->prev_sibling;
+    } else {
+        // Child was last child
+        parent->last_child = child->prev_sibling;
     }
 
     // Clear child's parent relationship
@@ -925,6 +939,11 @@ bool dom_element_insert_before(DomElement* parent, DomElement* new_child, DomEle
     }
 
     reference_child->prev_sibling = new_child;
+
+    // If inserting before first child, update last_child if needed
+    if (!new_child->next_sibling) {
+        parent->last_child = new_child;
+    }
 
     // Invalidate new child's computed values
     // dom_element_invalidate_computed_values(new_child, true);
@@ -1085,7 +1104,7 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     // Use MarkBuilder to deep copy the backing Lambda element
     MarkBuilder builder(source->doc->input);
     Item cloned_elem = builder.deep_copy({.element = source->native_element});
-    
+
     if (!cloned_elem.element) {
         log_error("dom_element_clone: MarkBuilder deep_copy failed");
         return NULL;
@@ -1159,7 +1178,6 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     text_node->parent = parent_element;
 
     log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
-
     return text_node;
 }
 
@@ -1308,6 +1326,10 @@ bool dom_text_remove(DomText* text_node) {
 
     if (text_node->next_sibling) {
         text_node->next_sibling->prev_sibling = text_node->prev_sibling;
+    } else if (text_node->parent && text_node->parent->is_element()) {
+        // Text node was last child
+        DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
+        parent_elem->last_child = text_node->prev_sibling;
     }
 
     // No need to update sibling indices - they will be recalculated on demand via scanning
@@ -1366,17 +1388,23 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     if (!parent->first_child) {
         // First child
         parent->first_child = text_node;
+        parent->last_child = text_node;
         text_node->prev_sibling = nullptr;
         text_node->next_sibling = nullptr;
     } else {
-        // Find last child and append
-        DomNode* last = parent->first_child;
-        while (last->next_sibling) {
-            last = last->next_sibling;
+        // Append to last child (use last_child for efficiency)
+        DomNode* last = parent->last_child;
+        if (!last) {
+            // Fallback if last_child not properly maintained
+            last = parent->first_child;
+            while (last->next_sibling) {
+                last = last->next_sibling;
+            }
         }
         last->next_sibling = text_node;
         text_node->prev_sibling = last;
         text_node->next_sibling = nullptr;
+        parent->last_child = text_node;
     }
 
     // Update parent element pointer (INLINE mode: no-op, but kept for consistency)
@@ -1806,13 +1834,21 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     // Add to DOM sibling chain
                     if (!dom_elem->first_child) {
                         dom_elem->first_child = comment_node;
+                        dom_elem->last_child = comment_node;
                         comment_node->prev_sibling = nullptr;
                         comment_node->next_sibling = nullptr;
                     } else {
-                        DomNode* last = dom_elem->first_child;
-                        while (last->next_sibling) last = last->next_sibling;
+                        // Use last_child for O(1) append
+                        DomNode* last = dom_elem->last_child;
+                        if (!last) {
+                            // Fallback if last_child not set
+                            last = dom_elem->first_child;
+                            while (last->next_sibling) last = last->next_sibling;
+                        }
                         last->next_sibling = comment_node;
                         comment_node->prev_sibling = last;
+                        comment_node->next_sibling = nullptr;
+                        dom_elem->last_child = comment_node;
                     }
 
                     log_debug("  Created comment node at index %lld: '%s'",
@@ -1850,26 +1886,27 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     if (!dom_elem->first_child) {
                         // First child
                         dom_elem->first_child = text_node;
+                        dom_elem->last_child = text_node;
                         text_node->prev_sibling = nullptr;
                         text_node->next_sibling = nullptr;
                     } else {
-                        // Find last child and append
-                        DomNode* last_child_node = dom_elem->first_child;
-                        while (last_child_node) {
-                            DomNode* next = last_child_node->next_sibling;
-
-                            if (!next) {
-                                // This is the last child, append text node here
-                                last_child_node->next_sibling = text_node;
-                                text_node->prev_sibling = last_child_node;
-                                text_node->next_sibling = nullptr;
-                                break;
+                        // Use last_child for O(1) append
+                        DomNode* last = dom_elem->last_child;
+                        if (!last) {
+                            // Fallback if last_child not set (shouldn't happen)
+                            last = dom_elem->first_child;
+                            while (last->next_sibling) {
+                                last = last->next_sibling;
                             }
-                            last_child_node = next;
                         }
+                        // Append text node to last child
+                        last->next_sibling = text_node;
+                        text_node->prev_sibling = last;
+                        text_node->next_sibling = nullptr;
+                        dom_elem->last_child = text_node;
                     }
 
-                    log_debug("  Created text node at index %lld: '%s' (len=%zu)", 
+                    log_debug("  Created text node at index %lld: '%s' (len=%zu)",
                               i, text_str->chars, text_str->len);
                 }
             }
