@@ -60,9 +60,9 @@ void cleanup_flex_container(LayoutContext* lycon) {
 // Main flex layout algorithm entry point
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     FlexContainerLayout* flex_layout = lycon->flex_container;
-    printf("DEBUG: FLEX START - container: %dx%d at (%d,%d)\n",
+    log_debug("FLEX START - container: %dx%d at (%d,%d)",
            container->width, container->height, container->x, container->y);
-    printf("DEBUG: FLEX PROPERTIES - align_items=%d, justify=%d, wrap=%d\n",
+    log_debug("FLEX PROPERTIES - align_items=%d, justify=%d, wrap=%d",
            flex_layout->align_items, flex_layout->justify, flex_layout->wrap);
     // DEBUG: Gap settings applied
 
@@ -86,26 +86,26 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             content_height -= (container->bound->padding.top + container->bound->padding.bottom);
         }
 
-        printf("DEBUG: FLEX CONTENT - content: %dx%d, container: %dx%d\n",
+        log_debug("FLEX CONTENT - content: %dx%d, container: %dx%d",
                content_width, content_height, container->width, container->height);
 
         // Axis orientation now calculated correctly with aligned enum values
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
-        printf("DEBUG: AXIS INIT - before: main=%.1f, cross=%.1f, content=%dx%d\n",
+        log_debug("AXIS INIT - before: main=%.1f, cross=%.1f, content=%dx%d",
                flex_layout->main_axis_size, flex_layout->cross_axis_size, content_width, content_height);
-        printf("DEBUG: AXIS INIT - flex_layout pointer: %p\n", (void*)flex_layout);
+        log_debug("AXIS INIT - flex_layout pointer: %p", (void*)flex_layout);
 
         if (is_horizontal) {
-            printf("DEBUG: AXIS INIT - horizontal branch\n");
-            printf("DEBUG: AXIS INIT - main condition: %s (main=%.1f)\n",
+            log_debug("AXIS INIT - horizontal branch");
+            log_debug("AXIS INIT - main condition: %s (main=%.1f)",
                    (flex_layout->main_axis_size == 0.0f) ? "true" : "false", flex_layout->main_axis_size);
             if (flex_layout->main_axis_size == 0.0f) {
                 flex_layout->main_axis_size = (float)content_width;
-                printf("DEBUG: AXIS INIT - set main to %.1f\n", (float)content_width);
-                printf("DEBUG: AXIS INIT - verify main now: %.1f\n", flex_layout->main_axis_size);
+                log_debug("AXIS INIT - set main to %.1f", (float)content_width);
+                log_debug("AXIS INIT - verify main now: %.1f", flex_layout->main_axis_size);
             }
-            printf("DEBUG: AXIS INIT - cross condition: %s (cross=%.1f)\n",
+            log_debug("AXIS INIT - cross condition: %s (cross=%.1f)",
                    (flex_layout->cross_axis_size == 0.0f) ? "true" : "false", flex_layout->cross_axis_size);
             if (flex_layout->cross_axis_size == 0.0f) {
                 // ENHANCED: Calculate proper cross-axis size based on content and alignment
@@ -128,14 +128,14 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     // Adjust for alignment requirements
                     if (flex_layout->align_items == CSS_VALUE_CENTER) {
                         content_based_height += 20; // Extra space for centering
-                        printf("DEBUG: FLEX_HEIGHT - added centering space, height: %d\n", content_based_height);
+                        log_debug("FLEX_HEIGHT - added centering space, height: %d", content_based_height);
                     }
 
                     // For features-like containers (multiple flex items), increase height
                     // This is a heuristic for complex layouts like sample5's features section
                     if (content_based_height < 100) {
                         content_based_height = 150; // Ensure sufficient height for feature cards
-                        printf("DEBUG: FLEX_HEIGHT - increased for complex layout: %d\n", content_based_height);
+                        log_debug("FLEX_HEIGHT - increased for complex layout: %d", content_based_height);
                     }
 
                     calculated_cross_size = content_based_height;
@@ -147,22 +147,22 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 // CRITICAL: Ensure height is never negative or zero
                 if (calculated_cross_size <= 0) {
                     calculated_cross_size = 100; // Absolute minimum to prevent negative heights
-                    printf("DEBUG: FLEX_HEIGHT - applied absolute minimum: %d\n", calculated_cross_size);
+                    log_debug("FLEX_HEIGHT - applied absolute minimum: %d", calculated_cross_size);
                 }
 
                 flex_layout->cross_axis_size = (float)calculated_cross_size;
-                printf("DEBUG: FLEX_HEIGHT - final cross_axis_size: %.1f (was content_height=%d)\n",
+                log_debug("FLEX_HEIGHT - final cross_axis_size: %.1f (was content_height=%d)",
                        (float)calculated_cross_size, content_height);
             }
         } else {
-            printf("DEBUG: AXIS INIT - vertical branch\n");
+            log_debug("AXIS INIT - vertical branch");
             if (flex_layout->main_axis_size == 0.0f) flex_layout->main_axis_size = (float)content_height;
             if (flex_layout->cross_axis_size == 0.0f) flex_layout->cross_axis_size = (float)content_width;
         }
 
-        printf("DEBUG: AXIS INIT - after: main=%.1f, cross=%.1f, horizontal=%d\n",
+        log_debug("AXIS INIT - after: main=%.1f, cross=%.1f, horizontal=%d",
                flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
-        printf("DEBUG: FLEX AXES - main: %.1f, cross: %.1f, horizontal: %d\n",
+        log_debug("FLEX AXES - main: %.1f, cross: %.1f, horizontal: %d",
                flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
 
         // ENHANCED: Update container dimensions to match calculated flex sizes
@@ -170,7 +170,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             int new_height = (int)flex_layout->cross_axis_size;
             // CRITICAL: Always update container height to prevent negative heights
             if (container->height <= 0 || new_height > container->height) {
-                printf("DEBUG: CONTAINER HEIGHT UPDATE - updating from %d to %d (cross_axis_size=%.1f)\n",
+                log_debug("CONTAINER HEIGHT UPDATE - updating from %d to %d (cross_axis_size=%.1f)",
                        container->height, new_height, flex_layout->cross_axis_size);
                 container->height = new_height;
             }
@@ -186,13 +186,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // Debug: Print initial item dimensions
     for (int i = 0; i < item_count; i++) {
         ViewGroup* item = (ViewGroup*)items[i]->as_element();
-        printf("DEBUG: Item %d initial: %dx%d at (%d,%d)\n", i, item->width, item->height, item->x, item->y);
+        log_debug("Item %d initial: %dx%d at (%d,%d)", i, item->width, item->height, item->x, item->y);
         if (item->blk) {
-            printf("DEBUG: Item %d box-sizing: %d, given: %dx%d\n", i, item->blk->box_sizing,
+            log_debug("Item %d box-sizing: %d, given: %dx%d", i, item->blk->box_sizing,
                    item->blk->given_width, item->blk->given_height);
         }
         if (item->bound) {
-            printf("DEBUG: Item %d padding: l=%d r=%d t=%d b=%d\n", i,
+            log_debug("Item %d padding: l=%d r=%d t=%d b=%d", i,
                    item->bound->padding.left, item->bound->padding.right,
                    item->bound->padding.top, item->bound->padding.bottom);
         }
@@ -205,6 +205,11 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Phase 2: Sort items by order property
     sort_flex_items_by_order(items, item_count);
+
+    // Phase 2.5: Resolve constraints for all flex items
+    // This must happen before flex basis calculation in create_flex_lines
+    log_debug("Phase 2.5: Resolving constraints for flex items");
+    apply_constraints_to_flex_items(flex_layout);
 
     // Phase 3: Create flex lines (handle wrapping)
     int line_count = create_flex_lines(flex_layout, items, item_count);
@@ -422,104 +427,133 @@ void sort_flex_items_by_order(View** items, int count) {
 // Calculate flex basis for an item
 int calculate_flex_basis(ViewGroup* item, FlexContainerLayout* flex_layout) {
     if (!item->fi) return 0;
-    log_debug("calculate_flex_basis - item->flex_basis: %d", item->fi->flex_basis);
-    if (item->fi->flex_basis == -1) {
-        // auto - use explicit size if available, otherwise content size
-        log_debug("calculate_flex_basis - item size: %dx%d", item->width, item->height);
-        log_debug("calculate_flex_basis - content size: %dx%d", item->content_width, item->content_height);
-
-        // *** CRITICAL FIX: For flex-basis auto, check for explicit main size first ***
-        bool has_explicit_main_size = false;
-        int explicit_size = 0;
-
-        if (is_main_axis_horizontal(flex_layout)) {
-            // Check if item has explicit width (given_width > 0 indicates CSS width was set)
-            if (item->blk && item->blk->given_width > 0) {
-                has_explicit_main_size = true;
-                explicit_size = item->blk->given_width;
-                log_debug("calculate_flex_basis - using explicit width: %d", explicit_size);
-            }
-        } else {
-            // Check if item has explicit height
-            if (item->blk && item->blk->given_height > 0) {
-                has_explicit_main_size = true;
-                explicit_size = item->blk->given_height;
-                log_debug("calculate_flex_basis - using explicit height: %d", explicit_size);
-            }
+    
+    log_debug("calculate_flex_basis for item %p", item);
+    
+    // Case 1: Explicit flex-basis value (not auto)
+    if (item->fi->flex_basis >= 0) {
+        if (item->fi->flex_basis_is_percent) {
+            // Percentage relative to container
+            float container_size = is_main_axis_horizontal(flex_layout) ?
+                flex_layout->main_axis_size : flex_layout->cross_axis_size;
+            return (int)(item->fi->flex_basis * container_size / 100.0f);
         }
-
-        if (has_explicit_main_size) {
-            return explicit_size;
-        } else {
-            // No explicit size - use content size + padding
-            int content_size = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
-
-            // ENHANCED: Calculate proper intrinsic content size for flex-basis auto
-            if (is_main_axis_horizontal(flex_layout)) {
-                // For horizontal flex containers, calculate intrinsic width
-                if (content_size <= 0 || content_size > flex_layout->main_axis_size / 2) {
-                    // Calculate intrinsic width based on text content and padding
-                    int intrinsic_width = 0;
-
-                    // ENHANCED: Calculate more accurate text width based on font size
-                    // In a real implementation, this would measure actual text
-                    DomNode* first_child = item->first_child;
-                    if (first_child && first_child->is_text()) {
-                        const char* text = (const char*)first_child->text_data();
-                        if (text) {
-                            int text_length = strlen(text);
-
-                            // IMPROVED: Use font-size aware calculation
-                            // Default font-size is 16px, but header uses 24px
-                            int font_size = 24; // Default for header context (sample4 uses 24px)
-
-                            // TODO: In a full implementation, get actual font size from layout context
-                            // For now, use a reasonable estimate based on context
-
-                            // More accurate estimate: ~0.6 * font_size per character for Arial
-                            float char_width = font_size * 0.6f;
-                            intrinsic_width = (int)(text_length * char_width);
-
-                            log_debug("TEXT_WIDTH_CALC - text='%s', length=%d, font_size=%d, char_width=%.1f, intrinsic_width=%d",
-                                text, text_length, font_size, char_width, intrinsic_width);
-                        }
-                    }
-
-                    // Add some minimum width if no text or very short text
-                    if (intrinsic_width < 40) {
-                        intrinsic_width = 60; // Minimum reasonable width for flex items
-                    }
-
-                    content_size = intrinsic_width;
-                    log_debug("calculate_flex_basis - calculated intrinsic width: %d", content_size);
-                }
-            } else {
-                // For vertical flex containers, use height
-                if (content_size <= 0) {
-                    content_size = 50; // Default height for flex items
-                }
-            }
-
-            // Add padding to content size for proper flex-basis calculation
-            if (is_main_axis_horizontal(flex_layout) && item->bound && item->bound->padding.left >= 0) {
-                content_size += item->bound->padding.left + item->bound->padding.right;
-            } else if (!is_main_axis_horizontal(flex_layout) && item->bound && item->bound->padding.top >= 0) {
-                content_size += item->bound->padding.top + item->bound->padding.bottom;
-            }
-
-            printf("DEBUG: calculate_flex_basis - using content+padding size: %d\n", content_size);
-            return content_size;
-        }
-    }
-    else if (item->fi->flex_basis_is_percent) {
-        // percentage basis
-        int container_size = is_main_axis_horizontal(flex_layout) ?
-            flex_layout->main_axis_size : flex_layout->cross_axis_size;
-        return (container_size * item->fi->flex_basis) / 100;
-    }
-    else {
-        // fixed length
         return item->fi->flex_basis;
+    }
+    
+    // Case 2: flex-basis: auto - use main axis size if explicit
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+    
+    // Check for explicit width/height in CSS
+    if (is_horizontal && item->blk && item->blk->given_width > 0) {
+        log_debug("calculate_flex_basis - using explicit width: %f", item->blk->given_width);
+        item->fi->has_explicit_width = 1;
+        return (int)item->blk->given_width;
+    }
+    if (!is_horizontal && item->blk && item->blk->given_height > 0) {
+        log_debug("calculate_flex_basis - using explicit height: %f", item->blk->given_height);
+        item->fi->has_explicit_height = 1;
+        return (int)item->blk->given_height;
+    }
+    
+    // Case 3: flex-basis: auto + no explicit size = use content size (intrinsic sizing)
+    
+    // Ensure intrinsic sizes are calculated
+    if (!item->fi->has_intrinsic_width && is_horizontal) {
+        calculate_item_intrinsic_sizes(item, flex_layout);
+    }
+    if (!item->fi->has_intrinsic_height && !is_horizontal) {
+        calculate_item_intrinsic_sizes(item, flex_layout);
+    }
+    
+    // Use max-content size as basis for auto (per CSS Flexbox spec)
+    int basis;
+    if (is_horizontal) {
+        basis = item->fi->intrinsic_width.max_content;
+    } else {
+        basis = item->fi->intrinsic_height.max_content;
+    }
+    
+    // Add padding and border to intrinsic content size
+    if (item->bound) {
+        if (is_horizontal) {
+            basis += item->bound->padding.left + item->bound->padding.right;
+            if (item->bound->border) {
+                basis += item->bound->border->width.left + item->bound->border->width.right;
+            }
+        } else {
+            basis += item->bound->padding.top + item->bound->padding.bottom;
+            if (item->bound->border) {
+                basis += item->bound->border->width.top + item->bound->border->width.bottom;
+            }
+        }
+    }
+    
+    log_debug("calculate_flex_basis - using intrinsic size: %d (including padding/border)", basis);
+    return basis;
+}
+
+// ============================================================================
+// Constraint Resolution for Flex Items
+// ============================================================================
+
+// Resolve min/max constraints for a flex item
+void resolve_flex_item_constraints(ViewGroup* item, FlexContainerLayout* flex_layout) {
+    if (!item || !item->fi) {
+        log_debug("resolve_flex_item_constraints: invalid item or no flex properties");
+        return;
+    }
+    
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+    
+    // Get specified constraints from BlockProp (CSS values)
+    int min_width = item->blk ? (int)item->blk->given_min_width : 0;
+    int max_width = item->blk && item->blk->given_max_width > 0 ? 
+        (int)item->blk->given_max_width : INT_MAX;
+    int min_height = item->blk ? (int)item->blk->given_min_height : 0;
+    int max_height = item->blk && item->blk->given_max_height > 0 ? 
+        (int)item->blk->given_max_height : INT_MAX;
+    
+    // Resolve 'auto' min-width/height for flex items
+    // Per CSS Flexbox spec, min-width: auto = min-content size (automatic minimum)
+    if (min_width == 0 && !item->fi->has_explicit_width) {
+        // For flex items, min-width: auto uses min-content size as the minimum
+        if (!item->fi->has_intrinsic_width) {
+            calculate_item_intrinsic_sizes(item, flex_layout);
+        }
+        min_width = item->fi->intrinsic_width.min_content;
+        log_debug("resolve_flex_item_constraints: auto min-width resolved to min-content: %d", min_width);
+    }
+    
+    if (min_height == 0 && !item->fi->has_explicit_height) {
+        if (!item->fi->has_intrinsic_height) {
+            calculate_item_intrinsic_sizes(item, flex_layout);
+        }
+        min_height = item->fi->intrinsic_height.min_content;
+        log_debug("resolve_flex_item_constraints: auto min-height resolved to min-content: %d", min_height);
+    }
+    
+    // Store resolved constraints in FlexItemProp for use during flex algorithm
+    item->fi->resolved_min_width = min_width;
+    item->fi->resolved_max_width = max_width;
+    item->fi->resolved_min_height = min_height;
+    item->fi->resolved_max_height = max_height;
+    
+    log_debug("Resolved constraints for item %p: width=[%d, %d], height=[%d, %d]",
+              item, min_width, max_width, min_height, max_height);
+}
+
+// Apply constraints to all flex items in container
+void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout) {
+    if (!flex_layout) return;
+    
+    log_debug("Applying constraints to %d flex items", flex_layout->item_count);
+    
+    for (int i = 0; i < flex_layout->item_count; i++) {
+        ViewGroup* item = (ViewGroup*)flex_layout->flex_items[i]->as_element();
+        if (item && item->fi) {
+            resolve_flex_item_constraints(item, flex_layout);
+        }
     }
 }
 
@@ -716,234 +750,203 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
     return line_count;
 }
 
-// Resolve flexible lengths for a flex line (flex-grow/shrink)
+// Resolve flexible lengths for a flex line (flex-grow/shrink) with iterative constraint resolution
 void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
 
     int container_main_size = flex_layout->main_axis_size;
 
-    // *** CRITICAL FIX: Ensure items maintain their sizes if no flex-grow/shrink ***
-
     // Calculate initial main sizes based on flex-basis
     int total_basis_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-        printf("DEBUG: resolve_flexible_lengths - calling calculate_flex_basis for item %d\n", i);
         int basis = calculate_flex_basis(item, flex_layout);
-        printf("DEBUG: resolve_flexible_lengths - item %d basis: %d\n", i, basis);
-
         set_main_axis_size(item, basis, flex_layout);
         total_basis_size += basis;
     }
 
-    // Calculate gap space (but don't add to total_basis_size)
+    // Calculate gap space
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
-
-    printf("DEBUG: resolve_flexible_lengths - container: %d, total_basis: %d, gap_space: %d\n",
-           container_main_size, total_basis_size, gap_space);
 
     // Calculate free space: container size minus item basis sizes minus gap space
     int free_space = container_main_size - total_basis_size - gap_space;
     line->free_space = free_space;
 
-    printf("DEBUG: resolve_flexible_lengths - free_space: %d\n", free_space);
+    log_debug("ITERATIVE_FLEX - container=%d, basis=%d, gap=%d, free_space=%d",
+              container_main_size, total_basis_size, gap_space, free_space);
 
-    // *** CRITICAL FIX: Even if free_space == 0, items should keep their basis sizes ***
     if (free_space == 0) {
-        // Ensure all items maintain their flex-basis sizes
-        for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-            if (!item) continue;
-            int basis = calculate_flex_basis(item, flex_layout);
-            set_main_axis_size(item, basis, flex_layout);
-        }
         return;  // No space to distribute
     }
 
-    log_debug("resolve_flexible_lengths - free_space: %d, total_flex_grow: %f", free_space, line->total_flex_grow);
-    if (free_space > 0 && line->total_flex_grow > 0) {
-        // ENHANCED FLEX-GROW ALGORITHM: Use double precision for better accuracy
-        double total_grow_weight = (double)line->total_flex_grow;
-        double free_space_d = (double)free_space;
+    // Track which items are frozen (hit their constraints)
+    bool* frozen = (bool*)calloc(line->item_count, sizeof(bool));
+    if (!frozen) return;
+
+    // ITERATIVE CONSTRAINT RESOLUTION ALGORITHM
+    // Per CSS Flexbox Spec: https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths
+    const int MAX_ITERATIONS = 10;  // Prevent infinite loops
+    int iteration = 0;
+    int remaining_free_space = free_space;
+
+    while (iteration < MAX_ITERATIONS) {
+        iteration++;
+        log_debug("ITERATIVE_FLEX - iteration %d, remaining_free_space=%d", iteration, remaining_free_space);
+
+        // Re-evaluate whether we're growing or shrinking based on CURRENT remaining_free_space
+        bool is_growing = (remaining_free_space > 0 && line->total_flex_grow > 0);
+        bool is_shrinking = (remaining_free_space < 0 && line->total_flex_shrink > 0);
+
+        if (!is_growing && !is_shrinking) {
+            log_debug("ITERATIVE_FLEX - no flex distribution needed (free_space=%d)", remaining_free_space);
+            break;
+        }
+
+        // Calculate total flex factor (grow or shrink) for unfrozen items
+        double total_flex_factor = 0.0;
+        double total_scaled_shrink = 0.0;
+        int unfrozen_count = 0;
+
+        for (int i = 0; i < line->item_count; i++) {
+            if (frozen[i]) continue;
+            
+            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+            if (!item || !item->fi) continue;
+
+            if (is_growing && item->fi->flex_grow > 0) {
+                total_flex_factor += item->fi->flex_grow;
+                unfrozen_count++;
+            } else if (is_shrinking && item->fi->flex_shrink > 0) {
+                int current_size = get_main_axis_size(item, flex_layout);
+                double scaled = (double)current_size * item->fi->flex_shrink;
+                total_scaled_shrink += scaled;
+                unfrozen_count++;
+            }
+        }
+
+        log_debug("ITERATIVE_FLEX - unfrozen=%d, total_flex=%.2f, total_scaled_shrink=%.2f",
+                  unfrozen_count, total_flex_factor, total_scaled_shrink);
+
+        if (unfrozen_count == 0 || (is_growing && total_flex_factor == 0) ||
+            (is_shrinking && total_scaled_shrink == 0)) {
+            break;  // All items frozen or no flexible items
+        }
+
+        // Distribute remaining free space to unfrozen items
+        bool any_frozen_this_iteration = false;
         int total_distributed = 0;
 
-        log_debug("ENHANCED_FLEX_GROW - free_space=%d, total_grow_weight=%.6f", free_space, total_grow_weight);
-        // Find the last item with flex-grow > 0 to handle rounding
-        int last_growing_item = -1;
         for (int i = 0; i < line->item_count; i++) {
+            if (frozen[i]) continue;
+
             ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-            if (item && item->fi && item->fi->flex_grow > 0) {
-                last_growing_item = i;
+            if (!item || !item->fi) continue;
+
+            int current_size = get_main_axis_size(item, flex_layout);
+            int target_size = current_size;
+
+            if (is_growing && item->fi->flex_grow > 0) {
+                // FLEX-GROW: Distribute positive free space
+                double grow_ratio = item->fi->flex_grow / total_flex_factor;
+                int grow_amount = (int)round(grow_ratio * remaining_free_space);
+                target_size = current_size + grow_amount;
+                total_distributed += grow_amount;
+
+                log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%d, %d→%d",
+                          i, grow_ratio, grow_amount, current_size, target_size);
+
+            } else if (is_shrinking && item->fi->flex_shrink > 0) {
+                // FLEX-SHRINK: Distribute negative space (spec-compliant scaled shrink)
+                double scaled_shrink = (double)current_size * item->fi->flex_shrink;
+                double shrink_ratio = scaled_shrink / total_scaled_shrink;
+                int shrink_amount = (int)round(shrink_ratio * (-remaining_free_space));
+                target_size = current_size - shrink_amount;
+                total_distributed -= shrink_amount;
+
+                log_debug("ITERATIVE_FLEX - item %d: shrink_ratio=%.4f, shrink_amount=%d, %d→%d",
+                          i, shrink_ratio, shrink_amount, current_size, target_size);
             }
-        }
 
-        // Distribute positive free space using flex-grow with enhanced precision
-        for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-            if (item && item->fi && item->fi->flex_grow > 0) {
-                int grow_amount;
-                if (i == last_growing_item) {
-                    // Last growing item gets remaining space to eliminate rounding errors
-                    grow_amount = free_space - total_distributed;
-                    log_debug("ENHANCED_FLEX_GROW - item %d (LAST): remaining_space=%d", i, grow_amount);
-                } else {
-                    // Use double precision for intermediate calculations
-                    double grow_ratio = (double)item->fi->flex_grow / total_grow_weight;
-                    double precise_grow = grow_ratio * free_space_d;
-                    grow_amount = (int)round(precise_grow);
-                    total_distributed += grow_amount;
-                    log_debug("ENHANCED_FLEX_GROW - item %d: grow_ratio=%.6f, precise_grow=%.2f, grow_amount=%d",
-                           i, grow_ratio, precise_grow, grow_amount);
+            // Check constraints and freeze if violated
+            bool hit_constraint = false;
+            int clamped_size = target_size;
+
+            if (is_main_axis_horizontal(flex_layout)) {
+                // Check min-width constraint
+                if (item->fi->resolved_min_width >= 0 && target_size < item->fi->resolved_min_width) {
+                    clamped_size = item->fi->resolved_min_width;
+                    hit_constraint = true;
+                    log_debug("ITERATIVE_FLEX - item %d: HIT MIN WIDTH %d (wanted %d)",
+                              i, clamped_size, target_size);
                 }
+                // Check max-width constraint
+                if (item->fi->resolved_max_width >= 0 && target_size > item->fi->resolved_max_width) {
+                    clamped_size = item->fi->resolved_max_width;
+                    hit_constraint = true;
+                    log_debug("ITERATIVE_FLEX - item %d: HIT MAX WIDTH %d (wanted %d)",
+                              i, clamped_size, target_size);
+                }
+            } else {
+                // Check min-height constraint
+                if (item->fi->resolved_min_height >= 0 && target_size < item->fi->resolved_min_height) {
+                    clamped_size = item->fi->resolved_min_height;
+                    hit_constraint = true;
+                    log_debug("ITERATIVE_FLEX - item %d: HIT MIN HEIGHT %d (wanted %d)",
+                              i, clamped_size, target_size);
+                }
+                // Check max-height constraint
+                if (item->fi->resolved_max_height >= 0 && target_size > item->fi->resolved_max_height) {
+                    clamped_size = item->fi->resolved_max_height;
+                    hit_constraint = true;
+                    log_debug("ITERATIVE_FLEX - item %d: HIT MAX HEIGHT %d (wanted %d)",
+                              i, clamped_size, target_size);
+                }
+            }
 
-                int current_size = get_main_axis_size(item, flex_layout);
-                int new_size = current_size + grow_amount;
+            set_main_axis_size(item, clamped_size, flex_layout);
 
-                // ENHANCED: Apply min/max constraints after flex-grow
+            if (hit_constraint) {
+                frozen[i] = true;
+                any_frozen_this_iteration = true;
+                log_debug("ITERATIVE_FLEX - item %d: FROZEN at size %d", i, clamped_size);
+            }
+
+            // Adjust cross axis size based on aspect ratio
+            if (item->fi->aspect_ratio > 0) {
                 if (is_main_axis_horizontal(flex_layout)) {
-                    // Apply width constraints
-                    if (item->blk && item->blk->given_min_width >= 0) {
-                        int min_width = (int)item->blk->given_min_width;
-                        if (new_size < min_width) {
-                            printf("DEBUG: CONSTRAINT - item %d: applying min-width %d (was %d)\n", i, min_width, new_size);
-                            new_size = min_width;
-                        }
-                    }
-                    if (item->blk && item->blk->given_max_width >= 0) {
-                        int max_width = (int)item->blk->given_max_width;
-                        if (new_size > max_width) {
-                            printf("DEBUG: CONSTRAINT - item %d: applying max-width %d (was %d)\n", i, max_width, new_size);
-                            new_size = max_width;
-                        }
-                    }
+                    item->height = (int)(clamped_size / item->fi->aspect_ratio);
                 } else {
-                    // Apply height constraints
-                    if (item->blk && item->blk->given_min_height >= 0) {
-                        int min_height = (int)item->blk->given_min_height;
-                        if (new_size < min_height) {
-                            printf("DEBUG: CONSTRAINT - item %d: applying min-height %d (was %d)\n", i, min_height, new_size);
-                            new_size = min_height;
-                        }
-                    }
-                    if (item->blk && item->blk->given_max_height >= 0) {
-                        int max_height = (int)item->blk->given_max_height;
-                        if (new_size > max_height) {
-                            printf("DEBUG: CONSTRAINT - item %d: applying max-height %d (was %d)\n", i, max_height, new_size);
-                            new_size = max_height;
-                        }
-                    }
-                }
-
-                log_debug("ENHANCED_FLEX_GROW - item %d: grow=%.1f, grow_amount=%d, old_size=%d, new_size=%d (after constraints)",
-                       i, item->fi->flex_grow, grow_amount, current_size, new_size);
-                set_main_axis_size(item, new_size, flex_layout);
-
-                // Adjust cross axis size based on aspect ratio
-                if (item->fi->aspect_ratio > 0) {
-                    if (is_main_axis_horizontal(flex_layout)) {
-                        item->height = (int)(new_size / item->fi->aspect_ratio);
-                    } else {
-                        item->width = (int)(new_size * item->fi->aspect_ratio);
-                    }
+                    item->width = (int)(clamped_size * item->fi->aspect_ratio);
                 }
             }
         }
-    }
-    else if (free_space < 0 && line->total_flex_shrink > 0) {
-        // CSS FLEXBOX SPEC COMPLIANT FLEX-SHRINK ALGORITHM
-        // Per CSS Flexbox Level 1: https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths
-        double total_scaled_shrink = 0.0;
-        int negative_free_space = -free_space;
 
-        printf("DEBUG: CSS_SPEC_FLEX_SHRINK - negative_free_space=%d, total_flex_shrink=%.6f\n",
-               negative_free_space, line->total_flex_shrink);
+        // If no items were frozen this iteration, we're done
+        if (!any_frozen_this_iteration) {
+            log_debug("ITERATIVE_FLEX - converged after %d iterations", iteration);
+            break;
+        }
 
-        // STEP 1: Calculate scaled shrink factors (flex_basis × flex_shrink)
-        // This is the key difference from proportional shrinking
+        // Recalculate remaining free space for next iteration
+        int total_current_size = 0;
         for (int i = 0; i < line->item_count; i++) {
             ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-            if (item && item->fi && item->fi->flex_shrink > 0) {
-                // Use current main axis size as the basis for shrinking
-                int current_size = get_main_axis_size(item, flex_layout);
-                int basis = current_size;
-
-                // CSS Spec: scaled shrink factor = flex_basis × flex_shrink
-                double scaled_shrink = (double)basis * item->fi->flex_shrink;
-                total_scaled_shrink += scaled_shrink;
-
-                log_debug("CSS_SPEC_FLEX_SHRINK - item %d: basis=%d, flex_shrink=%.1f, scaled_shrink=%.2f",
-                    i, basis, item->fi->flex_shrink, scaled_shrink);
+            if (item) {
+                total_current_size += get_main_axis_size(item, flex_layout);
             }
         }
+        remaining_free_space = container_main_size - total_current_size - gap_space;
+        log_debug("ITERATIVE_FLEX - recalculated remaining_free_space=%d", remaining_free_space);
 
-        // STEP 2: Distribute negative space proportionally to scaled shrink factors
-        if (total_scaled_shrink > 0) {
-            int total_shrunk = 0;
-            int last_shrinking_item = -1;
-
-            // Find last shrinking item for rounding compensation
-            for (int i = 0; i < line->item_count; i++) {
-                ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-                if (item && item->fi && item->fi->flex_shrink > 0) {
-                    last_shrinking_item = i;
-                }
-            }
-
-            for (int i = 0; i < line->item_count; i++) {
-                ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-                if (item && item->fi && item->fi->flex_shrink > 0) {
-                    int current_size = get_main_axis_size(item, flex_layout);
-                    int basis = current_size;
-
-                    // Calculate shrink amount using CSS spec formula
-                    double scaled_shrink = (double)basis * item->fi->flex_shrink;
-                    double shrink_ratio = scaled_shrink / total_scaled_shrink;
-                    double precise_shrink = shrink_ratio * negative_free_space;
-                    int shrink_amount = (int)round(precise_shrink);
-
-                    // Rounding compensation for last item
-                    if (i == last_shrinking_item) {
-                        shrink_amount = negative_free_space - total_shrunk;
-                        printf("DEBUG: CSS_SPEC_FLEX_SHRINK - item %d: rounding compensation, shrink_amount=%d\n",
-                               i, shrink_amount);
-                    } else {
-                        total_shrunk += shrink_amount;
-                    }
-
-                    int new_size = current_size - shrink_amount;
-
-                    // Apply minimum content size constraints
-                    int min_content_size = 20; // Minimum reasonable size
-                    if (new_size < min_content_size) {
-                        new_size = min_content_size;
-                        log_debug("CSS_SPEC_FLEX_SHRINK - item %d: clamped to min_content_size=%d", i, min_content_size);
-                    }
-
-                    log_debug("CSS_SPEC_FLEX_SHRINK - item %d: shrink=%.1f, shrink_amount=%d, %d→%d",
-                        i, item->fi->flex_shrink, shrink_amount, current_size, new_size);
-
-                    set_main_axis_size(item, new_size, flex_layout);
-
-                    // Adjust cross axis size based on aspect ratio
-                    if (item->fi->aspect_ratio > 0) {
-                        if (is_main_axis_horizontal(flex_layout)) {
-                            item->height = (int)(new_size / item->fi->aspect_ratio);
-                        } else {
-                            item->width = (int)(new_size * item->fi->aspect_ratio);
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        // *** CRITICAL FIX: No flex-grow or flex-shrink, ensure items keep their basis sizes ***
-        for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-            if (!item) continue;
-            int basis = calculate_flex_basis(item, flex_layout);
-            set_main_axis_size(item, basis, flex_layout);
+        // If remaining free space is negligible, stop
+        if (abs(remaining_free_space) < 2) {
+            log_debug("ITERATIVE_FLEX - remaining space negligible, stopping");
+            break;
         }
     }
+
+    free(frozen);
+    log_debug("ITERATIVE_FLEX - completed after %d iterations", iteration);
 }
 
 // Align items on main axis (justify-content)

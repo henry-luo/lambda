@@ -342,6 +342,12 @@ struct GridItemProp{
     bool is_grid_auto_placed;
 };
 
+// Intrinsic size type (shared by flex and grid layout)
+typedef struct {
+    int min_content;  // Minimum content width (longest word/element)
+    int max_content;  // Maximum content width (no wrapping)
+} IntrinsicSizes;
+
 // FlexItemProp definition (needed by flex.hpp)
 typedef struct FlexItemProp {
     int flex_basis;  // -1 for auto
@@ -351,12 +357,28 @@ typedef struct FlexItemProp {
     int order;
     float aspect_ratio;
     int baseline_offset;
-    // Flags for percentage values
+    
+    // Intrinsic sizing cache (computed during measurement phase)
+    IntrinsicSizes intrinsic_width;   // min_content and max_content widths
+    IntrinsicSizes intrinsic_height;  // min_content and max_content heights
+    
+    // Resolved constraints (computed from BlockProp given_min/max values)
+    int resolved_min_width;    // Resolved min-width (including auto = min-content)
+    int resolved_max_width;    // Resolved max-width (INT_MAX if none)
+    int resolved_min_height;   // Resolved min-height (including auto = min-content)
+    int resolved_max_height;   // Resolved max-height (INT_MAX if none)
+    
+    // Flags for percentage values and measurement state
     int flex_basis_is_percent : 1;
     int is_margin_top_auto : 1;
     int is_margin_right_auto : 1;
     int is_margin_bottom_auto : 1;
     int is_margin_left_auto : 1;
+    int has_intrinsic_width : 1;   // True if intrinsic widths calculated
+    int has_intrinsic_height : 1;  // True if intrinsic heights calculated
+    int needs_measurement : 1;      // True if content needs measuring
+    int has_explicit_width : 1;     // True if width explicitly set in CSS
+    int has_explicit_height : 1;    // True if height explicitly set in CSS
 } FlexItemProp;
 
 struct InlineProp {

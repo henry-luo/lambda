@@ -267,12 +267,16 @@ DisplayValue resolve_display_value(void* child) {
         DomElement* dom_elem = node->as_element();
         uintptr_t tag_id = dom_elem ? dom_elem->tag_id : HTM_TAG__UNDEF;
 
+        log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->node_name());
+
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
             StyleTree* style_tree = dom_elem->specified_style;
+            log_debug("[CSS]   has specified_style, tree=%p", style_tree->tree);
             if (style_tree->tree) {
                 // look for display property in the AVL tree
                 AvlNode* node = avl_tree_search(style_tree->tree, CSS_PROPERTY_DISPLAY);
+                log_debug("[CSS]   AVL search result: node=%p", node);
                 if (node) {
                     log_debug("[CSS] found display property for tag_id=%lu", tag_id);
                     StyleNode* style_node = (StyleNode*)node->declaration;
@@ -280,10 +284,13 @@ DisplayValue resolve_display_value(void* child) {
                         CssDeclaration* decl = style_node->winning_decl;
                         if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum keyword = decl->value->data.keyword;
+                            log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK);
                             // Map keyword to display values
                             if (keyword == CSS_VALUE_FLEX) {
+                                log_debug("[CSS] ✅ MATCHED FLEX! Setting display to BLOCK+FLEX");
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_FLEX;
+                                log_debug("[CSS] ✅ Returning outer=%d, inner=%d", display.outer, display.inner);
                                 return display;
                             } else if (keyword == CSS_VALUE_INLINE_FLEX) {
                                 display.outer = CSS_VALUE_INLINE_BLOCK;

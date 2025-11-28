@@ -16,11 +16,11 @@ extern "C" {
 struct ViewBlock;
 struct LayoutContext;
 
-// Include for IntrinsicSizes type
-typedef struct {
-    int min_content;  // Minimum content width (longest word/element)
-    int max_content;  // Maximum content width (no wrapping)
-} IntrinsicSizes;
+// IntrinsicSizes type is now defined in view.hpp (shared with flex layout)
+// typedef struct {
+//     int min_content;  // Minimum content width (longest word/element)
+//     int max_content;  // Maximum content width (no wrapping)
+// } IntrinsicSizes;
 
 // Grid track size types following CSS Grid specification
 typedef enum {
