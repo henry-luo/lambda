@@ -3,6 +3,8 @@
 #include "layout_flex_measurement.hpp"
 
 #include "../lib/log.h"
+#include <float.h>
+#include <limits.h>
 
 // Content measurement for multi-pass flex layout
 // This file implements the first pass of the multi-pass flex layout algorithm
@@ -154,26 +156,89 @@ ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* 
 }
 
 void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height) {
-    // Measure text content dimensions
-    // This would involve font metrics and text measurement
+    // Legacy function - redirects to accurate measurement
+    int min_w, max_w, h;
+    measure_text_content_accurate(lycon, text_node, &min_w, &max_w, &h);
+    *width = max_w;  // Use max-content for width
+    *height = h;
+}
 
+// Enhanced accurate text measurement for intrinsic sizing
+void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
+                                   int* min_width, int* max_width, int* height) {
     const char* text_data = (const char*)text_node->text_data();
     size_t text_length = text_data ? strlen(text_data) : 0;
 
-    if (text_data && text_length > 0) {
-        // Calculate text dimensions based on current font
-        int text_width = estimate_text_width(lycon, (const unsigned char*)text_data, text_length);
-        int text_height = lycon->font.style->font_size;
-
-        *width = text_width;
-        *height = text_height;
-
-        log_debug("Measured text: %dx%d (\"%.*s\")",
-                  text_width, text_height, (int)min(text_length, 20), text_data);
-    } else {
-        *width = 0;
-        *height = 0;
+    if (!text_data || text_length == 0) {
+        *min_width = *max_width = *height = 0;
+        return;
     }
+
+    // Measure using actual font metrics
+    measure_text_run(lycon, text_data, text_length, min_width, max_width, height);
+
+    log_debug("Measured text accurately: min=%d, max=%d, height=%d (\"%.*s\")",
+              *min_width, *max_width, *height, (int)min(text_length, 20), text_data);
+}
+
+// Measure a text run with actual font metrics
+void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
+                     int* min_width, int* max_width, int* height) {
+    if (!lycon->font.ft_face || !text || length == 0) {
+        *min_width = *max_width = *height = 0;
+        return;
+    }
+
+    // Calculate max-content width (no breaking)
+    float total_width = 0.0f;
+    float current_word_width = 0.0f;
+    float longest_word = 0.0f;
+    
+    const unsigned char* str = (const unsigned char*)text;
+    FT_UInt prev_glyph_index = 0;
+    
+    for (size_t i = 0; i < length; i++) {
+        unsigned char ch = str[i];
+        
+        // Load glyph for this character
+        if (FT_Load_Char(lycon->font.ft_face, ch, FT_LOAD_DEFAULT)) {
+            continue;  // Skip characters that fail to load
+        }
+        
+        FT_GlyphSlot slot = lycon->font.ft_face->glyph;
+        float advance = (float)(slot->advance.x) / 64.0f;
+        
+        // Apply kerning if available
+        if (prev_glyph_index && lycon->font.style->has_kerning) {
+            FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, ch);
+            FT_Vector kerning;
+            FT_Get_Kerning(lycon->font.ft_face, prev_glyph_index, glyph_index,
+                          FT_KERNING_DEFAULT, &kerning);
+            advance += (float)(kerning.x) / 64.0f;
+            prev_glyph_index = glyph_index;
+        }
+        
+        total_width += advance;
+        
+        // Track word boundaries for min-content calculation
+        if (is_space(ch)) {
+            longest_word = max(longest_word, current_word_width);
+            current_word_width = 0.0f;
+        } else {
+            current_word_width += advance;
+        }
+    }
+    
+    // Check final word
+    longest_word = max(longest_word, current_word_width);
+    
+    // Set results
+    *max_width = (int)(total_width + 0.5f);  // Round to nearest pixel
+    *min_width = (int)(longest_word + 0.5f);  // Longest word = min-content
+    *height = (int)(lycon->font.style->font_size + 0.5f);
+    
+    log_debug("measure_text_run: text_length=%zu, min=%d, max=%d, height=%d",
+              length, *min_width, *max_width, *height);
 }
 
 int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t length) {
@@ -289,7 +354,7 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!view) return nullptr;
 
     // Initialize basic properties
-    fprintf(stderr, "[DOM DEBUG] create_flex_item_view - redundant assignment view %p->node = %p (was already set by alloc_view)\n",
+    log_debug("[DOM DEBUG] create_flex_item_view - redundant assignment view %p->node = %p (was already set by alloc_view)",
             (void*)view, (void*)node);
     view->parent = lycon->parent;
     view->view_type = RDT_VIEW_BLOCK;
@@ -360,6 +425,7 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     }
 
     block->display = display;
+    log_debug("*** SET DISPLAY: node=%p (%s), display={%d,%d}", node, node->node_name(), display.outer, display.inner);
 
     // Set up basic CSS properties (minimal setup for flex items)
     dom_node_resolve_style(node, lycon);
@@ -375,4 +441,163 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     // CRITICAL FIX: Set prev_view so cached measurements can be applied
     lycon->prev_view = (View*)block;
     log_debug("create_lightweight_flex_item_view EXIT for %s (node=%p, created_view=%p)", node->node_name(), node, block);
+}
+
+// ============================================================================
+// Enhanced Intrinsic Sizing Implementation
+// ============================================================================
+
+// Calculate intrinsic sizes for a flex item
+void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_layout) {
+    if (!item || !item->fi) {
+        log_debug("calculate_item_intrinsic_sizes: invalid item or no flex properties");
+        return;
+    }
+
+    // Skip if already calculated
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+    if (is_horizontal && item->fi->has_intrinsic_width) {
+        log_debug("calculate_item_intrinsic_sizes: width already calculated");
+        return;
+    }
+    if (!is_horizontal && item->fi->has_intrinsic_height) {
+        log_debug("calculate_item_intrinsic_sizes: height already calculated");
+        return;
+    }
+
+    log_debug("Calculating intrinsic sizes for item %p (%s)", item, item->node_name());
+
+    // Initialize to zero
+    int min_width = 0, max_width = 0, min_height = 0, max_height = 0;
+
+    // Check if item has children to measure
+    DomNode* child = item->first_child;
+    if (!child) {
+        // No children - use explicit dimensions or zero
+        min_width = max_width = item->width > 0 ? item->width : 0;
+        min_height = max_height = item->height > 0 ? item->height : 0;
+    } else if (child->is_text() && !child->next_sibling) {
+        // Simple text node - measure directly
+        // Need to create a minimal LayoutContext for measurement
+        // For now, use simplified measurement
+        const char* text = (const char*)child->text_data();
+        if (text) {
+            size_t len = strlen(text);
+            // Rough estimation: 10px per character for max, longest word for min
+            max_width = len * 10;
+            // Find longest word
+            int current_word = 0;
+            min_width = 0;
+            for (size_t i = 0; i < len; i++) {
+                if (is_space(text[i])) {
+                    min_width = max(min_width, current_word * 10);
+                    current_word = 0;
+                } else {
+                    current_word++;
+                }
+            }
+            min_width = max(min_width, current_word * 10);
+            min_height = max_height = 20;  // Rough font height
+        }
+    } else {
+        // Complex content - need full layout measurement
+        // TODO: Implement proper block measurement
+        // For now, use simple estimation
+        min_width = 100;  // Placeholder
+        max_width = 200;  // Placeholder
+        min_height = 50;  // Placeholder
+        max_height = 100; // Placeholder
+        log_debug("WARNING: Complex content measurement not yet implemented, using placeholders");
+    }
+
+    // Store results
+    item->fi->intrinsic_width.min_content = min_width;
+    item->fi->intrinsic_width.max_content = max_width;
+    item->fi->intrinsic_height.min_content = min_height;
+    item->fi->intrinsic_height.max_content = max_height;
+    item->fi->has_intrinsic_width = 1;
+    item->fi->has_intrinsic_height = 1;
+
+    log_debug("Intrinsic sizes calculated: width=[%d, %d], height=[%d, %d]",
+              min_width, max_width, min_height, max_height);
+}
+
+// Measure block intrinsic sizes (full implementation)
+void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
+                                   int* min_width, int* max_width,
+                                   int* min_height, int* max_height) {
+    if (!block) {
+        *min_width = *max_width = *min_height = *max_height = 0;
+        return;
+    }
+
+    // Save current layout context
+    LayoutContext saved = *lycon;
+    
+    // Mark as measurement mode
+    lycon->is_measuring = true;
+    
+    // Phase 1: Max-content measurement (no width constraint)
+    lycon->block.content_width = FLT_MAX;
+    *max_width = layout_block_measure_mode(lycon, block, false);
+    
+    // Phase 2: Min-content measurement (maximum wrapping)
+    lycon->block.content_width = 0;
+    *min_width = layout_block_measure_mode(lycon, block, true);
+    
+    // Height measurement would require laying out with specific width
+    // For now, estimate based on content
+    *min_height = *max_height = (int)lycon->block.advance_y;
+    
+    // Restore context
+    *lycon = saved;
+    
+    log_debug("Block intrinsic sizes: width=[%d, %d], height=[%d, %d]",
+              *min_width, *max_width, *min_height, *max_height);
+}
+
+// Layout block in measurement mode (without creating permanent views)
+int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width) {
+    if (!block) return 0;
+    
+    // In measurement mode, traverse children and measure their contributions
+    // without creating permanent view structures
+    
+    int max_width = 0;
+    DomNode* child = block->first_child;
+    
+    while (child) {
+        if (child->is_text()) {
+            // Measure text node - rough estimation
+            const char* text = (const char*)child->text_data();
+            if (text) {
+                size_t len = strlen(text);
+                if (constrain_width) {
+                    // Min-content: longest word
+                    int current_word = 0;
+                    int longest = 0;
+                    for (size_t i = 0; i < len; i++) {
+                        if (is_space(text[i])) {
+                            longest = max(longest, current_word * 10);
+                            current_word = 0;
+                        } else {
+                            current_word++;
+                        }
+                    }
+                    longest = max(longest, current_word * 10);
+                    max_width = max(max_width, longest);
+                } else {
+                    // Max-content: full text width
+                    max_width = max(max_width, (int)(len * 10));
+                }
+            }
+        } else if (child->is_element()) {
+            // For element children, would need recursive measurement
+            // Simplified for now
+            max_width = max(max_width, 100);  // Placeholder
+        }
+        child = child->next_sibling;
+    }
+    
+    return max_width;
 }

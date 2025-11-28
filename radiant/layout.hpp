@@ -101,6 +101,10 @@ typedef struct LayoutContext {
     float width, height;  // context dimensions
     float dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
+    
+    // Measurement mode flag - when true, layout is for measuring intrinsic sizes
+    // and should not create permanent view structures or modify the main layout tree
+    bool is_measuring;
 } LayoutContext;
 
 void* alloc_prop(LayoutContext* lycon, size_t size);

@@ -35,6 +35,10 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout);
 void distribute_free_space(FlexLineInfo* line, bool is_growing);
 
+// Constraint resolution
+void resolve_flex_item_constraints(ViewGroup* item, FlexContainerLayout* flex_layout);
+void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
+
 // Alignment functions
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
