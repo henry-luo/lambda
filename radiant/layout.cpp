@@ -108,12 +108,23 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
 }
 
 // DomNode style resolution function
+// Ensures styles are resolved only once per layout pass using styles_resolved flag
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
         if (dom_elem && dom_elem->specified_style) {
+            // Check if styles already resolved in this layout pass
+            if (dom_elem->styles_resolved) {
+                log_debug("[CSS] Skipping style resolution for <%s> - already resolved",
+                    dom_elem->tag_name ? dom_elem->tag_name : "unknown");
+                return;
+            }
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
             resolve_lambda_css_styles(dom_elem, lycon);
+            // Mark as resolved for this layout pass
+            dom_elem->styles_resolved = true;
+            log_debug("[CSS] Resolved styles for <%s> - marked as resolved",
+                dom_elem->tag_name ? dom_elem->tag_name : "unknown");
         }
     }
 }
@@ -400,9 +411,38 @@ int detect_html_version_lambda_css(DomDocument* doc) {
     return doc->html_version;
 }
 
+// Reset styles_resolved flag for all elements before layout pass
+// This ensures CSS style resolution happens exactly once per element per layout
+static void reset_styles_resolved_recursive(DomNode* node) {
+    if (!node) return;
+
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        elem->styles_resolved = false;
+
+        // Recursively process children
+        DomNode* child = elem->first_child;
+        while (child) {
+            reset_styles_resolved_recursive(child);
+            child = child->next_sibling;
+        }
+    }
+}
+
+// Public function to reset all styles_resolved flags in the document
+void reset_styles_resolved(DomDocument* doc) {
+    if (!doc || !doc->root) return;
+    log_debug("[CSS] Resetting styles_resolved flags for all elements");
+    reset_styles_resolved_recursive(doc->root);
+}
+
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
+
+    // Reset styles_resolved flags for all elements before layout
+    // This ensures CSS style resolution happens exactly once per element per layout pass
+    reset_styles_resolved(doc);
 
     // Initialize text flow logging
     init_text_flow_logging();
