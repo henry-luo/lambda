@@ -69,24 +69,24 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->writing_mode = WM_HORIZONTAL_TB;
         flex->text_direction = TD_LTR;
     }
-    
+
     // Initialize main_axis_size and cross_axis_size early for percentage resolution
     // This allows collect_and_prepare_flex_items to re-resolve percentages correctly
     int content_width = container->width;
     int content_height = container->height;
-    
+
     // Subtract borders if they exist
     if (container->bound && container->bound->border) {
         content_width -= (container->bound->border->width.left + container->bound->border->width.right);
         content_height -= (container->bound->border->width.top + container->bound->border->width.bottom);
     }
-    
+
     // Subtract padding if it exists
     if (container->bound) {
         content_width -= (container->bound->padding.left + container->bound->padding.right);
         content_height -= (container->bound->padding.top + container->bound->padding.bottom);
     }
-    
+
     bool is_horizontal = is_main_axis_horizontal(flex);
     if (is_horizontal) {
         flex->main_axis_size = content_width > 0 ? (float)content_width : 0.0f;
@@ -97,7 +97,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
     log_debug("init_flex_container: main_axis_size=%.1f, cross_axis_size=%.1f (content: %dx%d)",
               flex->main_axis_size, flex->cross_axis_size, content_width, content_height);
-    
+
     // Initialize dynamic arrays
     flex->allocated_items = 8;
     flex->flex_items = (View**)calloc(flex->allocated_items, sizeof(View*));
@@ -628,7 +628,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             bool is_row = is_main_axis_horizontal(flex_layout);
             float container_main = flex_layout->main_axis_size;
             float container_cross = flex_layout->cross_axis_size;
-            
+
             // Re-resolve width percentage
             if (!isnan(item->blk->given_width_percent)) {
                 float width_percent = item->blk->given_width_percent;
@@ -643,7 +643,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                     item->width = new_width;
                 }
             }
-            
+
             // Re-resolve height percentage
             if (!isnan(item->blk->given_height_percent)) {
                 float height_percent = item->blk->given_height_percent;
