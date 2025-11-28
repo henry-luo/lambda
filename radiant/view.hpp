@@ -357,17 +357,17 @@ typedef struct FlexItemProp {
     int order;
     float aspect_ratio;
     int baseline_offset;
-    
+
     // Intrinsic sizing cache (computed during measurement phase)
     IntrinsicSizes intrinsic_width;   // min_content and max_content widths
     IntrinsicSizes intrinsic_height;  // min_content and max_content heights
-    
+
     // Resolved constraints (computed from BlockProp given_min/max values)
     int resolved_min_width;    // Resolved min-width (including auto = min-content)
     int resolved_max_width;    // Resolved max-width (INT_MAX if none)
     int resolved_min_height;   // Resolved min-height (including auto = min-content)
     int resolved_max_height;   // Resolved max-height (INT_MAX if none)
-    
+
     // Flags for percentage values and measurement state
     int flex_basis_is_percent : 1;
     int is_margin_top_auto : 1;
