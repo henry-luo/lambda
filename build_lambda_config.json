@@ -202,12 +202,7 @@
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libnghttp2.a",
             "link": "static"
-        },
-        {
-            "name": "zlib",
-            "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
-            "link": "static"
-        },
+        },        
         {
             "name": "rpmalloc",
             "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
@@ -217,27 +212,21 @@
         },
         {
             "name": "zlib",
-            "description": "Compression library for PDF FlateDecode",
+            "description": "Compression library",
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
-        },
+        },        
+        {
+            "name": "bzip2",
+            "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+            "link": "static"
+        },        
         {
             "name": "freetype",
             "include": "/opt/homebrew/opt/freetype/include/freetype2",
             "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
             "link": "static"
         },
-        {
-            "name": "png",
-            "lib": "/opt/homebrew/lib/libpng.a",
-            "link": "static"
-        },
-        {
-            "name": "bzip2",
-            "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
-            "link": "static"
-        },
-
         {
             "name": "ThorVG",
             "include": "/usr/local/include",
@@ -251,6 +240,11 @@
             "lib": "/opt/homebrew/lib/libglfw3.a",
             "link": "static"
         },
+        {
+            "name": "png",
+            "lib": "/opt/homebrew/lib/libpng.a",
+            "link": "static"
+        },        
         {
             "name": "turbojpeg",
             "lib": "/opt/homebrew/lib/libturbojpeg.a",
@@ -670,7 +664,6 @@
             "compiler": "gcc",
             "includes": [
                 "/usr/include/freetype2",
-                "/usr/include/fontconfig",
                 "/usr/include",
                 "/usr/include/libpng16"
             ],
@@ -788,7 +781,6 @@
         "macos": {
             "includes": [
                 "/opt/homebrew/opt/freetype/include/freetype2",
-                "/opt/homebrew/include/fontconfig",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/libpng16"
             ],
