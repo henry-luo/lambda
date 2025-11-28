@@ -22,7 +22,7 @@ const char* View::view_name() {
     }
 }
 
-View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node) {
+View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
     View* view = (View*)node;
     switch (type) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:

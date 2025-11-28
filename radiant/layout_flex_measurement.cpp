@@ -133,7 +133,7 @@ ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* 
     lycon->prev_view = nullptr;
 
     // Create View that won't be linked to layout hierarchy
-    ViewBlock* temp_view = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
+    ViewBlock* temp_view = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, child);
 
     // Restore layout context immediately
     lycon->parent = saved_parent;
@@ -193,21 +193,21 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
     float total_width = 0.0f;
     float current_word_width = 0.0f;
     float longest_word = 0.0f;
-    
+
     const unsigned char* str = (const unsigned char*)text;
     FT_UInt prev_glyph_index = 0;
-    
+
     for (size_t i = 0; i < length; i++) {
         unsigned char ch = str[i];
-        
+
         // Load glyph for this character
         if (FT_Load_Char(lycon->font.ft_face, ch, FT_LOAD_DEFAULT)) {
             continue;  // Skip characters that fail to load
         }
-        
+
         FT_GlyphSlot slot = lycon->font.ft_face->glyph;
         float advance = (float)(slot->advance.x) / 64.0f;
-        
+
         // Apply kerning if available
         if (prev_glyph_index && lycon->font.style->has_kerning) {
             FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, ch);
@@ -217,9 +217,9 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
             advance += (float)(kerning.x) / 64.0f;
             prev_glyph_index = glyph_index;
         }
-        
+
         total_width += advance;
-        
+
         // Track word boundaries for min-content calculation
         if (is_space(ch)) {
             longest_word = max(longest_word, current_word_width);
@@ -228,15 +228,15 @@ void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
             current_word_width += advance;
         }
     }
-    
+
     // Check final word
     longest_word = max(longest_word, current_word_width);
-    
+
     // Set results
     *max_width = (int)(total_width + 0.5f);  // Round to nearest pixel
     *min_width = (int)(longest_word + 0.5f);  // Longest word = min-content
     *height = (int)(lycon->font.style->font_size + 0.5f);
-    
+
     log_debug("measure_text_run: text_length=%zu, min=%d, max=%d, height=%d",
               length, *min_width, *max_width, *height);
 }
@@ -350,11 +350,11 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
 
     // Create ViewBlock for the flex item
-    ViewBlock* view = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, node);
+    ViewBlock* view = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, node);
     if (!view) return nullptr;
 
     // Initialize basic properties
-    log_debug("[DOM DEBUG] create_flex_item_view - redundant assignment view %p->node = %p (was already set by alloc_view)",
+    log_debug("[DOM DEBUG] create_flex_item_view - redundant assignment view %p->node = %p (was already set by set_view)",
             (void*)view, (void*)node);
     view->parent = lycon->parent;
     view->view_type = RDT_VIEW_BLOCK;
@@ -413,7 +413,7 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     DisplayValue display = resolve_display_value(node);
 
     // Create ViewBlock directly (similar to layout_block but without child processing)
-    ViewBlock* block = (ViewBlock*)alloc_view(lycon,
+    ViewBlock* block = (ViewBlock*)set_view(lycon,
         display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
         display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
         display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
@@ -533,25 +533,25 @@ void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
 
     // Save current layout context
     LayoutContext saved = *lycon;
-    
+
     // Mark as measurement mode
     lycon->is_measuring = true;
-    
+
     // Phase 1: Max-content measurement (no width constraint)
     lycon->block.content_width = FLT_MAX;
     *max_width = layout_block_measure_mode(lycon, block, false);
-    
+
     // Phase 2: Min-content measurement (maximum wrapping)
     lycon->block.content_width = 0;
     *min_width = layout_block_measure_mode(lycon, block, true);
-    
+
     // Height measurement would require laying out with specific width
     // For now, estimate based on content
     *min_height = *max_height = (int)lycon->block.advance_y;
-    
+
     // Restore context
     *lycon = saved;
-    
+
     log_debug("Block intrinsic sizes: width=[%d, %d], height=[%d, %d]",
               *min_width, *max_width, *min_height, *max_height);
 }
@@ -559,13 +559,13 @@ void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
 // Layout block in measurement mode (without creating permanent views)
 int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width) {
     if (!block) return 0;
-    
+
     // In measurement mode, traverse children and measure their contributions
     // without creating permanent view structures
-    
+
     int max_width = 0;
     DomNode* child = block->first_child;
-    
+
     while (child) {
         if (child->is_text()) {
             // Measure text node - rough estimation
@@ -598,6 +598,6 @@ int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool const
         }
         child = child->next_sibling;
     }
-    
+
     return max_width;
 }

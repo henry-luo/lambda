@@ -234,7 +234,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
 
 // Create and initialize a table cell view
 static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode) {
-    ViewTableCell* cell = (ViewTableCell*)alloc_view(lycon, RDT_VIEW_TABLE_CELL, cellNode);
+    ViewTableCell* cell = (ViewTableCell*)set_view(lycon, RDT_VIEW_TABLE_CELL, cellNode);
 
     // Save current layout context
     DomNode* saved_elmt = lycon->elmt;
@@ -259,12 +259,12 @@ static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode)
 
 // Create and initialize a table row view
 static ViewTableRow* create_table_row(LayoutContext* lycon, DomNode* rowNode) {
-    return (ViewTableRow*)alloc_view(lycon, RDT_VIEW_TABLE_ROW, rowNode);
+    return (ViewTableRow*)set_view(lycon, RDT_VIEW_TABLE_ROW, rowNode);
 }
 
 // Create and initialize a table row group view
 static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNode* groupNode) {
-    return (ViewTableRowGroup*)alloc_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, groupNode);
+    return (ViewTableRowGroup*)set_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, groupNode);
 }
 
 // Build table structure from DOM
@@ -298,7 +298,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
         if (tag == HTM_TAG_CAPTION || child_display.inner == CSS_VALUE_TABLE_CAPTION) {
             // Create caption as block
-            ViewBlock* caption = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
+            ViewBlock* caption = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, child);
             if (caption) {
                 // Save layout context
                 Blockbox cap_saved_block = lycon->block;
