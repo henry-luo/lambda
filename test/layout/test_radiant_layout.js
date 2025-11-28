@@ -14,8 +14,8 @@ const { spawn } = require('child_process');
 
 class RadiantLayoutTester {
     constructor(options = {}) {
-        this.engine = options.engine || 'radiant'; // 'radiant' or 'lambda-css'
-        this.radiantExe = options.radiantExe || (this.engine === 'lambda-css' ? './lambda.exe' : './radiant.exe');
+        this.engine = options.engine || 'lambda-css'; // Default to 'lambda-css'
+        this.radiantExe = options.radiantExe || './lambda.exe'; // Default to lambda.exe
         this.tolerance = options.tolerance || 5; // 5px tolerance for layout differences
         this.elementThreshold = options.elementThreshold || 100.0; // 100% overall element match threshold
         this.textThreshold = options.textThreshold || 100.0; // 100% overall text match threshold
@@ -1249,7 +1249,7 @@ Radiant Layout Engine Automated Test Script
 Usage: node test/layout/test_radiant_layout.js [options]
 
 Options:
-  --engine, -e <name>      Layout engine to use: 'radiant' or 'lambda-css' (default: radiant)
+  --engine, -e <name>      Layout engine to use: 'lambda-css' (default: lambda-css)
   --category, -c <name>    Test specific category (e.g., basic, flex, grid)
   --test, -t <file>        Test specific HTML file
   --pattern, -p <text>     Test files containing pattern (runs in verbose mode)
@@ -1257,15 +1257,14 @@ Options:
   --element-threshold <pct> Element match threshold percentage (default: 80.0)
   --text-threshold <pct>   Text match threshold percentage (default: 70.0)
   --verbose, -v            Show detailed output
-  --radiant-exe <path>     Path to layout engine executable (default: ./radiant.exe or ./lambda.exe)
+  --radiant-exe <path>     Path to layout engine executable (default: ./lambda.exe)
   --help, -h               Show this help message
 
 Engines:
-  radiant      - Radiant layout engine (Lexbor-based HTML/CSS rendering)
   lambda-css   - Lambda CSS layout engine (custom CSS cascade and layout)
 
 Examples:
-  node test/layout/test_radiant_layout.js                              # Test all categories with Radiant
+  node test/layout/test_radiant_layout.js                              # Test all categories with Lambda CSS
   node test/layout/test_radiant_layout.js --engine lambda-css          # Test all categories with Lambda CSS
   node test/layout/test_radiant_layout.js -e lambda-css -c baseline    # Test baseline category with Lambda CSS
   node test/layout/test_radiant_layout.js -c baseline                  # Test baseline category with Radiant
