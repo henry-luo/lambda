@@ -114,7 +114,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         DomElement* dom_elem = node->as_element();
         if (dom_elem && dom_elem->specified_style) {
             // Check if styles already resolved in this layout pass
-            if (dom_elem->styles_resolved) {
+            // IMPORTANT: Skip this check during measurement mode (is_measuring=true)
+            // because measurement passes should not permanently mark styles as resolved
+            if (dom_elem->styles_resolved && !lycon->is_measuring) {
                 log_debug("[CSS] Skipping style resolution for <%s> - already resolved",
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
                 return;
@@ -122,9 +124,15 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
             resolve_lambda_css_styles(dom_elem, lycon);
             // Mark as resolved for this layout pass
-            dom_elem->styles_resolved = true;
-            log_debug("[CSS] Resolved styles for <%s> - marked as resolved",
-                dom_elem->tag_name ? dom_elem->tag_name : "unknown");
+            // Don't mark as resolved during measurement mode - let the actual layout pass do that
+            if (!lycon->is_measuring) {
+                dom_elem->styles_resolved = true;
+                log_debug("[CSS] Resolved styles for <%s> - marked as resolved",
+                    dom_elem->tag_name ? dom_elem->tag_name : "unknown");
+            } else {
+                log_debug("[CSS] Resolved styles for <%s> in measurement mode - not marking resolved",
+                    dom_elem->tag_name ? dom_elem->tag_name : "unknown");
+            }
         }
     }
 }
