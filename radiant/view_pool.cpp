@@ -764,6 +764,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     if (block->view_type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
     else if (block->view_type == RDT_VIEW_LIST_ITEM) display = "list-item";
     else if (block->view_type == RDT_VIEW_TABLE) display = "table";
+    else if (block->view_type == RDT_VIEW_TABLE_ROW_GROUP) display = "table-row-group";
+    else if (block->view_type == RDT_VIEW_TABLE_ROW) display = "table-row";
+    else if (block->view_type == RDT_VIEW_TABLE_CELL) display = "table-cell";
     // CRITICAL FIX: Check for flex container
     else if (block->embed && block->embed->flex) display = "flex";
     strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
