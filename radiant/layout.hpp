@@ -101,7 +101,7 @@ typedef struct LayoutContext {
     float width, height;  // context dimensions
     float dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
-    
+
     // Measurement mode flag - when true, layout is for measuring intrinsic sizes
     // and should not create permanent view structures or modify the main layout tree
     bool is_measuring;
@@ -115,7 +115,7 @@ PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
-View* alloc_view(LayoutContext* lycon, ViewType type, DomNode* node);
+View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 void free_view(ViewTree* tree, View* view);
 
 // ============================================================================

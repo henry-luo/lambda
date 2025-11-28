@@ -335,7 +335,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     line_init(lycon, 0, lycon->block.content_width);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
-    ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
+    ViewBlock* html = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, elmt);
     html->width = lycon->block.content_width;  html->height = lycon->block.content_height;
     lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
     lycon->elmt = elmt;

@@ -239,7 +239,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     LAYOUT_TEXT:
     if (!text_view) {
-        text_view = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, text_node);
+        text_view = (ViewText*)set_view(lycon, RDT_VIEW_TEXT, text_node);
         lycon->prev_view = (View*)text_view;
         text_view->font = lycon->font.style;
     }

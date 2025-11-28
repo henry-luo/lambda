@@ -619,7 +619,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
     uintptr_t elmt_name = elmt->tag();
-    ViewBlock* block = (ViewBlock*)alloc_view(lycon,
+    ViewBlock* block = (ViewBlock*)set_view(lycon,
         display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
         display.outer == CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
         display.inner == CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,

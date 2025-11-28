@@ -84,7 +84,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->node_name());
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
-        View* br_view = alloc_view(lycon, RDT_VIEW_BR, elmt);
+        View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
         br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
         br_view->width = 0;  br_view->height = lycon->block.line_height;
         lycon->prev_view = br_view;
@@ -97,7 +97,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     CssEnum pa_line_align = lycon->line.vertical_align;
     lycon->elmt = elmt;
 
-    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, elmt);
+    ViewSpan* span = (ViewSpan*)set_view(lycon, RDT_VIEW_INLINE, elmt);
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
