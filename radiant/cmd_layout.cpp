@@ -934,6 +934,7 @@ int cmd_layout(int argc, char** argv) {
     log_debug("[Layout] lambda_html_root=%p, dom_root=%p",
             (void*)doc->html_root, (void*)doc->root);
 
+    ui_context.document = doc;
     layout_html_doc(&ui_context, doc, false);
 
     log_debug("[Layout] layout_html_doc returned");
@@ -961,11 +962,9 @@ int cmd_layout(int argc, char** argv) {
     log_debug("[Cleanup] Starting cleanup...");
     log_debug("[Cleanup] Cleaning up UI context...");
     ui_context_cleanup(&ui_context);
-    log_debug("[Cleanup] Freeing document...");
-    free_document(doc);
     log_debug("[Cleanup] Destroying pool...");
     pool_destroy(pool);
     log_debug("[Cleanup] Complete");
-
+    log_notice("Completed layout command successfully");
     return 0;
 }
