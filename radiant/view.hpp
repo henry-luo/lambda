@@ -358,17 +358,17 @@ typedef struct FlexItemProp {
     int order;
     float aspect_ratio;
     int baseline_offset;
-    
+
     // Intrinsic sizing cache (computed during measurement phase)
     IntrinsicSizes intrinsic_width;   // min_content and max_content widths
     IntrinsicSizes intrinsic_height;  // min_content and max_content heights
-    
+
     // Resolved constraints (computed from BlockProp given_min/max values)
     int resolved_min_width;    // Resolved min-width (including auto = min-content)
     int resolved_max_width;    // Resolved max-width (INT_MAX if none)
     int resolved_min_height;   // Resolved min-height (including auto = min-content)
     int resolved_max_height;   // Resolved max-height (INT_MAX if none)
-    
+
     // Flags for percentage values and measurement state
     int flex_basis_is_percent : 1;
     int is_margin_top_auto : 1;
@@ -455,6 +455,8 @@ typedef struct BlockProp {
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
+    float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
+    float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
     // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 

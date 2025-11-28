@@ -32,26 +32,26 @@ static void print_view_tree_snapshot(ViewBlock* container, const char* phase_nam
 static int validate_flex_coordinates(ViewBlock* container, const char* phase_name) {
     log_enter();
     log_debug("Validating coordinates for phase: %s", phase_name);
-    
+
     int invalid_count = 0;
     View* child = container->first_child;
-    
+
     while (child) {
         if (child->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* view = (ViewBlock*)child;
-            
+
             // Check for negative dimensions
             if (view->width < 0 || view->height < 0) {
                 log_error("INVALID COORD (negative) in %s: view=%p (%s) w=%.1f h=%.1f",
                          phase_name, view, view->node_name(), view->width, view->height);
                 invalid_count++;
             }
-            
+
             // Log coordinates for debugging
             log_debug("COORD CHECK in %s: view=%p (%s) x=%.1f y=%.1f w=%.1f h=%.1f",
-                     phase_name, view, view->node_name(), 
+                     phase_name, view, view->node_name(),
                      view->x, view->y, view->width, view->height);
-            
+
             // Recursively check children
             if (view->first_child) {
                 invalid_count += validate_flex_coordinates(view, phase_name);
@@ -59,13 +59,13 @@ static int validate_flex_coordinates(ViewBlock* container, const char* phase_nam
         }
         child = child->next();
     }
-    
+
     if (invalid_count == 0) {
         log_debug("All coordinates valid in %s", phase_name);
     } else {
         log_error("Found %d invalid coordinates in %s", invalid_count, phase_name);
     }
-    
+
     log_leave();
     return invalid_count;
 }
@@ -79,11 +79,26 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     log_enter();
     log_info("ENHANCED FLEX ALGORITHM START: container=%p (%s)", flex_container, flex_container->node_name());
 
+    // CRITICAL: Initialize flex container properties for this container
+    // This must be done BEFORE running the flex algorithm so it uses
+    // the correct direction, wrap, justify, etc. from CSS
+    FlexContainerLayout* pa_flex = lycon->flex_container;
+    init_flex_container(lycon, flex_container);
+
     log_debug("ENHANCED FLEX LAYOUT STARTING");
     log_debug("Starting enhanced flex layout for container %p", flex_container);
 
-    // Clear measurement cache for this layout pass
-    clear_measurement_cache();
+    // NOTE: Do NOT clear measurement cache here!
+    // The cache is populated during PASS 1 (in layout_flex_content)
+    // and needs to be available for the flex algorithm that runs here.
+    // Cache should only be cleared at the start of a new top-level layout pass.
+
+    // CRITICAL: Collect and prepare flex items with percentage re-resolution
+    // This ensures percentage widths/heights are resolved relative to THIS container's
+    // content area, not the ancestor container that was in scope during CSS resolution.
+    log_debug("Collecting and preparing flex items for nested/enhanced container");
+    int item_count = collect_and_prepare_flex_items(lycon, lycon->flex_container, flex_container);
+    log_debug("Collected %d flex items with percentage re-resolution", item_count);
 
     // PASS 1: Run enhanced flex algorithm with measured content
     log_debug("Pass 1: Running enhanced flex algorithm with measured content");
@@ -95,6 +110,10 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     log_debug("Pass 2: Final content layout");
     layout_final_flex_content(lycon, flex_container);
 
+    // Restore parent flex context
+    cleanup_flex_container(lycon);
+    lycon->flex_container = pa_flex;
+
     log_info("ENHANCED FLEX ALGORITHM END: container=%p", flex_container);
     log_leave();
 }
@@ -102,13 +121,12 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container) {
     log_enter();
     log_info(">>> RUN_ENHANCED_FLEX_ALGORITHM: container=%p (%s)", flex_container, flex_container->node_name());
-    log_debug("ENHANCED FLEX ALGORITHM STARTING for %s", flex_container->node_name());
-    log_debug("Running enhanced flex algorithm with auto margin support");
+    log_info(">>> DEBUG: About to call layout_flex_container");
 
     // Note: space-evenly workaround now handled via x-justify-content custom property in resolve_style.cpp
 
     // First, run the existing flex algorithm
-    log_info(">>> ABOUT TO CALL layout_flex_container for %s", flex_container->node_name());
+    log_info(">>> CALLING layout_flex_container for %s", flex_container->node_name());
     layout_flex_container(lycon, flex_container);
     log_info(">>> RETURNED FROM layout_flex_container for %s", flex_container->node_name());
 
@@ -282,12 +300,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
 
     log_enter();
-    log_info("SUB-PASS 2: Layout flex item content: item=%p (%s), size=%dx%d", 
+    log_info("SUB-PASS 2: Layout flex item content: item=%p (%s), size=%dx%d",
              flex_item, flex_item->node_name(), flex_item->width, flex_item->height);
 
     log_debug("Flex item=%p, first_child=%p", flex_item, flex_item->first_child);
     if (flex_item->first_child) {
-        log_debug("First child name=%s, display={%d,%d}", 
+        log_debug("First child name=%s, display={%d,%d}",
                   flex_item->first_child->node_name(),
                   flex_item->as_element()->display.outer,
                   flex_item->as_element()->display.inner);
@@ -339,12 +357,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // CRITICAL: Check if this flex item is ITSELF a flex container (nested flex)
     // If so, recursively call the flex algorithm instead of laying out children as flow
     if (flex_item->display.inner == CSS_VALUE_FLEX) {
-        log_info(">>> NESTED FLEX DETECTED: item=%p (%s) has display.inner=FLEX", 
+        log_info(">>> NESTED FLEX DETECTED: item=%p (%s) has display.inner=FLEX",
                  flex_item, flex_item->node_name());
-        log_info(">>> NESTED FLEX PARENT POSITION: x=%.1f, y=%.1f (before recursion)", 
+        log_info(">>> NESTED FLEX PARENT POSITION: x=%.1f, y=%.1f (before recursion)",
                  flex_item->x, flex_item->y);
         log_enter();
-        
+
         // First, create lightweight Views for the nested container's children
         // WITHOUT laying them out (the flex algorithm will position/size them)
         DomNode* child = flex_item->first_child;
@@ -359,11 +377,11 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 child = child->next_sibling;
             } while (child);
         }
-        
+
         // Then run the flex algorithm which will position and size the Views
         log_info("Running nested flex algorithm for container=%p", flex_item);
         layout_flex_container_with_nested_content(lycon, flex_item);
-        
+
         log_info(">>> NESTED FLEX: Checking child coordinates after algorithm");
         View* nested_child = flex_item->first_child;
         while (nested_child) {
@@ -375,10 +393,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             }
             nested_child = nested_child->next();
         }
-        
+
         // Validate nested flex coordinates
         validate_flex_coordinates(flex_item, "After Nested Flex");
-        
+
         log_leave();
         log_info(">>> NESTED FLEX COMPLETE: item=%p", flex_item);
     } else {
@@ -419,7 +437,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) {
     log_enter();
     log_info("FINAL FLEX CONTENT LAYOUT START: container=%p", flex_container);
-    
+
     // Layout content within each flex item with their final sizes
     View* child = flex_container->first_child;
     while (child) {
@@ -432,12 +450,13 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
         child = child->next();
     }
-    
+
     log_info("FINAL FLEX CONTENT LAYOUT END: container=%p", flex_container);
     log_leave();
 }
 
 // Enhanced multi-pass flex layout
+// REFACTORED: Now uses unified single-pass collection (Task 2 - Eliminate Redundant Tree Traversals)
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     log_enter();
     log_info("FLEX LAYOUT START: container=%p (%s)", block, block->node_name());
@@ -457,43 +476,22 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     FlexContainerLayout* pa_flex = lycon->flex_container;
     init_flex_container(lycon, block);
 
-    // PASS 1: Create Views with measured sizes (combined measurement + View creation)
-    log_info("=== PASS 1: Create lightweight Views with measurements ===");
-    int child_count = 0;
-    DomNode* measure_child = block->first_child;
-    log_debug("PASS 1: block=%p, first_child=%p", block, measure_child);
-    if (measure_child) {
-        do {
-        log_debug("PASS 1: Processing flex child %p (count: %d)", measure_child, child_count);
-        log_debug("PASS 1: child node_name=%s, is_element=%d, next_sibling=%p",
-                  measure_child->node_name(), measure_child->is_element(), measure_child->next_sibling);
-        // Only create Views for element nodes, skip text nodes
-        if (measure_child->is_element()) {
-            log_debug("PASS 1: Creating View with measurement for %s (node=%p)", measure_child->node_name(), measure_child);
-            // CRITICAL: Keep measurement logic, then create View
-            measure_flex_child_content(lycon, measure_child);
-            layout_flow_node_for_flex(lycon, measure_child);
-            log_debug("PASS 1: Completed View creation for %s", measure_child->node_name());
-        } else {
-            log_debug("PASS 1: Skipping text node: %s", measure_child->node_name());
-        }
-        DomNode* next = measure_child->next_sibling;
-        log_debug("PASS 1: About to advance to next_sibling=%p", next);
-        measure_child = next;
-        child_count++;
-        } while (measure_child);
-    }
-    log_info("=== PASS 1 COMPLETE: %d children processed ===", child_count);
-    
-    // Print view tree and validate coordinates after PASS 1
-    print_view_tree_snapshot(block, "After PASS 1");
-    validate_flex_coordinates(block, "After PASS 1");
+    // UNIFIED PASS: Collect, measure, and prepare all flex items in a single traversal
+    // This replaces the old separate PASS 1 (measurement + View creation) and Phase 1 (collection)
+    log_info("=== UNIFIED PASS: Collect, measure, and prepare flex items ===");
+    int item_count = collect_and_prepare_flex_items(lycon, lycon->flex_container, block);
+    log_info("=== UNIFIED PASS COMPLETE: %d flex items collected ===", item_count);
+
+    // Print view tree and validate coordinates after unified collection
+    print_view_tree_snapshot(block, "After Unified Collection");
+    validate_flex_coordinates(block, "After Unified Collection");
 
     // PASS 2: Run enhanced flex algorithm with nested content support
+    // Note: The flex algorithm now skips collection since items are already prepared
     log_info("=== PASS 2: Running enhanced flex algorithm ===");
     layout_flex_container_with_nested_content(lycon, block);
     log_info("=== PASS 2 COMPLETE ===");
-    
+
     // Print view tree and validate coordinates after PASS 2
     print_view_tree_snapshot(block, "After PASS 2");
     validate_flex_coordinates(block, "After PASS 2");
@@ -501,7 +499,7 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // restore parent flex context
     cleanup_flex_container(lycon);
     lycon->flex_container = pa_flex;
-    
+
     log_info("FLEX LAYOUT END: container=%p", block);
     log_leave();
 }

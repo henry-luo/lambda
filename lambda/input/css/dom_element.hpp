@@ -111,6 +111,7 @@ struct DomElement : DomNode {
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
     bool needs_style_recompute;  // Flag indicating computed values are stale
+    bool styles_resolved;        // Flag to track if styles resolved in current layout pass
     // pseudo-class state (for :hover, :focus, etc.)
     uint32_t pseudo_state;       // Bitmask of pseudo-class states
 
@@ -144,7 +145,7 @@ struct DomElement : DomNode {
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
-        style_version(0), needs_style_recompute(false),
+        style_version(0), needs_style_recompute(false), styles_resolved(false),
         pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
 };
 

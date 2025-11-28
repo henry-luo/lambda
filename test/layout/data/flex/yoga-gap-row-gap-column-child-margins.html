@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Yoga Test: row_gap_column_child_margins</title>
+    <style>
+        /* Yoga default styles - all divs are flex containers */
+        body {
+            margin: 0;
+            padding: 0;
+            font: 10px/1 Arial, sans-serif;
+        }
+        div {
+            box-sizing: border-box;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            align-content: flex-start;
+            justify-content: flex-start;
+            flex-shrink: 0;
+            border: 0 solid black;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="row_gap_column_child_margins" style="flex-direction: column; width: 100px; height: 200px; row-gap: 10px;">
+  <div style="flex: 1; margin-block: 2px;"></div>
+  <div style="flex: 1; margin-block: 10px;"></div>
+  <div style="flex: 1; margin-block: 15px;"></div>
+</div>
+</body>
+</html>

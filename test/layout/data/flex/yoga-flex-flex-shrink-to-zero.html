@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Yoga Test: flex_shrink_to_zero</title>
+    <style>
+        /* Yoga default styles - all divs are flex containers */
+        body {
+            margin: 0;
+            padding: 0;
+            font: 10px/1 Arial, sans-serif;
+        }
+        div {
+            box-sizing: border-box;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            align-content: flex-start;
+            justify-content: flex-start;
+            flex-shrink: 0;
+            border: 0 solid black;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="flex_shrink_to_zero" style="height: 75px;">
+  <div style="width: 50px; height: 50px; flex-shrink:0;"></div>
+  <div style="width: 50px; height: 50px; flex-shrink:1;"></div>
+  <div style="width: 50px; height: 50px; flex-shrink:0;"></div>
+</div>
+</body>
+</html>

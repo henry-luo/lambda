@@ -606,8 +606,21 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         if (property == CSS_PROPERTY_FONT_SIZE || property == CSS_PROPERTY_LINE_HEIGHT || property == CSS_PROPERTY_VERTICAL_ALIGN) {
             // font-size percentage is relative to parent font size
             result = percentage * lycon->font.style->font_size / 100.0;
+        } else if (property == CSS_PROPERTY_HEIGHT || property == CSS_PROPERTY_MIN_HEIGHT ||
+                   property == CSS_PROPERTY_MAX_HEIGHT || property == CSS_PROPERTY_TOP ||
+                   property == CSS_PROPERTY_BOTTOM) {
+            // height-related properties: percentage relative to parent HEIGHT
+            if (lycon->block.pa_block) {
+                log_debug("percentage height calculation: %.2f%% of parent height %d = %.2f",
+                       percentage, lycon->block.pa_block->content_height,
+                       percentage * lycon->block.pa_block->content_height / 100.0);
+                result = percentage * lycon->block.pa_block->content_height / 100.0;
+            } else {
+                log_debug("percentage height value %.2f%% without parent context", percentage);
+                result = 0.0f;
+            }
         } else {
-            // most properties: percentage relative to parent width
+            // width-related and other properties: percentage relative to parent width
             if (lycon->block.pa_block) {
                 log_debug("percentage calculation: %.2f%% of parent width %d = %.2f",
                        percentage, lycon->block.pa_block->content_width,
@@ -1126,6 +1139,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_width = width;
                 block->blk->given_width_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                // Store raw percentage for flex item re-resolution
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->blk->given_width_percent = value->data.percentage.value;
+                    log_debug("[CSS] Width percentage stored: %.2f%%", value->data.percentage.value);
+                } else {
+                    block->blk->given_width_percent = NAN;
+                }
             }
             log_debug("[CSS] Width: %.2f px", width);
             break;
@@ -1140,6 +1160,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (block) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_height = height;
+                // Store raw percentage for flex item re-resolution
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->blk->given_height_percent = value->data.percentage.value;
+                    log_debug("[CSS] Height percentage stored: %.2f%%", value->data.percentage.value);
+                } else {
+                    block->blk->given_height_percent = NAN;
+                }
             }
             break;
         }

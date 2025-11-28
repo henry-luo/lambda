@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Yoga Test: flex_direction_col_reverse_inner_pos_top</title>
+    <style>
+        /* Yoga default styles - all divs are flex containers */
+        body {
+            margin: 0;
+            padding: 0;
+            font: 10px/1 Arial, sans-serif;
+        }
+        div {
+            box-sizing: border-box;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            align-content: flex-start;
+            justify-content: flex-start;
+            flex-shrink: 0;
+            border: 0 solid black;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="flex_direction_col_reverse_inner_pos_top" style="height: 100px; width: 100px;">
+  <div style="height: 100px; width: 100px; flex-direction: column-reverse; ">
+    <div style="width: 10px; height: 10px; position: absolute; top: 10px"></div>
+    <div style="width: 10px;"></div>
+    <div style="width: 10px;"></div>
+  </div>
+</div>
+</body>
+</html>

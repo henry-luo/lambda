@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Yoga Test: justify_content_min_width_with_padding_child_width_greater_than_parent</title>
+    <style>
+        /* Yoga default styles - all divs are flex containers */
+        body {
+            margin: 0;
+            padding: 0;
+            font: 10px/1 Arial, sans-serif;
+        }
+        div {
+            box-sizing: border-box;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            align-content: flex-start;
+            justify-content: flex-start;
+            flex-shrink: 0;
+            border: 0 solid black;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="justify_content_min_width_with_padding_child_width_greater_than_parent" style="width: 1000px; height: 1584px; align-content: stretch;">
+    <div style="flex-direction: row; align-content: stretch;">
+        <div style="flex-direction: row; justify-content: center; align-content: stretch; min-width: 400px; padding-left: 100px; padding-right: 100px;">
+            <div style="height: 100px; width: 300px; align-content: stretch; flex-direction: row;"></div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
