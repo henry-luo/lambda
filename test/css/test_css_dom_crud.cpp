@@ -41,7 +41,7 @@ protected:
         // Create Input context for MarkBuilder
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
-        
+
         input = Input::create(pool);
         ASSERT_NE(input, nullptr);
 
@@ -72,12 +72,12 @@ protected:
         Item elem_item = builder.element(tag_name)
             .attr("_init", "placeholder")
             .final();
-        
+
         if (!elem_item.element) return nullptr;
-        
+
         // Set as root (might be needed for MarkEditor)
         input->root = elem_item;
-        
+
         // Build DOM tree with DomDocument
         DomElement* dom_elem = build_dom_tree_from_element(elem_item.element, doc, nullptr);
         return dom_elem;
@@ -129,7 +129,7 @@ TEST_F(DomIntegrationTest, DomElementAttributes) {
     ASSERT_NE(element, nullptr);
     ASSERT_NE(element->native_element, nullptr);
     ASSERT_NE(element->doc->input, nullptr);
-    
+
     // Set attribute
     EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
     EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value1");
@@ -162,30 +162,30 @@ TEST_F(DomIntegrationTest, InlineMode_ElementPointerStability) {
     // when attributes are added/updated (only the shape and data change)
     DomElement* element = create_dom_element("div");
     ASSERT_NE(element, nullptr);
-    
+
     Element* original_native_ptr = element->native_element;
     ASSERT_NE(original_native_ptr, nullptr);
-    
+
     // Add a new attribute - should NOT change the element pointer in INLINE mode
     EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value1"));
-    EXPECT_EQ(element->native_element, original_native_ptr) 
+    EXPECT_EQ(element->native_element, original_native_ptr)
         << "Element pointer should NOT change in INLINE mode when adding new attribute";
-    
+
     // Update existing attribute - should NOT change the element pointer
     EXPECT_TRUE(dom_element_set_attribute(element, "data-test", "value2"));
     EXPECT_EQ(element->native_element, original_native_ptr)
         << "Element pointer should NOT change in INLINE mode when updating attribute";
-    
+
     // Add multiple attributes - pointer should remain stable
     EXPECT_TRUE(dom_element_set_attribute(element, "id", "test-id"));
     EXPECT_EQ(element->native_element, original_native_ptr);
-    
+
     EXPECT_TRUE(dom_element_set_attribute(element, "class", "test-class"));
     EXPECT_EQ(element->native_element, original_native_ptr);
-    
+
     EXPECT_TRUE(dom_element_set_attribute(element, "style", "color: red;"));
     EXPECT_EQ(element->native_element, original_native_ptr);
-    
+
     // Verify all attributes are still accessible
     EXPECT_STREQ(dom_element_get_attribute(element, "data-test"), "value2");
     EXPECT_STREQ(dom_element_get_attribute(element, "id"), "test-id");
@@ -915,10 +915,10 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     DomElement* parent = create_dom_element("div");
     ASSERT_NE(parent, nullptr);
     ASSERT_NE(parent->native_element, nullptr);
-    
+
     // Append backed text node
     DomText* text = dom_element_append_text(parent, "Hello World");
-    
+
     ASSERT_NE(text, nullptr);
     EXPECT_NE(text->native_string, nullptr);
     EXPECT_NE(((DomElement*)text->parent)->doc->input, nullptr);
@@ -926,7 +926,7 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     EXPECT_STREQ(text->text, "Hello World");
     EXPECT_EQ(text->length, 11u);
     EXPECT_TRUE(dom_text_is_backed(text));
-    
+
     // Verify Lambda backing
     ASSERT_EQ(parent->native_element->length, 1);
     Item child = parent->native_element->items[0];
@@ -939,14 +939,14 @@ TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("p");
     DomText* text = dom_element_append_text(parent, "Original");
     ASSERT_NE(text, nullptr);
-    
+
     // Update text content
     EXPECT_TRUE(dom_text_set_content(text, "Updated"));
-    
+
     // Verify DomText updated
     EXPECT_STREQ(text->text, "Updated");
     EXPECT_EQ(text->length, 7u);
-    
+
     // Verify Lambda String updated
     int64_t idx = dom_text_get_child_index(text);
     ASSERT_GE(idx, 0);
@@ -962,25 +962,25 @@ TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
     DomText* text2 = dom_element_append_text(parent, "Second");
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
-    
+
     EXPECT_EQ(parent->native_element->length, 2);
-    
+
     // Remove first text node
     EXPECT_TRUE(dom_text_remove(text1));
-    
+
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
     Item remaining = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
     EXPECT_STREQ(((String*)remaining.pointer)->chars, "Second");
-    
+
     // Verify text2 index updated
     EXPECT_EQ(dom_text_get_child_index(text2), 0);
 }
 
 TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     DomElement* parent = create_dom_element("div");
-    
+
     // Add multiple text nodes
     DomText* text1 = dom_element_append_text(parent, "One");
     DomText* text2 = dom_element_append_text(parent, "Two");
@@ -988,24 +988,24 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(text2, nullptr);
     ASSERT_NE(text3, nullptr);
-    
+
     EXPECT_EQ(parent->native_element->length, 3);
-    
+
     // Update middle text
     EXPECT_TRUE(dom_text_set_content(text2, "TWO"));
-    
+
     // Verify all strings
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
     EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "TWO");
     EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Three");
-    
+
     // Remove middle text
     EXPECT_TRUE(dom_text_remove(text2));
-    
+
     EXPECT_EQ(parent->native_element->length, 2);
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
     EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "Three");
-    
+
     // Verify indices updated
     EXPECT_EQ(dom_text_get_child_index(text1), 0);
     EXPECT_EQ(dom_text_get_child_index(text3), 1);
@@ -1019,41 +1019,41 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
         .child(builder.element("span").text("Middle").final())
         .text("After")
         .final();
-    
+
     ASSERT_NE(div_item.element, nullptr);
-    
+
     // Set as input root
     input->root = div_item;
-    
+
     // Build DOM tree from Lambda with DomDocument
     DomElement* parent = build_dom_tree_from_element(div_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Verify structure in Lambda tree
     EXPECT_EQ(parent->native_element->length, 3);
     EXPECT_EQ(get_type_id(parent->native_element->items[0]), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_ELEMENT);
     EXPECT_EQ(get_type_id(parent->native_element->items[2]), LMD_TYPE_STRING);
-    
+
     // Get the text nodes from DOM
     DomText* text1 = static_cast<DomText*>(parent->first_child);
     ASSERT_NE(text1, nullptr);
     ASSERT_TRUE(text1->is_text());
     EXPECT_TRUE(dom_text_is_backed(text1));
-    
+
     DomElement* span = static_cast<DomElement*>(text1->next_sibling);
     ASSERT_NE(span, nullptr);
     ASSERT_TRUE(span->is_element());
-    
+
     DomText* text2 = static_cast<DomText*>(span->next_sibling);
     ASSERT_NE(text2, nullptr);
     ASSERT_TRUE(text2->is_text());
     EXPECT_TRUE(dom_text_is_backed(text2));
-    
+
     // Update text around element
     EXPECT_TRUE(dom_text_set_content(text1, "BEFORE"));
     EXPECT_TRUE(dom_text_set_content(text2, "AFTER"));
-    
+
     // Verify Lambda tree updated
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "BEFORE");
     EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "AFTER");
@@ -1061,40 +1061,40 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
 
 TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
     DomElement* parent = create_dom_element("p");
-    
+
     DomText* t0 = dom_element_append_text(parent, "Zero");
     DomText* t1 = dom_element_append_text(parent, "One");
     DomText* t2 = dom_element_append_text(parent, "Two");
     ASSERT_NE(t0, nullptr);
     ASSERT_NE(t1, nullptr);
     ASSERT_NE(t2, nullptr);
-    
+
     EXPECT_EQ(dom_text_get_child_index(t0), 0);
     EXPECT_EQ(dom_text_get_child_index(t1), 1);
     EXPECT_EQ(dom_text_get_child_index(t2), 2);
-    
+
     // Remove middle - indices should update
     EXPECT_TRUE(dom_text_remove(t1));
-    
+
     EXPECT_EQ(dom_text_get_child_index(t0), 0);
     EXPECT_EQ(dom_text_get_child_index(t2), 1);
 }
 
 TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
     DomElement* parent = create_dom_element("div");
-    
+
     // Start with non-empty string
     DomText* text = dom_element_append_text(parent, "Initial");
     ASSERT_NE(text, nullptr);
     EXPECT_TRUE(dom_text_is_backed(text));
-    
+
     // Update to single space (empty strings become "lambda.nil" in MarkBuilder)
     EXPECT_TRUE(dom_text_set_content(text, " "));
-    
+
     // Verify DomText updated
     EXPECT_STREQ(text->text, " ");
     EXPECT_EQ(text->length, 1u);
-    
+
     // Verify Lambda String updated
     Item child = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
@@ -1106,19 +1106,19 @@ TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
 TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
     const char* long_text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
                            "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
-    
+
     DomElement* parent = create_dom_element("div");
     DomText* text = dom_element_append_text(parent, long_text);
-    
+
     ASSERT_NE(text, nullptr);
     EXPECT_STREQ(text->text, long_text);
     EXPECT_EQ(text->length, strlen(long_text));
-    
+
     // Update to even longer string
     const char* longer = "This is an even longer string that tests memory handling and proper allocation strategies.";
     EXPECT_TRUE(dom_text_set_content(text, longer));
     EXPECT_STREQ(text->text, longer);
-    
+
     // Verify Lambda
     int64_t idx = dom_text_get_child_index(text);
     EXPECT_STREQ(((String*)parent->native_element->items[idx].pointer)->chars, longer);
@@ -1128,17 +1128,17 @@ TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
     DomElement* parent = create_dom_element("p");
     DomText* text = dom_element_append_text(parent, "Version1");
     ASSERT_NE(text, nullptr);
-    
+
     // Multiple sequential updates
     EXPECT_TRUE(dom_text_set_content(text, "Version2"));
     EXPECT_STREQ(text->text, "Version2");
-    
+
     EXPECT_TRUE(dom_text_set_content(text, "Version3"));
     EXPECT_STREQ(text->text, "Version3");
-    
+
     EXPECT_TRUE(dom_text_set_content(text, "Final"));
     EXPECT_STREQ(text->text, "Final");
-    
+
     // Verify Lambda has latest
     Item child = parent->native_element->items[0];
     EXPECT_STREQ(((String*)child.pointer)->chars, "Final");
@@ -1146,7 +1146,7 @@ TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
 
 TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
     DomElement* parent = create_dom_element("div");
-    
+
     DomText* texts[5];
     for (int i = 0; i < 5; i++) {
         char buf[20];
@@ -1154,19 +1154,19 @@ TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
         texts[i] = dom_element_append_text(parent, buf);
         ASSERT_NE(texts[i], nullptr);
     }
-    
+
     EXPECT_EQ(parent->native_element->length, 5);
-    
+
     // Remove text at index 2
     EXPECT_TRUE(dom_text_remove(texts[2]));
-    
+
     // Verify structure
     EXPECT_EQ(parent->native_element->length, 4);
     EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "Text0");
     EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "Text1");
     EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Text3");  // Shifted
     EXPECT_STREQ(((String*)parent->native_element->items[3].pointer)->chars, "Text4");  // Shifted
-    
+
     // Verify indices updated
     EXPECT_EQ(dom_text_get_child_index(texts[0]), 0);
     EXPECT_EQ(dom_text_get_child_index(texts[1]), 1);
@@ -1176,12 +1176,12 @@ TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
 
 TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
     DomElement* parent = create_dom_element("div");
-    
+
     // Create backed text node
     DomText* backed = dom_element_append_text(parent, "Backed");
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_text_is_backed(backed));
-    
+
     // Skip unbacked test - all text nodes are now backed
     // NOTE: Text nodes now always reference Lambda String*, there's no "unbacked" mode
 }
@@ -1193,7 +1193,7 @@ TEST_F(DomIntegrationTest, DomText_IsBacked_DetectsCorrectly) {
 TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     DomElement* parent = create_dom_element("div");
     DomComment* comment = dom_element_append_comment(parent, " Test comment ");
-    
+
     ASSERT_NE(comment, nullptr);
     EXPECT_NE(comment->native_element, nullptr);
     EXPECT_NE(((DomElement*)comment->parent)->doc->input, nullptr);
@@ -1201,7 +1201,7 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     EXPECT_STREQ(comment->content, " Test comment ");
     EXPECT_EQ(comment->length, 14u);
     EXPECT_EQ(comment->node_type, DOM_NODE_COMMENT);
-    
+
     // Verify Lambda backing
     TypeElmt* type = (TypeElmt*)comment->native_element->type;
     EXPECT_STREQ(type->name.str, "!--");
@@ -1212,14 +1212,14 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
 TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
     DomComment* comment = dom_element_append_comment(parent, "Original");
-    
+
     ASSERT_NE(comment, nullptr);
     EXPECT_TRUE(dom_comment_set_content(comment, "Updated"));
-    
+
     // Verify DomComment updated
     EXPECT_STREQ(comment->content, "Updated");
     EXPECT_EQ(comment->length, 7u);
-    
+
     // Verify Lambda updated
     EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Updated");
 }
@@ -1228,14 +1228,14 @@ TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
     DomElement* parent = create_dom_element("div");
     DomComment* comment1 = dom_element_append_comment(parent, " First ");
     DomComment* comment2 = dom_element_append_comment(parent, " Second ");
-    
+
     ASSERT_NE(comment1, nullptr);
     ASSERT_NE(comment2, nullptr);
     EXPECT_EQ(parent->native_element->length, 2);
-    
+
     // Remove first comment
     EXPECT_TRUE(dom_comment_remove(comment1));
-    
+
     // Verify Lambda updated
     EXPECT_EQ(parent->native_element->length, 1);
     TypeElmt* remaining_type = (TypeElmt*)parent->native_element->items[0].element->type;
@@ -1245,41 +1245,41 @@ TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
 
 TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
     DomElement* parent = create_dom_element("div");
-    
+
     // Add mixed children: comment, text, comment
     // (Note: We use only backed operations for this test)
     DomComment* comment1 = dom_element_append_comment(parent, " Start ");
     DomText* text = dom_element_append_text(parent, "Content");
     DomComment* comment2 = dom_element_append_comment(parent, " End ");
-    
+
     // Verify structure in Lambda (3 children: comment, text, comment)
     EXPECT_EQ(parent->native_element->length, 3);
-    
+
     // Check types in Lambda tree
     TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
     EXPECT_STREQ(type0->name.str, "!--");
     EXPECT_EQ(get_type_id(parent->native_element->items[1]), LMD_TYPE_STRING);
     TypeElmt* type2 = (TypeElmt*)parent->native_element->items[2].element->type;
     EXPECT_STREQ(type2->name.str, "!--");
-    
+
     // Verify content
     EXPECT_STREQ(comment1->content, " Start ");
     EXPECT_STREQ(text->text, "Content");
     EXPECT_STREQ(comment2->content, " End ");
-    
+
     // Verify DOM sibling chain traversal includes all three
     DomNode* node = parent->first_child;
     ASSERT_NE(node, (DomNode*)NULL);
     EXPECT_EQ(node->node_type, DOM_NODE_COMMENT);
-    
+
     node = node->next_sibling;
     ASSERT_NE(node, (DomNode*)NULL);
     EXPECT_EQ(node->node_type, DOM_NODE_TEXT);
-    
+
     node = node->next_sibling;
     ASSERT_NE(node, (DomNode*)NULL);
     EXPECT_EQ(node->node_type, DOM_NODE_COMMENT);
-    
+
     node = node->next_sibling;
     EXPECT_EQ(node, (DomNode*)NULL);  // No more siblings
 }
@@ -1287,14 +1287,14 @@ TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
 TEST_F(DomIntegrationTest, DomComment_EmptyComment_Backed) {
     DomElement* parent = create_dom_element("div");
     DomComment* comment = dom_element_append_comment(parent, "");
-    
+
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, "");
     EXPECT_EQ(comment->length, 0u);
-    
+
     // Verify Lambda - empty comments should have empty String child
     EXPECT_EQ(comment->native_element->length, 0);
-    
+
     // Set content on empty comment
     EXPECT_TRUE(dom_comment_set_content(comment, "Now has content"));
     EXPECT_STREQ(comment->content, "Now has content");
@@ -1305,14 +1305,14 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
     const char* long_comment = "This is a very long comment that might span multiple lines\n"
                                "and contains various special characters: <>&\"'\n"
                                "It should be handled correctly by the backing system.";
-    
+
     DomElement* parent = create_dom_element("div");
     DomComment* comment = dom_element_append_comment(parent, long_comment);
-    
+
     ASSERT_NE(comment, nullptr);
     EXPECT_STREQ(comment->content, long_comment);
     EXPECT_EQ(comment->length, strlen(long_comment));
-    
+
     // Verify Lambda backing
     EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, long_comment);
 }
@@ -1320,42 +1320,42 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
 TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
     DomElement* parent = create_dom_element("div");
     DomComment* comment = dom_element_append_comment(parent, "Version1");
-    
+
     ASSERT_NE(comment, nullptr);
-    
+
     // Multiple sequential updates
     EXPECT_TRUE(dom_comment_set_content(comment, "Version2"));
     EXPECT_STREQ(comment->content, "Version2");
-    
+
     EXPECT_TRUE(dom_comment_set_content(comment, "Version3"));
     EXPECT_STREQ(comment->content, "Version3");
-    
+
     EXPECT_TRUE(dom_comment_set_content(comment, "Final"));
     EXPECT_STREQ(comment->content, "Final");
-    
+
     // Verify Lambda has latest
     EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Final");
 }
 
 TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
     DomElement* parent = create_dom_element("div");
-    
+
     DomComment* comment1 = dom_element_append_comment(parent, " C1 ");
     DomComment* comment2 = dom_element_append_comment(parent, " C2 ");
     DomComment* comment3 = dom_element_append_comment(parent, " C3 ");
-    
+
     EXPECT_EQ(parent->native_element->length, 3);
-    
+
     // Remove middle comment
     EXPECT_TRUE(dom_comment_remove(comment2));
-    
+
     // Verify Lambda structure
     EXPECT_EQ(parent->native_element->length, 2);
-    
+
     TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
     EXPECT_STREQ(type0->name.str, "!--");
     EXPECT_STREQ(((String*)parent->native_element->items[0].element->items[0].pointer)->chars, " C1 ");
-    
+
     TypeElmt* type1 = (TypeElmt*)parent->native_element->items[1].element->type;
     EXPECT_STREQ(type1->name.str, "!--");
     EXPECT_STREQ(((String*)parent->native_element->items[1].element->items[0].pointer)->chars, " C3 ");
@@ -1363,46 +1363,46 @@ TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
 
 TEST_F(DomIntegrationTest, DomComment_IsBacked_DetectsCorrectly) {
     DomElement* parent = create_dom_element("div");
-    
+
     // Create backed comment
     DomComment* backed = dom_element_append_comment(parent, "Backed");
     ASSERT_NE(backed, nullptr);
     EXPECT_TRUE(dom_comment_is_backed(backed));
-    
+
     // Note: All comments are now backed (reference Lambda String*), no unbacked mode exists
 }
 
 TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {
     DomElement* parent = create_dom_element("div");
-    
+
     // Build structure: comment -> text -> element -> comment
     DomComment* comment1 = dom_element_append_comment(parent, " Start ");
     DomText* text = dom_element_append_text(parent, "Text");
     DomElement* span = create_dom_element("span");
     dom_element_append_child(parent, span);
     DomComment* comment2 = dom_element_append_comment(parent, " End ");
-    
+
     // Traverse via DOM sibling chain
     DomNode* child = parent->first_child;
     ASSERT_NE(child, nullptr);
     EXPECT_EQ(child->node_type, DOM_NODE_COMMENT);
     EXPECT_EQ(child, (DomNode*)comment1);
-    
+
     child = child->next_sibling;
     ASSERT_NE(child, nullptr);
     EXPECT_EQ(child->node_type, DOM_NODE_TEXT);
     EXPECT_EQ(child, (DomNode*)text);
-    
+
     child = child->next_sibling;
     ASSERT_NE(child, nullptr);
     EXPECT_EQ(child->node_type, DOM_NODE_ELEMENT);
     EXPECT_EQ(child, (DomNode*)span);
-    
+
     child = child->next_sibling;
     ASSERT_NE(child, nullptr);
     EXPECT_EQ(child->node_type, DOM_NODE_COMMENT);
     EXPECT_EQ(child, (DomNode*)comment2);
-    
+
     child = child->next_sibling;
     EXPECT_EQ(child, nullptr);
 }
@@ -1412,91 +1412,91 @@ TEST_F(DomIntegrationTest, DomComment_DOMTraversal_IncludesComments) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) {
-    // Purpose: Verify DOM CRUD operations (Create, Update, format) are properly routed 
+    // Purpose: Verify DOM CRUD operations (Create, Update, format) are properly routed
     // to underlying Lambda elements by checking formatted HTML output
-    
+
     // 1. CREATE: Build initial DOM element backed by Lambda
     DomElement* root = create_dom_element("div");
     ASSERT_NE(root, nullptr);
     ASSERT_NE(root->native_element, nullptr);
     ASSERT_NE(root->doc->input, nullptr);
-    
+
     // Set input root so we can format it
     input->root = Item{.element = root->native_element};
-    
+
     // 2. SET ATTRIBUTES: Add various attributes
     EXPECT_TRUE(dom_element_set_attribute(root, "id", "container"));
     EXPECT_TRUE(dom_element_set_attribute(root, "data-test", "value1"));
     EXPECT_TRUE(dom_element_set_attribute(root, "title", "Test Container"));
-    
+
     // 3. INSERT TEXT: Add text content
     DomText* text1 = dom_element_append_text(root, "Hello ");
     ASSERT_NE(text1, nullptr);
     EXPECT_TRUE(dom_text_is_backed(text1));
-    
+
     // 4. INSERT MORE TEXT: Add more text
     DomText* text2 = dom_element_append_text(root, "World");
     ASSERT_NE(text2, nullptr);
-    
+
     // 5. INSERT COMMENT: Add a comment
     DomComment* comment = dom_element_append_comment(root, " test comment ");
     ASSERT_NE(comment, nullptr);
     EXPECT_TRUE(dom_comment_is_backed(comment));
-    
+
     // 6. UPDATE OPERATIONS: Modify existing content
     EXPECT_TRUE(dom_text_set_content(text1, "Greetings "));
     EXPECT_TRUE(dom_text_set_content(text2, "Universe!"));
     EXPECT_TRUE(dom_element_set_attribute(root, "data-test", "updated"));
     EXPECT_TRUE(dom_comment_set_content(comment, " modified comment "));
-    
+
     // 7. ADD MORE ATTRIBUTES: Test attribute addition after updates
     EXPECT_TRUE(dom_element_set_attribute(root, "role", "main"));
-    
+
     // 8. Format the underlying Lambda element to HTML
     Item root_item = {.element = root->native_element};
     String* html = format_html(pool, root_item);
     ASSERT_NE(html, nullptr);
     ASSERT_NE(html->chars, nullptr);
-    
+
     const char* output = html->chars;
-    
+
     printf("=== Formatted HTML Output ===\n%s\n=== End Output ===\n", output);
-    
+
     // Verify the output contains all our CRUD operations:
-    
+
     // Check root attributes (all set/updated attributes should be present)
-    EXPECT_TRUE(strstr(output, "id=\"container\"") != nullptr) 
+    EXPECT_TRUE(strstr(output, "id=\"container\"") != nullptr)
         << "Missing id attribute in output";
-    EXPECT_TRUE(strstr(output, "data-test=\"updated\"") != nullptr) 
+    EXPECT_TRUE(strstr(output, "data-test=\"updated\"") != nullptr)
         << "Missing updated data-test attribute in output";
-    EXPECT_TRUE(strstr(output, "title=\"Test Container\"") != nullptr) 
+    EXPECT_TRUE(strstr(output, "title=\"Test Container\"") != nullptr)
         << "Missing title attribute in output";
-    EXPECT_TRUE(strstr(output, "role=\"main\"") != nullptr) 
+    EXPECT_TRUE(strstr(output, "role=\"main\"") != nullptr)
         << "Missing role attribute in output";
-    
+
     // Check text content (all updated text should be present)
-    EXPECT_TRUE(strstr(output, "Greetings ") != nullptr) 
+    EXPECT_TRUE(strstr(output, "Greetings ") != nullptr)
         << "Missing first updated text in output";
-    EXPECT_TRUE(strstr(output, "Universe!") != nullptr) 
+    EXPECT_TRUE(strstr(output, "Universe!") != nullptr)
         << "Missing second updated text in output";
-    
+
     // Check comment (updated comment should be present)
-    EXPECT_TRUE(strstr(output, "<!-- modified comment -->") != nullptr) 
+    EXPECT_TRUE(strstr(output, "<!-- modified comment -->") != nullptr)
         << "Missing updated comment in output";
-    
+
     // 9. VERIFY LAMBDA TREE STRUCTURE: Ensure backing structure is correct
     EXPECT_EQ(root->native_element->length, 3);  // text1, text2, comment
-    
+
     // Verify first child is text1
     Item child0 = root->native_element->items[0];
     EXPECT_EQ(get_type_id(child0), LMD_TYPE_STRING);
     EXPECT_STREQ(((String*)child0.pointer)->chars, "Greetings ");
-    
+
     // Verify second child is text2
     Item child1 = root->native_element->items[1];
     EXPECT_EQ(get_type_id(child1), LMD_TYPE_STRING);
     EXPECT_STREQ(((String*)child1.pointer)->chars, "Universe!");
-    
+
     // Verify third child is comment
     Item child2 = root->native_element->items[2];
     EXPECT_EQ(get_type_id(child2), LMD_TYPE_ELEMENT);
@@ -1505,42 +1505,42 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
     EXPECT_STREQ(comment_type->name.str, "!--");
     EXPECT_EQ(comment_elem->length, 1);
     EXPECT_STREQ(((String*)comment_elem->items[0].pointer)->chars, " modified comment ");
-    
+
     // 10. DELETE OPERATIONS: Test removal of text and comment nodes
     printf("\n=== Testing Deletions ===\n");
     printf("Before deletion - Lambda tree has %d children\n", root->native_element->length);
-    
+
     // Delete text2 ("Universe!")
     EXPECT_TRUE(dom_text_remove(text2));
     printf("After removing text2 - Lambda tree has %d children\n", root->native_element->length);
-    
+
     // Delete comment
     EXPECT_TRUE(dom_comment_remove(comment));
     printf("After removing comment - Lambda tree has %d children\n", root->native_element->length);
-    
+
     // 11. Format after deletions and verify
     String* html_after = format_html(pool, root_item);
     ASSERT_NE(html_after, nullptr);
-    
+
     const char* output_after = html_after->chars;
     printf("\n=== After Deletion Output ===\n%s\n=== End Output ===\n", output_after);
-    
+
     // Verify "Universe!" was deleted
-    EXPECT_TRUE(strstr(output_after, "Universe!") == nullptr) 
+    EXPECT_TRUE(strstr(output_after, "Universe!") == nullptr)
         << "Universe! should be deleted but found in: " << output_after;
-    
+
     // Verify comment was deleted
-    EXPECT_TRUE(strstr(output_after, "<!--") == nullptr) 
+    EXPECT_TRUE(strstr(output_after, "<!--") == nullptr)
         << "Comment should be deleted but found in: " << output_after;
-    
+
     // Verify "Greetings " still exists
-    EXPECT_TRUE(strstr(output_after, "Greetings ") != nullptr) 
+    EXPECT_TRUE(strstr(output_after, "Greetings ") != nullptr)
         << "Greetings should remain after deletions in: " << output_after;
-    
+
     // 12. Verify final Lambda tree structure
     printf("Final Lambda tree length: %d\n", root->native_element->length);
     EXPECT_EQ(root->native_element->length, 1) << "Should have 1 child remaining";
-    
+
     if (root->native_element->length > 0) {
         Item remaining = root->native_element->items[0];
         EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
@@ -1557,14 +1557,14 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
 TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
     // Test interleaved text and comment operations
     DomElement* root = create_dom_element("div");
-    
+
     // Create pattern: T1 C1 T2 C2 T3
     DomText* t1 = dom_element_append_text(root, "Text1");
     DomComment* c1 = dom_element_append_comment(root, " Comment1 ");
     DomText* t2 = dom_element_append_text(root, "Text2");
     DomComment* c2 = dom_element_append_comment(root, " Comment2 ");
     DomText* t3 = dom_element_append_text(root, "Text3");
-    
+
     // Verify Lambda tree structure
     EXPECT_EQ(root->native_element->length, 5);
     EXPECT_EQ(get_type_id(root->native_element->items[0]), LMD_TYPE_STRING);
@@ -1572,7 +1572,7 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
     EXPECT_EQ(get_type_id(root->native_element->items[2]), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(root->native_element->items[3]), LMD_TYPE_ELEMENT);
     EXPECT_EQ(get_type_id(root->native_element->items[4]), LMD_TYPE_STRING);
-    
+
     // Verify DOM tree traversal
     DomNode* node = root->first_child;
     EXPECT_EQ(node, (DomNode*)t1);
@@ -1586,31 +1586,31 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
     EXPECT_EQ(node, (DomNode*)t3);
     node = node->next_sibling;
     EXPECT_EQ(node, nullptr);
-    
+
     // Update all nodes
     EXPECT_TRUE(dom_text_set_content(t1, "UpdatedText1"));
     EXPECT_TRUE(dom_comment_set_content(c1, " UpdatedComment1 "));
     EXPECT_TRUE(dom_text_set_content(t2, "UpdatedText2"));
     EXPECT_TRUE(dom_comment_set_content(c2, " UpdatedComment2 "));
     EXPECT_TRUE(dom_text_set_content(t3, "UpdatedText3"));
-    
+
     // Verify Lambda tree has all updates
     EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "UpdatedText1");
     EXPECT_STREQ(((String*)root->native_element->items[1].element->items[0].pointer)->chars, " UpdatedComment1 ");
     EXPECT_STREQ(((String*)root->native_element->items[2].pointer)->chars, "UpdatedText2");
     EXPECT_STREQ(((String*)root->native_element->items[3].element->items[0].pointer)->chars, " UpdatedComment2 ");
     EXPECT_STREQ(((String*)root->native_element->items[4].pointer)->chars, "UpdatedText3");
-    
+
     // Remove alternating nodes (c1, t2, c2)
     EXPECT_TRUE(dom_comment_remove(c1));
     EXPECT_TRUE(dom_text_remove(t2));
     EXPECT_TRUE(dom_comment_remove(c2));
-    
+
     // Verify final structure: T1 T3
     EXPECT_EQ(root->native_element->length, 2);
     EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "UpdatedText1");
     EXPECT_STREQ(((String*)root->native_element->items[1].pointer)->chars, "UpdatedText3");
-    
+
     // Verify DOM traversal
     node = root->first_child;
     EXPECT_EQ(node, (DomNode*)t1);
@@ -1623,11 +1623,11 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
 TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     // Test nested elements with text and comments at multiple levels
     DomElement* root = create_dom_element("div");
-    
+
     // Level 1: root with text and child element
     DomText* root_text = dom_element_append_text(root, "Root text ");
     DomComment* root_comment = dom_element_append_comment(root, " Root comment ");
-    
+
     // Create nested element
     MarkBuilder builder(input);
     Item child_item = builder.element("span")
@@ -1637,36 +1637,36 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     DomElement* child = build_dom_tree_from_element(child_item.element, doc, nullptr);
     // Now explicitly append child to root (updates both Lambda tree and DOM chain)
     dom_element_append_child(root, child);
-    
+
     // Add content to nested element
     DomText* child_text = dom_element_append_text(child, "Child text");
     DomComment* child_comment = dom_element_append_comment(child, " Child comment ");
-    
+
     // Verify root Lambda tree (text, comment, element)
     EXPECT_EQ(root->native_element->length, 3);
     EXPECT_EQ(get_type_id(root->native_element->items[0]), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(root->native_element->items[1]), LMD_TYPE_ELEMENT);
     EXPECT_EQ(get_type_id(root->native_element->items[2]), LMD_TYPE_ELEMENT);
-    
+
     // Verify child Lambda tree
     EXPECT_EQ(child->native_element->length, 2);
     EXPECT_EQ(get_type_id(child->native_element->items[0]), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(child->native_element->items[1]), LMD_TYPE_ELEMENT);
-    
+
     // Update content at both levels
     EXPECT_TRUE(dom_text_set_content(root_text, "Updated root text "));
     EXPECT_TRUE(dom_comment_set_content(root_comment, " Updated root comment "));
     EXPECT_TRUE(dom_text_set_content(child_text, "Updated child text"));
     EXPECT_TRUE(dom_comment_set_content(child_comment, " Updated child comment "));
-    
+
     // Verify updates in Lambda tree
     EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "Updated root text ");
     EXPECT_STREQ(((String*)child->native_element->items[0].pointer)->chars, "Updated child text");
-    
+
     // Remove content from child
     EXPECT_TRUE(dom_text_remove(child_text));
     EXPECT_EQ(child->native_element->length, 1);
-    
+
     // Verify DOM traversal still works
     DomNode* node = root->first_child;
     EXPECT_EQ(node->node_type, DOM_NODE_TEXT);
@@ -1679,45 +1679,45 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
 TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
     // Test bulk operations on many nodes
     DomElement* root = create_dom_element("ul");
-    
+
     const int COUNT = 20;
     DomText* texts[COUNT];
     DomComment* comments[COUNT];
-    
+
     // Create many interleaved text and comment nodes
     for (int i = 0; i < COUNT; i++) {
         char text_buf[50], comment_buf[50];
         snprintf(text_buf, sizeof(text_buf), "Item %d", i);
         snprintf(comment_buf, sizeof(comment_buf), " Comment %d ", i);
-        
+
         texts[i] = dom_element_append_text(root, text_buf);
         comments[i] = dom_element_append_comment(root, comment_buf);
     }
-    
+
     // Verify count: 20 texts + 20 comments = 40 children
     EXPECT_EQ(root->native_element->length, COUNT * 2);
-    
+
     // Update every even-indexed text node
     for (int i = 0; i < COUNT; i += 2) {
         char buf[50];
         snprintf(buf, sizeof(buf), "Updated Item %d", i);
         EXPECT_TRUE(dom_text_set_content(texts[i], buf));
     }
-    
+
     // Update every odd-indexed comment node
     for (int i = 1; i < COUNT; i += 2) {
         char buf[50];
         snprintf(buf, sizeof(buf), " Updated Comment %d ", i);
         EXPECT_TRUE(dom_comment_set_content(comments[i], buf));
     }
-    
+
     // Verify updates in Lambda tree
     for (int i = 0; i < COUNT; i += 2) {
         char expected[50];
         snprintf(expected, sizeof(expected), "Updated Item %d", i);
         EXPECT_STREQ(((String*)root->native_element->items[i * 2].pointer)->chars, expected);
     }
-    
+
     // Remove every third node (text or comment)
     int removed_count = 0;
     for (int i = 0; i < COUNT; i += 3) {
@@ -1728,10 +1728,10 @@ TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
             removed_count++;
         }
     }
-    
+
     // Verify count decreased
     EXPECT_EQ(root->native_element->length, COUNT * 2 - removed_count);
-    
+
     // Verify DOM traversal integrity
     int traversal_count = 0;
     DomNode* node = root->first_child;
@@ -1745,46 +1745,46 @@ TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
 TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     // Test simultaneous attribute and content modifications
     DomElement* root = create_dom_element("article");
-    
+
     // Set initial attributes
     EXPECT_TRUE(dom_element_set_attribute(root, "id", "article1"));
     EXPECT_TRUE(dom_element_set_attribute(root, "class", "featured"));
     EXPECT_TRUE(dom_element_set_attribute(root, "data-priority", "high"));
-    
+
     // Add content
     DomText* title = dom_element_append_text(root, "Title");
     DomComment* separator = dom_element_append_comment(root, " --- ");
     DomText* body = dom_element_append_text(root, "Body text");
-    
+
     // Verify initial state
     EXPECT_EQ(root->native_element->length, 3);
     EXPECT_STREQ(dom_element_get_attribute(root, "id"), "article1");
-    
+
     // Update attributes
     EXPECT_TRUE(dom_element_set_attribute(root, "id", "article2"));
     EXPECT_TRUE(dom_element_set_attribute(root, "data-priority", "urgent"));
     EXPECT_TRUE(dom_element_add_class(root, "highlighted"));
-    
+
     // Update content
     EXPECT_TRUE(dom_text_set_content(title, "Updated Title"));
     EXPECT_TRUE(dom_comment_set_content(separator, " === "));
     EXPECT_TRUE(dom_text_set_content(body, "Updated body text"));
-    
+
     // Verify both attribute and content updates
     EXPECT_STREQ(dom_element_get_attribute(root, "id"), "article2");
     EXPECT_STREQ(dom_element_get_attribute(root, "data-priority"), "urgent");
     EXPECT_TRUE(dom_element_has_class(root, "featured"));
     EXPECT_TRUE(dom_element_has_class(root, "highlighted"));
-    
+
     EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "Updated Title");
     EXPECT_STREQ(((String*)root->native_element->items[1].element->items[0].pointer)->chars, " === ");
     EXPECT_STREQ(((String*)root->native_element->items[2].pointer)->chars, "Updated body text");
-    
+
     // Remove attributes and content
     EXPECT_TRUE(dom_element_remove_attribute(root, "data-priority"));
     EXPECT_TRUE(dom_text_remove(title));
     EXPECT_TRUE(dom_comment_remove(separator));
-    
+
     // Verify removals
     EXPECT_EQ(dom_element_get_attribute(root, "data-priority"), nullptr);
     EXPECT_EQ(root->native_element->length, 1);
@@ -1794,34 +1794,34 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
 TEST_F(DomIntegrationTest, CRUD_EmptyToFull_FullToEmpty) {
     // Test transitions between empty and full states
     DomElement* root = create_dom_element("div");
-    
+
     // Start empty
     EXPECT_EQ(root->native_element->length, 0);
     EXPECT_EQ(root->first_child, nullptr);
-    
+
     // Add single text
     DomText* t1 = dom_element_append_text(root, "First");
     EXPECT_EQ(root->native_element->length, 1);
     EXPECT_EQ(root->first_child, (DomNode*)t1);
-    
+
     // Add more content
     DomComment* c1 = dom_element_append_comment(root, " comment ");
     DomText* t2 = dom_element_append_text(root, "Second");
     EXPECT_EQ(root->native_element->length, 3);
-    
+
     // Remove all content one by one
     EXPECT_TRUE(dom_text_remove(t1));
     EXPECT_EQ(root->native_element->length, 2);
     EXPECT_EQ(root->first_child, (DomNode*)c1);
-    
+
     EXPECT_TRUE(dom_comment_remove(c1));
     EXPECT_EQ(root->native_element->length, 1);
     EXPECT_EQ(root->first_child, (DomNode*)t2);
-    
+
     EXPECT_TRUE(dom_text_remove(t2));
     EXPECT_EQ(root->native_element->length, 0);
     EXPECT_EQ(root->first_child, nullptr);
-    
+
     // Add content again
     DomText* t3 = dom_element_append_text(root, "Refilled");
     EXPECT_EQ(root->native_element->length, 1);
@@ -1833,28 +1833,28 @@ TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
     // Test multiple updates to same text node
     DomElement* root = create_dom_element("p");
     DomText* text = dom_element_append_text(root, "Version1");
-    
+
     // Get initial String pointer
     String* original_string = text->native_string;
     EXPECT_NE(original_string, nullptr);
-    
+
     // Update 10 times
     for (int i = 2; i <= 10; i++) {
         char buf[50];
         snprintf(buf, sizeof(buf), "Version%d", i);
         EXPECT_TRUE(dom_text_set_content(text, buf));
-        
+
         // Verify text updated
         EXPECT_STREQ(text->text, buf);
-        
+
         // Verify Lambda String updated (new String created each time)
         EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, buf);
-        
+
         // String pointer should change (new String allocated)
         EXPECT_NE(text->native_string, original_string);
         original_string = text->native_string;
     }
-    
+
     // Final verification
     EXPECT_STREQ(text->text, "Version10");
     EXPECT_EQ(root->native_element->length, 1);
@@ -1863,21 +1863,21 @@ TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
 TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
     // Test removing nodes from different positions
     DomElement* root = create_dom_element("div");
-    
+
     // Create 5 text nodes
     DomText* t0 = dom_element_append_text(root, "T0");
     DomText* t1 = dom_element_append_text(root, "T1");
     DomText* t2 = dom_element_append_text(root, "T2");
     DomText* t3 = dom_element_append_text(root, "T3");
     DomText* t4 = dom_element_append_text(root, "T4");
-    
+
     EXPECT_EQ(root->native_element->length, 5);
-    
+
     // Remove last (T4)
     EXPECT_TRUE(dom_text_remove(t4));
     EXPECT_EQ(root->native_element->length, 4);
     EXPECT_EQ(root->first_child, (DomNode*)t0);
-    
+
     // Verify DOM chain
     DomNode* node = root->first_child;
     EXPECT_EQ(node, (DomNode*)t0);
@@ -1889,20 +1889,20 @@ TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
     EXPECT_EQ(node, (DomNode*)t3);
     node = node->next_sibling;
     EXPECT_EQ(node, nullptr);
-    
+
     // Remove first (T0)
     EXPECT_TRUE(dom_text_remove(t0));
     EXPECT_EQ(root->native_element->length, 3);
     EXPECT_EQ(root->first_child, (DomNode*)t1);
-    
+
     // Remove middle (T2)
     EXPECT_TRUE(dom_text_remove(t2));
     EXPECT_EQ(root->native_element->length, 2);
-    
+
     // Verify final structure: T1, T3
     EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "T1");
     EXPECT_STREQ(((String*)root->native_element->items[1].pointer)->chars, "T3");
-    
+
     node = root->first_child;
     EXPECT_EQ(node, (DomNode*)t1);
     EXPECT_EQ(node->prev_sibling, nullptr);
@@ -1914,70 +1914,68 @@ TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
 TEST_F(DomIntegrationTest, CRUD_MixedOperations_StressTest) {
     // Stress test with random mix of operations
     DomElement* root = create_dom_element("section");
-    
+
     // Phase 1: Rapid additions
     std::vector<DomText*> texts;
     std::vector<DomComment*> comments;
-    
+
     for (int i = 0; i < 15; i++) {
         char buf[50];
         snprintf(buf, sizeof(buf), "Text%d", i);
         texts.push_back(dom_element_append_text(root, buf));
-        
+
         snprintf(buf, sizeof(buf), " Comment%d ", i);
         comments.push_back(dom_element_append_comment(root, buf));
     }
-    
+
     EXPECT_EQ(root->native_element->length, 30);
-    
+
     // Phase 2: Random updates
     for (int i = 0; i < 15; i += 3) {
         char buf[50];
         snprintf(buf, sizeof(buf), "Updated%d", i);
         EXPECT_TRUE(dom_text_set_content(texts[i], buf));
     }
-    
+
     for (int i = 1; i < 15; i += 3) {
         char buf[50];
         snprintf(buf, sizeof(buf), " Updated%d ", i);
         EXPECT_TRUE(dom_comment_set_content(comments[i], buf));
     }
-    
+
     // Phase 3: Random removals
     int initial_count = root->native_element->length;
     int removed = 0;
-    
+
     for (int i = 0; i < 15; i += 2) {
         if (i < (int)texts.size()) {
             EXPECT_TRUE(dom_text_remove(texts[i]));
             removed++;
         }
     }
-    
+
     for (int i = 1; i < 15; i += 4) {
         if (i < (int)comments.size()) {
             EXPECT_TRUE(dom_comment_remove(comments[i]));
             removed++;
         }
     }
-    
+
     EXPECT_EQ(root->native_element->length, initial_count - removed);
-    
+
     // Phase 4: Verify DOM tree integrity
     int traverse_count = 0;
     DomNode* node = root->first_child;
     DomNode* prev = nullptr;
-    
+
     while (node) {
         // Verify prev_sibling consistency
         EXPECT_EQ(node->prev_sibling, prev);
-        
+
         traverse_count++;
         prev = node;
         node = node->next_sibling;
     }
-    
+
     EXPECT_EQ(traverse_count, root->native_element->length);
 }
-
-
