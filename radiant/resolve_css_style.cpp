@@ -1139,6 +1139,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_width = width;
                 block->blk->given_width_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+                // Store raw percentage for flex item re-resolution
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->blk->given_width_percent = value->data.percentage.value;
+                    log_debug("[CSS] Width percentage stored: %.2f%%", value->data.percentage.value);
+                } else {
+                    block->blk->given_width_percent = NAN;
+                }
             }
             log_debug("[CSS] Width: %.2f px", width);
             break;
@@ -1153,6 +1160,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (block) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_height = height;
+                // Store raw percentage for flex item re-resolution
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    block->blk->given_height_percent = value->data.percentage.value;
+                    log_debug("[CSS] Height percentage stored: %.2f%%", value->data.percentage.value);
+                } else {
+                    block->blk->given_height_percent = NAN;
+                }
             }
             break;
         }

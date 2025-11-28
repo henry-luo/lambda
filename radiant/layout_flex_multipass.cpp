@@ -93,6 +93,13 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // and needs to be available for the flex algorithm that runs here.
     // Cache should only be cleared at the start of a new top-level layout pass.
 
+    // CRITICAL: Collect and prepare flex items with percentage re-resolution
+    // This ensures percentage widths/heights are resolved relative to THIS container's
+    // content area, not the ancestor container that was in scope during CSS resolution.
+    log_debug("Collecting and preparing flex items for nested/enhanced container");
+    int item_count = collect_and_prepare_flex_items(lycon, lycon->flex_container, flex_container);
+    log_debug("Collected %d flex items with percentage re-resolution", item_count);
+
     // PASS 1: Run enhanced flex algorithm with measured content
     log_debug("Pass 1: Running enhanced flex algorithm with measured content");
 
