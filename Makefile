@@ -1,9 +1,8 @@
 # Lambda Project Makefile
-# Utilizes compile.sh for build operations with standard make targets
+# Utilizes Premake5 build system with standard make targets
 
 # Project configuration
 PROJECT_NAME = Lambda
-COMPILE_SCRIPT = ./compile.sh
 DEFAULT_CONFIG = build_lambda_config.json
 
 # Build configurations
@@ -12,12 +11,9 @@ BUILD_DEBUG_DIR = build_debug
 BUILD_RELEASE_DIR = build_release
 BUILD_WINDOWS_DIR = build_windows
 BUILD_LINUX_DIR = build_linux
-TYPESET_DIR = typeset
 
 # Output executables
 LAMBDA_EXE = lambda.exe
-RADIANT_EXE = radiant.exe
-WINDOW_EXE = window.exe
 
 # Unicode support is always enabled (utf8proc-based)
 # No longer using conditional compilation flags
@@ -308,14 +304,14 @@ clean-tree-sitter-minimal:
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-test clean-grammar clean-radiant generate-grammar debug release rebuild test test-all test-baseline test-extended test-input run help install uninstall \
-	    lambda radiant window format lint check docs intellisense analyze-size \
+.PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-all test-baseline test-extended test-input run help install uninstall \
+	    lambda format lint check docs intellisense analyze-size \
 	    build-debug build-release clean-all distclean \
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
-	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant \
-	    test-radiant capture-layout test-layout layout count-loc
+	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal \
+	    capture-layout test-layout layout count-loc
 
 # Help target - shows available commands
 help:
@@ -325,13 +321,10 @@ help:
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
 	@echo "                  On Windows/MSYS2: Automatically configures MINGW64 toolchain with PATH fixes"
 	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
-	@echo "  build-radiant - Build Radiant HTML/CSS/SVG rendering engine executable only"
-	@echo "                  Focuses on building radiant.exe without test executables"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
-	@echo "  radiant       - Alias for build-radiant"
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "MINGW64 Targets (Universal CRT Avoidance):"
@@ -342,7 +335,6 @@ help:
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
 	@echo "  clean-grammar - Remove generated grammar and embed files (parser.c, ts-enum.h, lambda-embed.h)"
-	@echo "  clean-radiant - Remove radiant build outputs (executable, premake files, object files)"
 	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
@@ -379,8 +371,6 @@ help:
 	@echo "  test-fuzz     - Run fuzzing tests for robustness"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
-	@echo "  test-radiant  - Run all Radiant layout engine tests (95+ tests: flexbox, layout, rendering)"
-	@echo "                  Available suites: basic, intermediate, medium, advanced, baseline"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  test-linux    - Run CI tests for Linux executable"
 	@echo "  run           - Build and run the default executable"
@@ -397,17 +387,15 @@ help:
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo "  count-loc     - Count lines of code in the repository"
-	@echo "  test-layout              - Run Radiant layout integration tests (all suites)"
-	@echo "                             Uses Radiant engine (Lexbor-based HTML/CSS rendering)"
+	@echo "  test-layout              - Run Lambda CSS layout integration tests (all suites)"
+	@echo "                             Uses Lambda CSS engine (custom CSS cascade and layout)"
 	@echo "                             Usage: make test-layout suite=baseline (run specific suite)"
 	@echo "                             Usage: make test-layout test=table_simple (run specific test, .html/.htm optional)"
 	@echo "                             Usage: make test-layout pattern=float (run tests matching pattern)"
 	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
-	@echo "  layout                   - Run Lambda CSS layout integration tests (all suites)"
-	@echo "                             Uses Lambda CSS engine (custom CSS cascade and layout)"
-	@echo "                             Usage: make layout suite=baseline (run specific suite)"
-	@echo "                             Usage: make layout test=table_simple (run specific test, .html/.htm optional)"
+	@echo "  layout                   - Alias for test-layout"
+	@echo "                             Usage: make layout suite=baseline"
 	@echo "                             Usage: make layout pattern=float (run tests matching pattern)"
 	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
@@ -548,31 +536,9 @@ rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 # Specific project builds
 lambda: build
 
-# Radiant HTML/CSS/SVG rendering engine build (executable only)
-build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Building Radiant HTML/CSS/SVG rendering engine..."
-	@echo "Generating unified Premake configuration (includes radiant target)..."
-	$(PYTHON) utils/generate_premake.py --config $(DEFAULT_CONFIG) --output $(PREMAKE_FILE)
-	@echo "Generating makefiles for unified build..."
-	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building radiant executable with $(JOBS) parallel jobs..."
-	# Ensure explicit compiler variables are passed to Premake build
-	@echo "Using CC=$(CC) CXX=$(CXX)"
-	$(call run_make_with_error_summary,radiant)
-	@echo "✅ Radiant executable built successfully: $(RADIANT_EXE)"
-
-radiant: build-radiant
-
-# window: radiant
-
 # Build all projects
 all: lambda
 	@echo "All projects built successfully."
-
-# Debugging builds with specific directories
-build-debug:
-	@echo "Building with debug configuration..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --debug --jobs=$(JOBS)
 
 build-wasm:
 	@echo "Building WebAssembly version..."
@@ -607,8 +573,6 @@ clean:
 	@rm -f $(BUILD_LINUX_DIR)/*.compile_status 2>/dev/null || true
 	@echo "Cleaning executables..."
 	@rm -f $(LAMBDA_EXE)
-	@rm -f $(RADIANT_EXE)
-	@rm -f $(WINDOW_EXE)
 	@rm -f lambda_debug.exe
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
@@ -656,13 +620,6 @@ clean-grammar:
 	@rm -f $(LAMBDA_EMBED_H_FILE)
 	@echo "Generated grammar and embed files cleaned."
 
-clean-radiant:
-	@echo "Cleaning radiant build outputs..."
-	@rm -f $(RADIANT_EXE)
-	@rm -rf build/premake/radiant.make 2>/dev/null || true
-	@if [ -d "build/obj/radiant" ]; then rm -rf build/obj/radiant; fi
-	@echo "Radiant build outputs cleaned."
-
 # IntelliSense support
 intellisense:
 	@echo "Updating IntelliSense database..."
@@ -672,7 +629,7 @@ intellisense:
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
 
-clean-all: clean-premake clean-test clean-radiant
+clean-all: clean-premake clean-test
 	@echo "Removing all build directories..."
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(BUILD_DEBUG_DIR)
@@ -695,7 +652,6 @@ distclean: clean-all clean-grammar clean-test
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
 	@rm -f lambda-linux.exe
-	@rm -f $(WINDOW_EXE)
 	@rm -f _transpiled.c
 	@rm -f *.exe
 	@echo "Complete cleanup finished."
@@ -902,9 +858,6 @@ test-std: build
 		echo "Error: Simple test runner script not found"; \
 		exit 1; \
 	fi
-
-test-radiant:
-	@echo "No Radiant test yet."
 
 test-coverage:
 	@echo "Running tests with coverage analysis..."
@@ -1386,23 +1339,10 @@ uninstall:
 # 		fi; \
 # 	fi
 
-# Advanced targets for development workflow
-parallel:
-	@echo "Maximum parallel build..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=8 --force
-
-# Configuration-specific builds
-config-debug:
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --debug --jobs=$(JOBS)
-
-config-release:
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
-
 # Utility targets
 info:
 	@echo "Project Information:"
 	@echo "  Name: $(PROJECT_NAME)"
-	@echo "  Build Script: $(COMPILE_SCRIPT)"
 	@echo "  Default Config: $(DEFAULT_CONFIG)"
 	@echo "  Parallel Jobs: $(JOBS)"
 	@echo "  Build Directory: $(BUILD_DIR)"
@@ -1502,58 +1442,11 @@ capture-layout:
 # Layout Engine Testing Targets
 # ==============================
 
-# test-layout: Run layout tests using Radiant engine (Lexbor-based)
+# test-layout: Run layout tests using Lambda CSS engine
 # Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
 # Note: test parameter now accepts filename with or without .html/.htm extension
 # Example: make test-layout test=baseline_301_simple_margin
 test-layout:
-	@echo "🎨 Running Radiant Layout Engine Tests"
-	@echo "======================================"
-	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
-		TEST_VAR="$(or $(test),$(TEST))"; \
-		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
-		SUITE_VAR="$(or $(suite),$(SUITE))"; \
-		if [ -n "$$TEST_VAR" ]; then \
-			case "$$TEST_VAR" in \
-				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
-				*) \
-					TEST_FILE=""; \
-					for dir in basic baseline css2.1 flex grid; do \
-						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
-							TEST_FILE="$${TEST_VAR}.htm"; \
-							break; \
-						elif [ -f "test/layout/data/$$dir/$${TEST_VAR}.html" ]; then \
-							TEST_FILE="$${TEST_VAR}.html"; \
-							break; \
-						fi; \
-					done; \
-					if [ -z "$$TEST_FILE" ]; then \
-						TEST_FILE="$${TEST_VAR}.html"; \
-					fi \
-				;; \
-			esac; \
-			echo "🎯 Running single test: $$TEST_FILE"; \
-			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --test $$TEST_FILE -v; \
-		elif [ -n "$$PATTERN_VAR" ]; then \
-			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --pattern $$PATTERN_VAR; \
-		elif [ -n "$$SUITE_VAR" ]; then \
-			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --category $$SUITE_VAR; \
-		else \
-			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe; \
-		fi; \
-	else \
-		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
-		exit 1; \
-	fi
-
-# layout: Run layout tests using Lambda CSS engine
-# Usage: make layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
-# Note: test parameter now accepts filename with or without .html/.htm extension
-# Example: make layout test=baseline_301_simple_margin
-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
 	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
@@ -1580,21 +1473,24 @@ layout:
 				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --test $$TEST_FILE -v; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --pattern $$PATTERN_VAR; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --category $$SUITE_VAR; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe; \
+			node test/layout/test_radiant_layout.js --engine lambda-css; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
 		exit 1; \
 	fi
+
+# layout: Alias for test-layout
+layout: test-layout
 
 # layout-devtool: Launch the Layout DevTool Electron app
 # Usage: make layout-devtool
