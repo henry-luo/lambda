@@ -56,6 +56,19 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_content(FlexContainerLayout* flex_layout);
 
+// Overflow fallback alignment (Yoga-inspired)
+// Returns safe alignment value when remaining space is negative
+int fallback_alignment(int align);
+int fallback_justify(int justify);
+
+// Baseline calculation (Yoga-inspired)
+// Recursive baseline calculation through nested flex containers
+float calculate_baseline_recursive(View* node, FlexContainerLayout* flex_layout);
+bool is_baseline_layout(ViewBlock* node, FlexContainerLayout* flex_layout);
+
+// Wrap-reverse final position adjustment
+void apply_wrap_reverse_positions(FlexContainerLayout* flex_layout, ViewBlock* container);
+
 // Utility functions
 bool is_main_axis_horizontal(FlexProp* flex);
 int get_main_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout);
