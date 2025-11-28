@@ -69,6 +69,35 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->writing_mode = WM_HORIZONTAL_TB;
         flex->text_direction = TD_LTR;
     }
+    
+    // Initialize main_axis_size and cross_axis_size early for percentage resolution
+    // This allows collect_and_prepare_flex_items to re-resolve percentages correctly
+    int content_width = container->width;
+    int content_height = container->height;
+    
+    // Subtract borders if they exist
+    if (container->bound && container->bound->border) {
+        content_width -= (container->bound->border->width.left + container->bound->border->width.right);
+        content_height -= (container->bound->border->width.top + container->bound->border->width.bottom);
+    }
+    
+    // Subtract padding if it exists
+    if (container->bound) {
+        content_width -= (container->bound->padding.left + container->bound->padding.right);
+        content_height -= (container->bound->padding.top + container->bound->padding.bottom);
+    }
+    
+    bool is_horizontal = is_main_axis_horizontal(flex);
+    if (is_horizontal) {
+        flex->main_axis_size = content_width > 0 ? (float)content_width : 0.0f;
+        flex->cross_axis_size = content_height > 0 ? (float)content_height : 0.0f;
+    } else {
+        flex->main_axis_size = content_height > 0 ? (float)content_height : 0.0f;
+        flex->cross_axis_size = content_width > 0 ? (float)content_width : 0.0f;
+    }
+    log_debug("init_flex_container: main_axis_size=%.1f, cross_axis_size=%.1f (content: %dx%d)",
+              flex->main_axis_size, flex->cross_axis_size, content_width, content_height);
+    
     // Initialize dynamic arrays
     flex->allocated_items = 8;
     flex->flex_items = (View**)calloc(flex->allocated_items, sizeof(View*));
@@ -321,8 +350,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
-    // Phase 8: Align content (lines) if there are multiple lines
-    if (line_count > 1) {
+    // Phase 8: Align content (lines)
+    // Note: align-content applies to flex containers with flex-wrap: wrap or wrap-reverse
+    // even for single-line layouts - the single line should be aligned within the container
+    if (flex_layout->wrap != WRAP_NOWRAP) {
         align_content(flex_layout);
     }
 
@@ -590,19 +621,59 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             item->content_height = cached->content_height;
         }
 
-        // Step 5: Apply explicit CSS dimensions if specified
+        // Step 5: Re-resolve percentage widths/heights relative to flex container
+        // CSS percentages were resolved during style resolution with wrong parent context.
+        // For flex items, percentages should be relative to the flex container's content size.
         if (item->blk) {
-            if (item->blk->given_width > 0) {
+            bool is_row = is_main_axis_horizontal(flex_layout);
+            float container_main = flex_layout->main_axis_size;
+            float container_cross = flex_layout->cross_axis_size;
+            
+            // Re-resolve width percentage
+            if (!isnan(item->blk->given_width_percent)) {
+                float width_percent = item->blk->given_width_percent;
+                // For row: width is main axis, resolve against container width
+                // For column: width is cross axis
+                float resolve_against = is_row ? container_main : container_cross;
+                if (resolve_against > 0) {
+                    float new_width = resolve_against * width_percent / 100.0f;
+                    log_info("FLEX: Re-resolving width percentage: %.1f%% of %.1f = %.1f (was %.1f)",
+                             width_percent, resolve_against, new_width, item->blk->given_width);
+                    item->blk->given_width = new_width;
+                    item->width = new_width;
+                }
+            }
+            
+            // Re-resolve height percentage
+            if (!isnan(item->blk->given_height_percent)) {
+                float height_percent = item->blk->given_height_percent;
+                // For row: height is cross axis
+                // For column: height is main axis
+                float resolve_against = is_row ? container_cross : container_main;
+                if (resolve_against > 0) {
+                    float new_height = resolve_against * height_percent / 100.0f;
+                    log_info("FLEX: Re-resolving height percentage: %.1f%% of %.1f = %.1f (was %.1f)",
+                             height_percent, resolve_against, new_height, item->blk->given_height);
+                    item->blk->given_height = new_height;
+                    item->height = new_height;
+                }
+            }
+        }
+
+        // Step 6: Apply explicit CSS dimensions if specified (non-percentage)
+        if (item->blk) {
+            // Only apply if not a percentage (already handled above)
+            if (isnan(item->blk->given_width_percent) && item->blk->given_width > 0) {
                 log_debug("Applying CSS width: %.1f", item->blk->given_width);
                 item->width = item->blk->given_width;
             }
-            if (item->blk->given_height > 0) {
+            if (isnan(item->blk->given_height_percent) && item->blk->given_height > 0) {
                 log_debug("Applying CSS height: %.1f", item->blk->given_height);
                 item->height = item->blk->given_height;
             }
         }
 
-        // Step 6: Add to flex items array
+        // Step 7: Add to flex items array
         ensure_flex_items_capacity(flex_layout, item_count + 1);
         flex_layout->flex_items[item_count] = (View*)child;
 
@@ -1567,9 +1638,10 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
     }
 }
 
-// Align content (align-content for multiple lines)
+// Align content (align-content for flex containers with flex-wrap)
+// Note: This applies to both single-line and multi-line wrapping containers
 void align_content(FlexContainerLayout* flex_layout) {
-    if (!flex_layout || flex_layout->line_count <= 1) return;
+    if (!flex_layout || flex_layout->line_count == 0) return;
 
     int container_cross_size = is_main_axis_horizontal(flex_layout) ?
                               flex_layout->cross_axis_size : flex_layout->main_axis_size;

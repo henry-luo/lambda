@@ -454,6 +454,8 @@ typedef struct BlockProp {
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
+    float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
+    float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
     // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 
