@@ -84,29 +84,96 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         content_width = measured_width;
         content_height = measured_height;
     } else {
-        // Measure element content
-        temp_view = create_temporary_view_for_measurement(&measure_context, child);
-        if (temp_view) {
-            // For now, use simplified measurement instead of full layout
-            // TODO: Implement proper content layout measurement
-            temp_view->width = 100;  // Default measured width
-            temp_view->height = 50;  // Default measured height
-            temp_view->content_width = 80;
-            temp_view->content_height = 30;
+        // Measure element content by performing a preliminary layout
+        // Set up the measurement context with the container's width constraint
+        float container_width = lycon->block.content_width;
+        if (container_width <= 0) container_width = 366;  // Default fallback
 
-            // Extract measurement results
-            measured_width = temp_view->width;
-            measured_height = temp_view->height;
-            content_width = temp_view->content_width;
-            content_height = temp_view->content_height;
+        // Use the saved context's parent for proper style resolution
+        ViewGroup* saved_parent = lycon->parent;
 
-            log_debug("Measured element %s: %dx%d (content: %dx%d)",
-                      child->node_name(), measured_width, measured_height,
-                      content_width, content_height);
+        // Set up block context for measurement
+        measure_context.block.content_width = container_width;
+        measure_context.block.content_height = -1;  // Unconstrained height
+        measure_context.block.advance_y = 0;
+        measure_context.block.max_width = 0;
+        measure_context.is_measuring = true;
 
-            // Cleanup temporary view
-            cleanup_temporary_view(temp_view);
+        // Initialize line context
+        line_init(&measure_context, 0, container_width);
+
+        // Measure child content heights by traversing the subtree
+        // The child parameter is the flex item element - get its first_child
+        measured_height = 0;
+        measured_width = 0;
+        DomElement* child_elem = child->as_element();
+        if (child_elem) {
+            DomNode* sub_child = child_elem->first_child;
+            while (sub_child) {
+                if (sub_child->is_text()) {
+                    // Text content - skip whitespace-only text, estimate lines for real content
+                    const char* text = (const char*)sub_child->text_data();
+                    if (text && strlen(text) > 0) {
+                        // Check if text is only whitespace
+                        bool is_whitespace_only = true;
+                        for (const char* p = text; *p; p++) {
+                            if (!is_space((unsigned char)*p)) {
+                                is_whitespace_only = false;
+                                break;
+                            }
+                        }
+                        if (!is_whitespace_only) {
+                            measured_height += 20;  // Approximate line height for actual text
+                        }
+                    }
+                } else if (sub_child->is_element()) {
+                    // Element - check for block-level element heights
+                    DomElement* elem = sub_child->as_element();
+
+                    // Estimate element height based on type
+                    uintptr_t tag = sub_child->tag();
+                    int elem_height = 0;
+
+                    // Common block elements with typical heights
+                    if (tag == HTM_TAG_H1) elem_height = 32;
+                    else if (tag == HTM_TAG_H2) elem_height = 28;
+                    else if (tag == HTM_TAG_H3) elem_height = 24;
+                    else if (tag == HTM_TAG_H4) elem_height = 20;
+                    else if (tag == HTM_TAG_H5 || tag == HTM_TAG_H6) elem_height = 18;
+                    else if (tag == HTM_TAG_P) elem_height = 36;  // Typically 2-3 lines
+                    else if (tag == HTM_TAG_UL || tag == HTM_TAG_OL) {
+                        // Count list items
+                        int li_count = 0;
+                        if (elem) {
+                            DomNode* li = elem->first_child;
+                            while (li) {
+                                if (li->is_element()) li_count++;
+                                li = li->next_sibling;
+                            }
+                        }
+                        elem_height = li_count * 18;  // ~18px per list item
+                    }
+                    else if (tag == HTM_TAG_DIV) {
+                        // Nested div - estimate conservatively
+                        elem_height = 56;  // Default nested block height
+                    }
+                    else elem_height = 20;  // Default element height
+
+                    // Add margins (estimate 10px margin-bottom for block elements)
+                    measured_height += elem_height + 10;
+                }
+                sub_child = sub_child->next_sibling;
+            }
         }
+
+        // Set measured dimensions
+        if (measured_height == 0) measured_height = 50;
+        measured_width = (int)container_width;
+        content_width = measured_width;
+        content_height = measured_height;
+
+        log_debug("Measured element %s: %dx%d (content-based estimation)",
+                  child->node_name(), measured_width, measured_height);
     }
 
     // Store measurement results
@@ -500,14 +567,73 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
             min_height = max_height = 20;  // Rough font height
         }
     } else {
-        // Complex content - need full layout measurement
-        // TODO: Implement proper block measurement
-        // For now, use simple estimation
-        min_width = 100;  // Placeholder
-        max_width = 200;  // Placeholder
-        min_height = 50;  // Placeholder
-        max_height = 100; // Placeholder
-        log_debug("WARNING: Complex content measurement not yet implemented, using placeholders");
+        // Complex content - check measurement cache first
+        // The measurement cache is populated during the first pass of multi-pass flex layout
+        log_debug("calculate_item_intrinsic_sizes: checking cache for item %p", item);
+        MeasurementCacheEntry* cached = get_from_measurement_cache((DomNode*)item);
+        log_debug("calculate_item_intrinsic_sizes: cache lookup returned %p", cached);
+        if (cached) {
+            log_debug("calculate_item_intrinsic_sizes: cached entry - measured_width=%d, measured_height=%d",
+                      cached->measured_width, cached->measured_height);
+        }
+        if (cached && cached->measured_width > 0) {
+            // Use cached measurements from earlier measurement pass
+            min_width = cached->measured_width;
+            max_width = cached->measured_width;
+            min_height = cached->measured_height;
+            max_height = cached->measured_height;
+            log_debug("Using cached measurements for complex content: width=%d, height=%d",
+                      min_width, min_height);
+        } else {
+            // No cache available - traverse children to estimate sizes
+            // This is a fallback when measurement pass hasn't run yet
+            int child_count = 0;
+            int total_text_height = 0;
+            int max_child_width = 0;
+            DomNode* c = child;
+            while (c) {
+                child_count++;
+                if (c->is_text()) {
+                    // Text contributes to height
+                    total_text_height += 20;  // Approximate line height
+                    const char* text = (const char*)c->text_data();
+                    if (text) {
+                        int text_len = strlen(text);
+                        max_child_width = max(max_child_width, text_len * 10);
+                    }
+                } else if (c->is_element()) {
+                    // Element children contribute their sizes
+                    ViewGroup* child_view = (ViewGroup*)c->as_element();
+                    if (child_view) {
+                        if (child_view->height > 0) {
+                            total_text_height += child_view->height;
+                        } else {
+                            total_text_height += 20;  // Default element height
+                        }
+                        if (child_view->width > 0) {
+                            max_child_width = max(max_child_width, child_view->width);
+                        }
+                    }
+                }
+                c = c->next_sibling;
+            }
+
+            // Use calculated values or fallback to placeholders
+            if (child_count > 0) {
+                min_width = max_child_width > 0 ? max_child_width : 100;
+                max_width = max_child_width > 0 ? max_child_width : 200;
+                min_height = total_text_height > 0 ? total_text_height : 50;
+                max_height = total_text_height > 0 ? total_text_height : 100;
+                log_debug("Estimated intrinsic sizes from %d children: width=%d, height=%d",
+                          child_count, min_width, min_height);
+            } else {
+                // Truly empty element with no children
+                min_width = max_width = item->width > 0 ? item->width : 0;
+                min_height = max_height = item->height > 0 ? item->height : 0;
+                log_debug("Empty element - using explicit dimensions: width=%d, height=%d",
+                          min_width, min_height);
+            }
+        }
     }
 
     // Store results
