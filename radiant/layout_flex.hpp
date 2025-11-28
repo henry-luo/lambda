@@ -23,6 +23,9 @@ void cleanup_flex_container(LayoutContext* lycon);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 
 // Flex item collection and management
+// UNIFIED: Single-pass collection that combines measurement + View creation + collection
+int collect_and_prepare_flex_items(LayoutContext* lycon, FlexContainerLayout* flex_layout, ViewBlock* container);
+// DEPRECATED: Use collect_and_prepare_flex_items instead (kept for compatibility)
 int collect_flex_items(FlexContainerLayout* flex_layout, ViewBlock* container, View*** items);
 void sort_flex_items_by_order(View** items, int count);
 
@@ -39,10 +42,32 @@ void distribute_free_space(FlexLineInfo* line, bool is_growing);
 void resolve_flex_item_constraints(ViewGroup* item, FlexContainerLayout* flex_layout);
 void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
 
+// Consolidated constraint application (Task 4)
+// Single source of truth for applying min/max constraints to flex items
+int apply_flex_constraint(ViewGroup* item, int computed_size, bool is_main_axis,
+                          FlexContainerLayout* flex_layout, bool* hit_min, bool* hit_max);
+int apply_flex_constraint(ViewGroup* item, int computed_size, bool is_main_axis,
+                          FlexContainerLayout* flex_layout);
+int apply_stretch_constraint(ViewGroup* item, int container_cross_size,
+                             FlexContainerLayout* flex_layout);
+
 // Alignment functions
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_content(FlexContainerLayout* flex_layout);
+
+// Overflow fallback alignment (Yoga-inspired)
+// Returns safe alignment value when remaining space is negative
+int fallback_alignment(int align);
+int fallback_justify(int justify);
+
+// Baseline calculation (Yoga-inspired)
+// Recursive baseline calculation through nested flex containers
+float calculate_baseline_recursive(View* node, FlexContainerLayout* flex_layout);
+bool is_baseline_layout(ViewBlock* node, FlexContainerLayout* flex_layout);
+
+// Wrap-reverse final position adjustment
+void apply_wrap_reverse_positions(FlexContainerLayout* flex_layout, ViewBlock* container);
 
 // Utility functions
 bool is_main_axis_horizontal(FlexProp* flex);
