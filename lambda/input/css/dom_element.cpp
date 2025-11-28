@@ -863,17 +863,23 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
     if (!parent->first_child) {
         // First child
         parent->first_child = child;
+        parent->last_child = child;
         child->prev_sibling = NULL;
         child->next_sibling = NULL;
     } else {
-        // Find last child and append
-        DomNode* last = parent->first_child;
-        while (last->next_sibling) {
-            last = last->next_sibling;
+        // Append to last child (use last_child for efficiency)
+        DomNode* last = parent->last_child;
+        if (!last) {
+            // Fallback if last_child not properly maintained
+            last = parent->first_child;
+            while (last->next_sibling) {
+                last = last->next_sibling;
+            }
         }
         last->next_sibling = child;
         child->prev_sibling = last;
         child->next_sibling = NULL;
+        parent->last_child = child;
     }
 
     log_debug("dom_element_append_child: appended element to parent (both Lambda tree and DOM chain updated)");
@@ -1639,12 +1645,25 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
     // Add to DOM sibling chain
     comment_node->parent = parent;
     if (!parent->first_child) {
+        // First child
         parent->first_child = comment_node;
+        parent->last_child = comment_node;
+        comment_node->prev_sibling = nullptr;
+        comment_node->next_sibling = nullptr;
     } else {
-        DomNode* last = parent->first_child;
-        while (last->next_sibling) last = last->next_sibling;
+        // Append to last child (use last_child for efficiency)
+        DomNode* last = parent->last_child;
+        if (!last) {
+            // Fallback if last_child not properly maintained
+            last = parent->first_child;
+            while (last->next_sibling) {
+                last = last->next_sibling;
+            }
+        }
         last->next_sibling = comment_node;
         comment_node->prev_sibling = last;
+        comment_node->next_sibling = nullptr;
+        parent->last_child = comment_node;
     }
 
     log_debug("dom_element_append_comment: appended comment '%s'", comment_content);
@@ -1696,6 +1715,10 @@ bool dom_comment_remove(DomComment* comment_node) {
 
     if (comment_node->next_sibling) {
         comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
+    } else if (comment_node->parent) {
+        // Comment node was last child
+        DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
+        elem_parent->last_child = comment_node->prev_sibling;
     }
 
     // No need to update sibling indices - they will be recalculated on demand via scanning
