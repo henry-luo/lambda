@@ -11,7 +11,6 @@
 #include "../lambda/input/css/css_value.hpp"
 
 #include <GLFW/glfw3.h>
-#include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_SFNT_NAMES_H
@@ -23,6 +22,8 @@
 // Forward declarations
 struct FontFaceDescriptor;
 typedef struct FontFaceDescriptor FontFaceDescriptor;
+struct FontDatabase;
+typedef struct FontDatabase FontDatabase;
 
 // Define lexbor tag and CSS value constants first, before including headers that need them
 enum {
@@ -703,7 +704,7 @@ typedef struct {
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
-    FcConfig *font_config;
+    FontDatabase *font_db;
     FT_Library ft_library;
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style for HTML5
