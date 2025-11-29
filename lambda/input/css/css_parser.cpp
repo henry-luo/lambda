@@ -842,8 +842,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             break;
         }
 
-        // Stop at semicolon or closing brace
-        if (t == CSS_TOKEN_SEMICOLON || t == CSS_TOKEN_RIGHT_BRACE) {
+        // Stop at semicolon, closing brace, or EOF
+        if (t == CSS_TOKEN_SEMICOLON || t == CSS_TOKEN_RIGHT_BRACE || t == CSS_TOKEN_EOF) {
             break;
         }
 
