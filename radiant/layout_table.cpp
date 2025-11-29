@@ -143,6 +143,30 @@ ViewBlock* ViewTableRow::parent_row_group() {
     return nullptr;
 }
 
+// Get first cell when table acts as its own row (cells are direct children)
+ViewTableCell* ViewTable::first_direct_cell() {
+    if (!acts_as_row()) return nullptr;
+
+    for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_CELL) {
+            return (ViewTableCell*)child;
+        }
+    }
+    return nullptr;
+}
+
+// Get next cell when table acts as its own row
+ViewTableCell* ViewTable::next_direct_cell(ViewTableCell* current) {
+    if (!current || !acts_as_row()) return nullptr;
+
+    for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
+        if (sibling->view_type == RDT_VIEW_TABLE_CELL) {
+            return (ViewTableCell*)sibling;
+        }
+    }
+    return nullptr;
+}
+
 // =============================================================================
 // CELL HELPER FUNCTIONS
 // =============================================================================
