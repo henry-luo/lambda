@@ -645,6 +645,13 @@ typedef struct ViewTable : ViewBlock {
     // Usage: for (auto row = table->first_row(); row; row = table->next_row(row))
     ViewTableRow* next_row(ViewTableRow* current);
 
+    // Get first cell when table acts as its own row (is_annoy_tr)
+    // Returns nullptr if table doesn't act as a row
+    ViewTableCell* first_direct_cell();
+
+    // Get next cell when table acts as its own row
+    ViewTableCell* next_direct_cell(ViewTableCell* current);
+
     // Check if table acts as its own tbody
     inline bool acts_as_tbody() { return tb && tb->is_annoy_tbody; }
 
