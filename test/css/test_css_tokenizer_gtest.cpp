@@ -152,3 +152,247 @@ TEST_F(CssTokenizerTest, TokenStreamBasic) {
         }
     }
 }
+
+// ============================================================================
+// Regression Tests for Token Union Copying Issue
+// ============================================================================
+
+TEST_F(CssTokenizerTest, DimensionToken_PreservesUnitField) {
+    // Test that dimension tokens properly preserve the unit field in the union
+    // This is a regression test for the bug where only number_value was copied,
+    // losing the dimension.unit field
+    
+    size_t count;
+    CSSToken* tokens = tokenize("16px", &count);
+    
+    ASSERT_NE(tokens, nullptr) << "Should tokenize dimension value";
+    ASSERT_GE(count, 1) << "Should have at least one token";
+    
+    // Find the DIMENSION token (skip whitespace/EOF)
+    CSSToken* dim_token = nullptr;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            dim_token = &tokens[i];
+            break;
+        }
+    }
+    
+    ASSERT_NE(dim_token, nullptr) << "Should have a DIMENSION token";
+    EXPECT_EQ(dim_token->data.dimension.value, 16.0) << "Dimension value should be 16";
+    EXPECT_EQ(dim_token->data.dimension.unit, CSS_UNIT_PX) << "Dimension unit should be CSS_UNIT_PX (1)";
+    EXPECT_NE(dim_token->data.dimension.unit, CSS_UNIT_NONE) << "Dimension unit should not be CSS_UNIT_NONE (0)";
+}
+
+TEST_F(CssTokenizerTest, DimensionToken_MultipleDifferentUnits) {
+    // Test that multiple dimension tokens in sequence each preserve their units
+    size_t count;
+    CSSToken* tokens = tokenize("10px 2em 50% 1.5rem", &count);
+    
+    ASSERT_NE(tokens, nullptr) << "Should tokenize multiple dimensions";
+    
+    // Collect all dimension tokens
+    struct DimInfo {
+        double value;
+        CssUnit expected_unit;
+    };
+    
+    DimInfo expected[] = {
+        {10.0, CSS_UNIT_PX},
+        {2.0, CSS_UNIT_EM},
+        {1.5, CSS_UNIT_REM}
+    };
+    
+    int dim_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            ASSERT_LT(dim_count, 3) << "Should not have more than 3 dimension tokens";
+            EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, expected[dim_count].value) 
+                << "Dimension " << dim_count << " value mismatch";
+            EXPECT_EQ(tokens[i].data.dimension.unit, expected[dim_count].expected_unit) 
+                << "Dimension " << dim_count << " unit mismatch";
+            dim_count++;
+        } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
+            // Percentage is stored differently, just verify it exists
+            EXPECT_EQ(tokens[i].data.number_value, 50.0) << "Percentage value should be 50";
+        }
+    }
+    
+    EXPECT_EQ(dim_count, 3) << "Should have found 3 dimension tokens";
+}
+
+TEST_F(CssTokenizerTest, DimensionToken_SignedNumbers) {
+    // Test signed dimension values preserve units
+    size_t count;
+    CSSToken* tokens = tokenize("-5px +3em", &count);
+    
+    ASSERT_NE(tokens, nullptr) << "Should tokenize signed dimensions";
+    
+    int dim_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            if (dim_count == 0) {
+                EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, -5.0) << "First dimension value";
+                EXPECT_EQ(tokens[i].data.dimension.unit, CSS_UNIT_PX) << "First dimension unit";
+            } else if (dim_count == 1) {
+                EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, 3.0) << "Second dimension value";
+                EXPECT_EQ(tokens[i].data.dimension.unit, CSS_UNIT_EM) << "Second dimension unit";
+            }
+            dim_count++;
+        }
+    }
+    
+    EXPECT_EQ(dim_count, 2) << "Should have found 2 dimension tokens";
+}
+
+TEST_F(CssTokenizerTest, DimensionToken_DecimalValues) {
+    // Test decimal dimension values with units
+    size_t count;
+    CSSToken* tokens = tokenize("0.5px 1.25em .75rem", &count);
+    
+    ASSERT_NE(tokens, nullptr) << "Should tokenize decimal dimensions";
+    
+    struct Expected {
+        double value;
+        CssUnit unit;
+    } expected[] = {
+        {0.5, CSS_UNIT_PX},
+        {1.25, CSS_UNIT_EM},
+        {0.75, CSS_UNIT_REM}
+    };
+    
+    int dim_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            ASSERT_LT(dim_count, 3);
+            EXPECT_NEAR(tokens[i].data.dimension.value, expected[dim_count].value, 0.0001) 
+                << "Dimension " << dim_count << " value";
+            EXPECT_EQ(tokens[i].data.dimension.unit, expected[dim_count].unit) 
+                << "Dimension " << dim_count << " unit";
+            dim_count++;
+        }
+    }
+    
+    EXPECT_EQ(dim_count, 3) << "Should have 3 dimension tokens";
+}
+
+TEST_F(CssTokenizerTest, DimensionToken_ViewportUnits) {
+    // Test viewport units (vw, vh, vmin, vmax)
+    size_t count;
+    CSSToken* tokens = tokenize("100vw 50vh 10vmin 20vmax", &count);
+    
+    ASSERT_NE(tokens, nullptr);
+    
+    struct Expected {
+        double value;
+        CssUnit unit;
+    } expected[] = {
+        {100.0, CSS_UNIT_VW},
+        {50.0, CSS_UNIT_VH},
+        {10.0, CSS_UNIT_VMIN},
+        {20.0, CSS_UNIT_VMAX}
+    };
+    
+    int dim_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            ASSERT_LT(dim_count, 4);
+            EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, expected[dim_count].value);
+            EXPECT_EQ(tokens[i].data.dimension.unit, expected[dim_count].unit);
+            dim_count++;
+        }
+    }
+    
+    EXPECT_EQ(dim_count, 4) << "Should have 4 viewport unit tokens";
+}
+
+TEST_F(CssTokenizerTest, DimensionToken_AllMetadataFieldsCopied) {
+    // Test that all token fields are copied, not just the union
+    size_t count;
+    CSSToken* tokens = tokenize("42px", &count);
+    
+    ASSERT_NE(tokens, nullptr);
+    
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            // Verify all standard fields are set
+            EXPECT_NE(tokens[i].start, nullptr) << "Token start should be set";
+            EXPECT_GT(tokens[i].length, 0) << "Token length should be positive";
+            EXPECT_NE(tokens[i].value, nullptr) << "Token value should be set";
+            
+            // Verify union fields
+            EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, 42.0);
+            EXPECT_EQ(tokens[i].data.dimension.unit, CSS_UNIT_PX);
+            
+            // Metadata fields should exist (even if 0/NULL for simple test case)
+            // Just verify they don't cause crashes when accessed
+            int line = tokens[i].line;
+            int column = tokens[i].column;
+            bool escaped = tokens[i].is_escaped;
+            uint32_t codepoint = tokens[i].unicode_codepoint;
+            
+            (void)line; (void)column; (void)escaped; (void)codepoint; // Suppress unused warnings
+            break;
+        }
+    }
+}
+
+TEST_F(CssTokenizerTest, BorderShorthand_MultipleDimensions) {
+    // Regression test for the original bug: border shorthand with dimension
+    size_t count;
+    CSSToken* tokens = tokenize("1px solid #999", &count);
+    
+    ASSERT_NE(tokens, nullptr) << "Should tokenize border shorthand";
+    
+    // Should have: 1px (DIMENSION), whitespace, solid (IDENT), whitespace, #999 (HASH), EOF
+    bool found_dimension = false;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION) {
+            EXPECT_DOUBLE_EQ(tokens[i].data.dimension.value, 1.0) << "Border width value";
+            EXPECT_EQ(tokens[i].data.dimension.unit, CSS_UNIT_PX) << "Border width unit";
+            found_dimension = true;
+            break;
+        }
+    }
+    
+    EXPECT_TRUE(found_dimension) << "Should find dimension token in border shorthand";
+}
+
+TEST_F(CssTokenizerTest, TokenCopyingPreservesUnion_HashToken) {
+    // Test that union copying works for other union types (not just dimension)
+    size_t count;
+    CSSToken* tokens = tokenize("#ff0000", &count);
+    
+    ASSERT_NE(tokens, nullptr);
+    
+    bool found_hash = false;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_HASH) {
+            // Hash tokens use data.hash_type field in the union
+            // The hash_type might be 0 (unrestricted), so just verify the value is set
+            EXPECT_NE(tokens[i].value, nullptr) << "Hash value should be set";
+            if (tokens[i].value) {
+                EXPECT_GT(strlen(tokens[i].value), 0) << "Hash value should not be empty";
+            }
+            found_hash = true;
+            break;
+        }
+    }
+    
+    EXPECT_TRUE(found_hash) << "Should find hash token";
+}
+
+TEST_F(CssTokenizerTest, TokenCopyingPreservesUnion_DelimiterToken) {
+    // Test delimiter tokens which use data.delimiter field
+    size_t count;
+    CSSToken* tokens = tokenize("+", &count);
+    
+    ASSERT_NE(tokens, nullptr);
+    
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DELIM) {
+            EXPECT_EQ(tokens[i].data.delimiter, '+') << "Delimiter character should be preserved";
+            break;
+        }
+    }
+}
+

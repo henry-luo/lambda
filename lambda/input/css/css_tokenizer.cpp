@@ -533,7 +533,15 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
         dst->start = src->start;
         dst->length = src->length;
         dst->value = src->value;
-        dst->data.number_value = src->data.number_value;
+        
+        // Copy union data - use memcpy to ensure all union members are copied
+        memcpy(&dst->data, &src->data, sizeof(src->data));
+        
+        // Copy metadata fields
+        dst->line = src->line;
+        dst->column = src->column;
+        dst->is_escaped = src->is_escaped;
+        dst->unicode_codepoint = src->unicode_codepoint;
     }
 
     *token_count = enhanced_count;
