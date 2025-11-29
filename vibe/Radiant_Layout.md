@@ -28,7 +28,7 @@ The Radiant layout engine follows a structured pipeline:
 ```cpp
 typedef struct ViewBlock {
     // Positioning and dimensions
-    int x, y;                    // Absolute position
+    int x, y;                    // X, Y position relative to immediate containing block
     int width, height;           // Current dimensions
     int content_width, content_height;  // Content area dimensions
 
@@ -165,10 +165,9 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
 ### Planned Features
 
 1. **CSS Grid Layout**: Full grid container and item support
-2. **Advanced Flexbox**: Baseline alignment, flex-wrap improvements
-3. **Responsive Layout**: Media queries and container queries
-4. **Performance Optimization**: SIMD vectorization, parallel layout
-5. **Advanced Box Model**: CSS transforms, filters, animations
+2. **Responsive Layout**: Media queries and container queries
+3. **Performance Optimization**: SIMD vectorization, parallel layout
+4. **Advanced Box Model**: CSS transforms, filters, animations
 
 ### Architecture Improvements
 

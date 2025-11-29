@@ -110,6 +110,12 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     log_debug("Pass 2: Final content layout");
     layout_final_flex_content(lycon, flex_container);
 
+    // PASS 3: Reposition baseline-aligned items
+    // Now that nested content has been laid out, we can correctly calculate
+    // baselines that depend on child content (e.g., nested flex containers)
+    log_debug("Pass 3: Baseline repositioning after nested content layout");
+    reposition_baseline_items(lycon, flex_container);
+
     // Restore parent flex context
     cleanup_flex_container(lycon);
     lycon->flex_container = pa_flex;
@@ -372,7 +378,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 if (child->is_element()) {
                     log_debug("NESTED FLEX: Creating lightweight View for child %s", child->node_name());
                     // CRITICAL: Just create the View structure without layout
-                    create_lightweight_flex_item_view(lycon, child);
+                    init_flex_item_view(lycon, child);
                 }
                 child = child->next_sibling;
             } while (child);

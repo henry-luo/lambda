@@ -197,7 +197,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // on content, not container. Only use container_width if the element has explicit width.
         ViewGroup* elem = (ViewGroup*)child->as_element();
         bool has_explicit_width = (elem && elem->blk && elem->blk->given_width > 0);
-        
+
         if (has_explicit_width) {
             measured_width = (int)elem->blk->given_width;
             log_debug("Measured element %s: using explicit width %d", child->node_name(), measured_width);
@@ -414,10 +414,10 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
         return;
     }
 
-    log_debug("TRACE: About to call create_lightweight_flex_item_view for %s", node->node_name());
+    log_debug("TRACE: About to call init_flex_item_view for %s", node->node_name());
     // Create lightweight View for flex item element only (no child processing)
-    create_lightweight_flex_item_view(lycon, node);
-    log_debug("TRACE: Completed create_lightweight_flex_item_view for %s", node->node_name());
+    init_flex_item_view(lycon, node);
+    log_debug("TRACE: Completed init_flex_item_view for %s", node->node_name());
 
     // Apply measured sizes if available
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
@@ -450,25 +450,6 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     }
 }
 
-// Create a ViewBlock for a flex item without full content layout
-ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
-    if (!node || !node->is_element()) return nullptr;
-
-    // Create ViewBlock for the flex item
-    ViewBlock* view = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, node);
-    if (!view) return nullptr;
-
-    // Initialize basic properties
-    log_debug("[DOM DEBUG] create_flex_item_view - redundant assignment view %p->node = %p (was already set by set_view)",
-            (void*)view, (void*)node);
-    view->parent = lycon->parent;
-    view->view_type = RDT_VIEW_BLOCK;
-
-    // Update layout context
-    lycon->prev_view = (View*)view;
-    return view;
-}
-
 // Set up basic flex item properties without content layout
 void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node) {
     (void)lycon; // Suppress unused parameter warning
@@ -487,31 +468,11 @@ void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* 
     log_debug("Set up basic properties for flex item: %s", node->node_name());
 }
 
-// Create View for flex item element only (no children processing)
-void create_flex_item_view_only(LayoutContext* lycon, DomNode* node) {
-    if (!node || !node->is_element()) return;
-
-    log_debug("Creating View for flex item element only: %s", node->node_name());
-
-    // Create ViewBlock directly using the existing create_flex_item_view function
-    // but ensure we don't process children
-    ViewBlock* view = create_flex_item_view(lycon, node);
-    if (!view) {
-        log_error("Failed to create View for flex item: %s", node->node_name());
-        return;
-    }
-
-    // Set up basic properties
-    setup_flex_item_properties(lycon, view, node);
-
-    log_debug("Created View for flex item element: %s", node->node_name());
-}
-
 // Create lightweight View for flex item element only (no child processing)
-void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
+void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
-    log_debug("*** TRACE: create_lightweight_flex_item_view ENTRY for %s (node=%p)", node->node_name(), node);
+    log_debug("*** TRACE: init_flex_item_view ENTRY for %s (node=%p)", node->node_name(), node);
     log_debug("*** TRACE: Current prev_view before creation: %p", lycon->prev_view);
 
     // Get display properties for the element
@@ -545,7 +506,7 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
 
     // CRITICAL FIX: Set prev_view so cached measurements can be applied
     lycon->prev_view = (View*)block;
-    log_debug("create_lightweight_flex_item_view EXIT for %s (node=%p, created_view=%p)", node->node_name(), node, block);
+    log_debug("init_flex_item_view EXIT for %s (node=%p, created_view=%p)", node->node_name(), node, block);
 }
 
 // ============================================================================
@@ -625,13 +586,13 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
             log_debug("calculate_item_intrinsic_sizes: cached entry - measured_width=%d, measured_height=%d",
                       cached->measured_width, cached->measured_height);
         }
-        
+
         // CRITICAL FIX: For items without explicit dimensions, the cached values may be
         // based on container size, not intrinsic size. In such cases, we should NOT use
         // the cache for the axis that doesn't have an explicit size.
         bool has_explicit_width = (item->blk && item->blk->given_width > 0);
         bool has_explicit_height = (item->blk && item->blk->given_height > 0);
-        
+
         // Only use cached width if item has explicit width or cache has valid intrinsic data
         if (cached && cached->measured_width > 0 && has_explicit_width) {
             // Use cached measurements from earlier measurement pass
@@ -645,7 +606,7 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
             min_width = max_width = 0;
             log_debug("Using 0 for min-width (no explicit width, intrinsic is 0)");
         }
-        
+
         if (cached && cached->measured_height > 0 && has_explicit_height) {
             min_height = cached->measured_height;
             max_height = cached->measured_height;
@@ -677,7 +638,7 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
                                 break;
                             }
                         }
-                        
+
                         if (!is_whitespace_only) {
                             // Text contributes to height
                             total_text_height += 20;  // Approximate line height
@@ -694,12 +655,12 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
                         // which may be based on container size
                         bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height > 0);
                         bool child_has_explicit_width = (child_view->blk && child_view->blk->given_width > 0);
-                        
+
                         if (child_has_explicit_height && child_view->height > 0) {
                             total_text_height += child_view->height;
                         }
                         // Don't add default height for flex items without explicit height
-                        
+
                         if (child_has_explicit_width && child_view->width > 0) {
                             max_child_width = max(max_child_width, child_view->width);
                         }

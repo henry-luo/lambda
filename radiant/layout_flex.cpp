@@ -591,7 +591,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 
         // Step 2: Create/verify View structure
         log_debug("Step 2: Creating View for %s", child->node_name());
-        create_lightweight_flex_item_view(lycon, child);
+        init_flex_item_view(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup
         ViewGroup* item = (ViewGroup*)child->as_element();
@@ -1010,7 +1010,7 @@ int apply_stretch_constraint(
 
 // Calculate baseline offset for a flex item from its outer margin edge
 // Returns the distance from the item's top margin edge to its baseline
-// 
+//
 // NOTE: This is a simplified implementation that synthesizes the baseline
 // from the item's outer margin edge. Proper baseline alignment requires
 // running after all nested content is laid out, which is not yet implemented.
@@ -1037,14 +1037,12 @@ int calculate_item_baseline(ViewGroup* item) {
                  child->in_line->position == CSS_VALUE_FIXED);
 
             if (!is_positioned) {
-                // Get child's margin for baseline calculation
-                int child_margin_top = child->bound ? child->bound->margin.top : 0;
-                
                 // Recursively calculate child's baseline
                 int child_baseline = calculate_item_baseline(child);
-                
+
                 if (child_baseline > 0) {
-                    // Calculate child's relative y from parent's content box
+                    // child->y is already relative to item's content box
+                    // We need to account for item's padding/border to get position from margin edge
                     int parent_offset_y = 0;
                     if (item->bound) {
                         parent_offset_y = item->bound->padding.top;
@@ -1052,9 +1050,15 @@ int calculate_item_baseline(ViewGroup* item) {
                             parent_offset_y += item->bound->border->width.top;
                         }
                     }
-                    int child_rel_y = (int)child->y - (int)item->y - parent_offset_y;
-                    
-                    return margin_top + child_rel_y + child_baseline;
+
+                    // child->y is relative to parent's content box (after border+padding)
+                    // So the child's position from parent's margin edge is:
+                    // margin_top + parent_offset_y + child->y + child_baseline
+                    int result = margin_top + parent_offset_y + (int)child->y + child_baseline;
+
+                    log_debug("calculate_item_baseline: item=%p, child=%p, child_baseline=%d, child->y=%d, result=%d",
+                              item, child, child_baseline, (int)child->y, result);
+                    return result;
                 }
             }
         }
@@ -1094,6 +1098,125 @@ int find_max_baseline(FlexLineInfo* line, int container_align_items) {
     }
     log_debug("find_max_baseline: max_baseline=%d, found=%d", max_baseline, found);
     return found ? max_baseline : 0;
+}
+
+/**
+ * Reposition baseline-aligned items after nested content layout.
+ *
+ * This function is called after layout_final_flex_content() completes,
+ * at which point all nested flex containers have been laid out and their
+ * children have proper dimensions. This allows us to correctly calculate
+ * baselines that depend on nested content (e.g., first child's baseline
+ * in a nested flex container).
+ *
+ * The issue this solves: During the initial flex layout (Phase 9), baseline
+ * alignment is calculated but nested flex containers haven't had their
+ * children laid out yet (children have height=0). This causes baseline
+ * calculation to fall back to the parent's height, which is incorrect.
+ */
+void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) {
+    log_enter();
+    log_info("BASELINE REPOSITIONING START: container=%p (%s)",
+             flex_container, flex_container ? flex_container->node_name() : "null");
+
+    if (!flex_container) {
+        log_leave();
+        return;
+    }
+
+    FlexContainerLayout* flex_layout = lycon->flex_container;
+    if (!flex_layout) {
+        log_debug("No flex layout context, skipping baseline repositioning");
+        log_leave();
+        return;
+    }
+
+    // Check if this container uses baseline alignment
+    bool has_baseline_alignment = (flex_layout->align_items == ALIGN_BASELINE);
+
+    // Also check if any items have align-self: baseline
+    if (!has_baseline_alignment) {
+        for (int i = 0; i < flex_layout->line_count; i++) {
+            FlexLineInfo* line = &flex_layout->lines[i];
+            for (int j = 0; j < line->item_count; j++) {
+                ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
+                if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
+                    has_baseline_alignment = true;
+                    break;
+                }
+            }
+            if (has_baseline_alignment) break;
+        }
+    }
+
+    if (!has_baseline_alignment) {
+        log_debug("Container doesn't use baseline alignment, skipping");
+        log_leave();
+        return;
+    }
+
+    // Only reposition for horizontal main axis (baseline alignment is only for rows)
+    if (!is_main_axis_horizontal(flex_layout)) {
+        log_debug("Column direction, baseline alignment equivalent to start, skipping");
+        log_leave();
+        return;
+    }
+
+    log_info("Container uses baseline alignment, recalculating positions after nested layout");
+
+    // For each line, recalculate baselines and reposition items
+    for (int line_idx = 0; line_idx < flex_layout->line_count; line_idx++) {
+        FlexLineInfo* line = &flex_layout->lines[line_idx];
+
+        // Recalculate max baseline now that children are laid out
+        int max_baseline = find_max_baseline(line, flex_layout->align_items);
+        log_debug("Line %d: Recalculated max_baseline=%d", line_idx, max_baseline);
+
+        // Reposition each baseline-aligned item
+        for (int i = 0; i < line->item_count; i++) {
+            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+            if (!item || !item->fi) continue;
+
+            // Check if this item uses baseline alignment
+            int align_self = item->fi->align_self;
+            bool uses_baseline = (align_self == ALIGN_BASELINE) ||
+                                (align_self == ALIGN_AUTO && flex_layout->align_items == ALIGN_BASELINE);
+
+            if (!uses_baseline) continue;
+
+            // Calculate this item's baseline
+            int item_baseline = calculate_item_baseline(item);
+
+            // Calculate new cross position to align baselines
+            // The item should be positioned so that:
+            // line_cross_position + cross_pos + item_baseline = line_cross_position + max_baseline
+            // Therefore: cross_pos = max_baseline - item_baseline
+            int new_cross_pos = max_baseline - item_baseline;
+
+            // Get current position for comparison
+            int old_cross_pos = get_cross_axis_position(item, flex_layout);
+
+            // For multi-line or wrap-reverse, account for line position
+            int line_cross_pos = line->cross_position;
+
+            // The final position relative to container
+            int final_pos = line_cross_pos + new_cross_pos;
+
+            log_debug("Item %d: item_baseline=%d, max_baseline=%d, old_pos=%d, new_pos=%d (line_pos=%d + offset=%d)",
+                      i, item_baseline, max_baseline, old_cross_pos, final_pos, line_cross_pos, new_cross_pos);
+
+            // Only update if position changed
+            if (final_pos != old_cross_pos) {
+                // Since coordinates are relative to parent, we just update the item's position
+                // Children don't need to be translated - their relative positions stay the same
+                set_cross_axis_position(item, final_pos, flex_layout);
+                log_info("Repositioned baseline item %d: %d -> %d", i, old_cross_pos, final_pos);
+            }
+        }
+    }
+
+    log_info("BASELINE REPOSITIONING END");
+    log_leave();
 }
 
 // Check if main axis is horizontal

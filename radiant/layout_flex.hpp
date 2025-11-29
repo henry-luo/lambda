@@ -1,9 +1,33 @@
 #ifndef LAYOUT_FLEX_HPP
 #define LAYOUT_FLEX_HPP
 
-#include "flex.hpp"
 #include "view.hpp"
 #include "layout.hpp"
+
+// Flex direction enum (matches CSS values)
+typedef enum {
+    DIR_ROW = CSS_VALUE_ROW,
+    DIR_ROW_REVERSE = CSS_VALUE_ROW_REVERSE,
+    DIR_COLUMN = CSS_VALUE_COLUMN,
+    DIR_COLUMN_REVERSE = CSS_VALUE_COLUMN_REVERSE
+} FlexDirection;
+
+// Flex wrap enum (matches CSS values)
+typedef enum {
+    WRAP_NOWRAP = CSS_VALUE_NOWRAP,
+    WRAP_WRAP = CSS_VALUE_WRAP,
+    WRAP_WRAP_REVERSE = CSS_VALUE_WRAP_REVERSE
+} FlexWrap;
+
+// Justify content enum (matches CSS values)
+typedef enum {
+    JUSTIFY_START = CSS_VALUE_FLEX_START,
+    JUSTIFY_END = CSS_VALUE_FLEX_END,
+    JUSTIFY_CENTER = CSS_VALUE_CENTER,
+    JUSTIFY_SPACE_BETWEEN = CSS_VALUE_SPACE_BETWEEN,
+    JUSTIFY_SPACE_AROUND = CSS_VALUE_SPACE_AROUND,
+    JUSTIFY_SPACE_EVENLY = CSS_VALUE_SPACE_EVENLY
+} JustifyContent;
 
 // Flex line information for layout calculations
 typedef struct FlexLineInfo {
@@ -69,6 +93,10 @@ bool is_baseline_layout(ViewBlock* node, FlexContainerLayout* flex_layout);
 
 // Wrap-reverse final position adjustment
 void apply_wrap_reverse_positions(FlexContainerLayout* flex_layout, ViewBlock* container);
+
+// Baseline repositioning after nested content layout
+// Called after layout_final_flex_content() to recalculate baselines with actual child dimensions
+void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container);
 
 // Utility functions
 bool is_main_axis_horizontal(FlexProp* flex);
