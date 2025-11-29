@@ -531,91 +531,6 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
     return true;
 }
 
-CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool) {
-    if (!name || !value || !pool) return NULL;
-
-    CSSProperty* prop = (CSSProperty*)pool_calloc(pool, sizeof(CSSProperty));
-    if (!prop) return NULL;
-
-    // Initialize the declaration structure
-    prop->property_id = css_property_id_from_name(name);
-    prop->origin = CSS_ORIGIN_AUTHOR;
-    prop->source_order = 0;
-    prop->important = false;
-    prop->source_file = NULL;
-    prop->source_line = 0;
-
-    // Initialize specificity to zero
-    prop->specificity.inline_style = 0;
-    prop->specificity.ids = 0;
-    prop->specificity.classes = 0;
-    prop->specificity.elements = 0;
-    prop->specificity.important = false;
-
-    // Check for !important
-    const char* important_pos = strstr(value, "!important");
-    if (important_pos) {
-        prop->important = true;
-        prop->specificity.important = true;
-    }
-
-    // Create a value structure
-    prop->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-    if (!prop->value) {
-        return NULL;
-    }
-
-    // Parse common value types
-    // Try parsing as length (e.g., "20px", "1.5em", "100%")
-    char* endptr;
-    double num_value = strtod(value, &endptr);
-
-    if (endptr != value && *endptr != '\0') {
-        // Successfully parsed a number, check unit
-        if (strcmp(endptr, "px") == 0) {
-            prop->value->type = CSS_VALUE_TYPE_LENGTH;
-            prop->value->data.length.value = num_value;
-            prop->value->data.length.unit = CSS_UNIT_PX;
-            return prop;
-        } else if (strcmp(endptr, "em") == 0) {
-            prop->value->type = CSS_VALUE_TYPE_LENGTH;
-            prop->value->data.length.value = num_value;
-            prop->value->data.length.unit = CSS_UNIT_EM;
-            return prop;
-        } else if (strcmp(endptr, "rem") == 0) {
-            prop->value->type = CSS_VALUE_TYPE_LENGTH;
-            prop->value->data.length.value = num_value;
-            prop->value->data.length.unit = CSS_UNIT_REM;
-            return prop;
-        } else if (strcmp(endptr, "%") == 0) {
-            prop->value->type = CSS_VALUE_TYPE_PERCENTAGE;
-            prop->value->data.percentage.value = num_value;
-            return prop;
-        }
-    } else if (endptr != value && *endptr == '\0') {
-        // Plain number without unit
-        prop->value->type = CSS_VALUE_TYPE_NUMBER;
-        prop->value->data.number.value = num_value;
-        return prop;
-    }
-
-    // Fallback: lookup keyword and store enum, or store as custom
-    CssEnum enum_id = css_enum_by_name(value);
-    if (enum_id != CSS_VALUE__UNDEF) {
-        prop->value->type = CSS_VALUE_TYPE_KEYWORD;
-        prop->value->data.keyword = enum_id;
-    } else {
-        prop->value->type = CSS_VALUE_TYPE_CUSTOM;
-        prop->value->data.custom_property.name = pool_strdup(pool, value);
-        prop->value->data.custom_property.fallback = NULL;
-    }
-
-    return prop;
-}void css_property_free(CSSProperty* property) {
-    // Memory managed by pool, nothing to do
-    (void)property;
-}
-
 // Forward declarations
 bool css_parse_length(const char* value_str, CssLength* length);
 bool css_parse_color(const char* value_str, CssColor* color);
@@ -901,7 +816,7 @@ bool css_property_validate_value_from_string(CssPropertyId property_id,
 
             if (disallow_negative && length->value < 0) {
                 // reject negative value for properties that don't allow it
-                printf("[CSS Parse] Rejecting negative value %.2f for property %s\n",
+                log_debug("[CSS Parse] Rejecting negative value %.2f for property %s",
                        length->value, prop->name);
                 return false;
             }
@@ -1269,33 +1184,6 @@ bool css_parse_color(const char* value_str, CssColor* color) {
     return false;
 }
 
-bool css_parse_keyword(const char* value_str, CssPropertyId property_id, CssKeyword* keyword) {
-    if (!value_str || !keyword) return false;
-
-    keyword->value = value_str;
-    keyword->enum_value = 0; // Would map to property-specific enum
-    return true;
-}
-
-static bool css_parse_function_local(const char* value_str, CssFunction* function, Pool* pool) {
-    if (!value_str || !function || !pool) return false;
-
-    // Simple function parsing (calc, var, rgb, etc.)
-    const char* paren = strchr(value_str, '(');
-    if (!paren) return false;
-
-    size_t name_len = paren - value_str;
-    char* name = (char*)pool_calloc(pool, name_len + 1);
-    strncpy(name, value_str, name_len);
-    name[name_len] = '\0';
-
-    function->name = name;
-    function->args = NULL; // Would parse arguments in full implementation
-    function->arg_count = 0;
-
-    return true;
-}
-
 // ============================================================================
 // Debugging and Utility Functions
 // ============================================================================
@@ -1308,16 +1196,16 @@ const char* css_property_get_name(CssPropertyId property_id) {
 void css_property_print_info(CssPropertyId property_id) {
     const CssProperty* prop = css_property_get_by_id(property_id);
     if (!prop) {
-        printf("Property ID %u: NOT FOUND\n", (unsigned int)property_id);
+        log_debug("Property ID %u: NOT FOUND", (unsigned int)property_id);
         return;
     }
 
-    printf("Property: %s (ID: %u)\n", prop->name, (unsigned int)prop->id);
-    printf("  Type: %d\n", prop->type);
-    printf("  Inherits: %s\n", prop->inheritance == PROP_INHERIT_YES ? "yes" : "no");
-    printf("  Initial: %s\n", prop->initial_value);
-    printf("  Animatable: %s\n", prop->animatable ? "yes" : "no");
-    printf("  Shorthand: %s\n", prop->shorthand ? "yes" : "no");
+    log_debug("Property: %s (ID: %u)", prop->name, (unsigned int)prop->id);
+    log_debug("  Type: %d", prop->type);
+    log_debug("  Inherits: %s", prop->inheritance == PROP_INHERIT_YES ? "yes" : "no");
+    log_debug("  Initial: %s", prop->initial_value);
+    log_debug("  Animatable: %s", prop->animatable ? "yes" : "no");
+    log_debug("  Shorthand: %s", prop->shorthand ? "yes" : "no");
 }
 
 int css_property_get_count(void) {
