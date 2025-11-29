@@ -9,6 +9,7 @@
 #include <ctype.h>
 
 #include "url.h"
+#include "log.h"
 
 // Create URL parser
 UrlParser* url_parser_create(const char* input) {
@@ -252,11 +253,12 @@ UrlError url_parse_into(const char* input, Url* url) {
         
         // Fragment goes to end of string
         size_t fragment_len = strlen(fragment_start);
-        if (fragment_len > 0) {
+        if (fragment_len > 0 && fragment_len < 4096) {  // Reasonable limit for URL fragments
             char* fragment_buf = malloc(fragment_len + 2); // +1 for '#', +1 for '\0'
             if (fragment_buf) {
                 fragment_buf[0] = '#';
-                strcpy(fragment_buf + 1, fragment_start);
+                memcpy(fragment_buf + 1, fragment_start, fragment_len);  // Safe copy
+                fragment_buf[fragment_len + 1] = '\0';  // Explicit null termination
                 url_free_string(url->hash);
                 url->hash = url_create_string(fragment_buf);
                 free(fragment_buf);
@@ -389,7 +391,13 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
     // Parse base path segments, excluding the last one only if it's not a directory
     if (base_path && strlen(base_path) > 1) {
         char base_copy[2048];
-        strcpy(base_copy, base_path + 1); // Skip leading slash
+        size_t base_len = strlen(base_path + 1);
+        if (base_len >= sizeof(base_copy)) {
+            log_error("URL path too long: %zu chars (max: %zu)", base_len, sizeof(base_copy) - 1);
+            return NULL;  // Graceful failure for oversized paths
+        }
+        strncpy(base_copy, base_path + 1, sizeof(base_copy) - 1); // Safe copy
+        base_copy[sizeof(base_copy) - 1] = '\0';  // Ensure null termination
         
         // Check if base path ends with '/' (indicating it's a directory)
         bool is_directory = (base_path[strlen(base_path) - 1] == '/');

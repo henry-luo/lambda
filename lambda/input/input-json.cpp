@@ -1,11 +1,12 @@
 #include "input.hpp"
 #include "input-context.hpp"
 #include "../mark_builder.hpp"
+#include "../../vibe/lambda-safety.h"
 #include <cstring>
 
 using namespace lambda;
 
-static Item parse_value(InputContext& ctx, const char **json);
+static Item parse_value(InputContext& ctx, const char **json, int depth = 0);
 
 static String* parse_string(InputContext& ctx, const char **json) {
     SourceTracker& tracker = ctx.tracker;
@@ -115,7 +116,7 @@ static Item parse_number(InputContext& ctx, const char **json) {
     }
 }
 
-static Item parse_array(InputContext& ctx, const char **json) {
+static Item parse_array(InputContext& ctx, const char **json, int depth) {
     SourceTracker& tracker = ctx.tracker;
 
     if (**json != '[') {
@@ -136,7 +137,7 @@ static Item parse_array(InputContext& ctx, const char **json) {
     }
 
     while (**json && !ctx.shouldStopParsing()) {
-        Item item = parse_value(ctx, json);
+        Item item = parse_value(ctx, json, depth + 1);
         arr_builder.append(item);
 
         skip_whitespace(json);
@@ -168,7 +169,7 @@ static Item parse_array(InputContext& ctx, const char **json) {
     return arr_builder.final();
 }
 
-static Item parse_object(InputContext& ctx, const char **json) {
+static Item parse_object(InputContext& ctx, const char **json, int depth) {
     SourceTracker& tracker = ctx.tracker;
 
     if (**json != '{') {
@@ -258,7 +259,7 @@ static Item parse_object(InputContext& ctx, const char **json) {
         tracker.advance(1);
         skip_whitespace(json);
 
-        Item value = parse_value(ctx, json);
+        Item value = parse_value(ctx, json, depth + 1);
         map_builder.put(key, value);
 
         skip_whitespace(json);
@@ -290,8 +291,14 @@ static Item parse_object(InputContext& ctx, const char **json) {
     return map_builder.final();
 }
 
-static Item parse_value(InputContext& ctx, const char **json) {
+static Item parse_value(InputContext& ctx, const char **json, int depth) {
     SourceTracker& tracker = ctx.tracker;
+
+    // Security: Prevent stack overflow from deeply nested structures
+    if (depth > MAX_PARSING_DEPTH) {
+        ctx.addError(tracker.location(), "JSON nesting too deep (max %d levels)", MAX_PARSING_DEPTH);
+        return ctx.builder.createNull();
+    }
 
     skip_whitespace(json);
 
@@ -302,9 +309,9 @@ static Item parse_value(InputContext& ctx, const char **json) {
 
     switch (**json) {
         case '{':
-            return parse_object(ctx, json);
+            return parse_object(ctx, json, depth);
         case '[':
-            return parse_array(ctx, json);
+            return parse_array(ctx, json, depth);
         case '"': {
             String* str = parse_string(ctx, json);
             if (!str) return ctx.builder.createNull();
@@ -348,7 +355,7 @@ static Item parse_value(InputContext& ctx, const char **json) {
 void parse_json(Input* input, const char* json_string) {
     InputContext ctx(input, json_string, strlen(json_string));
 
-    input->root = parse_value(ctx, &json_string);
+    input->root = parse_value(ctx, &json_string, 0);
 
     // Log any errors that occurred during parsing
     if (ctx.hasErrors()) {
