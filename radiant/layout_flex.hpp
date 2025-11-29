@@ -11,6 +11,7 @@ typedef struct FlexLineInfo {
     int item_count;
     int main_size;            // Total size along main axis
     int cross_size;           // Size along cross axis (height of tallest item)
+    int cross_position;       // Position along cross axis (set by align_content)
     int free_space;           // Available space for distribution
     float total_flex_grow;    // Sum of flex-grow values
     float total_flex_shrink;  // Sum of flex-shrink values
