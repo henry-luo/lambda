@@ -128,6 +128,7 @@ struct DomElement : DomNode {
     union {
         FlexItemProp* fi;
         GridItemProp* gi;
+        TableProp* tb;  // table specific properties
         TableCellProp* td;  // table cell specific properties
     };
 
@@ -139,7 +140,6 @@ struct DomElement : DomNode {
     EmbedProp* embed;
     // positioning properties for CSS positioning
     PositionProp* position;
-    TableProp* tb;  // table specific properties
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),

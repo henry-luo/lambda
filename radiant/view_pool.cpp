@@ -40,6 +40,11 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             table->tb->border_spacing_h = 2.0f;
             table->tb->border_spacing_v = 2.0f;
             table->tb->border_collapse = false; // default is separate borders
+            // Initialize anonymous box flags (CSS 2.1 Section 17.2.1)
+            table->tb->is_annoy_tbody = 0;
+            table->tb->is_annoy_tr = 0;
+            table->tb->is_annoy_td = 0;
+            table->tb->is_annoy_colgroup = 0;
             break;
         }
         case RDT_VIEW_TABLE_CELL: {
@@ -62,6 +67,10 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             } else {
                 cell->td->row_span = 1;
             }
+            // Initialize anonymous box flags (CSS 2.1 Section 17.2.1)
+            cell->td->is_annoy_tr = 0;
+            cell->td->is_annoy_td = 0;
+            cell->td->is_annoy_colgroup = 0;
             break;
         }
         default:
@@ -1084,7 +1093,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     }
 
     // Flex item properties (for elements inside flex containers)
-    if (block->fi) {
+    // Note: fi, gi, td are in a union, so check view_type to avoid misinterpreting table cell data as flex data
+    bool is_table_element = (block->view_type == RDT_VIEW_TABLE ||
+                             block->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+                             block->view_type == RDT_VIEW_TABLE_ROW ||
+                             block->view_type == RDT_VIEW_TABLE_CELL);
+    if (block->fi && !is_table_element) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"flexGrow\": %.0f,\n", block->fi->flex_grow);
         strbuf_append_char_n(buf, ' ', indent + 4);

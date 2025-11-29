@@ -66,6 +66,12 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 - **CSS Engine**: `lambda/input/css/` - complete CSS parser, cascade resolver
 - **Radiant Engine**: `radiant/` - HTML/CSS/SVG layout and rendering with FreeType, GLFW, FontConfig
 
+### Radiant Subsystems
+
+Radiant is the CSS layout and rendering engine integrated with Lambda for document presentation.
+- **Unified DOM and View Tree**: `DomNode`, `DomText`, `DomElement` represents both DOM nodes and layout views
+- **Relative View Coordinates**: Each view has position/size relative to immediate containing block
+
 ## Lambda CLI Commands
 
 ### Basic Usage
