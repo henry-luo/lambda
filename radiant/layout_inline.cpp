@@ -87,7 +87,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
         br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
         br_view->width = 0;  br_view->height = lycon->block.line_height;
-        lycon->prev_view = br_view;
         line_break(lycon);
         return;
     }
@@ -121,18 +120,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         child = static_cast<DomElement*>(elmt)->first_child;
     }
     if (child) {
-        lycon->parent = (ViewGroup*)span;  lycon->prev_view = NULL;
         log_debug("layout inline children: advance_y %f, line_height %f", lycon->block.advance_y, lycon->block.line_height);
         do {
             layout_flow_node(lycon, child);
             child = child->next_sibling;
         } while (child);
-        lycon->parent = span->parent_view();
     }
 
     compute_span_bounding_box(span);
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
-    lycon->prev_view = (View*)span;
     log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
 }

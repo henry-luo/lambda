@@ -319,7 +319,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         const unsigned char* str = node->text_data();
         log_debug("layout_text: '%t'", str);
         // skip whitespace at end of block
-        if (!node->next_sibling && lycon->parent->is_block() && is_only_whitespace((const char*)str)) {
+        if (!node->next_sibling && node->parent->is_block() && is_only_whitespace((const char*)str)) {
             node->view_type = RDT_VIEW_NONE;
             log_debug("skipping whitespace text at end of block");
         }
@@ -356,8 +356,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     ViewBlock* html = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, elmt);
     html->width = lycon->block.content_width;  html->height = lycon->block.content_height;
-    lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
-    lycon->elmt = elmt;
+    lycon->doc->view_tree->root = (View*)html;  lycon->elmt = elmt;
     // default html styles
     html->scroller = alloc_scroll_prop(lycon);
     html->scroller->overflow_x = CSS_VALUE_AUTO;

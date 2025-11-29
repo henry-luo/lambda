@@ -21,7 +21,6 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 bool requires_content_measurement(ViewBlock* flex_container);
 
 // Helper functions for measurement
-ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* child);
 void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height);
 int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t length);
 void cleanup_temporary_view(ViewBlock* temp_view);

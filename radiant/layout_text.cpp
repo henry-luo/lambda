@@ -63,10 +63,10 @@ void line_break(LayoutContext* lycon) {
             View * vw = view;
             do {
                 view_vertical_align(lycon, vw);
-                if (vw == lycon->prev_view) { break; } // reached the last view in the line
+                if (vw == lycon->elmt->prev_sibling) { break; } // reached the last view in the line
                 vw = vw->next();
             } while (vw);
-            if (vw != lycon->prev_view) { // need to go parent level
+            if (vw != lycon->elmt->prev_sibling) { // need to go parent level
                 view = view->parent;
                 if (view) { view = view->next(); }
                 if (view) goto NEXT_VIEW;
@@ -240,7 +240,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     LAYOUT_TEXT:
     if (!text_view) {
         text_view = (ViewText*)set_view(lycon, RDT_VIEW_TEXT, text_node);
-        lycon->prev_view = (View*)text_view;
         text_view->font = lycon->font.style;
     }
     TextRect* rect = (TextRect*)pool_calloc(lycon->doc->view_tree->pool, sizeof(TextRect));

@@ -81,11 +81,10 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         log_debug("Failed to allocate view: %d", type);
         return NULL;
     }
-    view->view_type = type;  view->parent = lycon->parent;
+    view->view_type = type;
 
-    const char* parent_name = lycon->parent ? lycon->parent->node_name() : "no_parent";
     log_debug("*** ALLOC_VIEW: view (type=%d) for node %s (%p), parent=%p (%s)",
-        type, node->node_name(), node, lycon->parent, parent_name);
+        type, node->node_name(), node, node->parent, node->parent ? node->parent->node_name() : "null");
 
     // link the view
     if (!lycon->line.start_view) lycon->line.start_view = view;
