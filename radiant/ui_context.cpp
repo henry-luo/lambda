@@ -70,17 +70,12 @@ int ui_context_init(UiContext* uicon, bool headless) {
     } else {
         log_debug("LCD filter enabled for sub-pixel rendering");
     }
-    // init font database - create memory pools for font system
-    Pool* font_pool = pool_create();
-    Arena* font_arena = arena_create(font_pool, 1024 * 1024, 8 * 1024 * 1024);  // 1MB initial, 8MB max
-    uicon->font_db = font_database_create(font_pool, font_arena);
+    // Use global font database singleton for performance
+    uicon->font_db = font_database_get_global();
     if (!uicon->font_db) {
-        fprintf(stderr, "Failed to initialize font database\n");
+        fprintf(stderr, "Failed to initialize global font database\n");
         return EXIT_FAILURE;
     }
-    
-    // Scan system fonts
-    font_database_scan(uicon->font_db);
 
     if (headless) {
         // Headless mode: no window creation

@@ -72,6 +72,9 @@ typedef struct FontEntry {
     int collection_index;       // Font index in collection
     bool is_collection;
     
+    // Lazy loading flag
+    bool is_placeholder;        // True if needs full parsing
+    
 } FontEntry;
 
 typedef struct FontFamily {
@@ -87,6 +90,7 @@ typedef struct FontDatabase {
     HashMap* postscript_names;  // ps_name -> FontEntry*
     HashMap* file_paths;        // file_path -> FontEntry*
     ArrayList* all_fonts;       // All FontEntry* for iteration
+    ArrayList* font_files;      // Lazy loading: discovered font file paths
     
     // Platform directories
     ArrayList* scan_directories; // Directories to scan
@@ -163,6 +167,10 @@ void font_database_invalidate_cache(FontDatabase* db);
 size_t font_database_get_font_count(FontDatabase* db);
 size_t font_database_get_family_count(FontDatabase* db);
 void font_database_print_statistics(FontDatabase* db);
+
+// Global font database singleton for performance
+FontDatabase* font_database_get_global(void);
+void font_database_cleanup_global(void);
 
 #ifdef __cplusplus
 }
