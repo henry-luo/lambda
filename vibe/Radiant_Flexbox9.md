@@ -18,7 +18,7 @@ After importing 250 test cases from Facebook's Yoga flexbox library and running 
 
 | Category | Initial | Current | Status |
 |----------|---------|---------|--------|
-| aligncontent | 18/64 (28.1%) | Improved | 🟡 In Progress |
+| aligncontent | 18/64 (28.1%) | 32+ Improved | 🟢 Much Improved |
 | alignitems | 7/31 (22.6%) | - | 🔴 Needs Work |
 | alignself | 4/5 (80.0%) | - | 🟢 Mostly Working |
 | flex (grow/shrink/basis) | 3/15 (20.0%) | - | 🔴 Needs Work |
@@ -26,7 +26,7 @@ After importing 250 test cases from Facebook's Yoga flexbox library and running 
 | flexwrap | 2/24 (8.3%) | Improved | 🟡 In Progress |
 | gap | 13/33 (39.4%) | - | 🟡 Partial Support |
 | justifycontent | 20/28 (71.4%) | - | 🟢 Mostly Working |
-| **TOTAL** | **84/255 (32.9%)** | **120/255 (47.1%)** | **+36 tests** |
+| **TOTAL** | **84/255 (32.9%)** | **138/255 (54.1%)** | **+54 tests** |
 
 ---
 
@@ -60,18 +60,74 @@ After importing 250 test cases from Facebook's Yoga flexbox library and running 
 - Container height finalization (Phase 7.5) for auto-height containers
 - **Result**: 5/6 wrap-reverse tests passing (up from 0/6)
 
+#### 5. Align-content: stretch with proper line positioning (layout_flex.cpp + layout_flex_measurement.cpp)
+- **layout_flex.hpp**: Added `cross_position` field to `FlexLineInfo` to track line's absolute position
+- **layout_flex.cpp**:
+  - Added `item_has_definite_cross_size()` and `item_will_stretch()` helper functions
+  - Modified `calculate_line_cross_sizes()` to skip items with auto cross-size that will be stretched
+  - Reordered phases: Phase 7 (finalize container) → Phase 8 (align_content) → Phase 9 (align_items_cross_axis)
+  - `align_content()` now stores line's `cross_position` instead of moving items
+  - `align_items_cross_axis()` now uses `line->cross_position + cross_pos` for absolute positioning
+  - Fixed stretch logic to always set size to line's cross_size (not just when item is smaller)
+- **layout_flex_measurement.cpp**: Improved DIV height estimation to return 0 for empty divs (not 56px)
+- **Result**: Fixed align-content-stretch-row-with-children and similar tests (now at 138/255 = 54.1%)
+
+#### 6. Empty element measurement fix (layout_flex_measurement.cpp)
+- Removed the fallback `if (measured_height == 0) measured_height = 50;` which was incorrectly setting min-content for empty flex items
+- Empty elements now correctly have min-content of 0
+- **Result**: Fixed align-content-stretch-row-with-min-height and related tests
+
+#### 7. Proper intrinsic size calculation for flex items (layout_flex_measurement.cpp)
+- **measure_flex_child_content()**: Fixed to only use explicit width for `measured_width`, not container width. Items without explicit width now correctly get `measured_width = 0`.
+- **calculate_item_intrinsic_sizes()**: Fixed child traversal to only use explicit dimensions. Children without explicit width/height don't contribute to parent's intrinsic size.
+- **calculate_item_intrinsic_sizes()**: Fixed to skip whitespace-only text nodes when calculating intrinsic sizes.
+- **calculate_item_intrinsic_sizes()**: Removed placeholder fallback values (100x50) for items with children but no content.
+- **Result**: Fixed align-content-stretch-column test (column direction now correctly calculates line cross-sizes)
+
+#### 8. Baseline alignment foundation (layout_flex.cpp)
+- **calculate_item_baseline()**: New function to calculate baseline offset from item's outer margin edge
+  - Handles explicit baseline from text layout
+  - Recursively calculates baseline from first participating child (if laid out)
+  - Synthesizes baseline from outer margin edge for empty boxes
+- **find_max_baseline()**: Updated to accept container's `align_items` value
+  - Now considers items with `align-self: baseline` OR container's `align-items: baseline`
+  - Uses `calculate_item_baseline()` for proper baseline calculation
+- **ALIGN_BASELINE case**: Updated to use `calculate_item_baseline()` for consistent baseline handling
+- **Limitation**: Baseline calculation for nested flex containers is limited - children may not be laid out yet when baseline is calculated. This is an architectural limitation that requires two-pass layout to fix properly.
+- **Result**: 7 baseline tests now passing (simple cases), 8 still failing (complex nested cases)
+
+### Current Test Results: 145/255 (56.9%)
+**Improvement**: +25 tests from baseline of 120/255 (47.1%)
+
+| Category | Pass Rate | Notes |
+|----------|-----------|-------|
+| Baseline (wrapped-negative-space) | 14/14 (100%) | All percentage resolution tests pass |
+| align-content stretch (row) | 9/10 (90%) | Most stretch tests pass |
+| align-content stretch (column) | 1/1 (100%) | Column stretch now works |
+| wrap-reverse | 5/6 (83%) | Most wrap-reverse tests pass |
+| align-items baseline (simple) | 7/15 (47%) | Simple baseline cases pass |
+
 ### 🔄 In Progress
+
+None at this time.
+
+### 📋 Remaining Work
+
+1. **Recursive baseline calculation** - Implement `calculate_baseline_recursive()` to traverse nested containers
+2. **Wrap-reverse position flip** - Apply position adjustment at layout end: `container_cross - position - item_cross`
+3. **Two-pass distribution refinement** - Properly freeze items hitting min/max constraints and recalculate totals
 
 - Recursive baseline calculation
 - Two-pass distribution refinement
 - Additional wrap-reverse edge cases
+- Min-height with align-content stretch (items with min-height constraints)
 
 ### 📋 Remaining Tasks
 
-- Align-content stretch (re-measure items with stretched line height)
 - Full two-pass flex distribution with frozen item tracking
 - Gap refinements (cross-axis gap between lines)
 - Column-reverse with borders/padding edge cases
+- Margin handling in align-content stretch
 
 ---
 

@@ -306,7 +306,6 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("Phase 5: Completed calculating line cross sizes");
 
     // Phase 6: Align items on main axis
-    // Phase 6: Align items on main axis
     log_debug("Phase 6: About to align items on main axis for %d lines", line_count);
     for (int i = 0; i < line_count; i++) {
         log_debug("Phase 6: Aligning line %d on main axis", i);
@@ -314,15 +313,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         log_debug("Phase 6: Completed aligning line %d on main axis", i);
     }
 
-    // Phase 7: Align items on cross axis
-    log_debug("Phase 7: About to align items on cross axis for %d lines", line_count);
-    for (int i = 0; i < line_count; i++) {
-        log_debug("Phase 7: Aligning line %d on cross axis", i);
-        align_items_cross_axis(flex_layout, &flex_layout->lines[i]);
-        log_debug("Phase 7: Completed aligning line %d on cross axis", i);
-    }
-
-    // Phase 7.5: Finalize container cross size for auto-height containers
+    // Phase 7: Finalize container cross size for auto-height containers
     // This MUST happen BEFORE align_content so it uses correct container size
     if (is_main_axis_horizontal(flex_layout)) {
         int total_line_cross = 0;
@@ -340,21 +331,32 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (total_line_cross > 0) {
             if (!has_explicit_height) {
                 // Only update for auto-height containers
-                log_debug("Phase 7.5: Updating cross_axis_size from %.1f to %d (auto-height)",
+                log_debug("Phase 7: Updating cross_axis_size from %.1f to %d (auto-height)",
                          flex_layout->cross_axis_size, total_line_cross);
                 flex_layout->cross_axis_size = (float)total_line_cross;
                 container->height = total_line_cross;
             } else {
-                log_debug("Phase 7.5: Container has explicit height, not updating");
+                log_debug("Phase 7: Container has explicit height, not updating");
             }
         }
     }
 
-    // Phase 8: Align content (lines)
+    // Phase 8: Align content (distribute space among lines)
     // Note: align-content applies to flex containers with flex-wrap: wrap or wrap-reverse
-    // even for single-line layouts - the single line should be aligned within the container
+    // CRITICAL: This must happen BEFORE align_items_cross_axis so line cross-sizes are final
     if (flex_layout->wrap != WRAP_NOWRAP) {
+        log_debug("Phase 8: About to align content for %d lines", line_count);
         align_content(flex_layout);
+        log_debug("Phase 8: Completed align content");
+    }
+
+    // Phase 9: Align items on cross axis
+    // This runs AFTER align_content so line cross-sizes are finalized
+    log_debug("Phase 9: About to align items on cross axis for %d lines", line_count);
+    for (int i = 0; i < line_count; i++) {
+        log_debug("Phase 9: Aligning line %d on cross axis", i);
+        align_items_cross_axis(flex_layout, &flex_layout->lines[i]);
+        log_debug("Phase 9: Completed aligning line %d on cross axis", i);
     }
 
     // Note: wrap-reverse item positioning is now handled in align_items_cross_axis
@@ -369,9 +371,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     flex_layout->needs_reflow = false;
-}
-
-// Collect flex items from container children
+}// Collect flex items from container children
 int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** items) {
     if (!flex || !container || !items) return 0;
 
@@ -1008,26 +1008,91 @@ int apply_stretch_constraint(
     return constrained;
 }
 
+// Calculate baseline offset for a flex item from its outer margin edge
+// Returns the distance from the item's top margin edge to its baseline
+// 
+// NOTE: This is a simplified implementation that synthesizes the baseline
+// from the item's outer margin edge. Proper baseline alignment requires
+// running after all nested content is laid out, which is not yet implemented.
+int calculate_item_baseline(ViewGroup* item) {
+    if (!item) return 0;
+
+    // Get top margin
+    int margin_top = item->bound ? item->bound->margin.top : 0;
+
+    // Check if item has text content with explicit baseline
+    if (item->fi && item->fi->baseline_offset > 0) {
+        // Use explicit baseline from text layout (relative to content box)
+        return margin_top + item->fi->baseline_offset;
+    }
+
+    // Check if item has laid-out children - use first baseline-participating child
+    View* child_view = (View*)item->first_child;
+    while (child_view) {
+        ViewGroup* child = (ViewGroup*)child_view->as_element();
+        if (child && child->height > 0) {
+            // Skip positioned children (absolute/fixed)
+            bool is_positioned = child->in_line &&
+                (child->in_line->position == CSS_VALUE_ABSOLUTE ||
+                 child->in_line->position == CSS_VALUE_FIXED);
+
+            if (!is_positioned) {
+                // Get child's margin for baseline calculation
+                int child_margin_top = child->bound ? child->bound->margin.top : 0;
+                
+                // Recursively calculate child's baseline
+                int child_baseline = calculate_item_baseline(child);
+                
+                if (child_baseline > 0) {
+                    // Calculate child's relative y from parent's content box
+                    int parent_offset_y = 0;
+                    if (item->bound) {
+                        parent_offset_y = item->bound->padding.top;
+                        if (item->bound->border) {
+                            parent_offset_y += item->bound->border->width.top;
+                        }
+                    }
+                    int child_rel_y = (int)child->y - (int)item->y - parent_offset_y;
+                    
+                    return margin_top + child_rel_y + child_baseline;
+                }
+            }
+        }
+        child_view = (View*)child_view->next_sibling;
+    }
+
+    // Synthesize baseline from outer margin edge (bottom of margin box)
+    // This is the CSS spec fallback for elements without text or participating children
+    return margin_top + (int)item->height;
+}
+
 // Find maximum baseline in a flex line for baseline alignment
-int find_max_baseline(FlexLineInfo* line) {
+// container_align_items: the align-items value from the flex container
+int find_max_baseline(FlexLineInfo* line, int container_align_items) {
     int max_baseline = 0;
     bool found = false;
 
     for (int i = 0; i < line->item_count; i++) {
         ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
-        // CRITICAL FIX: Use align_self value directly - it's now stored as Lexbor constant
-        if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
-            int baseline = item->fi->baseline_offset;
-            if (baseline <= 0) {
-                // Default to 3/4 of height if no explicit baseline
-                baseline = (int)(item->height * 0.75);
-            }
+        if (!item) continue;
+
+        // Check if this item participates in baseline alignment
+        // Either via align-self: baseline OR container's align-items: baseline (and no override)
+        int align_self = item->fi ? (int)item->fi->align_self : ALIGN_AUTO;
+        bool uses_baseline = (align_self == ALIGN_BASELINE) ||
+                            (align_self == ALIGN_AUTO && container_align_items == ALIGN_BASELINE);
+
+        if (uses_baseline) {
+            int baseline = calculate_item_baseline(item);
+            log_debug("find_max_baseline: item %d - baseline=%d, height=%d, margin_top=%d",
+                      i, baseline, (int)item->height, item->bound ? item->bound->margin.top : 0);
             if (baseline > max_baseline) {
                 max_baseline = baseline;
             }
             found = true;
         }
     }
+    log_debug("find_max_baseline: max_baseline=%d, found=%d", max_baseline, found);
     return found ? max_baseline : 0;
 }
 
@@ -1502,8 +1567,8 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
               flex_layout, line, line ? line->item_count : -1);
     if (!flex_layout || !line || line->item_count == 0) return;
 
-    // Find maximum baseline for baseline alignment
-    int max_baseline = find_max_baseline(line);
+    // Find maximum baseline for baseline alignment (pass container's align_items)
+    int max_baseline = find_max_baseline(line, flex_layout->align_items);
     log_debug("align_items_cross_axis: max_baseline=%d", max_baseline);
 
     // For wrap-reverse or multi-line layouts, use line cross size
@@ -1599,9 +1664,11 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                                 cross_pos = 0;
                             }
                         } else {
-                            // Item can be stretched
+                            // Item can be stretched - always set to available size
                             cross_pos = 0;
-                            if (item_cross_size < available_cross_size) {
+                            // FIXED: Always stretch to available size, not just when smaller
+                            // This handles cases where content made item larger than the line
+                            if (item_cross_size != available_cross_size) {
                                 // Apply cross-axis constraints during stretch (Task 4: consolidated)
                                 int constrained_cross_size = apply_stretch_constraint(
                                     item, available_cross_size, flex_layout);
@@ -1615,13 +1682,14 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                     break;
                 case ALIGN_BASELINE:
                     if (is_main_axis_horizontal(flex_layout)) {
-                        // Calculate baseline offset
-                        int baseline = item->fi->baseline_offset;
-                        if (baseline <= 0) {
-                            baseline = (int)(item->height * 0.75);
-                        }
+                        // Calculate this item's baseline offset using the same function
+                        int item_baseline = calculate_item_baseline(item);
                         // Position item so its baseline aligns with max baseline
-                        cross_pos = max_baseline - baseline;
+                        // cross_pos is relative to line start, item_baseline is from item's margin edge
+                        // max_baseline - item_baseline gives the offset needed
+                        cross_pos = max_baseline - item_baseline;
+                        log_debug("ALIGN_BASELINE - item %d: item_baseline=%d, max_baseline=%d, cross_pos=%d",
+                                  i, item_baseline, max_baseline, cross_pos);
                     } else {
                         // For column direction, baseline is equivalent to start
                         cross_pos = 0;
@@ -1633,8 +1701,12 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             }
         }
 
-        log_debug("FINAL_CROSS_POS - item %d: calculated=%d, about to set", i, cross_pos);
-        set_cross_axis_position(item, cross_pos, flex_layout);
+        // CRITICAL: Add line's cross position to get absolute position
+        // line->cross_position is set by align_content for multi-line layouts
+        int absolute_cross_pos = line->cross_position + cross_pos;
+        log_debug("FINAL_CROSS_POS - item %d: line_pos=%d + cross_pos=%d = %d",
+                  i, line->cross_position, cross_pos, absolute_cross_pos);
+        set_cross_axis_position(item, absolute_cross_pos, flex_layout);
     }
 }
 
@@ -1643,8 +1715,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 void align_content(FlexContainerLayout* flex_layout) {
     if (!flex_layout || flex_layout->line_count == 0) return;
 
-    int container_cross_size = is_main_axis_horizontal(flex_layout) ?
-                              flex_layout->cross_axis_size : flex_layout->main_axis_size;
+    // FIXED: Always use cross_axis_size - it's already set correctly based on direction
+    // (for row: height, for column: width)
+    int container_cross_size = (int)flex_layout->cross_axis_size;
 
     int total_lines_size = 0;
     for (int i = 0; i < flex_layout->line_count; i++) {
@@ -1693,11 +1766,16 @@ void align_content(FlexContainerLayout* flex_layout) {
             }
             break;
         case ALIGN_STRETCH:
-            // Distribute extra space among lines
+            // Distribute extra space equally among all lines
             if (free_space > 0 && flex_layout->line_count > 0) {
                 int extra_per_line = free_space / flex_layout->line_count;
+                log_debug("ALIGN_STRETCH: container=%d, total_lines=%d, free=%d, extra_per_line=%d",
+                          container_cross_size, total_lines_size, free_space, extra_per_line);
                 for (int i = 0; i < flex_layout->line_count; i++) {
+                    int old_size = flex_layout->lines[i].cross_size;
                     flex_layout->lines[i].cross_size += extra_per_line;
+                    log_debug("ALIGN_STRETCH: line %d: %d + %d = %d",
+                              i, old_size, extra_per_line, flex_layout->lines[i].cross_size);
                 }
             }
             start_pos = 0;
@@ -1720,20 +1798,15 @@ void align_content(FlexContainerLayout* flex_layout) {
 
         FlexLineInfo* line = &flex_layout->lines[i];
 
+        // CRITICAL: Store line's cross position for use in align_items_cross_axis
+        line->cross_position = current_pos;
+
         log_debug("POSITION_LINE %d (order %d) - cross_pos: %d, cross_size: %d",
                i, line_idx, current_pos, line->cross_size);
 
-        // Move all items in this line to the new cross position
-        for (int j = 0; j < line->item_count; j++) {
-            ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
-            if (!item) continue;
-            int current_cross_pos = get_cross_axis_position(item, flex_layout);
-            int new_cross_pos = current_pos + current_cross_pos;
-
-            log_debug("ITEM %d in line %d - old_cross: %d -> new_cross: %d",
-                   j, i, current_cross_pos, new_cross_pos);
-            set_cross_axis_position(item, new_cross_pos, flex_layout);
-        }
+        // NOTE: We no longer set item positions here. Instead, align_items_cross_axis
+        // will use line->cross_position + item's offset within line.
+        // This avoids setting positions twice and potential conflicts.
 
         current_pos += line->cross_size + line_spacing;
 
@@ -2049,9 +2122,36 @@ void distribute_free_space(FlexLineInfo* line, bool is_growing) {
     }
 }
 
+// Helper: Check if an item has a definite cross-axis size
+static bool item_has_definite_cross_size(ViewGroup* item, FlexContainerLayout* flex_layout) {
+    if (!item || !item->blk) return false;
+
+    if (is_main_axis_horizontal(flex_layout)) {
+        // Cross-axis is height for row direction
+        return item->blk->given_height >= 0;
+    } else {
+        // Cross-axis is width for column direction
+        return item->blk->given_width >= 0;
+    }
+}
+
+// Helper: Check if an item will be stretched in cross-axis
+static bool item_will_stretch(ViewGroup* item, FlexContainerLayout* flex_layout) {
+    if (!item || !item->fi) return false;
+
+    // Get effective align-self (uses align-items if auto)
+    int align_type = item->fi->align_self != ALIGN_AUTO ?
+                     item->fi->align_self : flex_layout->align_items;
+
+    return align_type == ALIGN_STRETCH;
+}
+
 // Calculate cross sizes for all flex lines
 void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
     if (!flex_layout || flex_layout->line_count == 0) return;
+
+    // Check if align-content is stretch - affects how we calculate line sizes
+    bool align_content_stretch = (flex_layout->align_content == ALIGN_STRETCH);
 
     for (int i = 0; i < flex_layout->line_count; i++) {
         FlexLineInfo* line = &flex_layout->lines[i];
@@ -2061,6 +2161,38 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
         for (int j = 0; j < line->item_count; j++) {
             ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
             if (!item) continue;
+
+            bool has_definite = item_has_definite_cross_size(item, flex_layout);
+            bool will_stretch = item_will_stretch(item, flex_layout);
+
+            // For align-content: stretch, items with auto cross-size AND align-self: stretch
+            // should NOT contribute their content size to line cross-size.
+            // However, they should still contribute their min-cross-size (e.g., min-height)!
+            if (align_content_stretch &&
+                !has_definite &&
+                will_stretch) {
+                // Even for stretch items, consider their minimum size
+                int min_cross_size = 0;
+                if (item->fi) {
+                    if (is_main_axis_horizontal(flex_layout)) {
+                        min_cross_size = item->fi->resolved_min_height;
+                    } else {
+                        min_cross_size = item->fi->resolved_min_width;
+                    }
+                }
+                if (min_cross_size > 0) {
+                    log_debug("STRETCH_ITEM_MIN: line %d item %d - using min-cross-size: %d",
+                              i, j, min_cross_size);
+                    if (min_cross_size > max_cross_size) {
+                        max_cross_size = min_cross_size;
+                    }
+                } else {
+                    log_debug("SKIP_STRETCH_ITEM: line %d item %d - auto cross-size with stretch, skipping",
+                              i, j);
+                }
+                continue;
+            }
+
             int item_cross_size = get_cross_axis_size(item, flex_layout);
             if (item_cross_size > max_cross_size) {
                 max_cross_size = item_cross_size;
@@ -2068,5 +2200,6 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
         }
 
         line->cross_size = max_cross_size;
+        log_debug("LINE_CROSS_SIZE: line %d = %d", i, max_cross_size);
     }
 }
