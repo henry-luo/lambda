@@ -144,6 +144,236 @@ ViewBlock* ViewTableRow::parent_row_group() {
 }
 
 // =============================================================================
+// CELL HELPER FUNCTIONS
+// =============================================================================
+// Common operations for table cell layout to reduce code duplication.
+
+// Forward declaration for layout_table_cell_content (defined later in the file)
+static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell);
+
+// Get CSS width from a cell element, handling percentage and length values
+// Returns 0 if no explicit width is set
+static int get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, int table_content_width) {
+    if (tcell->node_type != DOM_NODE_ELEMENT) return 0;
+
+    DomElement* dom_elem = tcell->as_element();
+    if (!dom_elem || !dom_elem->specified_style) return 0;
+
+    CssDeclaration* width_decl = style_tree_get_declaration(
+        dom_elem->specified_style, CSS_PROPERTY_WIDTH);
+    if (!width_decl || !width_decl->value) return 0;
+
+    int cell_width = 0;
+    int css_content_width = 0;
+
+    if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE && table_content_width > 0) {
+        double percentage = width_decl->value->data.percentage.value;
+        css_content_width = (int)(table_content_width * percentage / 100.0);
+        cell_width = css_content_width;
+    } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        float resolved = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+        css_content_width = (int)resolved;
+        if (css_content_width > 0) {
+            cell_width = css_content_width;
+        }
+    }
+
+    if (cell_width <= 0) return 0;
+
+    // Add padding (CSS width is content-box)
+    if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
+        cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
+    }
+
+    // Add border width (only if border-style is not none)
+    if (tcell->bound && tcell->bound->border) {
+        float border_left = (tcell->bound->border->left_style != CSS_VALUE_NONE)
+            ? tcell->bound->border->width.left : 0;
+        float border_right = (tcell->bound->border->right_style != CSS_VALUE_NONE)
+            ? tcell->bound->border->width.right : 0;
+        cell_width += (int)(border_left + border_right);
+    }
+
+    return cell_width;
+}
+
+// Get explicit CSS height from a cell or block element
+// Returns 0 if no explicit height is set
+static int get_explicit_css_height(LayoutContext* lycon, ViewBlock* element) {
+    if (element->node_type != DOM_NODE_ELEMENT) return 0;
+
+    DomElement* dom_elem = element->as_element();
+    if (!dom_elem || !dom_elem->specified_style) return 0;
+
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
+    if (!height_decl || !height_decl->value) return 0;
+
+    float resolved = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+    return (resolved > 0) ? (int)resolved : 0;
+}
+
+// Measure content height from cell's children
+static int measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
+    int content_height = 0;
+
+    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)child;
+            int text_height = text->height > 0 ? text->height : 17;
+            if (text_height > content_height) content_height = text_height;
+        }
+        else if (child->view_type == RDT_VIEW_BLOCK ||
+                 child->view_type == RDT_VIEW_INLINE ||
+                 child->view_type == RDT_VIEW_INLINE_BLOCK) {
+            ViewBlock* block = (ViewBlock*)child;
+            int child_css_height = get_explicit_css_height(lycon, block);
+            int child_height = (child_css_height > 0) ? child_css_height : block->height;
+            if (child_height > content_height) content_height = child_height;
+        }
+    }
+
+    // Ensure minimum content height
+    return (content_height < 17) ? 17 : content_height;
+}
+
+// Calculate final cell height from content, padding, border
+static int calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, ViewTable* table,
+                                  int content_height, int explicit_height) {
+    if (explicit_height > 0) {
+        return explicit_height;
+    }
+
+    int cell_height = content_height;
+
+    // Add padding
+    if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
+        cell_height += tcell->bound->padding.top + tcell->bound->padding.bottom;
+    }
+
+    // Add border based on collapse mode
+    if (tcell->bound && tcell->bound->border) {
+        float border_top = (tcell->bound->border->top_style != CSS_VALUE_NONE)
+            ? tcell->bound->border->width.top : 0;
+        float border_bottom = (tcell->bound->border->bottom_style != CSS_VALUE_NONE)
+            ? tcell->bound->border->width.bottom : 0;
+
+        if (table->tb->border_collapse) {
+            cell_height += (int)((border_top + border_bottom) / 2);
+        } else {
+            cell_height += (int)(border_top + border_bottom);
+        }
+    }
+
+    return cell_height;
+}
+
+// Apply vertical alignment to cell children
+static void apply_cell_vertical_align(ViewTableCell* tcell, int cell_height, int content_height) {
+    if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_TOP) {
+        return; // No adjustment needed
+    }
+
+    // Calculate content area (subtract border and padding)
+    int cell_content_area = cell_height - 2; // Approximate border
+    if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
+        cell_content_area -= (tcell->bound->padding.top + tcell->bound->padding.bottom);
+    }
+
+    int y_adjustment = 0;
+    if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE) {
+        y_adjustment = (cell_content_area - content_height) / 2;
+    } else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
+        y_adjustment = cell_content_area - content_height;
+    }
+
+    if (y_adjustment > 0) {
+        for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+            child->y += y_adjustment;
+        }
+    }
+}
+
+// Position text children within a cell (relative coordinates)
+static void position_cell_text_children(ViewTableCell* tcell) {
+    int content_x = 1; // 1px border
+    int content_y = 1;
+
+    if (tcell->bound) {
+        content_x += tcell->bound->padding.left;
+        content_y += tcell->bound->padding.top;
+    }
+
+    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            child->x = content_x;
+            child->y = content_y;
+        }
+    }
+}
+
+// Calculate cell width from column widths (for colspan support)
+static int calculate_cell_width_from_columns(ViewTableCell* tcell, int* col_widths, int columns) {
+    int cell_width = 0;
+    int end_col = tcell->td->col_index + tcell->td->col_span;
+    for (int c = tcell->td->col_index; c < end_col && c < columns; c++) {
+        cell_width += col_widths[c];
+    }
+    return cell_width;
+}
+
+// Process a single cell: position, size, layout content, apply alignment
+// Returns the height contribution for the current row (adjusted for rowspan)
+static int process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, ViewTable* table,
+                               int* col_widths, int* col_x_positions, int columns) {
+    ViewBlock* cell = (ViewBlock*)tcell;
+
+    // Position cell relative to row
+    cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
+    cell->y = 0;
+
+    // Position text children within cell
+    position_cell_text_children(tcell);
+
+    // Calculate cell width from columns
+    cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
+
+    // Layout cell content now that width is set
+    layout_table_cell_content(lycon, cell);
+
+    // Get explicit CSS height and measure content
+    int explicit_cell_height = get_explicit_css_height(lycon, cell);
+    int content_height = measure_cell_content_height(lycon, tcell);
+
+    // Calculate final cell height
+    int cell_height = calculate_cell_height(lycon, tcell, table, content_height, explicit_cell_height);
+    cell->height = cell_height;
+
+    // Apply vertical alignment
+    apply_cell_vertical_align(tcell, cell_height, content_height);
+
+    // Handle rowspan for row height calculation
+    int height_for_row = cell_height;
+    if (tcell->td->row_span > 1) {
+        height_for_row = cell_height / tcell->td->row_span;
+        log_debug("Rowspan cell - total_height=%d, rowspan=%d, height_for_row=%d",
+                  cell_height, tcell->td->row_span, height_for_row);
+    }
+
+    return height_for_row;
+}
+
+// Apply fixed row height to row and all its cells
+static void apply_fixed_row_height(ViewTableRow* trow, int fixed_height) {
+    trow->height = fixed_height;
+    log_debug("Applied fixed layout row height: %dpx", fixed_height);
+
+    for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
+        cell->height = fixed_height;
+    }
+}
+
+// =============================================================================
 // INTERNAL DATA STRUCTURES
 // =============================================================================
 
@@ -1181,157 +1411,88 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Use navigation helpers to iterate over all cells uniformly
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
         for (ViewTableCell* tcell = row->first_cell(); tcell; tcell = row->next_cell(tcell)) {
-                            // Use pre-assigned column index from analyze_table_structure()
-                            int col = tcell->td->col_index;
+            // Use pre-assigned column index from analyze_table_structure()
+            int col = tcell->td->col_index;
 
-                            // Try to get explicit width from CSS first
-                            int cell_width = 0;
-                            if (tcell->node_type == DOM_NODE_ELEMENT) {
-                                DomElement* dom_elem = tcell->as_element();
-                                if (dom_elem->specified_style) {
-                                    CssDeclaration* width_decl = style_tree_get_declaration(
-                                        dom_elem->specified_style, CSS_PROPERTY_WIDTH);
-                                    if (width_decl && width_decl->value) {
-                                        // Check if it's a percentage value
-                                        if (width_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE && table_content_width > 0) {
-                                            // Calculate percentage relative to table content width
-                                            double percentage = width_decl->value->data.percentage.value;
-                                            int css_content_width = (int)(table_content_width * percentage / 100.0);
+            // Get explicit CSS width using helper function
+            int cell_width = get_cell_css_width(lycon, tcell, table_content_width);
 
-                                            // CSS width is content-box, need to add border and padding
-                                            cell_width = css_content_width;
+            // Calculate both minimum and preferred widths for CSS 2.1 table layout
+            int min_width = 0;   // MCW - Minimum Content Width
+            int pref_width = 0;  // PCW - Preferred Content Width
 
-                                            // Add padding
-                                            if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-                                                cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-                                            }
+            if (cell_width == 0) {
+                // No explicit CSS width - measure intrinsic content widths
+                pref_width = measure_cell_intrinsic_width(lycon, tcell);
+                min_width = measure_cell_minimum_width(lycon, tcell);
+                cell_width = pref_width; // Use preferred for backward compatibility
+            } else {
+                // Has explicit CSS width - use it for both min and preferred
+                min_width = pref_width = cell_width;
+            }
 
-                                            // Add actual border width (only if border-style is not none)
-                                            if (tcell->bound && tcell->bound->border) {
-                                                float border_left = (tcell->bound->border->left_style != CSS_VALUE_NONE)
-                                                    ? tcell->bound->border->width.left : 0;
-                                                float border_right = (tcell->bound->border->right_style != CSS_VALUE_NONE)
-                                                    ? tcell->bound->border->width.right : 0;
-                                                cell_width += (int)(border_left + border_right);
-                                            }
+            if (tcell->td->col_span == 1) {
+                // Single column cell - update min and preferred widths (bounds check)
+                if (col >= 0 && col < meta->column_count) {
+                    if (min_width > meta->col_min_widths[col]) {
+                        meta->col_min_widths[col] = min_width;
+                    }
+                    if (pref_width > meta->col_max_widths[col]) {
+                        meta->col_max_widths[col] = pref_width;
+                    }
+                    // Maintain backward compatibility for now
+                    if (cell_width > col_widths[col]) {
+                        col_widths[col] = cell_width;
+                    }
+                }
+            } else {
+                // Multi-column cell - distribute width across spanned columns
+                // CSS 2.1 Section 17.5.2.2: Distribute colspan cell's width proportionally
+                int span = tcell->td->col_span;
 
-                                            log_debug("Cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
-                                                    percentage, table_content_width, css_content_width, cell_width);
-                                        } else if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-                                            // Resolve length value (handles em, rem, px, etc.)
-                                            float resolved_width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
-                                            int css_content_width = (int)resolved_width;
-                                            if (css_content_width > 0) {
-                                                // CSS width is content-box, need to add border and padding
-                                                cell_width = css_content_width;
-                                                // Add padding
-                                                if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-                                                    cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-                                                }
-                                                // Add actual border width (only if border-style is not none)
-                                                if (tcell->bound && tcell->bound->border) {
-                                                    float border_left = (tcell->bound->border->left_style != CSS_VALUE_NONE)
-                                                        ? tcell->bound->border->width.left : 0;
-                                                    float border_right = (tcell->bound->border->right_style != CSS_VALUE_NONE)
-                                                        ? tcell->bound->border->width.right : 0;
-                                                    cell_width += (int)(border_left + border_right);
-                                                }
-                                                log_debug("Cell explicit CSS width: %dpx content + padding + border = %dpx total",
-                                                    css_content_width, cell_width);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                // Calculate current totals for all three width arrays
+                int current_col_total = 0;
+                int current_min_total = 0;
+                int current_max_total = 0;
+                for (int c = col; c < col + span && c < columns; c++) {
+                    current_col_total += col_widths[c];
+                    current_min_total += meta->col_min_widths[c];
+                    current_max_total += meta->col_max_widths[c];
+                }
 
-                            // Calculate both minimum and preferred widths for CSS 2.1 table layout
-                            int min_width = 0;   // MCW - Minimum Content Width
-                            int pref_width = 0;  // PCW - Preferred Content Width
+                // Distribute min_width across col_min_widths
+                if (min_width > current_min_total) {
+                    int extra_needed = min_width - current_min_total;
+                    int extra_per_col = extra_needed / span;
+                    int remainder = extra_needed % span;
+                    for (int c = col; c < col + span && c < columns; c++) {
+                        meta->col_min_widths[c] += extra_per_col;
+                        if (remainder > 0) { meta->col_min_widths[c]++; remainder--; }
+                    }
+                }
 
-                            if (cell_width == 0) {
-                                // No explicit CSS width - measure intrinsic content widths
-                                pref_width = measure_cell_intrinsic_width(lycon, tcell);
-                                min_width = measure_cell_minimum_width(lycon, tcell);
-                                cell_width = pref_width; // Use preferred for backward compatibility
-                            } else {
-                                // Has explicit CSS width - use it for both min and preferred
-                                min_width = pref_width = cell_width;
-                            }
+                // Distribute pref_width across col_max_widths
+                if (pref_width > current_max_total) {
+                    int extra_needed = pref_width - current_max_total;
+                    int extra_per_col = extra_needed / span;
+                    int remainder = extra_needed % span;
+                    for (int c = col; c < col + span && c < columns; c++) {
+                        meta->col_max_widths[c] += extra_per_col;
+                        if (remainder > 0) { meta->col_max_widths[c]++; remainder--; }
+                    }
+                }
 
-                            if (tcell->td->col_span == 1) {
-                                // Single column cell - update min and preferred widths (bounds check)
-                                if (col >= 0 && col < meta->column_count) {
-                                    if (min_width > meta->col_min_widths[col]) {
-                                        meta->col_min_widths[col] = min_width;
-                                    }
-                                    if (pref_width > meta->col_max_widths[col]) {
-                                        meta->col_max_widths[col] = pref_width;
-                                    }
-                                    // Maintain backward compatibility for now
-                                    if (cell_width > col_widths[col]) {
-                                        col_widths[col] = cell_width;
-                                    }
-                                }
-                            } else {
-                                // Multi-column cell - distribute width across spanned columns
-                                // CSS 2.1 Section 17.5.2.2: Distribute colspan cell's width proportionally
-                                int span = tcell->td->col_span;
-
-                                // Calculate current totals for all three width arrays
-                                int current_col_total = 0;
-                                int current_min_total = 0;
-                                int current_max_total = 0;
-                                for (int c = col; c < col + span && c < columns; c++) {
-                                    current_col_total += col_widths[c];
-                                    current_min_total += meta->col_min_widths[c];
-                                    current_max_total += meta->col_max_widths[c];
-                                }
-
-                                // Distribute min_width across col_min_widths
-                                if (min_width > current_min_total) {
-                                    int extra_needed = min_width - current_min_total;
-                                    int extra_per_col = extra_needed / span;
-                                    int remainder = extra_needed % span;
-
-                                    for (int c = col; c < col + span && c < columns; c++) {
-                                        meta->col_min_widths[c] += extra_per_col;
-                                        if (remainder > 0) {
-                                            meta->col_min_widths[c] += 1;
-                                            remainder--;
-                                        }
-                                    }
-                                }
-
-                                // Distribute pref_width across col_max_widths (CRITICAL FIX)
-                                if (pref_width > current_max_total) {
-                                    int extra_needed = pref_width - current_max_total;
-                                    int extra_per_col = extra_needed / span;
-                                    int remainder = extra_needed % span;
-
-                                    for (int c = col; c < col + span && c < columns; c++) {
-                                        meta->col_max_widths[c] += extra_per_col;
-                                        if (remainder > 0) {
-                                            meta->col_max_widths[c] += 1;
-                                            remainder--;
-                                        }
-                                    }
-                                }
-
-                                // Also update col_widths for backward compatibility
-                                if (cell_width > current_col_total) {
-                                    int extra_needed = cell_width - current_col_total;
-                                    int extra_per_col = extra_needed / span;
-                                    int remainder = extra_needed % span;
-
-                                    for (int c = col; c < col + span && c < columns; c++) {
-                                        col_widths[c] += extra_per_col;
-                                        if (remainder > 0) {
-                                            col_widths[c] += 1;
-                                            remainder--;
-                                        }
-                                    }
-                                }
-                            }
+                // Also update col_widths for backward compatibility
+                if (cell_width > current_col_total) {
+                    int extra_needed = cell_width - current_col_total;
+                    int extra_per_col = extra_needed / span;
+                    int remainder = extra_needed % span;
+                    for (int c = col; c < col + span && c < columns; c++) {
+                        col_widths[c] += extra_per_col;
+                        if (remainder > 0) { col_widths[c]++; remainder--; }
+                    }
+                }
+            }
         }
     }
 
@@ -1992,245 +2153,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     int row_height = 0;
                     ViewTableRow* trow = (ViewTableRow*)row;
                     for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                            ViewBlock* cell = (ViewBlock*)tcell;
-
-                            // CSS 2.1: Position cell relative to row (precise column position)
-                            cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
-                            cell->y = 0; // Relative to row top
-
-                            // Apply row-specific positioning adjustments for border-collapse
-                            if (table->tb->border_collapse) {
-                                // No additional adjustments needed - already in column positions
-                            }
-
-                            log_debug("CSS 2.1: Cell positioned at x=%d, y=%d (relative to row), size=%dx%d",
-                                   cell->x, cell->y, cell->width, cell->height);
-
-                            // RADIANT RELATIVE POSITIONING: Text positioned relative to cell parent
-                            for (View* text_child = ((ViewGroup*)cell)->first_child; text_child; text_child = text_child->next_sibling) {
-                                if (text_child->view_type == RDT_VIEW_TEXT) {
-                                    ViewText* text = (ViewText*)text_child;
-
-                                    // In Radiant's relative positioning system:
-                                    // Text x,y should be relative to its parent cell, not absolute
-
-                                    // Cell content area offset (border + padding)
-                                    int content_x = 1; // 1px border
-                                    int content_y = 1; // 1px border
-
-                                    // Add CSS padding for X (left)
-                                    if (tcell->bound) {
-                                        content_x += tcell->bound->padding.left;
-                                        content_y += tcell->bound->padding.top;
-                                    }
-
-                                    // Apply vertical alignment to Y position
-                                    // Vertical align adjusts within the cell's content area (after border+padding)
-                                    // We need to know cell height first, so we'll adjust this after height calculation
-                                    // For now, store the base Y (will adjust below after measuring child)
-
-                                    // Position text relative to cell (parent)
-                                    text->x = content_x;
-                                    text->y = content_y;  // Will adjust for vertical-align later
-                                    log_debug("Initial text positioning - x=%d, y=%d (before vertical-align)",
-                                           text->x, text->y);
-                                }
-                            }
-
-                            // Calculate cell width (sum of spanned columns)
-                            int cell_width = 0;
-                            for (int c = tcell->td->col_index; c < tcell->td->col_index + tcell->td->col_span && c < columns; c++) {
-                                cell_width += col_widths[c];
-                            }
-                            cell->width = cell_width;
-
-                            // CRITICAL FIX: Now that cell width is set, layout cell content with correct parent width
-                            // This allows child blocks to inherit the correct parent width instead of 0
-                            layout_table_cell_content(lycon, cell);
-
-                            // Enhanced cell height calculation with browser accuracy
-                            int content_height = 0;
-
-                            // STEP 1: Check for explicit CSS height property first
-                            int explicit_cell_height = 0;
-                            if (tcell->node_type == DOM_NODE_ELEMENT) {
-                                DomElement* dom_elem = tcell->as_element();
-                                if (dom_elem->specified_style) {
-                                    CssDeclaration* height_decl = style_tree_get_declaration(
-                                        dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                    if (height_decl && height_decl->value) {
-                                        // Use resolve_length_value to properly handle em/rem/px units
-                                        float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                                        if (resolved_height > 0) {
-                                            explicit_cell_height = (int)resolved_height;
-                                            log_debug("Cell has explicit CSS height: %dpx (resolved from %s)",
-                                                   explicit_cell_height,
-                                                   height_decl->value->type == CSS_VALUE_TYPE_LENGTH ? "length" : "other");
-                                        }
-                                    }
-                                }
-                            }
-
-                            // STEP 2: Measure content height precisely (for auto height or minimum)
-                            for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
-                                if (cc->view_type == RDT_VIEW_TEXT) {
-                                    ViewText* text = (ViewText*)cc;
-                                    int text_height = text->height > 0 ? text->height : 17; // Default line height
-                                    if (text_height > content_height) content_height = text_height;
-                                }
-                                else if (cc->view_type == RDT_VIEW_BLOCK || cc->view_type == RDT_VIEW_INLINE || cc->view_type == RDT_VIEW_INLINE_BLOCK) {
-                                    ViewBlock* block = (ViewBlock*)cc;
-
-                                    // Check if child has explicit CSS height
-                                    int child_css_height = 0;
-                                    if (block->node_type == DOM_NODE_ELEMENT) {
-                                        DomElement* dom_elem = block->as_element();
-                                        if (dom_elem->specified_style) {
-                                            CssDeclaration* child_height_decl = style_tree_get_declaration(
-                                                dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                            if (child_height_decl && child_height_decl->value) {
-                                                // Use resolve_length_value to properly handle em/rem/px units
-                                                float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, child_height_decl->value);
-                                                if (resolved_height > 0) {
-                                                    child_css_height = (int)resolved_height;
-                                                    log_debug("Child element (type=%d) has explicit CSS height: %dpx (resolved)", cc->view_type, child_css_height);
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Use child CSS height if present, otherwise use measured height
-                                    int child_height = child_css_height > 0 ? child_css_height : block->height;
-                                    if (child_height > content_height) content_height = child_height;
-                                }
-                            }
-
-                            // Ensure minimum content height
-                            if (content_height < 17) {
-                                content_height = 17; // Browser default line height
-                            }
-
-                            // STEP 3: Calculate final cell height - use explicit height if present
-                            int cell_height = 0;
-
-                            // Read cell padding
-                            int padding_vertical = 0;
-                            if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
-                                padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
-                                log_debug("Using CSS padding: top=%d, bottom=%d, total=%d",
-                                       tcell->bound->padding.top, tcell->bound->padding.bottom, padding_vertical);
-                            } else {
-                                log_debug("No CSS padding found or invalid values, using default 0");
-                                if (tcell->bound) {
-                                    log_debug("bound exists: padding.top=%d, padding.bottom=%d",
-                                           tcell->bound->padding.top, tcell->bound->padding.bottom);
-                                } else {
-                                    log_debug("tcell->bound is NULL");
-                                }
-                                padding_vertical = 0;
-                            }
-
-                            // Use explicit CSS height if provided, otherwise use content height
-                            if (explicit_cell_height > 0) {
-                                // CSS height already includes everything, just use it directly
-                                cell_height = explicit_cell_height;
-                                log_debug("Using explicit CSS height: %dpx (overrides content height %dpx)",
-                                       cell_height, content_height);
-                            } else {
-                                // Auto height: calculate from content + padding + border
-                                cell_height = content_height;
-                                cell_height += padding_vertical;  // Add CSS padding
-
-                                // Add border based on collapse mode and border-style
-                                int border_vertical = 0;
-                                if (tcell->bound && tcell->bound->border) {
-                                    float border_top = (tcell->bound->border->top_style != CSS_VALUE_NONE)
-                                        ? tcell->bound->border->width.top : 0;
-                                    float border_bottom = (tcell->bound->border->bottom_style != CSS_VALUE_NONE)
-                                        ? tcell->bound->border->width.bottom : 0;
-
-                                    if (table->tb->border_collapse) {
-                                        // Border-collapse: borders are shared, use half for interior cells
-                                        border_vertical = (int)((border_top + border_bottom) / 2);
-                                    } else {
-                                        // Separate borders: add full border width
-                                        border_vertical = (int)(border_top + border_bottom);
-                                    }
-                                }
-                                cell_height += border_vertical;
-                                log_debug("Using auto height - content=%d, padding=%d, border=%d, total=%d",
-                                       content_height, padding_vertical, border_vertical, cell_height);
-                            }
-
-                            cell->height = cell_height;
-
-                            // Store calculated height
-                            cell->height = cell_height;
-
-                            // Apply vertical alignment to cell children
-                            // This adjusts the Y position of content within the cell based on vertical-align property
-                            if (tcell->td->vertical_align != TableCellProp::CELL_VALIGN_TOP) {
-                                // Calculate available space in cell (content area after border and padding)
-                                int cell_content_area = cell_height - 2; // Subtract border (1px top + 1px bottom)
-                                int padding_vertical = 0;
-                                if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
-                                    padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
-                                    cell_content_area -= padding_vertical;
-                                }
-
-                                // Measure child height
-                                int child_height = content_height; // Use measured content height
-
-                                // Calculate adjustment based on alignment
-                                int y_adjustment = 0;
-                                if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE) {
-                                    y_adjustment = (cell_content_area - child_height) / 2;
-                                    log_debug("Vertical-align middle: cell_content_area=%d, child_height=%d, adjustment=%d",
-                                        cell_content_area, child_height, y_adjustment);
-                                }
-                                else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
-                                    y_adjustment = cell_content_area - child_height;
-                                    log_debug("Vertical-align bottom: cell_content_area=%d, child_height=%d, adjustment=%d",
-                                        cell_content_area, child_height, y_adjustment);
-                                }
-
-                                // Apply adjustment to all children
-                                if (y_adjustment > 0) {
-                                    for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
-                                        cc->y += y_adjustment;
-                                        log_debug("Applied vertical-align adjustment: child y=%d (added %d)",
-                                            cc->y, y_adjustment);
-                                    }
-                                }
-                            }
-
-                            // Handle rowspan for row height calculation
-                            // If cell spans multiple rows, only count a portion of its height for this row
-                            int height_for_row = cell_height;
-                            if (tcell->td->row_span > 1) {
-                                // Distribute cell height across spanned rows
-                                // For simplicity, divide evenly (more complex: consider content distribution)
-                                height_for_row = cell_height / tcell->td->row_span;
-                                log_debug("Rowspan cell - total_height=%d, rowspan=%d, height_for_row=%d",
-                                    cell_height, tcell->td->row_span, height_for_row);
-                            }
-
-                            if (height_for_row > row_height) {
-                                row_height = height_for_row;
-                            }
+                        int height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns);
+                        if (height_for_row > row_height) {
+                            row_height = height_for_row;
+                        }
                     }
 
                     // Apply fixed layout height if specified
                     if (table->tb->fixed_row_height > 0) {
-                        row->height = table->tb->fixed_row_height;
-                        log_debug("Applied fixed layout row height: %dpx", table->tb->fixed_row_height);
-
-                        // CRITICAL: Update all cell heights in this row to match fixed row height
-                        // Cells were calculated with auto height, but fixed layout overrides this
-                        for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
-                            cell->height = table->tb->fixed_row_height;
-                            log_debug("Updated cell height to match fixed_row_height=%d", table->tb->fixed_row_height);
-                        }
+                        apply_fixed_row_height(trow, table->tb->fixed_row_height);
                     } else {
                         row->height = row_height;
                     }
@@ -2259,224 +2190,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             trow->width = table_width;
             log_debug("Direct row positioned at x=%d, y=%d (relative to table), width=%d",
                    trow->x, trow->y, trow->width);
+
             int row_height = 0;
             for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                    ViewBlock* cell = (ViewBlock*)tcell;
-
-                    // CSS 2.1: Position cell relative to row (direct table row)
-                    cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
-                    cell->y = 0; // Relative to row top
-
-                    // Ensure consistent positioning between grouped and direct rows
-                    log_debug("CSS 2.1: Direct cell positioned at x=%d, y=%d (relative to row), size=%dx%d",
-                           cell->x, cell->y, cell->width, cell->height);
-
-                    // RADIANT RELATIVE POSITIONING: Text positioned relative to cell parent
-                    for (View* text_child = ((ViewGroup*)cell)->first_child; text_child; text_child = text_child->next_sibling) {
-                        if (text_child->view_type == RDT_VIEW_TEXT) {
-                            ViewText* text = (ViewText*)text_child;
-
-                            // In Radiant's relative positioning system:
-                            // Text x,y should be relative to its parent cell, not absolute
-
-                            // Cell content area offset (border + padding)
-                            int content_x = 1; // 1px border
-                            int content_y = 1; // 1px border
-
-                            // Add CSS padding
-                            if (tcell->bound) {
-                                content_x += tcell->bound->padding.left;
-                                content_y += tcell->bound->padding.top;
-                            }
-
-                            // Position text relative to cell (parent)
-                            text->x = content_x;  text->y = content_y;
-                            log_debug("Relative text positioning - x=%d, y=%d (relative to cell parent)",
-                                   text->x, text->y);
-                        }
-                    }
-
-                    // Calculate cell width
-                    int cell_width = 0;
-                    for (int c = tcell->td->col_index; c < tcell->td->col_index + tcell->td->col_span && c < columns; c++) {
-                        cell_width += col_widths[c];
-                    }
-                    cell->width = cell_width;
-
-                    // CRITICAL FIX: Now that cell width is set, layout cell content with correct parent width
-                    // This allows child blocks to inherit the correct parent width instead of 0
-                    layout_table_cell_content(lycon, cell);
-
-                    // Enhanced cell height calculation with browser accuracy
-                    int content_height = 0;
-
-                    // STEP 1: Check for explicit CSS height property first
-                    int explicit_cell_height = 0;
-                    if (tcell->node_type == DOM_NODE_ELEMENT) {
-                        DomElement* dom_elem = tcell->as_element();
-                        if (dom_elem->specified_style) {
-                            CssDeclaration* height_decl = style_tree_get_declaration(
-                                dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                            if (height_decl && height_decl->value) {
-                                // Use resolve_length_value to properly handle em/rem/px units
-                                float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
-                                if (resolved_height > 0) {
-                                    explicit_cell_height = (int)resolved_height;
-                                    log_debug("Cell has explicit CSS height: %dpx (resolved)", explicit_cell_height);
-                                }
-                            }
-                        }
-                    }
-
-                    // STEP 2: Measure content height precisely (for auto height or minimum)
-                    for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
-                        if (cc->view_type == RDT_VIEW_TEXT) {
-                            ViewText* text = (ViewText*)cc;
-                            int text_height = text->height > 0 ? text->height : 17;
-                            if (text_height > content_height) content_height = text_height;
-                        }
-                        else if (cc->view_type == RDT_VIEW_BLOCK || cc->view_type == RDT_VIEW_INLINE || cc->view_type == RDT_VIEW_INLINE_BLOCK) {
-                            ViewBlock* block = (ViewBlock*)cc;
-
-                            // Check if child has explicit CSS height
-                            int child_css_height = 0;
-                            if (block->node_type == DOM_NODE_ELEMENT) {
-                                DomElement* dom_elem = block->as_element();
-                                if (dom_elem->specified_style) {
-                                    CssDeclaration* child_height_decl = style_tree_get_declaration(
-                                        dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
-                                    if (child_height_decl && child_height_decl->value) {
-                                        // Use resolve_length_value to properly handle em/rem/px units
-                                        float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, child_height_decl->value);
-                                        if (resolved_height > 0) {
-                                            child_css_height = (int)resolved_height;
-                                            log_debug("Direct row child element (type=%d) has explicit CSS height: %dpx (resolved)", cc->view_type, child_css_height);
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Use child CSS height if present, otherwise use measured height
-                            int child_height = child_css_height > 0 ? child_css_height : block->height;
-                            if (child_height > content_height) content_height = child_height;
-                        }
-                    }
-
-                    // Ensure minimum content height
-                    if (content_height < 17) {
-                        content_height = 17;
-                    }
-
-                    // STEP 3: Calculate final cell height - use explicit height if present
-                    int cell_height = 0;
-
-                    // Read cell padding
-                    int padding_vertical = 0;
-                    if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
-                        padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
-                        log_debug("Using CSS padding: top=%d, bottom=%d, total=%d",
-                               tcell->bound->padding.top, tcell->bound->padding.bottom, padding_vertical);
-                    } else {
-                        log_debug("No CSS padding found, using default 0");
-                        padding_vertical = 0;
-                    }
-
-                    // Calculate border height based on collapse mode
-                    int border_vertical = 0;
-                    // Calculate border based on collapse mode and border-style
-                    if (tcell->bound && tcell->bound->border) {
-                        float border_top = (tcell->bound->border->top_style != CSS_VALUE_NONE)
-                            ? tcell->bound->border->width.top : 0;
-                        float border_bottom = (tcell->bound->border->bottom_style != CSS_VALUE_NONE)
-                            ? tcell->bound->border->width.bottom : 0;
-
-                        if (table->tb->border_collapse) {
-                            // Border-collapse: borders are shared, use half for interior cells
-                            border_vertical = (int)((border_top + border_bottom) / 2);
-                        } else {
-                            // Separate borders: add full border width
-                            border_vertical = (int)(border_top + border_bottom);
-                        }
-                    }
-
-                    // Use explicit CSS height if provided, otherwise use content height
-                    if (explicit_cell_height > 0) {
-                        // CSS height already includes everything, just use it directly
-                        cell_height = explicit_cell_height;
-                        log_debug("Using explicit CSS height: %dpx (overrides content height %dpx)",
-                               cell_height, content_height);
-                    } else {
-                        // Auto height: calculate from content + padding + border
-                        cell_height = content_height;
-                        cell_height += padding_vertical;  // Add CSS padding
-                        cell_height += border_vertical;   // Add CSS border (adjusted for collapse mode)
-                        log_debug("Using auto height - content=%d, padding=%d, border=%d, total=%d",
-                               content_height, padding_vertical, border_vertical, cell_height);
-                    }
-                    // Store calculated height
-                    cell->height = cell_height;
-
-                    // Apply vertical alignment to cell children
-                    // This adjusts the Y position of content within the cell based on vertical-align property
-                    if (tcell->td->vertical_align != TableCellProp::CELL_VALIGN_TOP) {
-                        // Calculate available space in cell (content area after border and padding)
-                        int cell_content_area = cell_height - border_vertical; // Subtract actual border
-                        if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
-                            cell_content_area -= (tcell->bound->padding.top + tcell->bound->padding.bottom);
-                        }
-
-                        // Measure child height
-                        int child_height = content_height; // Use measured content height
-
-                        // Calculate adjustment based on alignment
-                        int y_adjustment = 0;
-                        if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE) {
-                            y_adjustment = (cell_content_area - child_height) / 2;
-                            log_debug("Vertical-align middle: cell_content_area=%d, child_height=%d, adjustment=%d",
-                                   cell_content_area, child_height, y_adjustment);
-                        }
-                        else if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BOTTOM) {
-                            y_adjustment = cell_content_area - child_height;
-                            log_debug("Vertical-align bottom: cell_content_area=%d, child_height=%d, adjustment=%d",
-                                   cell_content_area, child_height, y_adjustment);
-                        }
-
-                        // Apply adjustment to all children
-                        if (y_adjustment > 0) {
-                            for (View* cc = ((ViewGroup*)cell)->first_child; cc; cc = cc->next_sibling) {
-                                cc->y += y_adjustment;
-                                log_debug("Applied vertical-align adjustment: child y=%d (added %d)",
-                                       cc->y, y_adjustment);
-                            }
-                        }
-                    }
-
-                    // Handle rowspan for row height calculation
-                    // If cell spans multiple rows, only count a portion of its height for this row
-                    int height_for_row = cell_height;
-                    if (tcell->td->row_span > 1) {
-                        // Distribute cell height across spanned rows
-                        height_for_row = cell_height / tcell->td->row_span;
-                        log_debug("Rowspan cell - total_height=%d, rowspan=%d, height_for_row=%d",
-                               cell_height, tcell->td->row_span, height_for_row);
-                    }
-
-                    if (height_for_row > row_height) {
-                        row_height = height_for_row;
-                    }
+                int height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns);
+                if (height_for_row > row_height) {
+                    row_height = height_for_row;
+                }
             }
 
             // Apply fixed layout height if specified
             if (table->tb->fixed_row_height > 0) {
-                trow->height = table->tb->fixed_row_height;
-                log_debug("Applied fixed layout row height: %dpx", table->tb->fixed_row_height);
-
-                // CRITICAL: Update all cell heights in this row to match fixed row height
-                // Cells were calculated with auto height, but fixed layout overrides this
-                for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
-                    cell->height = table->tb->fixed_row_height;
-                    log_debug("Updated cell height to match fixed_row_height=%d", table->tb->fixed_row_height);
-                }
+                apply_fixed_row_height(trow, table->tb->fixed_row_height);
             } else {
                 trow->height = row_height;
             }
