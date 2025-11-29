@@ -448,6 +448,10 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
 
+    // Clear measurement cache at the start of each layout pass
+    // This ensures fresh intrinsic size calculations for each layout
+    clear_measurement_cache();
+
     // Reset styles_resolved flags for all elements before layout
     // This ensures CSS style resolution happens exactly once per element per layout pass
     reset_styles_resolved(doc);

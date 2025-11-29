@@ -155,6 +155,100 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     int item_count = collect_and_prepare_flex_items(lycon, lycon->flex_container, flex_container);
     log_debug("Collected %d flex items with percentage re-resolution", item_count);
 
+    // AUTO-HEIGHT CALCULATION: After items are measured, recalculate container's
+    // cross-axis size for row flex (or main-axis size for column flex) if not explicit.
+    // This must happen AFTER collect_and_prepare_flex_items which measures items.
+    FlexContainerLayout* flex_layout = lycon->flex_container;
+    log_debug("AUTO-HEIGHT: checking container %s - flex_layout=%p, is_horizontal=%d",
+              flex_container->node_name(), flex_layout, flex_layout ? is_main_axis_horizontal(flex_layout) : -1);
+
+    // Check if container has explicit height from CSS OR was sized by a parent flex layout
+    bool has_explicit_height = false;
+    if (flex_container->blk && flex_container->blk->given_height > 0) {
+        has_explicit_height = true;
+    }
+    // Also check if this container is a flex item whose height was set by parent flex
+    // This prevents overwriting heights set by parent column flex's flex-grow
+    if (flex_container->fi && flex_container->height > 0) {
+        // Check if parent set the height via flex sizing
+        // If this element is a flex item with flex-grow/shrink and has a non-content height,
+        // it was sized by the parent flex container
+        if (flex_container->fi->flex_grow > 0 || flex_container->fi->flex_shrink > 0) {
+            // The parent flex layout sized this element, don't override
+            has_explicit_height = true;
+            log_debug("AUTO-HEIGHT: container is a flex item with height set by parent flex");
+        }
+    }
+
+    if (flex_layout) {
+        log_debug("AUTO-HEIGHT: cross_axis_size=%.1f, container->height=%.1f, explicit=%d",
+                  flex_layout->cross_axis_size, flex_container->height, has_explicit_height);
+    }
+    if (flex_layout && is_main_axis_horizontal(flex_layout) && !has_explicit_height) {
+        // Row flex with auto height: calculate height from flex items
+        log_debug("AUTO-HEIGHT: row flex with auto-height, calculating from items");
+        int max_item_height = 0;
+        DomNode* child = flex_container->first_child;
+        while (child) {
+            if (child->is_element()) {
+                ViewGroup* item = (ViewGroup*)child->as_element();
+                if (item && item->fi && item->height > 0) {
+                    if ((int)item->height > max_item_height) {
+                        max_item_height = (int)item->height;
+                        log_debug("AUTO-HEIGHT: row flex item height = %d, max = %d", (int)item->height, max_item_height);
+                    }
+                } else if (item) {
+                    // Try measured content height from cache
+                    MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+                    if (cached && cached->measured_height > max_item_height) {
+                        max_item_height = cached->measured_height;
+                        log_debug("AUTO-HEIGHT: row flex item cached height = %d, max = %d", cached->measured_height, max_item_height);
+                    }
+                }
+            }
+            child = child->next_sibling;
+        }
+        if (max_item_height > 0) {
+            flex_layout->cross_axis_size = (float)max_item_height;
+            flex_container->height = (float)max_item_height;
+            log_debug("AUTO-HEIGHT: row flex container height updated to %d from measured items", max_item_height);
+        }
+    } else if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_height) {
+        // Column flex with auto height: calculate height from flex items
+        log_debug("AUTO-HEIGHT: column flex with auto-height, calculating from items");
+        int total_height = 0;
+        DomNode* child = flex_container->first_child;
+        while (child) {
+            if (child->is_element()) {
+                ViewGroup* item = (ViewGroup*)child->as_element();
+                if (item && item->fi && item->height > 0) {
+                    total_height += (int)item->height;
+                    log_debug("AUTO-HEIGHT: column flex item height = %d, total = %d", (int)item->height, total_height);
+                } else if (item) {
+                    // Try measured content height from cache
+                    MeasurementCacheEntry* cached = get_from_measurement_cache(child);
+                    if (cached && cached->measured_height > 0) {
+                        total_height += cached->measured_height;
+                        log_debug("AUTO-HEIGHT: column flex item cached height = %d, total = %d", cached->measured_height, total_height);
+                    }
+                }
+            }
+            child = child->next_sibling;
+        }
+        // Add gap spacing
+        if (item_count > 1 && flex_layout->column_gap > 0) {
+            total_height += (int)(flex_layout->column_gap * (item_count - 1));
+        } else if (item_count > 1 && flex_layout->row_gap > 0) {
+            // For column flex, row-gap applies
+            total_height += (int)(flex_layout->row_gap * (item_count - 1));
+        }
+        if (total_height > 0) {
+            flex_layout->main_axis_size = (float)total_height;
+            flex_container->height = (float)total_height;
+            log_debug("AUTO-HEIGHT: column flex container height updated to %d from measured items", total_height);
+        }
+    }
+
     // PASS 1: Run enhanced flex algorithm with measured content
     log_debug("Pass 1: Running enhanced flex algorithm with measured content");
 

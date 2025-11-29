@@ -102,9 +102,35 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Initialize line context
         line_init(&measure_context, 0, container_width);
 
+        // Check if this element is a row flex container
+        // For row flex containers, we should use MAX of child heights, not SUM
+        ViewGroup* elem_view = (ViewGroup*)child->as_element();
+        bool is_row_flex = false;
+        if (elem_view) {
+            log_debug("measure_flex_child_content: elem_view=%p, view_type=%d, display.inner=%d (CSS_VALUE_FLEX=%d)",
+                      elem_view, elem_view->view_type, elem_view->display.inner, CSS_VALUE_FLEX);
+            // Check display property directly on the DOM element
+            if (elem_view->display.inner == CSS_VALUE_FLEX) {
+                // It's a flex container - check direction
+                ViewBlock* block_view = (ViewBlock*)elem_view;
+                if (block_view->embed && block_view->embed->flex) {
+                    int dir = block_view->embed->flex->direction;
+                    is_row_flex = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+                    log_debug("Element %s is%s a row flex container (direction=%d)",
+                              child->node_name(), is_row_flex ? "" : " NOT", dir);
+                } else {
+                    // Default flex direction is row
+                    is_row_flex = true;
+                    log_debug("Element %s is a flex container with default row direction",
+                              child->node_name());
+                }
+            }
+        }
+
         // Measure child content heights by traversing the subtree
         // The child parameter is the flex item element - get its first_child
         measured_height = 0;
+        int max_child_height = 0;  // For row flex containers
         measured_width = 0;
         DomElement* child_elem = child->as_element();
         if (child_elem) {
@@ -123,7 +149,15 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             }
                         }
                         if (!is_whitespace_only) {
-                            measured_height += 20;  // Approximate line height for actual text
+                            int text_height = 20;  // Approximate line height for actual text
+                            if (is_row_flex) {
+                                // Row flex: text is a flex item, use max
+                                if (text_height > max_child_height) {
+                                    max_child_height = text_height;
+                                }
+                            } else {
+                                measured_height += text_height;
+                            }
                         }
                     }
                 } else if (sub_child->is_element()) {
@@ -185,11 +219,26 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
                     // Add margins only if element has height
                     if (elem_height > 0) {
-                        measured_height += elem_height + 10;
+                        if (is_row_flex) {
+                            // Row flex: use MAX of child heights
+                            int total_elem_height = elem_height + 10;  // Include margin
+                            if (total_elem_height > max_child_height) {
+                                max_child_height = total_elem_height;
+                            }
+                        } else {
+                            // Column flex or normal block: SUM of child heights
+                            measured_height += elem_height + 10;
+                        }
                     }
                 }
                 sub_child = sub_child->next_sibling;
             }
+        }
+
+        // For row flex containers, use max_child_height instead of accumulated sum
+        if (is_row_flex && max_child_height > 0) {
+            measured_height = max_child_height;
+            log_debug("Row flex container: using max child height %d", measured_height);
         }
 
         // Set measured dimensions
@@ -593,6 +642,20 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
         bool has_explicit_width = (item->blk && item->blk->given_width > 0);
         bool has_explicit_height = (item->blk && item->blk->given_height > 0);
 
+        // Check if this item is a row flex container
+        // For row flex containers, the cached height from measure_flex_child_content might be incorrect
+        // because it sums child heights instead of taking the max
+        bool is_row_flex_container = false;
+        if (item->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* block_view = (ViewBlock*)item;
+            if (block_view->embed && block_view->embed->flex) {
+                int dir = block_view->embed->flex->direction;
+                is_row_flex_container = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+                log_debug("calculate_item_intrinsic_sizes: is_row_flex_container=%d (direction=%d)",
+                          is_row_flex_container, dir);
+            }
+        }
+
         // Only use cached width if item has explicit width or cache has valid intrinsic data
         if (cached && cached->measured_width > 0 && has_explicit_width) {
             // Use cached measurements from earlier measurement pass
@@ -612,12 +675,42 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
             max_height = cached->measured_height;
             log_debug("Using cached height for complex content (has explicit height): height=%d",
                       min_height);
-        } else if (cached && cached->measured_height > 0) {
-            // For height, we can use cache even without explicit height for row direction
-            // (main-axis measurement is usually more reliable)
+        } else if (cached && cached->measured_height > 0 && !is_row_flex_container) {
+            // For height, we can use cache even without explicit height
+            // BUT NOT for row flex containers (cache may have summed heights incorrectly)
             min_height = cached->measured_height;
             max_height = cached->measured_height;
             log_debug("Using cached height for complex content: height=%d", min_height);
+        } else if (is_row_flex_container) {
+            // For row flex containers, recalculate height as max of children
+            // Don't use the cached value which might have summed heights
+            int max_child_height = 0;
+            DomNode* c = child;
+            while (c) {
+                if (c->is_text()) {
+                    max_child_height = max(max_child_height, 20);  // Text line height
+                } else if (c->is_element()) {
+                    ViewGroup* child_view = (ViewGroup*)c->as_element();
+                    if (child_view) {
+                        int child_h = 0;
+                        if (child_view->blk && child_view->blk->given_height > 0) {
+                            child_h = (int)child_view->blk->given_height;
+                        } else if (child_view->height > 0) {
+                            child_h = child_view->height;
+                        } else {
+                            // Estimate from padding
+                            child_h = 20;  // Default text height
+                            if (child_view->bound) {
+                                child_h += child_view->bound->padding.top + child_view->bound->padding.bottom;
+                            }
+                        }
+                        max_child_height = max(max_child_height, child_h);
+                    }
+                }
+                c = c->next_sibling;
+            }
+            min_height = max_height = max_child_height > 0 ? max_child_height : 20;
+            log_debug("Row flex container: recalculated height as max of children: %d", min_height);
         } else {
             // No cache available - traverse children to estimate sizes
             // This is a fallback when measurement pass hasn't run yet
