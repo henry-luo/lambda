@@ -66,6 +66,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->align_content = ALIGN_STRETCH;  // Default per CSS Flexbox spec
         flex->row_gap = 0;
         flex->column_gap = 0;
+        flex->row_gap_is_percent = false;
+        flex->column_gap_is_percent = false;
         flex->writing_mode = WM_HORIZONTAL_TB;
         flex->text_direction = TD_LTR;
     }
@@ -85,6 +87,46 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     if (container->bound) {
         content_width -= (container->bound->padding.left + container->bound->padding.right);
         content_height -= (container->bound->padding.top + container->bound->padding.bottom);
+    }
+
+    // Check if container has explicit dimensions (needed for percentage gap resolution)
+    bool has_explicit_height = container->blk && container->blk->given_height > 0;
+    bool has_explicit_width = container->blk && container->blk->given_width > 0;
+
+    // Resolve percentage gaps to actual pixel values
+    // Per CSS spec, gap percentages are resolved against the content box dimension
+    // in the corresponding axis (row-gap uses height, column-gap uses width)
+    // For auto-size containers, percentage gaps resolve to 0
+    if (container->embed && container->embed->flex) {
+        FlexProp* source = container->embed->flex;
+        if (source->row_gap_is_percent) {
+            if (has_explicit_height && content_height > 0) {
+                float resolved_gap = (source->row_gap / 100.0f) * content_height;
+                log_debug("init_flex_container: resolving row_gap from %.1f%% to %.1fpx (height=%d)",
+                          source->row_gap, resolved_gap, content_height);
+                flex->row_gap = resolved_gap;
+            } else {
+                // Auto-height container: percentage gap resolves to 0
+                log_debug("init_flex_container: row_gap %.1f%% resolves to 0 (auto-height container)",
+                          source->row_gap);
+                flex->row_gap = 0;
+            }
+            flex->row_gap_is_percent = false;  // Now it's resolved
+        }
+        if (source->column_gap_is_percent) {
+            if (has_explicit_width && content_width > 0) {
+                float resolved_gap = (source->column_gap / 100.0f) * content_width;
+                log_debug("init_flex_container: resolving column_gap from %.1f%% to %.1fpx (width=%d)",
+                          source->column_gap, resolved_gap, content_width);
+                flex->column_gap = resolved_gap;
+            } else {
+                // Auto-width container: percentage gap resolves to 0
+                log_debug("init_flex_container: column_gap %.1f%% resolves to 0 (auto-width container)",
+                          source->column_gap);
+                flex->column_gap = 0;
+            }
+            flex->column_gap_is_percent = false;  // Now it's resolved
+        }
     }
 
     bool is_horizontal = is_main_axis_horizontal(flex);

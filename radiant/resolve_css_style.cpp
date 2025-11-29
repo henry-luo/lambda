@@ -2928,14 +2928,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 float gap_value = resolve_length_value(lycon, prop_id, value);
-                block->embed->flex->row_gap = (int)gap_value;
+                block->embed->flex->row_gap = gap_value;
+                block->embed->flex->row_gap_is_percent = false;
                 log_debug("[CSS] row-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // row-gap percentage is relative to the container's width
                 float gap_value = value->data.percentage.value;
-                block->embed->flex->row_gap = (int)gap_value; // Store percentage value
-                // TODO: might need a flag to indicate percentage vs absolute
-                log_debug("[CSS] row-gap: %.2f%% (stored as: %d)", gap_value, block->embed->flex->row_gap);
+                block->embed->flex->row_gap = gap_value;  // Store percentage value (0-100)
+                block->embed->flex->row_gap_is_percent = true;
+                log_debug("[CSS] row-gap: %.2f%% (percentage)", gap_value);
             }
             break;
         }
@@ -2952,14 +2953,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 float gap_value = resolve_length_value(lycon, prop_id, value);
-                block->embed->flex->column_gap = (int)gap_value;
+                block->embed->flex->column_gap = gap_value;
+                block->embed->flex->column_gap_is_percent = false;
                 log_debug("[CSS] column-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // column-gap percentage is relative to the container's width
                 float gap_value = value->data.percentage.value;
-                block->embed->flex->column_gap = (int)gap_value; // Store percentage value
-                // TODO: might need a flag to indicate percentage vs absolute
-                log_debug("[CSS] column-gap: %.2f%% (stored as: %d)", gap_value, block->embed->flex->column_gap);
+                block->embed->flex->column_gap = gap_value;  // Store percentage value (0-100)
+                block->embed->flex->column_gap_is_percent = true;
+                log_debug("[CSS] column-gap: %.2f%% (percentage)", gap_value);
             }
             break;
         }
@@ -3448,7 +3450,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // If only one value is specified, it's used for both row and column gap
             log_debug("[Lambda CSS Shorthand] Expanding gap shorthand");
 
-            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER ||
+                value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 // single value - use for both row-gap and column-gap
                 log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
                 CssDeclaration gap_decl = *decl;

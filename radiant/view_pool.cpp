@@ -194,6 +194,7 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
         prop->align_items = ALIGN_STRETCH;
         prop->align_content = ALIGN_STRETCH;  // CSS spec default for multi-line flex
         prop->row_gap = 0;  prop->column_gap = 0;
+        prop->row_gap_is_percent = false;  prop->column_gap_is_percent = false;
         block->embed->flex = prop;
     }
 }
