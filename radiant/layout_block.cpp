@@ -199,6 +199,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
                         block->display.outer, block->display.inner, block->node_name());
                 layout_table(lycon, block, block->display);
+                // CRITICAL FIX: Reset parent after table layout to ensure subsequent 
+                // siblings are parented correctly (they should be children of the 
+                // original parent, not children of the table)
+                lycon->parent = block->parent_view();
                 return;
             }
             else {
