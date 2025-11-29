@@ -1,9 +1,9 @@
 #include "input.hpp"
 #include "input-context.hpp"
 #include "../mark_builder.hpp"
-#include "../../vibe/lambda-safety.h"
 #include <cstring>
 
+#define MAX_PARSING_DEPTH 64                  // Max nesting depth
 using namespace lambda;
 
 static Item parse_value(InputContext& ctx, const char **json, int depth = 0);
@@ -195,12 +195,12 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
             ctx.addError(tracker.location(), "Expected '\"' for object key");
             break;
         }
-        
+
         StringBuf* sb = ctx.sb;
         stringbuf_reset(sb);
         (*json)++; // Skip opening quote
         tracker.advance(1);
-        
+
         // Parse key content (simplified - no escape handling needed for keys typically)
         while (**json && **json != '"') {
             if (**json == '\\') {
@@ -215,12 +215,12 @@ static Item parse_object(InputContext& ctx, const char **json, int depth) {
             (*json)++;
             tracker.advance(1);
         }
-        
+
         if (**json == '"') {
             (*json)++; // skip closing quote
             tracker.advance(1);
         }
-        
+
         // Create key as a name (always pooled)
         String* key = ctx.builder.createName(sb->str->chars, sb->length);
         if (!key) {

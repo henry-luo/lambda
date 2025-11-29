@@ -165,60 +165,54 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     float content_width, content_height;
     // calculate horizontal position
     log_debug("given_width=%f, given_height=%f", lycon->block.given_width, lycon->block.given_height);
-    if (block->position->has_left && lycon->block.given_width >= 0) {
-        block->x = block->position->left + (block->bound ? block->bound->margin.left : 0);
+
+    // First determine content_width: use CSS width if specified, otherwise calculate from constraints
+    if (lycon->block.given_width >= 0) {
         content_width = lycon->block.given_width;
-    }
-    else if (block->position->has_right && lycon->block.given_width >= 0) {
-        content_width = lycon->block.given_width;
-        block->x = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - content_width;
-    }
-    else if (block->position->has_left && block->position->has_right) {
-        // both left and right specified - calculate width
-        block->x = block->position->left + (block->bound ? block->bound->margin.left : 0);
+    } else if (block->position->has_left && block->position->has_right) {
+        // both left and right specified - calculate width from constraints
+        float left_edge = block->position->left + (block->bound ? block->bound->margin.left : 0);
         float right_edge = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0);
-        content_width = max(right_edge - block->x, 0);
+        content_width = max(right_edge - left_edge, 0.0f);
+    } else {
+        // shrink-to-fit: will be determined by content (start with 0, let content grow it)
+        // For now, fall back to containing block width minus margins
+        content_width = max(cb_width - (block->bound ? block->bound->margin.right + block->bound->margin.left : 0), 0.0f);
     }
-    else if (block->position->has_left) {  // only left specified
+
+    // Now determine x position
+    if (block->position->has_left) {
         block->x = block->position->left + (block->bound ? block->bound->margin.left : 0);
-        content_width = max(cb_width - block->x - (block->bound ? block->bound->margin.right : 0), 0);
-    }
-    else if (block->position->has_right) {  // only right specified
+    } else if (block->position->has_right) {
+        block->x = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - content_width;
+    } else {
+        // neither left nor right specified - use static position (with margin offset)
         block->x = block->bound ? block->bound->margin.left : 0;
-        content_width = max(cb_width - block->position->right - (block->bound ? block->bound->margin.right + block->bound->margin.left : 0), 0);
-    }
-    else { // neither left nor right specified
-        block->x = block->bound ? block->bound->margin.left : 0;
-        content_width = max(cb_width - (block->bound ? block->bound->margin.right + block->bound->margin.left : 0), 0);
     }
     assert(content_width >= 0);
 
-    // calculate vertical position
-    if (block->position->has_top && lycon->block.given_height >= 0) {
-        block->y = block->position->top + (block->bound ? block->bound->margin.top : 0);
+    // calculate vertical position - same refactoring as horizontal
+    if (lycon->block.given_height >= 0) {
         content_height = lycon->block.given_height;
+    } else if (block->position->has_top && block->position->has_bottom) {
+        // both top and bottom specified - calculate height from constraints
+        float top_edge = block->position->top + (block->bound ? block->bound->margin.top : 0);
+        float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
+        content_height = max(bottom_edge - top_edge, 0.0f);
+    } else {
+        // shrink-to-fit: will be determined by content
+        // For now, fall back to containing block height minus margins
+        content_height = max(cb_height - (block->bound ? block->bound->margin.bottom + block->bound->margin.top : 0), 0.0f);
     }
-    else if (block->position->has_bottom && lycon->block.given_height >= 0) {
-        content_height = lycon->block.given_height;
+
+    // Now determine y position
+    if (block->position->has_top) {
+        block->y = block->position->top + (block->bound ? block->bound->margin.top : 0);
+    } else if (block->position->has_bottom) {
         block->y = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0) - content_height;
-    }
-    else if (block->position->has_top && block->position->has_bottom) {
-        // both top and bottom specified - calculate height
-        block->y = block->position->top + (block->bound ? block->bound->margin.top : 0);
-        float bottom_edge = cb_y + cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
-        content_height = max(bottom_edge - block->y, 0);
-    }
-    else if (block->position->has_top) { // only top specified
-        block->y = block->position->top + (block->bound ? block->bound->margin.top : 0);
-        content_height = max(cb_height - block->y - (block->bound ? block->bound->margin.bottom : 0), 0);
-    }
-    else if (block->position->has_bottom) { // only bottom specified
+    } else {
+        // neither top nor bottom specified - use static position (with margin offset)
         block->y = block->bound ? block->bound->margin.top : 0;
-        content_height = max(cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom + block->bound->margin.top : 0), 0);
-    }
-    else { // neither top nor bottom specified
-        block->y = block->bound ? block->bound->margin.top : 0;
-        content_height = max(cb_height - (block->bound ? block->bound->margin.bottom + block->bound->margin.top : 0), 0);
     }
     assert(content_height >= 0);
 

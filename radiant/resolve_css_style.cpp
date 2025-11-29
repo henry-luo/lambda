@@ -249,11 +249,15 @@ int32_t get_lambda_specificity(const CssDeclaration* decl) {
         log_debug("[CSS] get_lambda_specificity: decl is NULL");
         return 0;
     }
-    // Lambda CssSpecificity is a struct with (a, b, c) components
+    // Lambda CssSpecificity is a struct with (inline_style, ids, classes, elements) components
     // Convert to int32_t by packing:
-    int32_t specificity = (decl->specificity.ids << 16) | (decl->specificity.classes << 8) | decl->specificity.elements;
-    log_debug("[CSS] decl specificity: ids=%d, classes=%d, elmts=%d => %d",
-        decl->specificity.ids, decl->specificity.classes, decl->specificity.elements, specificity);
+    // inline_style is highest priority (bit 24), then ids (bits 16-23), classes (8-15), elements (0-7)
+    int32_t specificity = (decl->specificity.inline_style << 24) |
+                          (decl->specificity.ids << 16) |
+                          (decl->specificity.classes << 8) |
+                          decl->specificity.elements;
+    log_debug("[CSS] decl specificity: inline=%d, ids=%d, classes=%d, elmts=%d => %d",
+        decl->specificity.inline_style, decl->specificity.ids, decl->specificity.classes, decl->specificity.elements, specificity);
     return specificity;
 }
 

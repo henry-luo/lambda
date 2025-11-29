@@ -387,7 +387,6 @@ struct InlineProp {
     Color color;
     CssEnum vertical_align;
     float opacity;  // CSS opacity value (0.0 to 1.0)
-    int position;  // PositionType
     int visibility;  // Visibility
 };
 
@@ -457,7 +456,6 @@ typedef struct BlockProp {
     CssEnum given_width_type;
     float given_width_percent;  // Raw percentage if width: X% (NaN if not percentage)
     float given_height_percent; // Raw percentage if height: X% (NaN if not percentage)
-    // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 
 typedef struct FontBox {

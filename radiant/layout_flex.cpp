@@ -395,8 +395,10 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
 
         // Filter out absolutely positioned and hidden items
         ViewGroup* child_elmt = (ViewGroup*)child->as_element();
-        bool is_absolute = child_elmt && child_elmt->in_line && child_elmt->in_line->position &&
-            (child_elmt->in_line->position == CSS_VALUE_ABSOLUTE || child_elmt->in_line->position == CSS_VALUE_FIXED);
+        // CRITICAL: Check position->position (PositionProp), NOT in_line->position
+        ViewBlock* child_block = (ViewBlock*)child_elmt;
+        bool is_absolute = child_block && child_block->position && child_block->position->position &&
+            (child_block->position->position == CSS_VALUE_ABSOLUTE || child_block->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             count++;
@@ -434,8 +436,10 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
 
         // Filter out absolutely positioned and hidden items
         ViewGroup* child_elmt = (ViewGroup*)child->as_element();
-        bool is_absolute = child_elmt && child_elmt->in_line && child_elmt->in_line->position &&
-            (child_elmt->in_line->position == CSS_VALUE_ABSOLUTE || child_elmt->in_line->position == CSS_VALUE_FIXED);
+        // CRITICAL: Check position->position (PositionProp), NOT in_line->position
+        ViewBlock* child_block2 = (ViewBlock*)child_elmt;
+        bool is_absolute = child_block2 && child_block2->position && child_block2->position->position &&
+            (child_block2->position->position == CSS_VALUE_ABSOLUTE || child_block2->position->position == CSS_VALUE_FIXED);
         bool is_hidden = child_elmt && child_elmt->in_line && child_elmt->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             flex->flex_items[count] = child;
@@ -536,9 +540,12 @@ static bool should_skip_flex_item(ViewGroup* item) {
     if (!item) return true;
 
     // Skip absolutely positioned items
-    if (item->in_line && item->in_line->position &&
-        (item->in_line->position == CSS_VALUE_ABSOLUTE ||
-         item->in_line->position == CSS_VALUE_FIXED)) {
+    // CRITICAL: Check block->position->position (PositionProp), NOT in_line->position (InlineProp)
+    // The CSS position property is resolved to PositionProp, not InlineProp
+    ViewBlock* block = (ViewBlock*)item;
+    if (block->position && block->position->position &&
+        (block->position->position == CSS_VALUE_ABSOLUTE ||
+         block->position->position == CSS_VALUE_FIXED)) {
         return true;
     }
 
@@ -1032,9 +1039,11 @@ int calculate_item_baseline(ViewGroup* item) {
         ViewGroup* child = (ViewGroup*)child_view->as_element();
         if (child && child->height > 0) {
             // Skip positioned children (absolute/fixed)
-            bool is_positioned = child->in_line &&
-                (child->in_line->position == CSS_VALUE_ABSOLUTE ||
-                 child->in_line->position == CSS_VALUE_FIXED);
+            // CRITICAL: Check position->position (PositionProp), NOT in_line->position
+            ViewBlock* child_block = (ViewBlock*)child;
+            bool is_positioned = child_block->position &&
+                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->position->position == CSS_VALUE_FIXED);
 
             if (!is_positioned) {
                 // Recursively calculate child's baseline
