@@ -659,15 +659,15 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         log_error("Failed to create DomDocument");
         return nullptr;
     }
-    
+
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
         return nullptr;
     }
-    log_debug("Built DomElement tree: root=%p, backed=%s", 
-              (void*)dom_root, 
+    log_debug("Built DomElement tree: root=%p, backed=%s",
+              (void*)dom_root,
               (dom_root->native_element && dom_root->doc) ? "YES" : "NO");
 
     // Step 3: Initialize CSS engine

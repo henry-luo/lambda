@@ -15,6 +15,9 @@ void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInf
 bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
 
+// External function for laying out absolute positioned children
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
+
 // External function for printing view tree
 extern void print_view_block(ViewBlock* block, StrBuf* buf, int indent);
 
@@ -26,6 +29,58 @@ static void print_view_tree_snapshot(ViewBlock* container, const char* phase_nam
     log_info("%s", buf->str);
     log_info("=== END VIEW TREE SNAPSHOT ===");
     strbuf_free(buf);
+}
+
+// Helper function: Lay out absolute positioned children within a flex container
+// These children are excluded from the flex algorithm but still need to be laid out
+static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* container) {
+    log_enter();
+    log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
+
+    DomNode* child = container->first_child;
+    while (child) {
+        if (child->is_element()) {
+            ViewBlock* child_block = (ViewBlock*)child->as_element();
+
+            // Check if this child is absolute or fixed positioned
+            if (child_block->position &&
+                (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_block->position->position == CSS_VALUE_FIXED)) {
+
+                log_debug("Found absolute positioned child: %s", child->node_name());
+
+                // Save parent context
+                Blockbox pa_block = lycon->block;
+                Linebox pa_line = lycon->line;
+
+                // Set up lycon->block dimensions from the child's CSS
+                // This is needed because layout_abs_block expects given_width/given_height
+                // to be set in the lycon->block context
+                if (child_block->blk) {
+                    lycon->block.given_width = child_block->blk->given_width;
+                    lycon->block.given_height = child_block->blk->given_height;
+                } else {
+                    lycon->block.given_width = -1;
+                    lycon->block.given_height = -1;
+                }
+
+                // Lay out the absolute positioned block
+                layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
+
+                // Restore parent context
+                lycon->block = pa_block;
+                lycon->line = pa_line;
+
+                log_debug("Absolute child laid out: %s at (%.1f, %.1f) size %.1fx%.1f",
+                         child->node_name(), child_block->x, child_block->y,
+                         child_block->width, child_block->height);
+            }
+        }
+        child = child->next_sibling;
+    }
+
+    log_debug("=== ABSOLUTE POSITIONED CHILDREN LAYOUT COMPLETE ===");
+    log_leave();
 }
 
 // Helper function: Validate coordinates for debugging
@@ -388,6 +443,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         log_info("Running nested flex algorithm for container=%p", flex_item);
         layout_flex_container_with_nested_content(lycon, flex_item);
 
+        // CRITICAL: Lay out absolute positioned children of the nested flex container
+        layout_flex_absolute_children(lycon, flex_item);
+
         log_info(">>> NESTED FLEX: Checking child coordinates after algorithm");
         View* nested_child = flex_item->first_child;
         while (nested_child) {
@@ -501,6 +559,11 @@ void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
     // Print view tree and validate coordinates after PASS 2
     print_view_tree_snapshot(block, "After PASS 2");
     validate_flex_coordinates(block, "After PASS 2");
+
+    // PASS 3: Lay out absolute positioned children (excluded from flex algorithm)
+    log_info("=== PASS 3: Laying out absolute positioned children ===");
+    layout_flex_absolute_children(lycon, block);
+    log_info("=== PASS 3 COMPLETE ===");
 
     // restore parent flex context
     cleanup_flex_container(lycon);
