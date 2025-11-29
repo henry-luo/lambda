@@ -614,8 +614,8 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
         // Debug: show the first few name records (only in verbose mode)
         #ifdef FONT_DEBUG_VERBOSE
         if (i < 5) {
-            printf("DEBUG: name record %d: platform=%d, encoding=%d, language=%d, name_id=%d, length=%d\n",
-                   i, platform_id, encoding_id, language_id, name_id, length);
+            log_debug("name record %d: platform=%d, encoding=%d, language=%d, name_id=%d, length=%d",
+                      i, platform_id, encoding_id, language_id, name_id, length);
         }
         #endif
         
@@ -641,11 +641,13 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                     // Debug: show raw bytes for family name records (only in debug builds)
                     #ifdef FONT_DEBUG_VERBOSE
                     if (name_id == 1 && length <= 20) {
-                        printf("DEBUG: Raw bytes for family name (platform=%d, length=%d): ", platform_id, length);
-                        for (int j = 0; j < length; j++) {
-                            printf("%02x ", (uint8_t)name_buffer[j]);
+                        char hex_buffer[256] = {0};
+                        char *p = hex_buffer;
+                        p += snprintf(p, sizeof(hex_buffer), "Raw bytes for family name (platform=%d, length=%d): ", platform_id, length);
+                        for (int j = 0; j < length && (p - hex_buffer + 4) < sizeof(hex_buffer); j++) {
+                            p += snprintf(p, sizeof(hex_buffer) - (p - hex_buffer), "%02x ", (uint8_t)name_buffer[j]);
                         }
-                        printf("\n");
+                        log_debug("%s", hex_buffer);
                     }
                     #endif
                     
@@ -667,7 +669,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                             // Debug output for platform 1
                             #ifdef FONT_DEBUG_VERBOSE
                             if (name_id == 1) {
-                                printf("DEBUG: Platform 1 decoded name: '%s'\n", ascii_name);
+                                log_debug("Platform 1 decoded name: '%s'", ascii_name);
                             }
                             #endif
                         }
@@ -692,7 +694,7 @@ static bool parse_name_table(FILE *file, TTF_Table_Directory *name_table, FontEn
                             // Debug output for platform 3
                             #ifdef FONT_DEBUG_VERBOSE
                             if (name_id == 1) {
-                                printf("DEBUG: Platform 3 decoded name: '%s'\n", ascii_name);
+                                log_debug("Platform 3 decoded name: '%s'", ascii_name);
                             }
                             #endif
                         }
@@ -823,7 +825,7 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
     
     ttc_header.num_fonts = be32toh_local(ttc_header.num_fonts);
     #ifdef FONT_DEBUG_VERBOSE
-    printf("DEBUG: TTC file %s contains %u fonts\n", file_path, ttc_header.num_fonts);
+    log_debug("TTC file %s contains %u fonts", file_path, ttc_header.num_fonts);
     #endif
     
     // Read offsets to individual fonts
@@ -898,15 +900,15 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
             // Adjust table offset to be relative to start of file
             name_table->offset += font_offsets[i];
             #ifdef FONT_DEBUG_VERBOSE
-            printf("DEBUG: TTC font %u: parsing name table at offset %u\n", i, name_table->offset);
+            log_debug("TTC font %u: parsing name table at offset %u", i, name_table->offset);
             #endif
             font_success &= parse_name_table(file, name_table, entry, arena);
             #ifdef FONT_DEBUG_VERBOSE
-            printf("DEBUG: TTC font %u: name table parsed, family_name=%s\n", i, entry->family_name ? entry->family_name : "NULL");
+            log_debug("TTC font %u: name table parsed, family_name=%s", i, entry->family_name ? entry->family_name : "NULL");
             #endif
         } else {
             #ifdef FONT_DEBUG_VERBOSE
-            printf("DEBUG: TTC font %u: no name table found\n", i);
+            log_debug("TTC font %u: no name table found", i);
             #endif
             font_success = false;
         }
@@ -947,12 +949,12 @@ static bool parse_ttc_font_metadata(const char *file_path, FontDatabase *db, Are
         if (font_success && entry->family_name) {
             arraylist_append(db->all_fonts, entry);
             #ifdef FONT_DEBUG_VERBOSE
-            printf("DEBUG: Successfully parsed TTC font %u: %s (%s)\n", i, entry->family_name, entry->subfamily_name);
+            log_debug("Successfully parsed TTC font %u: %s (%s)", i, entry->family_name, entry->subfamily_name);
             #endif
             success = true;
         } else {
             #ifdef FONT_DEBUG_VERBOSE
-            printf("DEBUG: Failed to parse TTC font %u (font_success=%d, family_name=%s)\n", i, font_success, entry->family_name ? entry->family_name : "NULL");
+            log_debug("Failed to parse TTC font %u (font_success=%d, family_name=%s)", i, font_success, entry->family_name ? entry->family_name : "NULL");
             #endif
         }
     }
@@ -1362,8 +1364,8 @@ static void scan_directory_recursive(FontDatabase* db, const char* directory, in
                 hashmap_set(db->file_paths, &placeholder);
                 
                 #ifdef FONT_DEBUG_VERBOSE
-                printf("DEBUG: Created placeholder for font: %s (family: %s)\n", 
-                       full_path, placeholder->family_name ? placeholder->family_name : "unknown");
+                log_debug("Created placeholder for font: %s (family: %s)", 
+                          full_path, placeholder->family_name ? placeholder->family_name : "unknown");
                 #endif
             }
         }
@@ -1380,7 +1382,7 @@ static bool parse_placeholder_font(FontEntry* placeholder, Arena* arena) {
     }
     
     #ifdef FONT_DEBUG_VERBOSE
-    printf("DEBUG: Parsing placeholder font: %s\n", placeholder->file_path);
+    log_debug("Parsing placeholder font: %s", placeholder->file_path);
     #endif
     
     // Parse the font metadata in-place
@@ -1402,7 +1404,7 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
     FontEntry** existing = (FontEntry**)hashmap_get(db->file_paths, &search_key);
     if (existing && *existing) {
         #ifdef FONT_DEBUG_VERBOSE
-        printf("DEBUG: Font already loaded: %s\n", file_path);
+        log_debug("Font already loaded: %s", file_path);
         #endif
         return *existing;
     }
@@ -1416,7 +1418,7 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
     
     if (format == FONT_FORMAT_TTC) {
         #ifdef FONT_DEBUG_VERBOSE
-        printf("DEBUG: Lazy loading TTC file: %s\n", file_path);
+        log_debug("Lazy loading TTC file: %s", file_path);
         #endif
         // For TTC files, we'll parse the first font for now
         // (In a full implementation, you'd need to handle multiple fonts per file)
@@ -1427,7 +1429,7 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
         }
     } else {
         #ifdef FONT_DEBUG_VERBOSE
-        printf("DEBUG: Lazy loading font file: %s\n", file_path);
+        log_debug("Lazy loading font file: %s", file_path);
         #endif
         parsed = parse_font_metadata(file_path, font_entry, db->string_arena);
         if (parsed) {
@@ -1527,8 +1529,8 @@ bool font_database_scan(FontDatabase* db) {
                 priority_fonts_parsed++;
                 
                 #ifdef FONT_DEBUG_VERBOSE
-                printf("DEBUG: Parsed priority font: %s (%s)\n", 
-                       font->family_name, font->file_path);
+                log_debug("Parsed priority font: %s (%s)", 
+                          font->family_name, font->file_path);
                 #endif
             }
             
@@ -1625,6 +1627,30 @@ static float calculate_match_score(FontEntry* font, FontDatabaseCriteria* criter
     // Language support bonus (5 points max)
     if (criteria->language && font_supports_language(font, criteria->language)) {
         score += 5.0f;
+    }
+    
+    // Standard font preference (10 points max)
+    // Prefer standard variants over Unicode/specialty variants for better browser compatibility
+    if (font->file_path) {
+        const char* filename = strrchr(font->file_path, '/');
+        filename = filename ? filename + 1 : font->file_path;
+        
+        // Penalty for Unicode variants when standard font requested
+        if (strstr(filename, "Unicode") && !strstr(criteria->family_name, "Unicode")) {
+            score -= 8.0f;  // Significant penalty for Unicode variants
+        }
+        
+        // Penalty for oversized font files (likely comprehensive Unicode fonts)
+        if (font->file_size > 5 * 1024 * 1024) {  // > 5MB
+            score -= 5.0f;  // Penalty for very large fonts
+        }
+        
+        // Bonus for exact filename matches (e.g., "Arial.ttf" for "Arial")
+        char expected_filename[256];
+        snprintf(expected_filename, sizeof(expected_filename), "%s.ttf", criteria->family_name);
+        if (strcasecmp(filename, expected_filename) == 0) {
+            score += 10.0f;  // Bonus for exact filename match
+        }
     }
     
     return score;
