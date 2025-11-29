@@ -435,7 +435,9 @@ static void scan_windows_registry_fonts(FontDatabase *db) {
                 continue;
             }
         } else {
-            strcpy(full_path, font_file);
+            // Absolute path - copy safely with bounds checking
+            strncpy(full_path, font_file, sizeof(full_path) - 1);
+            full_path[sizeof(full_path) - 1] = '\0';  // Ensure null termination
         }
         
         // Check if file exists and add to database
