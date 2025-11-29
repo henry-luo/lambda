@@ -538,6 +538,8 @@ typedef struct FlexProp {
     int align_content;  // AlignType or CSS_VALUE_*
     float row_gap;
     float column_gap;
+    bool row_gap_is_percent;      // true if row_gap is a percentage
+    bool column_gap_is_percent;   // true if column_gap is a percentage
     WritingMode writing_mode;
     TextDirection text_direction;
 } FlexProp;
