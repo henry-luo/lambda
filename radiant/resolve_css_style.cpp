@@ -851,6 +851,21 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 log_debug("[Lambda CSS] Inheriting property %d from ancestor <%s>",
                          prop_id, ancestor ? ancestor->tag_name : "unknown");
 
+                // CRITICAL FIX: For font-size, do NOT re-resolve the specified value
+                // because em/percentage values would compound incorrectly.
+                // Instead, copy the computed font-size from lycon->font.style
+                // which already has the parent's computed font-size.
+                if (prop_id == CSS_PROPERTY_FONT_SIZE) {
+                    log_debug("[Lambda CSS] Inheriting computed font-size from parent: %.1f",
+                        lycon->font.style ? lycon->font.style->font_size : 16.0f);
+                    ViewSpan* span = (ViewSpan*)lycon->view;
+                    if (!span->font) {
+                        span->font = alloc_font_prop(lycon);
+                    }
+                    // font is already correctly set via alloc_font_prop copying lycon->font.style
+                    continue;
+                }
+
                 // Apply the inherited property using the ancestor's declaration
                 resolve_lambda_css_property(prop_id, inherited_decl, lycon);
             }

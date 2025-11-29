@@ -763,6 +763,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
         // Caption - mark as block and layout content immediately
         ViewBlock* caption = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, node);
         if (caption) {
+            lycon->view = (View*)caption;
+            dom_node_resolve_style(node, lycon);  // Resolve caption styles
+
             Blockbox saved_block = lycon->block;
             Linebox saved_line = lycon->line;
 
@@ -770,19 +773,26 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             if (caption_width <= 0) caption_width = 600;
 
             lycon->block.content_width = (float)caption_width;
-            lycon->block.content_height = 0;
+            lycon->block.content_height = 10000;  // Large enough for content
             lycon->block.advance_y = 0;
-            lycon->line.left = lycon->line.left;
-            lycon->line.right = lycon->line.left + caption_width;
-            lycon->line.advance_x = (float)lycon->line.left;
+            lycon->line.left = 0;
+            lycon->line.right = caption_width;
+            lycon->line.advance_x = 0;
             lycon->line.is_line_start = true;
+            log_debug("Caption layout start: width=%d, advance_y=%.1f", caption_width, lycon->block.advance_y);
 
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
+            // Handle last line
+            log_debug("Caption before line_break: is_line_start=%d, advance_y=%.1f", lycon->line.is_line_start, lycon->block.advance_y);
+            if (!lycon->line.is_line_start) { line_break(lycon); }
+            log_debug("Caption after line_break: advance_y=%.1f", lycon->block.advance_y);
 
-            caption->height = (int)lycon->block.advance_y;
+            caption->height = lycon->block.advance_y;
+            caption->width = (float)caption_width;  // Also set width explicitly
+            log_debug("Caption layout end: caption->height=%.1f, advance_y=%.1f", caption->height, lycon->block.advance_y);
             lycon->block = saved_block;
             lycon->line = saved_line;
         }
@@ -794,6 +804,8 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
         // Row group - mark and recurse
         ViewTableRowGroup* group = (ViewTableRowGroup*)set_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, node);
         if (group) {
+            lycon->view = (View*)group;
+            dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewGroup*)group);
@@ -804,6 +816,8 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
         // Row - mark and recurse
         ViewTableRow* row = (ViewTableRow*)set_view(lycon, RDT_VIEW_TABLE_ROW, node);
         if (row) {
+            lycon->view = (View*)row;
+            dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewGroup*)row);
@@ -1078,17 +1092,24 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
             // Measure text without wrapping
             const unsigned char* text = child->text_data();
             if (text && *text) {
-                // Measure text width using current font
+                log_debug("PCW measuring text: '%s' (len=%d)", text, (int)strlen((const char*)text));
+                // Measure text width using current font with kerning
                 float text_width = 0;
                 const unsigned char* p = text;
+                FT_UInt prev_glyph_index = 0;
+                bool has_kerning = lycon->font.ft_face && FT_HAS_KERNING(lycon->font.ft_face);
+
                 while (*p) {
                     if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-                        // Count space but don't wrap
-                        if (lycon->font.ft_face && lycon->font.ft_face->size) {
+                        // Use pre-calculated space width if available
+                        if (lycon->font.style && lycon->font.style->space_width > 0) {
+                            text_width += lycon->font.style->space_width;
+                        } else if (lycon->font.ft_face && lycon->font.ft_face->size) {
                             text_width += lycon->font.ft_face->size->metrics.max_advance / 64.0f * 0.25f;
                         } else {
                             text_width += 4.0f; // Fallback space width
                         }
+                        prev_glyph_index = 0; // Reset kerning after space
                         p++;
                         continue;
                     }
@@ -1097,8 +1118,15 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
                     if (lycon->font.ft_face) {
                         FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, *p);
                         if (glyph_index) {
+                            // Apply kerning if available
+                            if (has_kerning && prev_glyph_index) {
+                                FT_Vector kerning;
+                                FT_Get_Kerning(lycon->font.ft_face, prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
+                                text_width += kerning.x / 64.0f;
+                            }
                             FT_Load_Glyph(lycon->font.ft_face, glyph_index, FT_LOAD_DEFAULT);
                             text_width += lycon->font.ft_face->glyph->advance.x / 64.0f;
+                            prev_glyph_index = glyph_index;
                         }
                     } else {
                         // Fallback when no font face available - use average character width
@@ -1106,6 +1134,7 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
                     }
                     p++;
                 }
+                log_debug("PCW text measured width: %.2f (with kerning)", text_width);
                 if (text_width > max_width) max_width = text_width;
             }
         }
@@ -1196,32 +1225,42 @@ static int measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cell)
 
     // For minimum width, we want the width of the longest word
     float min_width = 0.0f;
+    bool has_kerning = lycon->font.ft_face && FT_HAS_KERNING(lycon->font.ft_face);
 
     // Measure each child's minimum width
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
-            // For text, find the longest word
+            // For text, find the longest word (with kerning)
             const unsigned char* text = child->text_data();
             if (text && *text) {
                 float longest_word = 0.0f;
                 float current_word = 0.0f;
                 const unsigned char* p = text;
+                FT_UInt prev_glyph_index = 0;
 
                 while (*p) {
                     if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
                         // End of word
                         if (current_word > longest_word) longest_word = current_word;
                         current_word = 0.0f;
+                        prev_glyph_index = 0;
                         p++;
                         continue;
                     }
 
-                    // Add character to current word
+                    // Add character to current word (with kerning)
                     if (lycon->font.ft_face) {
                         FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, *p);
                         if (glyph_index) {
+                            // Apply kerning if available
+                            if (has_kerning && prev_glyph_index) {
+                                FT_Vector kerning;
+                                FT_Get_Kerning(lycon->font.ft_face, prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
+                                current_word += kerning.x / 64.0f;
+                            }
                             FT_Load_Glyph(lycon->font.ft_face, glyph_index, FT_LOAD_DEFAULT);
                             current_word += lycon->font.ft_face->glyph->advance.x / 64.0f;
+                            prev_glyph_index = glyph_index;
                         }
                     } else {
                         // Fallback when no font face available - use average character width
@@ -2408,9 +2447,23 @@ void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display
         return;
     }
 
+    // CRITICAL: Update font context before building table tree
+    // This ensures children inherit the correct computed font-size from the table element.
+    // Without this, lycon->font.style would still point to the grandparent's font.
+    ViewTable* table = (ViewTable*)lycon->view;
+    log_debug("Table font context check: table=%p, table->font=%p, lycon->font.style=%p, lycon->font.style->font_size=%.1f",
+        (void*)table, table ? (void*)table->font : nullptr,
+        (void*)lycon->font.style, lycon->font.style ? lycon->font.style->font_size : -1.0f);
+    if (table && table->font) {
+        setup_font(lycon->ui_context, &lycon->font, table->font);
+        log_debug("Updated font context for table: font-size=%.1f", table->font->font_size);
+    } else {
+        log_debug("WARNING: table->font is NULL, cannot update font context");
+    }
+
     // Step 1: Build table structure from DOM
     log_debug("Step 1 - Building table tree");
-    ViewTable* table = build_table_tree(lycon, tableNode);
+    table = build_table_tree(lycon, tableNode);
     if (!table) {
         log_debug("ERROR: Failed to build table structure");
         return;
