@@ -93,7 +93,7 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
 
         compound->simple_selectors[compound->simple_selector_count++] = simple;
 
-        fprintf(stderr, "[CSS Parser] Added simple selector to compound (count=%zu)\n", compound->simple_selector_count);
+        log_debug("[CSS Parser] Added simple selector to compound (count=%zu)", compound->simple_selector_count);
 
         // Check if position actually advanced
         if (*pos == start_pos) {
@@ -106,7 +106,7 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
         return NULL;
     }
 
-    fprintf(stderr, "[CSS Parser] Parsed compound selector with %zu simple selectors\n", compound->simple_selector_count);
+    log_debug("[CSS Parser] Parsed compound selector with %zu simple selectors", compound->simple_selector_count);
     return compound;
 }
 
@@ -154,15 +154,15 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
             if (delim == '>') {
                 combinator = CSS_COMBINATOR_CHILD;
                 (*pos)++;
-                fprintf(stderr, "[CSS Parser] Found child combinator '>'\n");
+                log_debug("[CSS Parser] Found child combinator '>'");
             } else if (delim == '+') {
                 combinator = CSS_COMBINATOR_NEXT_SIBLING;
                 (*pos)++;
-                fprintf(stderr, "[CSS Parser] Found next-sibling combinator '+'\n");
+                log_debug("[CSS Parser] Found next-sibling combinator '+'");
             } else if (delim == '~') {
                 combinator = CSS_COMBINATOR_SUBSEQUENT_SIBLING;
                 (*pos)++;
-                fprintf(stderr, "[CSS Parser] Found subsequent-sibling combinator '~'\n");
+                log_debug("[CSS Parser] Found subsequent-sibling combinator '~'");
             }
         }
 
@@ -175,7 +175,7 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
                     (next->type == CSS_TOKEN_DELIM && (next->data.delimiter == '.' || next->data.delimiter == '*')) ||
                     next->type == CSS_TOKEN_HASH) {
                     combinator = CSS_COMBINATOR_DESCENDANT;
-                    fprintf(stderr, "[CSS Parser] Detected descendant combinator (whitespace)\n");
+                    log_debug("[CSS Parser] Detected descendant combinator (whitespace)");
                 }
             }
         }
@@ -212,7 +212,7 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
             selector->compound_selectors[selector->compound_selector_count] = next_compound;
             selector->compound_selector_count++;
 
-            fprintf(stderr, "[CSS Parser] Added compound selector with combinator (total count=%zu)\n",
+            log_debug("[CSS Parser] Added compound selector with combinator (total count=%zu)",
                     selector->compound_selector_count);
         } else {
             // No combinator found, restore position and stop
@@ -221,7 +221,7 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
         }
     }
 
-    fprintf(stderr, "[CSS Parser] Completed selector with %zu compound parts\n", selector->compound_selector_count);
+    log_debug("[CSS Parser] Completed selector with %zu compound parts", selector->compound_selector_count);
     return selector;
 }
 
@@ -229,7 +229,7 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
 CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
 
-    fprintf(stderr, "[CSS Parser] Parsing selector group at position %d\n", *pos);
+    log_debug("[CSS Parser] Parsing selector group at position %d", *pos);
 
     // Initial capacity for selector array
     size_t capacity = 4;
@@ -241,18 +241,18 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
     // Parse first selector
     CssSelector* first = css_parse_selector_with_combinators(tokens, pos, token_count, pool);
     if (!first) {
-        fprintf(stderr, "[CSS Parser] ERROR: Failed to parse first selector in group\n");
+        log_debug("[CSS Parser] ERROR: Failed to parse first selector in group");
         return NULL;
     }
     selectors[count++] = first;
-    fprintf(stderr, "[CSS Parser] Parsed selector %zu in group\n", count);
+    log_debug("[CSS Parser] Parsed selector %zu in group", count);
 
     // Skip whitespace after selector
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
 
     // Parse additional selectors separated by commas
     while (*pos < token_count && tokens[*pos].type == CSS_TOKEN_COMMA) {
-        fprintf(stderr, "[CSS Parser] Found comma, parsing next selector in group\n");
+        log_debug("[CSS Parser] Found comma, parsing next selector in group");
         (*pos)++; // consume comma
 
         // Skip whitespace after comma
@@ -261,7 +261,7 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
         // Parse next selector
         CssSelector* next = css_parse_selector_with_combinators(tokens, pos, token_count, pool);
         if (!next) {
-            fprintf(stderr, "[CSS Parser] WARNING: Failed to parse selector after comma, stopping group\n");
+            log_debug("[CSS Parser] WARNING: Failed to parse selector after comma, stopping group");
             break;
         }
 
@@ -270,7 +270,7 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
             capacity *= 2;
             CssSelector** new_selectors = (CssSelector**)pool_calloc(pool, capacity * sizeof(CssSelector*));
             if (!new_selectors) {
-                fprintf(stderr, "[CSS Parser] ERROR: Failed to expand selector array\n");
+                log_debug("[CSS Parser] ERROR: Failed to expand selector array");
                 break;
             }
             memcpy(new_selectors, selectors, count * sizeof(CssSelector*));
@@ -278,7 +278,7 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
         }
 
         selectors[count++] = next;
-        fprintf(stderr, "[CSS Parser] Parsed selector %zu in group\n", count);
+        log_debug("[CSS Parser] Parsed selector %zu in group", count);
 
         // Skip whitespace after selector
         *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
@@ -291,7 +291,7 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
     group->selectors = selectors;
     group->selector_count = count;
 
-    fprintf(stderr, "[CSS Parser] Completed selector group with %zu selectors\n", count);
+    log_debug("[CSS Parser] Completed selector group with %zu selectors", count);
     return group;
 }
 
@@ -325,7 +325,7 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 selector->value = value_buf;
             }
         }
-        fprintf(stderr, "[CSS Parser] Element selector: '%s'\n", selector->value ? selector->value : "(null)");
+        log_debug("[CSS Parser] Element selector: '%s'", selector->value ? selector->value : "(null)");
         (*pos)++;
         matched = true;
     } else if (token->type == CSS_TOKEN_DELIM && token->data.delimiter == '.') {
@@ -344,12 +344,12 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->value = value_buf;
                 }
             }
-            fprintf(stderr, "[CSS Parser] Class selector: '.%s'\n", selector->value ? selector->value : "(null)");
+            log_debug("[CSS Parser] Class selector: '.%s'", selector->value ? selector->value : "(null)");
             (*pos)++;
             matched = true;
         } else {
             // No identifier after '.', invalid class selector
-            fprintf(stderr, "[CSS Parser] ERROR: Expected identifier after '.'\n");
+            log_debug("[CSS Parser] ERROR: Expected identifier after '.'");
             (*pos)--;  // Back up to the '.' token
         }
     } else if (token->type == CSS_TOKEN_HASH) {
@@ -372,20 +372,20 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 selector->value = value_buf;
             }
         }
-        fprintf(stderr, "[CSS Parser] ID selector: '#%s'\n", selector->value ? selector->value : "(null)");
+        log_debug("[CSS Parser] ID selector: '#%s'", selector->value ? selector->value : "(null)");
         (*pos)++;
         matched = true;
     } else if (token->type == CSS_TOKEN_DELIM && token->data.delimiter == '*') {
         // Universal selector: *
         selector->type = CSS_SELECTOR_TYPE_UNIVERSAL;
         selector->value = "*";
-        fprintf(stderr, "[CSS Parser] Universal selector: '*'\n");
+        log_debug("[CSS Parser] Universal selector: '*'");
         (*pos)++;
         matched = true;
     } else if (token->type == CSS_TOKEN_FUNCTION) {
         // Functional pseudo-class like nth-child(1)
         // Token value contains the function name without the opening parenthesis
-        fprintf(stderr, "[CSS Parser] Detected CSS_TOKEN_FUNCTION: '%s'\n", token->value ? token->value : "(null)");
+        log_debug("[CSS Parser] Detected CSS_TOKEN_FUNCTION: '%s'", token->value ? token->value : "(null)");
         const char* func_name = token->value;
         if (!func_name && token->start && token->length > 0) {
             char* name_buf = (char*)pool_calloc(pool, token->length + 1);
@@ -1632,9 +1632,4 @@ CssRule* css_parse_rule_from_tokens(const CssToken* tokens, int token_count, Poo
     CssRule* rule = NULL;
     css_parse_rule_from_tokens_internal(tokens, token_count, pool, &rule);
     return rule;
-}
-
-// Backward compatibility wrapper with old name
-CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool) {
-    return css_parse_rule_from_tokens(tokens, token_count, pool);
 }

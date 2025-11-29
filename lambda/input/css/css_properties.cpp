@@ -816,7 +816,7 @@ bool css_property_validate_value_from_string(CssPropertyId property_id,
 
             if (disallow_negative && length->value < 0) {
                 // reject negative value for properties that don't allow it
-                printf("[CSS Parse] Rejecting negative value %.2f for property %s\n",
+                log_debug("[CSS Parse] Rejecting negative value %.2f for property %s",
                        length->value, prop->name);
                 return false;
             }
@@ -1196,16 +1196,16 @@ const char* css_property_get_name(CssPropertyId property_id) {
 void css_property_print_info(CssPropertyId property_id) {
     const CssProperty* prop = css_property_get_by_id(property_id);
     if (!prop) {
-        printf("Property ID %u: NOT FOUND\n", (unsigned int)property_id);
+        log_debug("Property ID %u: NOT FOUND", (unsigned int)property_id);
         return;
     }
 
-    printf("Property: %s (ID: %u)\n", prop->name, (unsigned int)prop->id);
-    printf("  Type: %d\n", prop->type);
-    printf("  Inherits: %s\n", prop->inheritance == PROP_INHERIT_YES ? "yes" : "no");
-    printf("  Initial: %s\n", prop->initial_value);
-    printf("  Animatable: %s\n", prop->animatable ? "yes" : "no");
-    printf("  Shorthand: %s\n", prop->shorthand ? "yes" : "no");
+    log_debug("Property: %s (ID: %u)", prop->name, (unsigned int)prop->id);
+    log_debug("  Type: %d", prop->type);
+    log_debug("  Inherits: %s", prop->inheritance == PROP_INHERIT_YES ? "yes" : "no");
+    log_debug("  Initial: %s", prop->initial_value);
+    log_debug("  Animatable: %s", prop->animatable ? "yes" : "no");
+    log_debug("  Shorthand: %s", prop->shorthand ? "yes" : "no");
 }
 
 int css_property_get_count(void) {

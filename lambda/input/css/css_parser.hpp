@@ -594,9 +594,6 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule);
 CssRule* css_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
 
-// Backward compatibility wrapper
-CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
-
 #ifdef __cplusplus
 }
 #endif
