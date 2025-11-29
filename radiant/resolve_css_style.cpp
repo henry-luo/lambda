@@ -14,7 +14,7 @@ Color resolve_color_value(const CssValue* value) {
     case CSS_VALUE_TYPE_COLOR: {
         // Access color data from CssValue anonymous struct
         switch (value->data.color.type) {
-        case CSS_COLOR_RGB:
+        case CSS_COLOR_HEX:  case CSS_COLOR_RGB:
             result = value->data.color.data.color;
             break;
         case CSS_COLOR_HSL:
@@ -1765,12 +1765,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // Border shorthand: <width> <style> <color> (any order)
             // Parse values from the list or single value
             float border_width = -1.0f;  CssEnum border_style = CSS_VALUE__UNDEF;  Color border_color = {0};
-
             if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multiple values
+                log_debug("[CSS] Border shorthand has multiple values: %d", value->data.list.count);
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
-
                 for (size_t i = 0; i < count; i++) {
                     CssValue* val = values[i];
                     if (val->type == CSS_VALUE_TYPE_LENGTH) {
@@ -1801,16 +1800,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     else if (val->type == CSS_VALUE_TYPE_COLOR) {
                         // Color
                         log_debug("[CSS] Border color value type: %d", val->data.color.type);
-                        if (val->data.color.type == CSS_COLOR_RGB) {
-                            border_color.r = val->data.color.data.rgba.r;
-                            border_color.g = val->data.color.data.rgba.g;
-                            border_color.b = val->data.color.data.rgba.b;
-                            border_color.a = val->data.color.data.rgba.a;
-                        }
+                        border_color = resolve_color_value(val);
+                    }
+                    else {
+                        log_debug("[CSS] Unrecognized border shorthand value type: %d", val->type);
                     }
                 }
             } else {
                 // Single value
+                log_debug("[CSS] Border shorthand has single value of type: %d", value->type);
                 if (value->type == CSS_VALUE_TYPE_LENGTH) {
                     border_width = resolve_length_value(lycon, prop_id, value);
                 } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1831,12 +1829,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         border_color = color_name_to_rgb(keyword);
                     }
                 } else if (value->type == CSS_VALUE_TYPE_COLOR) {
-                    if (value->data.color.type == CSS_COLOR_RGB) {
-                        border_color.r = value->data.color.data.rgba.r;
-                        border_color.g = value->data.color.data.rgba.g;
-                        border_color.b = value->data.color.data.rgba.b;
-                        border_color.a = value->data.color.data.rgba.a;
-                    }
+                    border_color = resolve_color_value(value);
                 }
             }
 

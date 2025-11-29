@@ -279,6 +279,44 @@ TEST_F(DomIntegrationTest, EdgeCase_AttributeOverwrite) {
     EXPECT_TRUE(dom_element_has_attribute(element, "data-test"));
 }
 
+TEST_F(DomIntegrationTest, SetAttribute_SpaceSeparatedClasses) {
+    DomElement* element = create_dom_element("div");
+
+    // Test setting multiple space-separated classes
+    EXPECT_TRUE(dom_element_set_attribute(element, "class", "foo bar baz"));
+    
+    // Verify all three classes were parsed and added
+    EXPECT_TRUE(dom_element_has_class(element, "foo"));
+    EXPECT_TRUE(dom_element_has_class(element, "bar"));
+    EXPECT_TRUE(dom_element_has_class(element, "baz"));
+    EXPECT_EQ(element->class_count, 3);
+
+    // Test with extra whitespace (spaces, tabs, newlines)
+    EXPECT_TRUE(dom_element_set_attribute(element, "class", "  alpha  \t\tbeta\n\ngamma  "));
+    
+    // Verify all three classes were parsed correctly
+    EXPECT_TRUE(dom_element_has_class(element, "alpha"));
+    EXPECT_TRUE(dom_element_has_class(element, "beta"));
+    EXPECT_TRUE(dom_element_has_class(element, "gamma"));
+    EXPECT_EQ(element->class_count, 3);
+    
+    // Old classes should be replaced
+    EXPECT_FALSE(dom_element_has_class(element, "foo"));
+    EXPECT_FALSE(dom_element_has_class(element, "bar"));
+    EXPECT_FALSE(dom_element_has_class(element, "baz"));
+
+    // Test single class still works
+    EXPECT_TRUE(dom_element_set_attribute(element, "class", "single-class"));
+    EXPECT_TRUE(dom_element_has_class(element, "single-class"));
+    EXPECT_EQ(element->class_count, 1);
+    EXPECT_FALSE(dom_element_has_class(element, "alpha"));
+
+    // Test empty class attribute
+    EXPECT_TRUE(dom_element_set_attribute(element, "class", ""));
+    EXPECT_EQ(element->class_count, 0);
+    EXPECT_FALSE(dom_element_has_class(element, "single-class"));
+}
+
 TEST_F(DomIntegrationTest, QuirksMode_CaseInsensitiveAttributes) {
     // Enable quirks mode
     selector_matcher_set_quirks_mode(matcher, true);

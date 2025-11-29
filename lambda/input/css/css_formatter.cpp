@@ -172,7 +172,7 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                 stringbuf_append_str(formatter->output, info->name);
             } else {
                 // Fallback for invalid enum - output "initial" as safe default
-                fprintf(stderr, "[CSS Formatter] WARNING: Invalid keyword enum %d, using 'initial'\n", value->data.keyword);
+                log_debug("[CSS Formatter] WARNING: Invalid keyword enum %d, using 'initial'", value->data.keyword);
                 stringbuf_append_str(formatter->output, "initial");
             }
             break;
@@ -674,7 +674,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         }
 
         if (rule->data.generic_rule.content) {
-            fprintf(stderr, "[CSS Formatter] Content: '%s'\n", rule->data.generic_rule.content);
+            log_debug("[CSS Formatter] Content: '%s'", rule->data.generic_rule.content);
             append_space(formatter);
             stringbuf_append_str(formatter->output, rule->data.generic_rule.content);
         }
@@ -720,7 +720,7 @@ const char* css_format_stylesheet(CssFormatter* formatter, CssStylesheet* styles
         // Restore the main output buffer and append the rule
         formatter->output = saved_output;
         if (rule_str) {
-            fprintf(stderr, "[CSS Formatter Stylesheet] Appending rule %zu (type %d), length=%zu: '%.80s...'\n",
+            log_debug("[CSS Formatter Stylesheet] Appending rule %zu (type %d), length=%zu: '%.80s...'",
                     i, stylesheet->rules[i]->type, strlen(rule_str), rule_str);
             stringbuf_append_str(formatter->output, rule_str);
         }

@@ -182,21 +182,34 @@ int css_declaration_cascade_compare(CssDeclaration* a, CssDeclaration* b) {
 static int css_get_cascade_level(CssDeclaration* decl) {
     if (decl->specificity.important) {
         // Important declarations (reverse origin order)
+        // Note: Inline !important is still author !important but with inline_style flag
         switch (decl->origin) {
-            case CSS_ORIGIN_USER_AGENT: return 7;
-            case CSS_ORIGIN_USER: return 6;
-            case CSS_ORIGIN_AUTHOR: return 5;
-            case CSS_ORIGIN_ANIMATION: return 4; // Animations don't have !important
-            case CSS_ORIGIN_TRANSITION: return 4; // Transitions don't have !important
+            case CSS_ORIGIN_USER_AGENT: return 8;
+            case CSS_ORIGIN_USER: return 7;
+            case CSS_ORIGIN_AUTHOR: return 6;
+            case CSS_ORIGIN_ANIMATION: return 5; // Animations don't typically have !important
+            case CSS_ORIGIN_TRANSITION: return 5; // Transitions don't have !important
         }
     } else {
         // Normal declarations
+        // CSS Cascade Order:
+        // 1. User-agent normal
+        // 2. User normal
+        // 3. Author normal (stylesheet)
+        // 4. Inline styles (author origin with inline_style=1)
+        // 5. Animations/Transitions
+        
+        // Check for inline styles first (part of author origin but higher priority)
+        if (decl->origin == CSS_ORIGIN_AUTHOR && decl->specificity.inline_style) {
+            return 4; // Inline styles
+        }
+        
         switch (decl->origin) {
             case CSS_ORIGIN_USER_AGENT: return 1;
             case CSS_ORIGIN_USER: return 2;
             case CSS_ORIGIN_AUTHOR: return 3;
-            case CSS_ORIGIN_ANIMATION: return 4;
-            case CSS_ORIGIN_TRANSITION: return 4;
+            case CSS_ORIGIN_ANIMATION: return 5;
+            case CSS_ORIGIN_TRANSITION: return 5;
         }
     }
     return 3; // Default to author normal

@@ -2,6 +2,7 @@
 #include "dom_element.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
+#include "css_parser.hpp"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/stringbuf.h"
@@ -266,9 +267,27 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                 ElementReader reader(element->native_element);
                 element->id = reader.get_attr_string("id");
             } else if (strcmp(name, "class") == 0) {
-                // Parse class attribute - for now just trigger class cache refresh
-                // TODO: Properly parse space-separated classes
-                dom_element_add_class(element, value);
+                // Parse space-separated classes
+                // First, clear existing classes
+                element->class_count = 0;
+                element->class_names = nullptr;
+                
+                // Parse and add each class
+                if (value && strlen(value) > 0) {
+                    char* class_copy = (char*)arena_alloc(element->doc->arena, strlen(value) + 1);
+                    if (class_copy) {
+                        strcpy(class_copy, value);
+                        
+                        // Split by spaces and add each class
+                        char* token = strtok(class_copy, " \t\n\r");
+                        while (token) {
+                            if (strlen(token) > 0) {
+                                dom_element_add_class(element, token);
+                            }
+                            token = strtok(nullptr, " \t\n\r");
+                        }
+                    }
+                }
             } else if (strcmp(name, "style") == 0) {
                 // Parse and apply inline styles
                 dom_element_apply_inline_style(element, value);
@@ -557,19 +576,38 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
             value_len--;
         }
 
-        // Parse the property using css_parse_property
-        CssDeclaration* decl = css_parse_property(prop_name, prop_value, element->doc->pool);
-        if (decl) {
-            // Set inline style specificity (1,0,0,0)
-            decl->specificity.inline_style = 1;
-            decl->specificity.ids = 0;
-            decl->specificity.classes = 0;
-            decl->specificity.elements = 0;
-            decl->specificity.important = false;
+        // Parse the property using the proper CSS tokenizer and parser
+        // Format the declaration string for parsing
+        size_t decl_str_len = strlen(prop_name) + strlen(prop_value) + 3; // "name: value"
+        char* decl_str = (char*)arena_alloc(element->doc->arena, decl_str_len);
+        if (decl_str) {
+            snprintf(decl_str, decl_str_len, "%s:%s", prop_name, prop_value);
+            
+            // Tokenize the declaration
+            size_t token_count = 0;
+            CssToken* tokens = css_tokenize(decl_str, strlen(decl_str), element->doc->pool, &token_count);
+            
+            if (tokens && token_count > 0) {
+                int pos = 0;
+                CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, element->doc->pool);
+                
+                if (decl) {
+                    // Set origin to author (inline styles are author origin)
+                    decl->origin = CSS_ORIGIN_AUTHOR;
+                    
+                    // Set inline style specificity (1,0,0,0)
+                    decl->specificity.inline_style = 1;
+                    decl->specificity.ids = 0;
+                    decl->specificity.classes = 0;
+                    decl->specificity.elements = 0;
+                    decl->specificity.important = false;
 
-            // Apply to element
-            if (dom_element_apply_declaration(element, decl)) {
-                applied_count++;
+                    // Apply to element
+                    bool applied = dom_element_apply_declaration(element, decl);
+                    if (applied) {
+                        applied_count++;
+                    }
+                }
             }
         }
 

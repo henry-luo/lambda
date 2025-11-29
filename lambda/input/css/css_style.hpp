@@ -1172,24 +1172,6 @@ bool css_parse_length(const char* value_str, CssLength* length);
  */
 bool css_parse_color(const char* value_str, CssColor* color);
 
-/**
- * Parse a keyword value
- * @param value_str Value string
- * @param property_id Property ID (for context-sensitive keywords)
- * @param keyword Output keyword structure
- * @return true if successfully parsed, false otherwise
- */
-bool css_parse_keyword(const char* value_str, CssPropertyId property_id, CssKeyword* keyword);
-
-/**
- * Parse a function value
- * @param value_str Value string (e.g., "calc(100% - 10px)")
- * @param function Output function structure
- * @param pool Memory pool for allocations
- * @return true if successfully parsed, false otherwise
- */
-bool css_parse_function_string(const char* value_str, CssFunction* function, Pool* pool);
-
 // ============================================================================
 // Debugging and Utility Functions
 // ============================================================================
@@ -1290,12 +1272,6 @@ const char* css_property_name_from_id(CssPropertyId id);
 CssValueType css_property_get_expected_type(CssPropertyId id);
 bool css_property_validate_value(CssPropertyId id, CssValue* value);
 bool css_property_validate_value_from_string(CssPropertyId property_id,
-                                            const char* value_str,
-                                            void** parsed_value,
-                                            Pool* pool);
-
-// Property parsing functions
-CssDeclaration* css_parse_property(const char* name, const char* value, Pool* pool);
-void css_property_free(CssDeclaration* property);
+    const char* value_str, void** parsed_value, Pool* pool);
 
 #endif // CSS_STYLE_H
