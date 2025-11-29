@@ -4,6 +4,7 @@
 #include "view.hpp"
 #include "font_face.h"
 #include "../lib/log.h"
+#include "../lib/font_config.h"
 
 /* Explicit strdup declaration for compatibility */
 extern char *strdup(const char *s);
@@ -25,33 +26,31 @@ uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
 }
 
-char* load_font_path(FcConfig *font_config, const char* font_name) {
-    // search for font
-    FcPattern *pattern = FcNameParse((const FcChar8 *)font_name);
-    FcConfigSubstitute(font_config, pattern, FcMatchPattern);
-    FcDefaultSubstitute(pattern);
+char* load_font_path(FontDatabase *font_db, const char* font_name) {
+    if (!font_db || !font_name) {
+        log_warn("Invalid parameters: font_db=%p, font_name=%p", font_db, font_name);
+        return NULL;
+    }
 
-    FcResult result;  FcChar8 *file = NULL;  char *path = NULL;
-    FcPattern *match = FcFontMatch(font_config, pattern, &result);
-    if (!match) {
+    // Simple font lookup by family name - find any font in the family
+    ArrayList* matches = font_database_find_all_matches(font_db, font_name);
+    if (!matches || matches->length == 0) {
         if (font_log) {
             clog_warn(font_log, "Font not found: %s", font_name);
         } else {
             log_warn("Font not found: %s", font_name);
         }
+        if (matches) arraylist_free(matches);
+        return NULL;
     }
-    else {
-        // get font file path
-        if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch) {
-            log_debug("Failed to get font file path: %s", font_name);
-        } else {
-            log_debug("Found font '%s' at: %s", font_name, file);
-            path = strdup((const char *)file);  // need to strdup, as file will be destroyed by FcPatternDestroy later
-        }
-    }
-    if (match) FcPatternDestroy(match);
-    if (pattern) FcPatternDestroy(pattern);
-    return path;
+
+    // Just take the first match for now - could be enhanced to prefer normal weight/style
+    FontEntry* font = (FontEntry*)matches->data[0];
+    char* result = strdup(font->file_path);
+    
+    log_debug("Found font '%s' at: %s", font_name, font->file_path);
+    arraylist_free(matches);
+    return result;
 }
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size) {
@@ -77,7 +76,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
     }
 
     FT_Face face = NULL;
-    char* font_path = load_font_path(uicon->font_config, font_name);
+    char* font_path = load_font_path(uicon->font_db, font_name);
     if (font_path) {
         // load the font
         log_font_loading_attempt(font_name, font_path);
@@ -108,36 +107,94 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
     }
     strbuf_free(name_and_size);
     // units_per_EM is the font design size, and does not change with font pixel size
-    log_info("Font loaded: %s, height:%f, ascend:%f, descend:%f, em size: %f",
-        face->family_name, face->size->metrics.height / 64.0,
-        face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0, face->units_per_EM / 64.0);
+    if (face) {
+        log_info("Font loaded: %s, height:%f, ascend:%f, descend:%f, em size: %f",
+            face->family_name, face->size->metrics.height / 64.0,
+            face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0, face->units_per_EM / 64.0);
+    } else {
+        log_error("Failed to load font: %s", font_name);
+    }
     return face;
 }
 
 FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
-    StrBuf* name;
-    name = strbuf_create(font_name);
     log_debug("load_styled_font: font_name='%s', font_weight=%d, CSS_VALUE_BOLD=%d",
         font_name, font_style->font_weight, CSS_VALUE_BOLD);
+    
+    // Use FontDatabaseCriteria to find font with specific weight and style
+    FontDatabaseCriteria criteria;
+    memset(&criteria, 0, sizeof(criteria));
+    strncpy(criteria.family_name, font_name, sizeof(criteria.family_name) - 1);
+    
+    // Convert CSS weight to font weight
     if (font_style->font_weight == CSS_VALUE_BOLD) {
-        if (font_style->font_style == CSS_VALUE_ITALIC) {
-            strbuf_append_str(name, ":bolditalic");
-        } else {
-            strbuf_append_str(name, ":bold");
-        }
-    }
-    else if (font_style->font_style == CSS_VALUE_ITALIC) {
-        strbuf_append_str(name, ":italic");
-    }
-    FT_Face face = load_font_face(uicon, name->str, font_style->font_size);
-    if (face) {
-        log_info("Loading styled font: %s, ascd: %f, desc: %f, em size: %f, font height: %f",
-            name->str, face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0,
-            face->units_per_EM / 64.0, face->size->metrics.height / 64.0);
+        criteria.weight = 700;  // Bold
     } else {
-        log_error("Failed to load styled font: %s", name->str);
+        criteria.weight = 400;  // Normal
     }
-    strbuf_free(name);
+    
+    // Convert CSS style to font style
+    if (font_style->font_style == CSS_VALUE_ITALIC) {
+        criteria.style = FONT_STYLE_ITALIC;
+    } else {
+        criteria.style = FONT_STYLE_NORMAL;
+    }
+    
+    // Try to find a font matching the criteria
+    FontDatabaseResult result = font_database_find_best_match(uicon->font_db, &criteria);
+    FT_Face face = NULL;
+    
+    if (result.font && result.font->file_path) {
+        FontEntry* font = result.font;
+        // Create cache key for this specific font file and size
+        StrBuf* cache_key = strbuf_create(font->file_path);
+        strbuf_append_str(cache_key, ":");
+        strbuf_append_int(cache_key, (int)font_style->font_size);
+        
+        // Initialize fontface map if needed
+        if (uicon->fontface_map == NULL) {
+            uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
+                fontface_hash, fontface_compare, NULL, NULL);
+        }
+        
+        // Check cache first
+        if (uicon->fontface_map) {
+            FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
+            FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
+            if (entry) {
+                log_debug("Fontface loaded from cache: %s", cache_key->str);
+                strbuf_free(cache_key);
+                return entry->face;
+            }
+        }
+        
+        // Load the font file
+        if (FT_New_Face(uicon->ft_library, font->file_path, 0, &face) == 0) {
+            FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+            
+            // Cache the loaded font
+            if (uicon->fontface_map) {
+                char* name = (char*)malloc(cache_key->length + 1);
+                memcpy(name, cache_key->str, cache_key->length);
+                name[cache_key->length] = '\0';
+                FontfaceEntry new_entry = {.name=name, .face=face};
+                hashmap_set(uicon->fontface_map, &new_entry);
+            }
+            
+            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s), ascd: %f, desc: %f, em size: %f, font height: %f",
+                font_name, font->family_name, font->weight, 
+                font_style_to_string(font->style),
+                face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0,
+                face->units_per_EM / 64.0, face->size->metrics.height / 64.0);
+        } else {
+            log_error("Failed to load font face for: %s (found font: %s)", font_name, font->file_path);
+        }
+        
+        strbuf_free(cache_key);
+    } else {
+        log_error("Failed to find styled font: %s (weight: %d, style: %d)", font_name, criteria.weight, criteria.style);
+    }
+    
     return face;
 }
 
@@ -188,8 +245,34 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     if (!fbox->ft_face) {
         fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
     }
+    
+    // If font loading failed, try fallback fonts
     if (!fbox->ft_face) {
-        log_error("Failed to setup font: %s", family_to_load);
+        log_warn("Font '%s' not found, trying fallbacks...", family_to_load);
+        
+        // Try some common fallback fonts
+        const char* fallbacks[] = {
+            "Helvetica",        // Common on macOS
+            "SF Pro Display",   // New macOS default
+            "Arial Unicode MS", // Available on most systems
+            "DejaVu Sans",      // Common on Linux
+            "Times New Roman",  // Serif fallback
+            "AppleSDGothicNeo", // We know this one exists from our scan
+            NULL
+        };
+        
+        for (int i = 0; fallbacks[i] && !fbox->ft_face; i++) {
+            log_debug("Trying fallback font: %s", fallbacks[i]);
+            fbox->ft_face = load_styled_font(uicon, fallbacks[i], fprop);
+            if (fbox->ft_face) {
+                log_info("Using fallback font: %s for requested font: %s", fallbacks[i], family_to_load);
+                break;
+            }
+        }
+    }
+    
+    if (!fbox->ft_face) {
+        log_error("Failed to setup font: %s (and all fallbacks)", family_to_load);
         return;
     }
 

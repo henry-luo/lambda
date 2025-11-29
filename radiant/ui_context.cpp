@@ -3,11 +3,14 @@
 #include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
 
 #include "../lib/log.h"
+#include "../lib/font_config.h"
+#include "../lib/mempool.h"
+#include "../lib/arena.h"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
-char* load_font_path(FcConfig *font_config, const char* font_name);
+char* load_font_path(FontDatabase *font_db, const char* font_name);
 void scroll_config_init(int pixel_ratio);
 
 char *fallback_fonts[] = {
@@ -67,12 +70,17 @@ int ui_context_init(UiContext* uicon, bool headless) {
     } else {
         log_debug("LCD filter enabled for sub-pixel rendering");
     }
-    // init Fontconfig
-    uicon->font_config = FcInitLoadConfigAndFonts();
-    if (!uicon->font_config) {
-        fprintf(stderr, "Failed to initialize Fontconfig\n");
+    // init font database - create memory pools for font system
+    Pool* font_pool = pool_create();
+    Arena* font_arena = arena_create(font_pool, 1024 * 1024, 8 * 1024 * 1024);  // 1MB initial, 8MB max
+    uicon->font_db = font_database_create(font_pool, font_arena);
+    if (!uicon->font_db) {
+        fprintf(stderr, "Failed to initialize font database\n");
         return EXIT_FAILURE;
     }
+    
+    // Scan system fonts
+    font_database_scan(uicon->font_db);
 
     if (headless) {
         // Headless mode: no window creation
@@ -118,7 +126,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
     // init ThorVG engine
     tvg_engine_init(TVG_ENGINE_SW, 1);
     // load font for tvg to render text later
-    char* font_path = load_font_path(uicon->font_config, "Arial");
+    char* font_path = load_font_path(uicon->font_db, "Arial");
     if (font_path) {
         tvg_font_load(font_path);  free(font_path);
     }
@@ -154,7 +162,7 @@ void ui_context_cleanup(UiContext* uicon) {
     log_debug("cleaning up font resources");
     fontface_cleanup(uicon);  // free font cache
     FT_Done_FreeType(uicon->ft_library);
-    FcConfigDestroy(uicon->font_config);
+    font_database_destroy(uicon->font_db);
 
     log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache
