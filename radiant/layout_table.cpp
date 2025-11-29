@@ -39,7 +39,7 @@ ViewTableRow* ViewTable::first_row() {
             }
         }
     }
-    
+
     // Otherwise, look in row groups
     for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
@@ -59,7 +59,7 @@ ViewBlock* ViewTable::first_row_group() {
     if (acts_as_tbody()) {
         return this;
     }
-    
+
     // Otherwise, find first actual row group
     for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
@@ -71,14 +71,14 @@ ViewBlock* ViewTable::first_row_group() {
 
 ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
-    
+
     // First try next sibling in same parent
     for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
         if (sibling->view_type == RDT_VIEW_TABLE_ROW) {
             return (ViewTableRow*)sibling;
         }
     }
-    
+
     // If no more rows in current group, try next row group
     ViewBlock* parent = (ViewBlock*)current->parent;
     if (parent && parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
@@ -91,7 +91,7 @@ ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
             }
         }
     }
-    
+
     return nullptr;
 }
 
@@ -106,7 +106,7 @@ ViewTableRow* ViewTableRowGroup::first_row() {
 
 ViewTableRow* ViewTableRowGroup::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
-    
+
     for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
         if (sibling->view_type == RDT_VIEW_TABLE_ROW) {
             return (ViewTableRow*)sibling;
@@ -126,7 +126,7 @@ ViewTableCell* ViewTableRow::first_cell() {
 
 ViewTableCell* ViewTableRow::next_cell(ViewTableCell* current) {
     if (!current) return nullptr;
-    
+
     for (ViewBlock* sibling = (ViewBlock*)current->next_sibling; sibling; sibling = (ViewBlock*)sibling->next_sibling) {
         if (sibling->view_type == RDT_VIEW_TABLE_CELL) {
             return (ViewTableCell*)sibling;

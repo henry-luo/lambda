@@ -634,43 +634,43 @@ struct ViewTableRowGroup;
 
 typedef struct ViewTable : ViewBlock {
     // Navigation helpers that respect anonymous box flags (CSS 2.1 Section 17.2.1)
-    
+
     // Get first logical row (may be in a row group or directly under table if is_annoy_tbody)
     ViewTableRow* first_row();
-    
+
     // Get first row group (may be the table itself if is_annoy_tbody)
     ViewBlock* first_row_group();
-    
+
     // Iterate all rows across all row groups
     // Usage: for (auto row = table->first_row(); row; row = table->next_row(row))
     ViewTableRow* next_row(ViewTableRow* current);
-    
+
     // Check if table acts as its own tbody
     inline bool acts_as_tbody() { return tb && tb->is_annoy_tbody; }
-    
+
     // Check if table acts as its own row (cells are direct children)
     inline bool acts_as_row() { return tb && tb->is_annoy_tr; }
 } ViewTable;
 
 typedef struct ViewTableRowGroup : ViewBlock {
     // Minimal metadata may be added later (e.g., group kind: thead/tbody/tfoot)
-    
+
     // Get first row in this group
     ViewTableRow* first_row();
-    
+
     // Get next row in this group
     ViewTableRow* next_row(ViewTableRow* current);
 } ViewTableRowGroup;
 
 typedef struct ViewTableRow : ViewBlock {
     // Minimal metadata may be added later (e.g., computed baseline)
-    
+
     // Get first cell in this row
     ViewTableCell* first_cell();
-    
+
     // Get next cell in this row
     ViewTableCell* next_cell(ViewTableCell* current);
-    
+
     // Get parent row group (or table if row is direct child)
     ViewBlock* parent_row_group();
 } ViewTableRow;
