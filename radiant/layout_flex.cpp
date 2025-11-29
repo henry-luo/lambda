@@ -1871,6 +1871,21 @@ void align_content(FlexContainerLayout* flex_layout) {
                  flex_layout->align_content, effective_align, free_space);
     }
 
+    // CRITICAL FIX for wrap-reverse: Invert start/end alignments
+    // For wrap-reverse, the cross-start and cross-end are swapped, so:
+    // - ALIGN_START means start from the cross-end (bottom for row)
+    // - ALIGN_END means start from the cross-start (top for row)
+    // - ALIGN_STRETCH with no free space behaves like ALIGN_START (which becomes ALIGN_END for wrap-reverse)
+    bool is_wrap_reverse = (flex_layout->wrap == WRAP_WRAP_REVERSE);
+    if (is_wrap_reverse) {
+        if (effective_align == ALIGN_START || (effective_align == ALIGN_STRETCH && free_space <= 0)) {
+            effective_align = ALIGN_END;
+        } else if (effective_align == ALIGN_END) {
+            effective_align = ALIGN_START;
+        }
+        // Note: space-* and stretch (with positive free_space) keep their behavior, just with reversed line order
+    }
+
     // CRITICAL FIX: Use align_content value directly - it's now stored as Lexbor constant
     switch (effective_align) {
         case ALIGN_START:
