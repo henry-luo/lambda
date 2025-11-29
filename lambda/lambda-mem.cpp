@@ -36,7 +36,8 @@ void* heap_calloc(size_t size, TypeId type_id) {
 // use this for user content, text data, or any non-structural strings
 String* heap_strcpy(char* src, int len) {
     String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
-    strcpy(str->chars, src);
+    memcpy(str->chars, src, len);  // Safe copy with explicit length
+    str->chars[len] = '\0';        // Explicit null termination
     str->len = len;  str->ref_cnt = 0;
     return str;
 }

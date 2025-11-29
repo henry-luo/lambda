@@ -39,6 +39,7 @@
         "lib/image.c",
         "lib/mime-detect.c",
         "lib/mime-types.c",
+        "lib/font_config.c",
         "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
@@ -201,12 +202,7 @@
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libnghttp2.a",
             "link": "static"
-        },
-        {
-            "name": "zlib",
-            "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
-            "link": "static"
-        },
+        },        
         {
             "name": "rpmalloc",
             "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
@@ -216,37 +212,19 @@
         },
         {
             "name": "zlib",
-            "description": "Compression library for PDF FlateDecode",
+            "description": "Compression library",
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
-        },
-        {
-            "name": "freetype",
-            "include": "/opt/homebrew/opt/freetype/include/freetype2",
-            "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
-            "link": "static"
-        },
-        {
-            "name": "png",
-            "lib": "/opt/homebrew/lib/libpng.a",
-            "link": "static"
-        },
+        },        
         {
             "name": "bzip2",
             "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
             "link": "static"
-        },
+        },        
         {
-            "name": "fontconfig",
-            "description": "FontConfig built without libintl/iconv dependencies",
-            "include": "/opt/homebrew/include/fontconfig",
-            "lib": "/opt/homebrew/lib/libfontconfig_minimal.a",
-            "link": "static"
-        },
-        {
-            "name": "expat",
-            "description": "Needed by FontConfig",
-            "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
+            "name": "freetype",
+            "include": "/opt/homebrew/opt/freetype/include/freetype2",
+            "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
             "link": "static"
         },
         {
@@ -262,6 +240,11 @@
             "lib": "/opt/homebrew/lib/libglfw3.a",
             "link": "static"
         },
+        {
+            "name": "png",
+            "lib": "/opt/homebrew/lib/libpng.a",
+            "link": "static"
+        },        
         {
             "name": "turbojpeg",
             "lib": "/opt/homebrew/lib/libturbojpeg.a",
@@ -681,7 +664,6 @@
             "compiler": "gcc",
             "includes": [
                 "/usr/include/freetype2",
-                "/usr/include/fontconfig",
                 "/usr/include",
                 "/usr/include/libpng16"
             ],
@@ -799,7 +781,6 @@
         "macos": {
             "includes": [
                 "/opt/homebrew/opt/freetype/include/freetype2",
-                "/opt/homebrew/include/fontconfig",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/libpng16"
             ],
@@ -942,6 +923,25 @@
                             "rpmalloc"
                         ],
                         "binary": "test_datetime_gtest.exe"
+                    },
+                    {
+                        "source": "test_font_config_gtest.cpp",
+                        "name": "🔤 Font Configuration Tests (GTest)",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/font_config.c",
+                            "lib/arraylist.c",
+                            "lib/strbuf.c",
+                            "lib/hashmap.c"
+                        ],
+                        "binary": "test_font_config_gtest.exe"
                     },
                     {
                         "source": "test_url_gtest.cpp",
