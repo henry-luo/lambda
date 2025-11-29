@@ -267,9 +267,27 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                 ElementReader reader(element->native_element);
                 element->id = reader.get_attr_string("id");
             } else if (strcmp(name, "class") == 0) {
-                // Parse class attribute - for now just trigger class cache refresh
-                // TODO: Properly parse space-separated classes
-                dom_element_add_class(element, value);
+                // Parse space-separated classes
+                // First, clear existing classes
+                element->class_count = 0;
+                element->class_names = nullptr;
+                
+                // Parse and add each class
+                if (value && strlen(value) > 0) {
+                    char* class_copy = (char*)arena_alloc(element->doc->arena, strlen(value) + 1);
+                    if (class_copy) {
+                        strcpy(class_copy, value);
+                        
+                        // Split by spaces and add each class
+                        char* token = strtok(class_copy, " \t\n\r");
+                        while (token) {
+                            if (strlen(token) > 0) {
+                                dom_element_add_class(element, token);
+                            }
+                            token = strtok(nullptr, " \t\n\r");
+                        }
+                    }
+                }
             } else if (strcmp(name, "style") == 0) {
                 // Parse and apply inline styles
                 dom_element_apply_inline_style(element, value);
