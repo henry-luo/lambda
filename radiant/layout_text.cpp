@@ -63,10 +63,10 @@ void line_break(LayoutContext* lycon) {
             View * vw = view;
             do {
                 view_vertical_align(lycon, vw);
-                if (vw == lycon->elmt->prev_sibling) { break; } // reached the last view in the line
+                if (vw == lycon->view) { break; } // reached the last view in the line
                 vw = vw->next();
             } while (vw);
-            if (vw != lycon->elmt->prev_sibling) { // need to go parent level
+            if (vw != lycon->view) { // need to go parent level
                 view = view->parent;
                 if (view) { view = view->next(); }
                 if (view) goto NEXT_VIEW;
