@@ -597,13 +597,6 @@ typedef struct TableProp {
         TABLE_LAYOUT_FIXED = 1    // Fixed width calculation based on first row/col elements
     } table_layout;
 
-    // Border model and spacing
-    // border_collapse=false => separate borders, apply border-spacing gaps
-    // border_collapse=true  => collapsed borders, no gaps between cells
-    bool border_collapse;
-    float border_spacing_h; // horizontal spacing between columns (px)
-    float border_spacing_v; // vertical spacing between rows (px)
-
     // Caption positioning
     enum {
         CAPTION_SIDE_TOP = 0,     // Caption appears above the table (default)
@@ -616,30 +609,73 @@ typedef struct TableProp {
         EMPTY_CELLS_HIDE = 1      // Hide borders and backgrounds of empty cells
     } empty_cells;
 
+    // Border model and spacing
+    float border_spacing_h; // horizontal spacing between columns (px)
+    float border_spacing_v; // vertical spacing between rows (px)
     // Fixed layout height distribution
     int fixed_row_height;   // Height per row for table-layout:fixed with explicit height (0=auto)
+    // border_collapse=false => separate borders, apply border-spacing gaps
+    // border_collapse=true  => collapsed borders, no gaps between cells
+    bool border_collapse;
+    uint8_t is_annoy_tbody:1;    // whether this element is doubled as an anonymous tbody
+    uint8_t is_annoy_tr:1;       // whether this element is doubled as an anonymous tr
+    uint8_t is_annoy_td:1;       // whether this element is doubled as an anonymous td
+    uint8_t is_annoy_colgroup:1; // whether this element is doubled as an anonymous colgroup
+
 } TableProp;
 
 // Table-specific lightweight subclasses (no additional fields yet)
 // These keep table concerns out of the base ViewBlock while preserving layout/render compatibility.
+
+// Forward declarations for table navigation
+struct ViewTableRow;
+struct ViewTableCell;
+struct ViewTableRowGroup;
+
 typedef struct ViewTable : ViewBlock {
+    // Navigation helpers that respect anonymous box flags (CSS 2.1 Section 17.2.1)
+    
+    // Get first logical row (may be in a row group or directly under table if is_annoy_tbody)
+    ViewTableRow* first_row();
+    
+    // Get first row group (may be the table itself if is_annoy_tbody)
+    ViewBlock* first_row_group();
+    
+    // Iterate all rows across all row groups
+    // Usage: for (auto row = table->first_row(); row; row = table->next_row(row))
+    ViewTableRow* next_row(ViewTableRow* current);
+    
+    // Check if table acts as its own tbody
+    inline bool acts_as_tbody() { return tb && tb->is_annoy_tbody; }
+    
+    // Check if table acts as its own row (cells are direct children)
+    inline bool acts_as_row() { return tb && tb->is_annoy_tr; }
 } ViewTable;
 
 typedef struct ViewTableRowGroup : ViewBlock {
     // Minimal metadata may be added later (e.g., group kind: thead/tbody/tfoot)
+    
+    // Get first row in this group
+    ViewTableRow* first_row();
+    
+    // Get next row in this group
+    ViewTableRow* next_row(ViewTableRow* current);
 } ViewTableRowGroup;
 
 typedef struct ViewTableRow : ViewBlock {
     // Minimal metadata may be added later (e.g., computed baseline)
+    
+    // Get first cell in this row
+    ViewTableCell* first_cell();
+    
+    // Get next cell in this row
+    ViewTableCell* next_cell(ViewTableCell* current);
+    
+    // Get parent row group (or table if row is direct child)
+    ViewBlock* parent_row_group();
 } ViewTableRow;
 
 struct TableCellProp {
-// Cell spanning metadata
-    int col_span;  // Number of columns this cell spans (default: 1)
-    int row_span;  // Number of rows this cell spans (default: 1)
-    int col_index; // Starting column index (computed during layout)
-    int row_index; // Starting row index (computed during layout)
-
     // Vertical alignment
     enum {
         CELL_VALIGN_TOP = 0,
@@ -647,6 +683,15 @@ struct TableCellProp {
         CELL_VALIGN_BOTTOM = 2,
         CELL_VALIGN_BASELINE = 3
     } vertical_align;
+
+    // Cell spanning metadata
+    int col_span;  // Number of columns this cell spans (default: 1)
+    int row_span;  // Number of rows this cell spans (default: 1)
+    int col_index; // Starting column index (computed during layout)
+    int row_index; // Starting row index (computed during layout)
+    uint8_t is_annoy_tr:1;       // whether this element is doubled as an anonymous tr
+    uint8_t is_annoy_td:1;       // whether this element is doubled as an anonymous td
+    uint8_t is_annoy_colgroup:1; // whether this element is doubled as an anonymous colgroup
 };
 
 typedef struct ViewTableCell : ViewBlock {
