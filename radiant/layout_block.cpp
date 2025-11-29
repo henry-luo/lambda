@@ -163,6 +163,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("Setting up flex container for %s", block->node_name());
                 layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node_name());
+                // Flex layout handles its own height - skip finalize_block_flow
+                lycon->parent = block->parent_view();
+                return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s", block->node_name());
