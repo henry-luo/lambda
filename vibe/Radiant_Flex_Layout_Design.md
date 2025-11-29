@@ -13,17 +13,17 @@ The Radiant layout engine implements CSS Flexbox according to the W3C CSS Flexib
 Radiant uses a **unified DOM/View tree** where DOM nodes and View objects share the same inheritance hierarchy. This eliminates the need for separate parallel trees and reduces memory overhead.
 
 ```
-                      DomNode (base)
-                          │
-                          ├── DomElement (extends DomNode)
-                          │       │
-                          │       └── ViewGroup (extends DomElement)
-                          │               │
-                          │               ├── ViewSpan (inline elements)
-                          │               │
-                          │               └── ViewBlock (block elements)
-                          │
-                          └── DomText (text nodes)
+	  DomNode (base)
+		  │
+		  ├── DomElement (extends DomNode)
+		  │       │
+		  │       └── ViewGroup (extends DomElement)
+		  │               │
+		  │               ├── ViewSpan (inline elements)
+		  │               │
+		  │               └── ViewBlock (block elements)
+		  │
+		  └── DomText (text nodes)
 ```
 
 **Key Benefits:**
@@ -32,7 +32,34 @@ Radiant uses a **unified DOM/View tree** where DOM nodes and View objects share 
 - Children/siblings work for both DOM traversal and View iteration
 - Reference to parent works uniformly
 
-### 1.2 Key Type Definitions
+### 1.2 View Coordinates and Box Model
+
+View bounds are defined by four floats:
+```cpp
+float x, y, width, height;
+// (x, y) relative to the BORDER box of parent block
+// (width, height) forms the BORDER box of current block
+```
+
+**Key Points:**
+- Positions are **relative to parent's border box**, not content box
+- Dimensions represent the **border box** (includes padding and border, excludes margin)
+- Moving a parent automatically moves all children visually
+- Enables efficient hit-testing by walking the parent chain
+
+**Coordinate Conversion:** When absolute (viewport-relative) coordinates are needed (e.g., for rendering or JSON output), the engine traverses up the parent chain, accumulating offsets:
+
+```cpp
+float abs_x = view->x, abs_y = view->y;
+ViewGroup* parent = view->parent_view();
+while (parent) {
+    abs_x += parent->x;
+    abs_y += parent->y;
+    parent = parent->parent_view();
+}
+```
+
+### 1.3 Key Type Definitions
 
 | Type | Purpose |
 |------|---------|
@@ -42,7 +69,7 @@ Radiant uses a **unified DOM/View tree** where DOM nodes and View objects share 
 | `ViewSpan` | Inline-level box; extends `ViewGroup` |
 | `ViewBlock` | Block-level box; extends `ViewSpan` |
 
-### 1.3 View Type Enumeration
+### 1.4 View Type Enumeration
 
 ```cpp
 enum ViewType {
@@ -183,14 +210,14 @@ struct MeasurementCacheEntry {
 
 ## 3. Multi-Pass Layout Algorithm
 
-The flex layout uses a **two-pass algorithm** with a nested sub-pass for content layout.
+The flex layout uses a **two-pass algorithm** with nested content layout.
 
 ### 3.1 Pass Overview
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  PASS 1: Measurement + View Creation                    │
-│  - Create lightweight Views for flex items              │
+│  PASS 1: Measurement + View Initialization              │
+│  - Initialize Views for flex items                      │
 │  - Measure intrinsic content sizes                      │
 │  - Cache measurements for later use                     │
 └─────────────────────────────────────────────────────────┘
@@ -201,14 +228,15 @@ The flex layout uses a **two-pass algorithm** with a nested sub-pass for content
 │  - Run 9-phase flex layout algorithm                    │
 │  - Position and size all flex items                     │
 │  - Handle wrapping, alignment, gaps                     │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│  SUB-PASS 2: Content Layout (per flex item)             │
+│                                                         │
+│  SUB-PASS 2a: Content Layout (per flex item)            │
 │  - Layout nested content within each flex item          │
 │  - Handle nested flex containers recursively            │
 │  - Apply text layout, images, etc.                      │
+│                                                         │
+│  SUB-PASS 2b: Baseline Repositioning                    │
+│  - Recalculate baselines with actual child dimensions   │
+│  - Reposition baseline-aligned items                    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -371,11 +399,12 @@ Based on `align-items` / `align-self`:
 - `flex-start`: Item at cross start
 - `flex-end`: Item at cross end
 - `center`: Item centered
-- `stretch`: Item stretched to container cross size
-- `baseline`: Items aligned by text baseline
+- `stretch`: Item stretched to line cross size (respects min/max constraints)
+- `baseline`: Items aligned by baseline (initial positioning, refined in Pass 3)
 
 Also handles:
 - `margin: auto` on cross axis
+- `wrap-reverse` alignment inversion
 
 **Values Computed:**
 - `item->y` or `item->x` (cross axis position)
@@ -431,57 +460,43 @@ After the flex algorithm positions items, each item's content is laid out.
 
 ---
 
+## 5.1 Sub-Pass 2b: Baseline Repositioning
+
+**Function:** `reposition_baseline_items()`
+
+**Purpose:** After nested content is laid out, baselines can be correctly calculated for items with children (e.g., nested flex containers).
+
+**Algorithm:**
+1. For each line, recalculate `max_baseline` using `find_max_baseline()`
+2. For baseline-aligned items, compute new cross position: `max_baseline - item_baseline`
+3. Update item position via `set_cross_axis_position()`
+
+**Baseline Calculation** (`calculate_item_baseline()`):
+- If item has text: use `baseline_offset` from text layout
+- If item has children: recursively find first child's baseline, add child's relative `y` position
+- Fallback: synthesize baseline at bottom of margin box (`margin_top + height`)
+
+**Note:** Since coordinates are relative, repositioning the parent doesn't require updating children.
+
+---
+
 ## 6. Axis Helpers
 
 ### Main Axis
 
 ```cpp
-bool is_main_axis_horizontal(FlexProp* flex) {
-    // Considers writing-mode for vertical scripts
-    if (flex->writing_mode == WM_VERTICAL_RL || WM_VERTICAL_LR) {
-        return direction == CSS_VALUE_COLUMN || COLUMN_REVERSE;
-    }
-    return direction == CSS_VALUE_ROW || ROW_REVERSE;
-}
-
-int get_main_axis_size(ViewGroup* item, FlexContainerLayout* flex) {
-    return is_main_axis_horizontal(flex) ? item->width : item->height;
-}
-
-void set_main_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex) {
-    if (is_main_axis_horizontal(flex)) item->width = size;
-    else item->height = size;
-}
-
-void set_main_axis_position(ViewGroup* item, int pos, FlexContainerLayout* flex) {
-    // Include padding/border offset
-    if (is_main_axis_horizontal(flex)) {
-        item->x = pos + padding_left + border_left;
-    } else {
-        item->y = pos + padding_top + border_top;
-    }
-}
+bool is_main_axis_horizontal(FlexProp* flex);
+int get_main_axis_size(ViewGroup* item, FlexContainerLayout* flex);
+void set_main_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex);
+void set_main_axis_position(ViewGroup* item, int pos, FlexContainerLayout* flex);
 ```
 
 ### Cross Axis
 
 ```cpp
-int get_cross_axis_size(ViewGroup* item, FlexContainerLayout* flex) {
-    return is_main_axis_horizontal(flex) ? item->height : item->width;
-}
-
-void set_cross_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex) {
-    if (is_main_axis_horizontal(flex)) item->height = size;
-    else item->width = size;
-}
-
-void set_cross_axis_position(ViewGroup* item, int pos, FlexContainerLayout* flex) {
-    if (is_main_axis_horizontal(flex)) {
-        item->y = pos + padding_top + border_top;
-    } else {
-        item->x = pos + padding_left + border_left;
-    }
-}
+int get_cross_axis_size(ViewGroup* item, FlexContainerLayout* flex);
+void set_cross_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex);
+void set_cross_axis_position(ViewGroup* item, int pos, FlexContainerLayout* flex);
 ```
 
 ---
@@ -528,65 +543,27 @@ void set_cross_axis_position(ViewGroup* item, int pos, FlexContainerLayout* flex
 
 ---
 
-## 8. CSS Value Constants
-
-Flex properties use Lexbor CSS constants directly:
-
-```cpp
-// Direction
-CSS_VALUE_ROW           = 271
-CSS_VALUE_ROW_REVERSE   = 272
-CSS_VALUE_COLUMN        = 273
-CSS_VALUE_COLUMN_REVERSE = 274
-
-// Wrap
-CSS_VALUE_NOWRAP        = 225
-CSS_VALUE_WRAP          = 306
-CSS_VALUE_WRAP_REVERSE  = 307
-
-// Justify Content
-CSS_VALUE_FLEX_START    = 138
-CSS_VALUE_FLEX_END      = 137
-CSS_VALUE_CENTER        = 77
-CSS_VALUE_SPACE_BETWEEN = 279
-CSS_VALUE_SPACE_AROUND  = 278
-CSS_VALUE_SPACE_EVENLY  = 280
-
-// Align Items / Content
-ALIGN_AUTO    = CSS_VALUE_AUTO
-ALIGN_START   = CSS_VALUE_FLEX_START
-ALIGN_END     = CSS_VALUE_FLEX_END
-ALIGN_CENTER  = CSS_VALUE_CENTER
-ALIGN_STRETCH = CSS_VALUE_STRETCH
-ALIGN_BASELINE = CSS_VALUE_BASELINE
-```
-
----
-
-## 9. File Organization
+## 8. File Organization
 
 | File | Purpose |
 |------|---------|
 | `layout_flex.cpp` | Core 9-phase flex algorithm |
-| `layout_flex.hpp` | Function declarations, FlexLineInfo |
+| `layout_flex.hpp` | Function declarations, FlexLineInfo, FlexDirection/FlexWrap/JustifyContent enums |
 | `layout_flex_multipass.cpp` | Multi-pass orchestration, entry point |
 | `layout_flex_measurement.cpp` | Content measurement, caching |
 | `layout_flex_measurement.hpp` | Measurement function declarations |
-| `flex.hpp` | Legacy FlexContainer/FlexItem structs |
 | `view.hpp` | FlexProp, FlexItemProp, View classes |
 | `layout.hpp` | FlexContainerLayout, LayoutContext |
 
 ---
 
-## 10. Known Limitations
+## 9. Known Limitations
 
 1. **Intrinsic Height Estimation**: Currently uses heuristics for element heights; actual font rendering would be more accurate.
 
 2. **Nested Flex Performance**: Deep nesting triggers full recursive layout.
 
-3. **Baseline Alignment**: Currently approximates baseline as 75% of height.
-
-4. **Writing Mode Support**: Vertical writing modes have limited testing.
+3. **Writing Mode Support**: Vertical writing modes have limited testing.
 
 ---
 

@@ -343,7 +343,7 @@ for (int i = 0; i < line->item_count; i++) {
 **Implementation**:
 Created new unified function `collect_and_prepare_flex_items()` that combines:
 1. Content measurement (`measure_flex_child_content()`)
-2. View creation (`create_lightweight_flex_item_view()`)
+2. View preparation (`init_flex_item_view()`)
 3. Flex item collection (filtering, caching, sizing)
 
 **Key Changes**:

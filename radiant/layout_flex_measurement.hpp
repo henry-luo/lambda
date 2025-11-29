@@ -33,26 +33,22 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, struct FlexContainerLayout*
 
 // Enhanced measurement functions for accurate intrinsic sizing
 void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,
-                                   int* min_width, int* max_width, int* height);
+    int* min_width, int* max_width, int* height);
 void measure_block_intrinsic_sizes(LayoutContext* lycon, ViewBlock* block,
-                                   int* min_width, int* max_width,
-                                   int* min_height, int* max_height);
+    int* min_width, int* max_width, int* min_height, int* max_height);
 int layout_block_measure_mode(LayoutContext* lycon, ViewBlock* block, bool constrain_width);
 void measure_text_run(LayoutContext* lycon, const char* text, size_t length,
-                     int* min_width, int* max_width, int* height);
+    int* min_width, int* max_width, int* height);
 
 // Measurement cache functions
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
-void store_in_measurement_cache(DomNode* node, int width, int height,
-                               int content_width, int content_height);
+void store_in_measurement_cache(DomNode* node, int width, int height, int content_width, int content_height);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache();
 
 // Enhanced layout functions that use measured sizes
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);
-ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node);
-void create_flex_item_view_only(LayoutContext* lycon, DomNode* node);
-void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node);
+void init_flex_item_view(LayoutContext* lycon, DomNode* node);
 void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
 void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
-                                    DisplayValue display, MeasurementCacheEntry* cached);
+    DisplayValue display, MeasurementCacheEntry* cached);

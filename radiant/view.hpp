@@ -696,7 +696,6 @@ typedef struct {
 
 // Now include headers that depend on these constants
 #include "event.hpp"
-#include "flex.hpp"
 
 typedef struct {
     GLFWwindow *window;    // current window
