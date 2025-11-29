@@ -170,55 +170,110 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             log_debug("AXIS INIT - cross condition: %s (cross=%.1f)",
                    (flex_layout->cross_axis_size == 0.0f) ? "true" : "false", flex_layout->cross_axis_size);
             if (flex_layout->cross_axis_size == 0.0f) {
-                // ENHANCED: Calculate proper cross-axis size based on content and alignment
+                // ENHANCED: Calculate proper cross-axis size based on flex items
                 int calculated_cross_size = content_height;
 
-                // If container has no explicit height, calculate based on content
+                // If container has no explicit height, calculate based on flex items
                 if (container->height <= 0 || content_height <= 0) {
-                    // IMPROVED: Calculate height based on flex items and their content
-                    int content_based_height = 0;
-
-                    // Estimate height based on flex container type and content
-                    if (flex_layout->wrap == CSS_VALUE_WRAP || flex_layout->wrap == CSS_VALUE_WRAP_REVERSE) {
-                        // For wrapping containers, estimate based on potential multi-line layout
-                        content_based_height = 120; // Allow for wrapped content
-                    } else {
-                        // For non-wrapping containers, use single-line height
-                        content_based_height = 80; // Standard single-line height
+                    // Calculate max height from flex items
+                    int max_item_height = 0;
+                    View* child = container->first_child;
+                    while (child) {
+                        if (child->view_type == RDT_VIEW_BLOCK) {
+                            ViewGroup* item = (ViewGroup*)child->as_element();
+                            if (item) {
+                                int item_height = 0;
+                                // Check for explicit height
+                                if (item->blk && item->blk->given_height > 0) {
+                                    item_height = (int)item->blk->given_height;
+                                } else if (item->height > 0) {
+                                    item_height = item->height;
+                                } else if (item->fi) {
+                                    // Use flex-basis if it's a height value
+                                    if (item->fi->flex_basis >= 0 && !item->fi->flex_basis_is_percent) {
+                                        // For row flex, flex-basis is width, not height
+                                        // Estimate height from content or use minimum
+                                        item_height = 20;  // One line of text minimum
+                                    }
+                                }
+                                // Add padding and border to item height
+                                if (item->bound) {
+                                    item_height += item->bound->padding.top + item->bound->padding.bottom;
+                                    if (item->bound->border) {
+                                        item_height += item->bound->border->width.top + item->bound->border->width.bottom;
+                                    }
+                                }
+                                if (item_height > max_item_height) {
+                                    max_item_height = item_height;
+                                }
+                                log_debug("ROW FLEX: item height = %d, max = %d", item_height, max_item_height);
+                            }
+                        }
+                        child = child->next();
                     }
-
-                    // Adjust for alignment requirements
-                    if (flex_layout->align_items == CSS_VALUE_CENTER) {
-                        content_based_height += 20; // Extra space for centering
-                        log_debug("FLEX_HEIGHT - added centering space, height: %d", content_based_height);
-                    }
-
-                    // For features-like containers (multiple flex items), increase height
-                    // This is a heuristic for complex layouts like sample5's features section
-                    if (content_based_height < 100) {
-                        content_based_height = 150; // Ensure sufficient height for feature cards
-                        log_debug("FLEX_HEIGHT - increased for complex layout: %d", content_based_height);
-                    }
-
-                    calculated_cross_size = content_based_height;
+                    calculated_cross_size = max_item_height > 0 ? max_item_height : 20;  // Minimum fallback
+                    log_debug("ROW FLEX: auto-height calculated as %d from items", calculated_cross_size);
                 } else {
                     // Use existing content height if available
                     calculated_cross_size = content_height;
                 }
 
-                // CRITICAL: Ensure height is never negative or zero
-                if (calculated_cross_size <= 0) {
-                    calculated_cross_size = 100; // Absolute minimum to prevent negative heights
-                    log_debug("FLEX_HEIGHT - applied absolute minimum: %d", calculated_cross_size);
-                }
-
                 flex_layout->cross_axis_size = (float)calculated_cross_size;
-                log_debug("FLEX_HEIGHT - final cross_axis_size: %.1f (was content_height=%d)",
-                       (float)calculated_cross_size, content_height);
+                container->height = calculated_cross_size;
+                log_debug("ROW FLEX: final cross_axis_size: %.1f", (float)calculated_cross_size);
             }
         } else {
             log_debug("AXIS INIT - vertical branch");
-            if (flex_layout->main_axis_size == 0.0f) flex_layout->main_axis_size = (float)content_height;
+            if (flex_layout->main_axis_size == 0.0f) {
+                // For column flex with auto height, calculate height based on flex items
+                if (content_height <= 0) {
+                    // Auto-height column flex: calculate from flex items' intrinsic heights
+                    int total_item_height = 0;
+                    View* child = container->first_child;
+                    while (child) {
+                        if (child->view_type == RDT_VIEW_BLOCK) {
+                            ViewGroup* item = (ViewGroup*)child->as_element();
+                            if (item && item->fi) {
+                                // Use flex-basis if specified, otherwise use intrinsic/explicit height
+                                int item_height = 0;
+                                if (item->fi->flex_basis >= 0 && !item->fi->flex_basis_is_percent) {
+                                    item_height = item->fi->flex_basis;
+                                } else if (item->blk && item->blk->given_height > 0) {
+                                    item_height = (int)item->blk->given_height;
+                                } else if (item->height > 0) {
+                                    item_height = item->height;
+                                } else {
+                                    // Estimate minimum height for content
+                                    item_height = 20;  // Minimum height for one line of text
+                                }
+                                total_item_height += item_height;
+                                log_debug("COLUMN FLEX: item height contribution = %d", item_height);
+                            }
+                        }
+                        child = child->next();
+                    }
+                    // Add gaps between items
+                    int child_count = 0;
+                    child = container->first_child;
+                    while (child) {
+                        if (child->view_type == RDT_VIEW_BLOCK) child_count++;
+                        child = child->next();
+                    }
+                    if (child_count > 1) {
+                        total_item_height += flex_layout->row_gap * (child_count - 1);
+                    }
+                    if (total_item_height > 0) {
+                        flex_layout->main_axis_size = (float)total_item_height;
+                        container->height = total_item_height;
+                        log_debug("COLUMN FLEX: auto-height calculated as %d from items", total_item_height);
+                    } else {
+                        flex_layout->main_axis_size = 100.0f;  // Minimum fallback
+                        log_debug("COLUMN FLEX: using fallback height 100");
+                    }
+                } else {
+                    flex_layout->main_axis_size = (float)content_height;
+                }
+            }
             if (flex_layout->cross_axis_size == 0.0f) flex_layout->cross_axis_size = (float)content_width;
         }
 
@@ -324,8 +379,16 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         if (line_count > 1) {
             total_line_cross += flex_layout->row_gap * (line_count - 1);
         }
-        // Check if container has explicit height
-        bool has_explicit_height = container->blk && container->blk->given_height >= 0;
+        // Check if container has explicit height (given_height > 0 means explicit)
+        // OR if this container is a flex item whose height was set by parent flex
+        bool has_explicit_height = container->blk && container->blk->given_height > 0;
+        if (!has_explicit_height && container->fi && container->height > 0) {
+            // Check if parent set the height via flex sizing
+            if (container->fi->flex_grow > 0 || container->fi->flex_shrink > 0) {
+                has_explicit_height = true;
+                log_debug("Phase 7: Container is a flex item with height set by parent flex");
+            }
+        }
 
         // Update container cross_axis_size to actual content height
         if (total_line_cross > 0) {
@@ -337,6 +400,44 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 container->height = total_line_cross;
             } else {
                 log_debug("Phase 7: Container has explicit height, not updating");
+            }
+        }
+    } else {
+        // Column flex: finalize main_axis_size (height) for auto-height containers
+        int total_line_main = 0;
+        for (int i = 0; i < line_count; i++) {
+            // For column flex, sum up item heights (main sizes)
+            FlexLineInfo* line = &flex_layout->lines[i];
+            for (int j = 0; j < line->item_count; j++) {
+                ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
+                if (item) {
+                    total_line_main += item->height;
+                }
+            }
+            // Add gaps between items
+            if (line->item_count > 1) {
+                total_line_main += flex_layout->row_gap * (line->item_count - 1);
+            }
+        }
+        // Check if container has explicit height (given_height > 0 means explicit)
+        // OR if this container is a flex item whose height was set by parent flex
+        bool has_explicit_height = container->blk && container->blk->given_height > 0;
+        if (!has_explicit_height && container->fi && container->height > 0) {
+            // Check if parent set the height via flex sizing
+            if (container->fi->flex_grow > 0 || container->fi->flex_shrink > 0) {
+                has_explicit_height = true;
+                log_debug("Phase 7: (Column) Container is a flex item with height set by parent flex");
+            }
+        }
+
+        if (total_line_main > 0) {
+            if (!has_explicit_height) {
+                log_debug("Phase 7: (Column) Updating main_axis_size from %.1f to %d (auto-height)",
+                         flex_layout->main_axis_size, total_line_main);
+                flex_layout->main_axis_size = (float)total_line_main;
+                container->height = total_line_main;
+            } else {
+                log_debug("Phase 7: (Column) Container has explicit height, not updating");
             }
         }
     }
