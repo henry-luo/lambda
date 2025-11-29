@@ -149,7 +149,6 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         DomNode *child = nullptr;
         if (block->is_element()) { child = block->first_child; }
         if (child) {
-            lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (block->display.inner == CSS_VALUE_FLOW) {
                 // inline content flow
                 do {
@@ -163,8 +162,6 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("Setting up flex container for %s", block->node_name());
                 layout_flex_content(lycon, block);
                 log_debug("Finished flex container layout for %s", block->node_name());
-                // Flex layout handles its own height - skip finalize_block_flow
-                lycon->parent = block->parent_view();
                 return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
@@ -199,16 +196,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
                         block->display.outer, block->display.inner, block->node_name());
                 layout_table(lycon, block, block->display);
-                // CRITICAL FIX: Reset parent after table layout to ensure subsequent
-                // siblings are parented correctly (they should be children of the
-                // original parent, not children of the table)
-                lycon->parent = block->parent_view();
                 return;
             }
             else {
                 log_debug("unknown display type");
             }
-            lycon->parent = block->parent_view();
         }
         finalize_block_flow(lycon, block, block->display.outer);
     }
@@ -611,7 +603,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->node_name(), display.outer, display.inner);
 
     // Check if this block is a flex item
-    ViewBlock* parent_block = (ViewBlock*)lycon->parent;
+    ViewGroup* parent_block = (ViewGroup*)elmt->parent;
     bool is_flex_item = (parent_block && parent_block->display.inner == CSS_VALUE_FLEX);
 
     if (display.outer != CSS_VALUE_INLINE_BLOCK) {
@@ -642,7 +634,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (block->position && (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED)) {
         layout_abs_block(lycon, elmt, block, &pa_block, &pa_line);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
-        lycon->prev_view = (View*)block;
     } else {
         // layout block content to determine content width and height
         layout_block_content(lycon, elmt, block, &pa_block, &pa_line);
@@ -766,8 +757,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             log_debug("Applying relative positioning");
             layout_relative_positioned(lycon, block);
         }
-
-        lycon->prev_view = (View*)block;
     }
     log_leave();
 }

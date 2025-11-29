@@ -755,12 +755,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
     uintptr_t tag = node->tag();
 
     // Save context
-    ViewGroup* saved_parent = lycon->parent;
-    View* saved_prev = lycon->prev_view;
     DomNode* saved_elmt = lycon->elmt;
-
-    lycon->parent = parent;
-    lycon->prev_view = nullptr;
     lycon->elmt = node;
 
     // Mark node based on display type or HTML tag
@@ -781,7 +776,6 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             lycon->line.right = lycon->line.left + caption_width;
             lycon->line.advance_x = (float)lycon->line.left;
             lycon->line.is_line_start = true;
-            lycon->parent = (ViewGroup*)caption;
 
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
@@ -791,7 +785,6 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             caption->height = (int)lycon->block.advance_y;
             lycon->block = saved_block;
             lycon->line = saved_line;
-            lycon->prev_view = (View*)caption;
         }
     }
     else if (tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT ||
@@ -805,7 +798,6 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewGroup*)group);
             }
-            lycon->prev_view = (View*)group;
         }
     }
     else if (tag == HTM_TAG_TR || display.inner == CSS_VALUE_TABLE_ROW) {
@@ -816,7 +808,6 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             for (; child; child = child->next_sibling) {
                 if (child->is_element()) mark_table_node(lycon, child, (ViewGroup*)row);
             }
-            lycon->prev_view = (View*)row;
         }
     }
     else if (tag == HTM_TAG_TD || tag == HTM_TAG_TH || display.inner == CSS_VALUE_TABLE_CELL) {
@@ -826,13 +817,10 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             lycon->view = (View*)cell;
             dom_node_resolve_style(node, lycon);
             parse_cell_attributes(lycon, node, cell);
-            lycon->prev_view = (View*)cell;
         }
     }
 
     // Restore context
-    lycon->parent = saved_parent;
-    lycon->prev_view = saved_prev;
     lycon->elmt = saved_elmt;
 }
 
@@ -974,8 +962,6 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     // Save layout context to restore later
     Blockbox saved_block = lycon->block;
     Linebox saved_line = lycon->line;
-    ViewGroup* saved_parent = lycon->parent;
-    View* saved_prev = lycon->prev_view;
     DomNode* saved_elmt = lycon->elmt;
 
     // Calculate cell border and padding offsets
@@ -1018,8 +1004,6 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->line.right = content_start_x + content_width;  // Text ends before right padding
     lycon->line.advance_x = content_start_x;   // Start advancing from padding offset
     lycon->line.is_line_start = true;
-    lycon->parent = (ViewGroup*)cell;
-    lycon->prev_view = nullptr;
     lycon->elmt = tcell;
 
     log_debug("Layout cell content - cell=%dx%d, border=(%d,%d), padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
@@ -1046,8 +1030,6 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     // Restore layout context
     lycon->block = saved_block;
     lycon->line = saved_line;
-    lycon->parent = saved_parent;
-    lycon->prev_view = saved_prev;
     lycon->elmt = saved_elmt;
 }
 
@@ -1062,16 +1044,12 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
     // Save current layout context
     Blockbox saved_block = lycon->block;
     Linebox saved_line = lycon->line;
-    ViewGroup* saved_parent = lycon->parent;
-    View* saved_prev = lycon->prev_view;
     DomNode* saved_elmt = lycon->elmt;
     bool saved_measuring = lycon->is_measuring;
     FontBox saved_font = lycon->font; // Save font context
 
     // Set up CSS 2.1 measurement context with infinite width
     lycon->is_measuring = true; // Flag to indicate measurement mode
-    lycon->parent = (ViewGroup*)cell;
-    lycon->prev_view = nullptr;
     lycon->elmt = cell;
 
     // Apply the cell's CSS font properties for accurate measurement
@@ -1163,8 +1141,6 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
     // Restore context
     lycon->block = saved_block;
     lycon->line = saved_line;
-    lycon->parent = saved_parent;
-    lycon->prev_view = saved_prev;
     lycon->elmt = saved_elmt;
     lycon->is_measuring = saved_measuring;
     lycon->font = saved_font; // Restore original font context
@@ -1205,16 +1181,12 @@ static int measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cell)
     // Save current layout context
     Blockbox saved_block = lycon->block;
     Linebox saved_line = lycon->line;
-    ViewGroup* saved_parent = lycon->parent;
-    View* saved_prev = lycon->prev_view;
     DomNode* saved_elmt = lycon->elmt;
     bool saved_measuring = lycon->is_measuring;
     FontBox saved_font = lycon->font; // Save font context
 
     // Set up temporary measurement context
     lycon->is_measuring = true;
-    lycon->parent = (ViewGroup*)cell;
-    lycon->prev_view = nullptr;
     lycon->elmt = cell;
 
     // Apply the cell's CSS font properties for accurate measurement
@@ -1275,8 +1247,6 @@ static int measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cell)
     // Restore context
     lycon->block = saved_block;
     lycon->line = saved_line;
-    lycon->parent = saved_parent;
-    lycon->prev_view = saved_prev;
     lycon->elmt = saved_elmt;
     lycon->is_measuring = saved_measuring;
     lycon->font = saved_font;

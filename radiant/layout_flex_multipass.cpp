@@ -468,11 +468,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
     // Save parent context
     LayoutContext saved_context = *lycon;
-
-    // Set up flex item as a proper containing block
-    lycon->parent = (ViewGroup*)flex_item;
-    lycon->prev_view = NULL;
-
     // Calculate content area dimensions accounting for box model
     int content_width = flex_item->width;
     int content_height = flex_item->height;
@@ -564,9 +559,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         DomNode* child = flex_item->first_child;
         if (child) {
             do {
-                log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->node_name(), lycon->parent);
+                log_debug("*** PASS3 TRACE: Layout child %s of flex item", child->node_name());
                 // Use standard layout flow - this handles all HTML content types
-                // CRITICAL: lycon->parent is set to flex_item, so text Views become children of flex_item
                 layout_flow_node(lycon, child);
                 log_debug("*** PASS3 TRACE: Completed layout of child %s", child->node_name());
                 child = child->next_sibling;

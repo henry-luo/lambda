@@ -89,9 +89,6 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         float container_width = lycon->block.content_width;
         if (container_width <= 0) container_width = 366;  // Default fallback
 
-        // Use the saved context's parent for proper style resolution
-        ViewGroup* saved_parent = lycon->parent;
-
         // Set up block context for measurement
         measure_context.block.content_width = container_width;
         measure_context.block.content_height = -1;  // Unconstrained height
@@ -273,42 +270,6 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     log_debug("Content measurement complete for %s", child->node_name());
 }
 
-// Helper functions for measurement
-ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* child) {
-    // Create truly temporary ViewBlock for measurement without affecting main layout
-    log_debug("*** TEMP_VIEW TRACE: Creating temporary view for measurement of %s", child->node_name());
-
-    // Save current layout context to avoid affecting main layout
-    ViewGroup* saved_parent = lycon->parent;
-    View* saved_prev_view = lycon->prev_view;
-
-    // Temporarily disconnect from layout hierarchy
-    lycon->parent = nullptr;
-    lycon->prev_view = nullptr;
-
-    // Create View that won't be linked to layout hierarchy
-    ViewBlock* temp_view = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, child);
-
-    // Restore layout context immediately
-    lycon->parent = saved_parent;
-    lycon->prev_view = saved_prev_view;
-
-    if (temp_view) {
-        // Initialize with unconstrained dimensions for intrinsic measurement
-        temp_view->width = 0;
-        temp_view->height = 0;
-        // CRITICAL FIX: Do NOT set next_sibling to nullptr!
-        // In the merged DOM/View tree, temp_view IS the actual DOM node,
-        // so modifying next_sibling breaks the DOM sibling chain!
-        // temp_view->next_sibling = nullptr;  // REMOVED - breaks DOM chain
-
-        // CRITICAL: Ensure this View is not linked to any parent
-        temp_view->parent = nullptr;
-        log_debug("*** TEMP_VIEW TRACE: Created isolated temp view %p for %s", temp_view, child->node_name());
-    }
-    return temp_view;
-}
-
 void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height) {
     // Legacy function - redirects to accurate measurement
     int min_w, max_w, h;
@@ -471,13 +432,9 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     // Apply measured sizes if available
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
     log_debug("DEBUG: cached = %p", cached);
-    log_debug("DEBUG: lycon->prev_view = %p", lycon->prev_view);
-    if (lycon->prev_view) {
-        log_debug("DEBUG: lycon->prev_view->type = %d", lycon->prev_view->view_type);
-    }
 
-    if (cached && lycon->prev_view && lycon->prev_view->view_type == RDT_VIEW_BLOCK) {
-        ViewBlock* view = (ViewBlock*)lycon->prev_view;
+    if (cached && node->view_type == RDT_VIEW_BLOCK) {
+        ViewBlock* view = (ViewBlock*)node;
         log_debug("DEBUG: view = %p, node = %p", view, node);
         if (view == node) {
             log_debug("Applying cached measurements to flex item: %dx%d",
@@ -495,7 +452,7 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
             log_debug("DEBUG: Node mismatch - cached for different node");
         }
     } else {
-        log_debug("DEBUG: Failed measurement application - cached=%p, prev_view=%p", cached, lycon->prev_view);
+        log_debug("DEBUG: Failed measurement application - cached=%p, node=%p", cached, node);
     }
 }
 
@@ -522,8 +479,6 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
     log_debug("*** TRACE: init_flex_item_view ENTRY for %s (node=%p)", node->node_name(), node);
-    log_debug("*** TRACE: Current prev_view before creation: %p", lycon->prev_view);
-
     // Get display properties for the element
     DisplayValue display = resolve_display_value(node);
 
@@ -553,8 +508,6 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     block->width = 0;  block->height = 0;
     block->content_width = 0;  block->content_height = 0;
 
-    // CRITICAL FIX: Set prev_view so cached measurements can be applied
-    lycon->prev_view = (View*)block;
     log_debug("init_flex_item_view EXIT for %s (node=%p, created_view=%p)", node->node_name(), node, block);
 }
 

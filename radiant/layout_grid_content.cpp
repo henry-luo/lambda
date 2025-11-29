@@ -13,16 +13,10 @@ extern "C" {
 // Based on successful Phase 3.1 flex layout enhancements
 void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     if (!grid_item) return;
-
     log_debug("Enhanced grid item content layout for %p\n", grid_item);
 
     // Save parent context
     LayoutContext saved_context = *lycon;
-
-    // Set up grid item as a proper containing block
-    lycon->parent = (ViewGroup*)grid_item;
-    lycon->prev_view = NULL;
-
     // Calculate content area dimensions accounting for box model
     int content_width = grid_item->width;
     int content_height = grid_item->height;

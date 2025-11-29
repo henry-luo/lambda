@@ -81,8 +81,6 @@ typedef struct FlexContainerLayout : FlexProp {
 
 typedef struct GridContainerLayout GridContainerLayout;
 typedef struct LayoutContext {
-    ViewGroup* parent;
-    View* prev_view;
     View* view;  // current view
     DomNode* elmt;  // current dom element, used before the view is created
 
