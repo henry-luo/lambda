@@ -352,6 +352,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.content_height = 0;  // Will be calculated based on content
     lycon->block.advance_y = 0;  lycon->block.line_height = -1;
     lycon->block.text_align = CSS_VALUE_LEFT;
+
+    // Set available space to viewport dimensions (width definite, height indefinite for content-sizing)
+    lycon->available_space = AvailableSpace::make_width_definite(lycon->ui_context->window_width);
+
     line_init(lycon, 0, lycon->block.content_width);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
@@ -447,6 +451,9 @@ void reset_styles_resolved(DomDocument* doc) {
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
+
+    // Initialize available space to indefinite (will be set properly during layout)
+    lycon->available_space = AvailableSpace::make_indefinite();
 
     // Clear measurement cache at the start of each layout pass
     // This ensures fresh intrinsic size calculations for each layout

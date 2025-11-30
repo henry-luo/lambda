@@ -16,8 +16,10 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     GridContainerLayout* grid = (GridContainerLayout*)calloc(1, sizeof(GridContainerLayout));
     lycon->grid_container = grid;
+    grid->lycon = lycon;  // Store layout context for intrinsic sizing
     if (container->embed->grid) {
         memcpy(grid, container->embed->grid, sizeof(GridProp));
+        grid->lycon = lycon;  // Restore after memcpy
     } else {
         // Set default values using enum names that align with Lexbor constants
         grid->justify_content = CSS_VALUE_START;

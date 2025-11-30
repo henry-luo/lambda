@@ -531,6 +531,15 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
     lycon->block.content_width = content_width;  lycon->block.content_height = content_height;
 
+    // Update available space to match content dimensions
+    // Preserve intrinsic sizing mode if already set (for nested measurement)
+    if (!lycon->available_space.is_intrinsic_sizing()) {
+        lycon->available_space.width = AvailableSize::make_definite(content_width);
+        if (content_height > 0) {
+            lycon->available_space.height = AvailableSize::make_definite(content_height);
+        }
+    }
+
     if (block->bound) {
         block->width = content_width + block->bound->padding.left + block->bound->padding.right +
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);

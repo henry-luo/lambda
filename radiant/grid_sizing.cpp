@@ -189,7 +189,7 @@ int calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_i
         }
 
         if (spans_track) {
-            IntrinsicSizes item_sizes = calculate_grid_item_intrinsic_sizes(item, is_row);
+            IntrinsicSizes item_sizes = calculate_grid_item_intrinsic_sizes(grid_layout->lycon, item, is_row);
 
             int item_size = 0;
             switch (size_type) {

@@ -102,8 +102,8 @@ void layout_grid_item_content_for_sizing(LayoutContext* lycon, ViewBlock* grid_i
 
     // Calculate intrinsic sizes for measurement phase
     // This is consistent with the flex layout approach
-    calculate_grid_item_intrinsic_sizes(grid_item, true);  // Row axis
-    calculate_grid_item_intrinsic_sizes(grid_item, false); // Column axis
+    calculate_grid_item_intrinsic_sizes(lycon, grid_item, true);  // Row axis
+    calculate_grid_item_intrinsic_sizes(lycon, grid_item, false); // Column axis
 
     // Set preliminary dimensions based on intrinsic sizes
     if (grid_item->width <= 0) {
