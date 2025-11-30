@@ -21,7 +21,7 @@ Radiant currently has **three separate implementations** of intrinsic sizing:
 ### Issues with Current Design
 
 1. **Code Duplication**: ~400 lines of measurement code duplicated across layout modes
-2. **Inconsistent Accuracy**: 
+2. **Inconsistent Accuracy**:
    - Table uses accurate FreeType font metrics with kerning
    - Flex uses rough estimates (10px per character for min-content)
    - Grid uses hardcoded placeholder values (50px width, 20px height)
@@ -63,14 +63,14 @@ public:
         MinContent,    // Measuring min-content (break at every opportunity)
         MaxContent,    // Measuring max-content (never wrap)
     };
-    
+
     static AvailableSize make_definite(CSSPixels);
     static AvailableSize make_indefinite();
     static AvailableSize make_min_content();
     static AvailableSize make_max_content();
-    
-    bool is_intrinsic_sizing_constraint() const { 
-        return is_min_content() || is_max_content(); 
+
+    bool is_intrinsic_sizing_constraint() const {
+        return is_min_content() || is_max_content();
     }
 };
 
@@ -94,19 +94,19 @@ CSSPixels FormattingContext::calculate_min_content_width(Box const& box) const {
 
     // Create isolated state that doesn't affect main layout
     LayoutState throwaway_state;
-    
+
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.width_constraint = SizeConstraint::MinContent;
     box_state.set_indefinite_content_width();
-    
+
     // Create fresh formatting context for measurement
     auto context = create_independent_formatting_context(
         throwaway_state, LayoutMode::IntrinsicSizing, box);
-    
+
     context->run(AvailableSpace(
-        AvailableSize::make_min_content(), 
+        AvailableSize::make_min_content(),
         available_height));
-    
+
     auto result = context->automatic_content_width();
     cache.emplace(result);
     return result;
@@ -179,7 +179,7 @@ enum class AvailableSizeType {
 struct AvailableSize {
     AvailableSizeType type;
     float value;  // Only valid for Definite
-    
+
     static AvailableSize make_definite(float px) {
         return { AvailableSizeType::Definite, px };
     }
@@ -192,13 +192,13 @@ struct AvailableSize {
     static AvailableSize make_max_content() {
         return { AvailableSizeType::MaxContent, 0 };
     }
-    
+
     bool is_definite() const { return type == AvailableSizeType::Definite; }
     bool is_indefinite() const { return type == AvailableSizeType::Indefinite; }
     bool is_min_content() const { return type == AvailableSizeType::MinContent; }
     bool is_max_content() const { return type == AvailableSizeType::MaxContent; }
     bool is_intrinsic() const { return is_min_content() || is_max_content(); }
-    
+
     float to_px_or_zero() const {
         return is_definite() ? value : 0;
     }
@@ -207,7 +207,7 @@ struct AvailableSize {
 struct AvailableSpace {
     AvailableSize width;
     AvailableSize height;
-    
+
     static AvailableSpace make_definite(float w, float h) {
         return { AvailableSize::make_definite(w), AvailableSize::make_definite(h) };
     }
@@ -231,7 +231,7 @@ struct AvailableSpace {
 struct IntrinsicSizeCache {
     int min_content_width = -1;   // -1 means not computed
     int max_content_width = -1;
-    
+
     // Height depends on width, so we cache per-width
     // Using simple array for common widths, or hashmap for general case
     struct HeightCacheEntry {
@@ -241,13 +241,13 @@ struct IntrinsicSizeCache {
     };
     HeightCacheEntry height_cache[4];  // Small fixed cache
     int height_cache_count = 0;
-    
+
     void reset() {
         min_content_width = -1;
         max_content_width = -1;
         height_cache_count = 0;
     }
-    
+
     int get_min_height_for_width(int width) const;
     int get_max_height_for_width(int width) const;
     void set_height_for_width(int width, int min_h, int max_h);
@@ -309,8 +309,8 @@ struct TextIntrinsicWidths {
     int min_content;  // Longest word
     int max_content;  // Full text width
 };
-TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon, 
-                                                   const char* text, 
+TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
+                                                   const char* text,
                                                    size_t length);
 
 // Measure element intrinsic widths (recursive)
@@ -327,32 +327,32 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 // Text Measurement (Single Implementation)
 // ============================================================================
 
-TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon, 
-                                                   const char* text, 
+TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
+                                                   const char* text,
                                                    size_t length) {
     TextIntrinsicWidths result = {0, 0};
-    
+
     if (!lycon->font.ft_face || !text || length == 0) {
         return result;
     }
-    
+
     float total_width = 0.0f;
     float current_word = 0.0f;
     float longest_word = 0.0f;
-    
+
     FT_UInt prev_glyph = 0;
     bool has_kerning = FT_HAS_KERNING(lycon->font.ft_face);
     const unsigned char* str = (const unsigned char*)text;
-    
+
     for (size_t i = 0; i < length; i++) {
         unsigned char ch = str[i];
-        
+
         // Word boundary detection
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
             prev_glyph = 0;
-            
+
             // Add space width to total
             float space_width = 4.0f;  // Default
             if (lycon->font.style && lycon->font.style->space_width > 0) {
@@ -361,11 +361,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             total_width += space_width;
             continue;
         }
-        
+
         // Get glyph metrics
         FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, ch);
         if (!glyph_index) continue;
-        
+
         // Apply kerning
         float kerning = 0.0f;
         if (has_kerning && prev_glyph) {
@@ -374,25 +374,25 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                           FT_KERNING_DEFAULT, &kern);
             kerning = kern.x / 64.0f;
         }
-        
+
         // Load glyph and get advance
         FT_Load_Glyph(lycon->font.ft_face, glyph_index, FT_LOAD_DEFAULT);
         float advance = lycon->font.ft_face->glyph->advance.x / 64.0f + kerning;
-        
+
         current_word += advance;
         total_width += advance;
         prev_glyph = glyph_index;
     }
-    
+
     // Check final word
     longest_word = fmax(longest_word, current_word);
-    
+
     result.min_content = (int)ceilf(longest_word);
     result.max_content = (int)roundf(total_width);
-    
-    log_debug("measure_text_intrinsic_widths: min=%d, max=%d", 
+
+    log_debug("measure_text_intrinsic_widths: min=%d, max=%d",
               result.min_content, result.max_content);
-    
+
     return result;
 }
 
@@ -402,16 +402,16 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
 int calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
     if (!node) return 0;
-    
+
     // 1. Check cache
     // TODO: Implement per-node cache lookup
-    
+
     // 2. Check for natural width (replaced elements like images)
     if (node->is_element()) {
         ViewBlock* view = (ViewBlock*)node;
         // TODO: Check for natural_width on replaced elements
     }
-    
+
     // 3. Measure based on node type
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
@@ -422,18 +422,18 @@ int calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
         }
         return 0;
     }
-    
+
     // 4. For elements, recursively measure children
     DomElement* element = node->as_element();
     if (!element) return 0;
-    
+
     int min_width = 0;
-    
+
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         int child_min = calculate_min_content_width(lycon, child);
         min_width = max(min_width, child_min);
     }
-    
+
     // 5. Add padding and border
     ViewBlock* view = (ViewBlock*)element;
     if (view->bound) {
@@ -442,20 +442,20 @@ int calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
             min_width += view->bound->border->width.left + view->bound->border->width.right;
         }
     }
-    
+
     // 6. Cache result
     // TODO: Store in per-node cache
-    
+
     return min_width;
 }
 
 int calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
     if (!node) return 0;
-    
+
     // Similar structure to min_content_width
     // but uses max_content from text measurement
     // and sums children for inline context
-    
+
     if (node->is_text()) {
         const char* text = (const char*)node->text_data();
         if (text) {
@@ -465,17 +465,17 @@ int calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
         }
         return 0;
     }
-    
+
     DomElement* element = node->as_element();
     if (!element) return 0;
-    
+
     int max_width = 0;
-    
+
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         int child_max = calculate_max_content_width(lycon, child);
         max_width = max(max_width, child_max);
     }
-    
+
     ViewBlock* view = (ViewBlock*)element;
     if (view->bound) {
         max_width += view->bound->padding.left + view->bound->padding.right;
@@ -483,7 +483,7 @@ int calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
             max_width += view->bound->border->width.left + view->bound->border->width.right;
         }
     }
-    
+
     return max_width;
 }
 
@@ -494,37 +494,37 @@ int calculate_min_content_height(LayoutContext* lycon, DomNode* node, int width)
 
 int calculate_max_content_height(LayoutContext* lycon, DomNode* node, int width) {
     if (!node) return 0;
-    
+
     // TODO: Check cache for this specific width
-    
+
     // For accurate height, we need to actually lay out content at the given width
     // This requires a measurement pass with throwaway state
-    
+
     // Save current context
     LayoutContext saved = *lycon;
-    
+
     // Set up measurement context
     lycon->is_measuring = true;
     lycon->block.content_width = width;
     lycon->block.advance_y = 0;
-    
+
     // TODO: Perform layout in measurement mode
     // layout_flow_node(lycon, node);
-    
+
     int height = (int)lycon->block.advance_y;
-    
+
     // Restore context
     *lycon = saved;
-    
+
     // TODO: Cache result for this width
-    
+
     return height;
 }
 
 int calculate_fit_content_width(LayoutContext* lycon, DomNode* node, int available_width) {
     int min_content = calculate_min_content_width(lycon, node);
     int max_content = calculate_max_content_width(lycon, node);
-    
+
     // fit-content = clamp(min-content, available, max-content)
     return min(max_content, max(min_content, available_width));
 }
@@ -558,17 +558,17 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
 
 void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_layout) {
     if (!item || !item->fi) return;
-    
+
     // Skip if already calculated
     if (item->fi->has_intrinsic_width && item->fi->has_intrinsic_height) return;
-    
+
     // Use unified measurement API
     LayoutContext* lycon = /* get from context */;
-    
+
     item->fi->intrinsic_width.min_content = calculate_min_content_width(lycon, (DomNode*)item);
     item->fi->intrinsic_width.max_content = calculate_max_content_width(lycon, (DomNode*)item);
     item->fi->has_intrinsic_width = 1;
-    
+
     // Height depends on width - use the computed width or flex basis
     int width = item->width > 0 ? item->width : item->fi->intrinsic_width.max_content;
     item->fi->intrinsic_height.min_content = calculate_min_content_height(lycon, (DomNode*)item, width);
@@ -585,12 +585,12 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(ViewBlock* item, bool is_row_axis) {
     IntrinsicSizes sizes = {0, 0};
     if (!item) return sizes;
-    
+
     LayoutContext* lycon = /* get from context */;
-    
+
     if (is_row_axis) {
         // For row axis, we're measuring height
-        int width = item->width > 0 ? item->width : 
+        int width = item->width > 0 ? item->width :
                     calculate_fit_content_width(lycon, (DomNode*)item, 200);
         sizes.min_content = calculate_min_content_height(lycon, (DomNode*)item, width);
         sizes.max_content = calculate_max_content_height(lycon, (DomNode*)item, width);
@@ -599,7 +599,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(ViewBlock* item, bool is_row_
         sizes.min_content = calculate_min_content_width(lycon, (DomNode*)item);
         sizes.max_content = calculate_max_content_width(lycon, (DomNode*)item);
     }
-    
+
     return sizes;
 }
 ```
@@ -624,7 +624,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(ViewBlock* item, bool is_row_
 - [ ] Verify table layout tests still pass
 - [ ] Delete old measurement code
 
-### Step 4: Migrate Flex Layout (Medium Risk)  
+### Step 4: Migrate Flex Layout (Medium Risk)
 - [ ] Simplify `calculate_item_intrinsic_sizes()` to use unified API
 - [ ] Remove duplicate `measure_text_run()` implementation
 - [ ] Verify flex layout tests still pass
@@ -689,4 +689,3 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(ViewBlock* item, bool is_row_
 - Ladybird source: `Libraries/LibWeb/Layout/FormattingContext.cpp`
 - Ladybird source: `Libraries/LibWeb/Layout/FlexFormattingContext.cpp`
 - Ladybird source: `Libraries/LibWeb/Layout/TableFormattingContext.cpp`
-

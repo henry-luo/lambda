@@ -203,7 +203,7 @@
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libnghttp2.a",
             "link": "static"
-        },        
+        },
         {
             "name": "rpmalloc",
             "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
@@ -216,12 +216,12 @@
             "description": "Compression library",
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
-        },        
+        },
         {
             "name": "bzip2",
             "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
             "link": "static"
-        },        
+        },
         {
             "name": "freetype",
             "include": "/opt/homebrew/opt/freetype/include/freetype2",
@@ -245,7 +245,7 @@
             "name": "png",
             "lib": "/opt/homebrew/lib/libpng.a",
             "link": "static"
-        },        
+        },
         {
             "name": "turbojpeg",
             "lib": "/opt/homebrew/lib/libturbojpeg.a",
