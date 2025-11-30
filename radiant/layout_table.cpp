@@ -237,6 +237,47 @@ static int get_explicit_css_height(LayoutContext* lycon, ViewBlock* element) {
     return (resolved > 0) ? (int)resolved : 0;
 }
 
+// Check if a table cell is empty (has no content)
+// CSS 2.1 Section 17.6.1: A cell is empty if it contains no in-flow content
+// (text nodes with only whitespace are considered empty, but replaced elements are content)
+static bool is_cell_empty(ViewTableCell* cell) {
+    DomNode* child = ((DomElement*)cell)->first_child;
+    while (child) {
+        if (child->is_element()) {
+            // Element child = has content (not empty)
+            return false;
+        }
+        if (child->is_text()) {
+            // Check if text is only whitespace
+            const char* text = ((DomText*)child)->text;
+            if (text) {
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        // Non-whitespace content found
+                        return false;
+                    }
+                }
+            }
+        }
+        child = child->next_sibling;
+    }
+    return true;  // No visible content found
+}
+
+// Check if a table row or row group has visibility: collapse
+// CSS 2.1 Section 17.5.5: Rows with visibility: collapse are removed from layout
+// but still contribute to column width calculations
+static bool is_visibility_collapse(ViewBlock* element) {
+    if (!element) return false;
+
+    // Check the InlineProp for visibility
+    DomElement* dom_elem = element->as_element();
+    if (dom_elem && dom_elem->in_line) {
+        return dom_elem->in_line->visibility == VIS_COLLAPSE;
+    }
+    return false;
+}
+
 // Measure content height from cell's children
 static int measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     int content_height = 0;
@@ -301,6 +342,8 @@ static int calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, Vie
 
 // Apply vertical alignment to cell children
 static void apply_cell_vertical_align(ViewTableCell* tcell, int cell_height, int content_height) {
+    log_debug("apply_cell_vertical_align: valign=%d, cell_height=%d, content_height=%d",
+           tcell->td->vertical_align, cell_height, content_height);
     if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_TOP) {
         return; // No adjustment needed
     }
@@ -321,6 +364,13 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, int cell_height, int
     if (y_adjustment > 0) {
         for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
             child->y += y_adjustment;
+            // Also update TextRect for ViewText nodes
+            if (child->view_type == RDT_VIEW_TEXT) {
+                ViewText* text = (ViewText*)child;
+                if (text->rect) {
+                    text->rect->y += y_adjustment;
+                }
+            }
         }
     }
 }
@@ -359,6 +409,18 @@ static int process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, ViewTa
                                int* col_widths, int* col_x_positions, int columns) {
     ViewBlock* cell = (ViewBlock*)tcell;
 
+    // Check if this empty cell should have its border/background hidden
+    // CSS 2.1 Section 17.6.1: In separated borders model, empty cells can have
+    // their borders and backgrounds hidden based on empty-cells property
+    if (tcell->td->is_empty && !table->tb->border_collapse &&
+        table->tb->empty_cells == TableProp::EMPTY_CELLS_HIDE) {
+        tcell->td->hide_empty = 1;
+        log_debug("Cell at col=%d row=%d: hide_empty=1 (empty + empty-cells:hide)",
+            tcell->td->col_index, tcell->td->row_index);
+    } else {
+        tcell->td->hide_empty = 0;
+    }
+
     // Position cell relative to row
     cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
     cell->y = 0;
@@ -395,12 +457,21 @@ static int process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, ViewTa
 }
 
 // Apply fixed row height to row and all its cells
-static void apply_fixed_row_height(ViewTableRow* trow, int fixed_height) {
+// Forward declaration
+static int measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell);
+static void apply_cell_vertical_align(ViewTableCell* tcell, int cell_height, int content_height);
+
+static void apply_fixed_row_height(LayoutContext* lycon, ViewTableRow* trow, int fixed_height) {
     trow->height = fixed_height;
     log_debug("Applied fixed layout row height: %dpx", fixed_height);
 
     for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
-        cell->height = fixed_height;
+        if (cell->height < fixed_height) {
+            cell->height = fixed_height;
+            // Re-apply vertical alignment with correct cell height
+            int content_height = measure_cell_content_height(lycon, cell);
+            apply_cell_vertical_align(cell, fixed_height, content_height);
+        }
     }
 }
 
@@ -419,6 +490,7 @@ struct TableMetadata {
     int* col_max_widths;        // Maximum column widths (future)
     int* row_heights;           // Row heights for rowspan calculation
     int* row_y_positions;       // Row Y positions for rowspan calculation
+    bool* row_collapsed;        // Visibility: collapse tracking per row
 
     TableMetadata(int cols, int rows)
         : column_count(cols), row_count(rows) {
@@ -428,6 +500,7 @@ struct TableMetadata {
         col_max_widths = (int*)calloc(cols, sizeof(int));  // Preferred content widths (CSS PCW)
         row_heights = (int*)calloc(rows, sizeof(int));
         row_y_positions = (int*)calloc(rows, sizeof(int));
+        row_collapsed = (bool*)calloc(rows, sizeof(bool));
     }
 
     ~TableMetadata() {
@@ -437,6 +510,7 @@ struct TableMetadata {
         free(col_max_widths);
         free(row_heights);
         free(row_y_positions);
+        free(row_collapsed);
     }
 
     // Grid accessor
@@ -517,6 +591,42 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                     log_debug("Table border-spacing: %.2fpx (numeric, both h and v)", spacing);
                 }
             }
+
+            // Read caption-side property (CSS 2.1 Section 17.4.1)
+            CssDeclaration* caption_decl = style_tree_get_declaration(
+                dom_elem->specified_style,
+                CSS_PROPERTY_CAPTION_SIDE);
+
+            if (caption_decl && caption_decl->value) {
+                CssValue* val = (CssValue*)caption_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                    if (val->data.keyword == CSS_VALUE_BOTTOM) {
+                        table->tb->caption_side = TableProp::CAPTION_SIDE_BOTTOM;
+                        log_debug("Table caption-side: bottom");
+                    } else {
+                        table->tb->caption_side = TableProp::CAPTION_SIDE_TOP;
+                        log_debug("Table caption-side: top");
+                    }
+                }
+            }
+
+            // Read empty-cells property (CSS 2.1 Section 17.6.1.1)
+            CssDeclaration* empty_cells_decl = style_tree_get_declaration(
+                dom_elem->specified_style,
+                CSS_PROPERTY_EMPTY_CELLS);
+
+            if (empty_cells_decl && empty_cells_decl->value) {
+                CssValue* val = (CssValue*)empty_cells_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                    if (val->data.keyword == CSS_VALUE_HIDE) {
+                        table->tb->empty_cells = TableProp::EMPTY_CELLS_HIDE;
+                        log_debug("Table empty-cells: hide");
+                    } else {
+                        table->tb->empty_cells = TableProp::EMPTY_CELLS_SHOW;
+                        log_debug("Table empty-cells: show");
+                    }
+                }
+            }
         }
     }
 
@@ -579,6 +689,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     cell->td->row_span = 1;
     cell->td->col_index = -1;
     cell->td->row_index = -1;
+    cell->td->is_empty = is_cell_empty(cell) ? 1 : 0;  // Check if cell has no content
     // CSS 2.1: Default vertical-align for table cells is 'middle'
     cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
     if (!cellNode->is_element()) return;
@@ -615,6 +726,15 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
             CssDeclaration* valign_decl = style_tree_get_declaration(
                 dom_elem->specified_style,
                 CSS_PROPERTY_VERTICAL_ALIGN);
+
+            log_debug("parse_cell_attributes: element=%s, specified_style=%p, valign_decl=%p",
+                      cellNode->node_name(), (void*)dom_elem->specified_style, (void*)valign_decl);
+            if (valign_decl && valign_decl->value) {
+                log_debug("valign_decl->value: type=%d, keyword=%d (TOP=%d, MIDDLE=%d, BOTTOM=%d)",
+                          valign_decl->value->type,
+                          valign_decl->value->type == CSS_VALUE_TYPE_KEYWORD ? valign_decl->value->data.keyword : -1,
+                          CSS_VALUE_TOP, CSS_VALUE_MIDDLE, CSS_VALUE_BOTTOM);
+            }
 
             if (valign_decl && valign_decl->value && valign_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum valign_keyword = valign_decl->value->data.keyword;
@@ -765,6 +885,23 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
         if (caption) {
             lycon->view = (View*)caption;
             dom_node_resolve_style(node, lycon);  // Resolve caption styles
+
+            // Read caption-side from caption element's style and store in table
+            DomElement* dom_elem = static_cast<DomElement*>(node);
+            if (dom_elem->specified_style && parent && parent->view_type == RDT_VIEW_TABLE) {
+                ViewTable* table = (ViewTable*)parent;
+                if (table->tb) {
+                    CssDeclaration* caption_decl = style_tree_get_declaration(
+                        dom_elem->specified_style, CSS_PROPERTY_CAPTION_SIDE);
+                    if (caption_decl && caption_decl->value) {
+                        CssValue* val = caption_decl->value;
+                        if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword == CSS_VALUE_BOTTOM) {
+                            table->tb->caption_side = TableProp::CAPTION_SIDE_BOTTOM;
+                            log_debug("Caption side: bottom (from caption element)");
+                        }
+                    }
+                }
+            }
 
             Blockbox saved_block = lycon->block;
             Linebox saved_line = lycon->line;
@@ -1322,6 +1459,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     int rows = 0;
 
     // Iterate all rows using navigation helpers
+    // CSS 2.1 §17.5.5: Collapsed rows still contribute to column width calculation
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
         rows++;
         int row_cells = 0;
@@ -1336,9 +1474,16 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
     // Create metadata structure
     TableMetadata* meta = new TableMetadata(columns, rows);
 
-    // Second pass: assign column indices and measure widths
+    // Second pass: assign column indices, measure widths, and track collapsed rows
     int current_row = 0;
     for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row)) {
+        // Track visibility: collapse for this row
+        // CSS 2.1 §17.5.5: Rows with visibility: collapse don't contribute to height
+        if (is_visibility_collapse((ViewBlock*)row)) {
+            meta->row_collapsed[current_row] = true;
+            log_debug("Row %d has visibility: collapse", current_row);
+        }
+
         int col = 0;
         for (ViewTableCell* cell = row->first_cell(); cell; cell = row->next_cell(cell)) {
             // Find next available column
@@ -1384,9 +1529,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
         if (child->tag() == HTM_TAG_CAPTION) {
             caption = child;
-            // Caption should have proper dimensions from content layout
+            // Caption height = content height + padding + border
             if (caption->height > 0) {
-                caption_height = caption->height + 8; // Add margin
+                float padding_v = 0;
+                float border_v = 0;
+                if (caption->bound) {
+                    padding_v = caption->bound->padding.top + caption->bound->padding.bottom;
+                    if (caption->bound->border) {
+                        border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
+                    }
+                }
+                caption_height = (int)(caption->height + padding_v + border_v);
+                log_debug("Caption height calculation: content=%.1f, padding_v=%.1f, border_v=%.1f, total=%d",
+                    caption->height, padding_v, border_v, caption_height);
             }
             break;
         }
@@ -2138,8 +2293,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("CSS 2.1: Column %d starts at x=%dpx", i-1, col_x_positions[i-1]);
     }
 
-    // Start Y position after caption, with table padding and top border-spacing
-    int current_y = caption_height;
+    // Start Y position - only include caption height if caption is at top
+    int current_y = 0;
+    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
+        current_y = caption_height;
+    }
 
     // Add table border (content starts inside the border)
     int table_border_top = 0;
@@ -2163,11 +2321,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("Added top border-spacing: +%dpx", table->tb->border_spacing_v);
     }
 
-    // Position caption if it exists
-    if (caption) {
+    // Position caption at top if caption-side is top (default)
+    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
         caption->x = 0;
         caption->y = 0;
         caption->width = table_width;
+        log_debug("Positioned caption at top: y=0");
     }
 
     // Global row index for tracking row positions across all row groups
@@ -2225,6 +2384,43 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (row->view_type == RDT_VIEW_TABLE_ROW) {
                     current_row_index++;
                     bool is_last_row = (current_row_index == row_count);
+
+                    // CSS 2.1 §17.5.5: Check for visibility: collapse
+                    // Collapsed rows don't render and don't contribute to height
+                    bool is_collapsed = (global_row_index < meta->row_count &&
+                                         meta->row_collapsed[global_row_index]);
+
+                    if (is_collapsed) {
+                        // Position row but with zero height
+                        row->x = 0;
+                        row->y = current_y - group_start_y;
+                        row->width = child->width;
+                        row->height = 0;
+
+                        // Still process cells for column width contribution
+                        // but don't let them affect row height
+                        ViewTableRow* trow = (ViewTableRow*)row;
+                        for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                            // Position cell but with zero height
+                            ViewBlock* cell = (ViewBlock*)tcell;
+                            cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
+                            cell->y = 0;
+                            cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
+                            cell->height = 0;
+                        }
+
+                        // Track collapsed row
+                        if (global_row_index < meta->row_count) {
+                            meta->row_y_positions[global_row_index] = current_y;
+                            meta->row_heights[global_row_index] = 0;
+                            log_debug("Collapsed row %d: y=%d, height=0", global_row_index, current_y);
+                        }
+                        global_row_index++;
+
+                        // No height contribution, no spacing after collapsed row
+                        continue;
+                    }
+
                     // Position row relative to row group
                     row->x = 0;
                     row->y = current_y - group_start_y; // Relative to row group
@@ -2242,11 +2438,43 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         }
                     }
 
+                    // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
+                    int explicit_row_height = 0;
+                    if (row->is_element()) {
+                        DomElement* row_elem = row->as_element();
+                        if (row_elem->specified_style) {
+                            CssDeclaration* height_decl = style_tree_get_declaration(
+                                row_elem->specified_style, CSS_PROPERTY_HEIGHT);
+                            if (height_decl && height_decl->value) {
+                                float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                                if (resolved_height > 0) {
+                                    explicit_row_height = (int)resolved_height;
+                                    log_debug("Row has explicit CSS height: %dpx", explicit_row_height);
+                                }
+                            }
+                        }
+                    }
+
+                    // Use the larger of content height and explicit CSS height
+                    if (explicit_row_height > row_height) {
+                        row_height = explicit_row_height;
+                        log_debug("Using explicit row height %dpx instead of content height", row_height);
+                    }
+
                     // Apply fixed layout height if specified
                     if (table->tb->fixed_row_height > 0) {
-                        apply_fixed_row_height(trow, table->tb->fixed_row_height);
+                        apply_fixed_row_height(lycon, trow, table->tb->fixed_row_height);
                     } else {
                         row->height = row_height;
+                        // Also apply height to all cells in the row
+                        for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                            if (tcell->height < row_height) {
+                                tcell->height = row_height;
+                                // Re-apply vertical alignment with correct cell height
+                                int content_height = measure_cell_content_height(lycon, tcell);
+                                apply_cell_vertical_align(tcell, (int)tcell->height, content_height);
+                            }
+                        }
                     }
 
                     // Track row height and Y position for rowspan calculation
@@ -2278,6 +2506,38 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Handle direct table rows (relative to table)
             ViewTableRow* trow = (ViewTableRow*)child;
 
+            // CSS 2.1 §17.5.5: Check for visibility: collapse
+            bool is_collapsed = (global_row_index < meta->row_count &&
+                                 meta->row_collapsed[global_row_index]);
+
+            if (is_collapsed) {
+                // Position row but with zero height
+                trow->x = 0;
+                trow->y = current_y;
+                trow->width = table_width;
+                trow->height = 0;
+
+                // Still process cells for column width but with zero height
+                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                    ViewBlock* cell = (ViewBlock*)tcell;
+                    cell->x = col_x_positions[tcell->td->col_index] - col_x_positions[0];
+                    cell->y = 0;
+                    cell->width = calculate_cell_width_from_columns(tcell, col_widths, columns);
+                    cell->height = 0;
+                }
+
+                // Track collapsed row
+                if (global_row_index < meta->row_count) {
+                    meta->row_y_positions[global_row_index] = current_y;
+                    meta->row_heights[global_row_index] = 0;
+                    log_debug("Collapsed direct row %d: y=%d, height=0", global_row_index, current_y);
+                }
+                global_row_index++;
+
+                // No height contribution, no spacing after collapsed row
+                continue;
+            }
+
             trow->x = 0;  trow->y = current_y; // Relative to table
             trow->width = table_width;
             log_debug("Direct row positioned at x=%d, y=%d (relative to table), width=%d",
@@ -2291,11 +2551,43 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
 
+            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
+            int explicit_row_height = 0;
+            if (trow->is_element()) {
+                DomElement* row_elem = trow->as_element();
+                if (row_elem->specified_style) {
+                    CssDeclaration* height_decl = style_tree_get_declaration(
+                        row_elem->specified_style, CSS_PROPERTY_HEIGHT);
+                    if (height_decl && height_decl->value) {
+                        float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                        if (resolved_height > 0) {
+                            explicit_row_height = (int)resolved_height;
+                            log_debug("Direct row has explicit CSS height: %dpx", explicit_row_height);
+                        }
+                    }
+                }
+            }
+
+            // Use the larger of content height and explicit CSS height
+            if (explicit_row_height > row_height) {
+                row_height = explicit_row_height;
+                log_debug("Using explicit row height %dpx instead of content height", row_height);
+            }
+
             // Apply fixed layout height if specified
             if (table->tb->fixed_row_height > 0) {
-                apply_fixed_row_height(trow, table->tb->fixed_row_height);
+                apply_fixed_row_height(lycon, trow, table->tb->fixed_row_height);
             } else {
                 trow->height = row_height;
+                // Also apply height to all cells in the row
+                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                    if (tcell->height < row_height) {
+                        tcell->height = row_height;
+                        // Re-apply vertical alignment with correct cell height
+                        int content_height = measure_cell_content_height(lycon, tcell);
+                        apply_cell_vertical_align(tcell, (int)tcell->height, content_height);
+                    }
+                }
             }
 
             // Track row height and Y position for rowspan calculation
@@ -2393,6 +2685,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Bottom spacing around the table (top was already added)
         final_table_height += table->tb->border_spacing_v;
         log_debug("Added table edge bottom vertical spacing: +%dpx", table->tb->border_spacing_v);
+    }
+
+    // Position caption at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
+    if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
+        caption->x = 0;
+        caption->y = final_table_height;  // Position after all rows
+        caption->width = table_width;
+        final_table_height += caption_height;  // Add caption height to table
+        log_debug("Positioned caption at bottom: y=%d, caption_height=%d", (int)caption->y, caption_height);
     }
 
     // CRITICAL FIX: Add table border to final dimensions

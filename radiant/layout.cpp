@@ -302,6 +302,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
+        case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
             layout_block(lycon, node, display);
             break;
         case CSS_VALUE_INLINE:
@@ -311,7 +312,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             log_debug("skipping element of display: none");
             break;
         default:
-            log_debug("unknown display type");
+            log_debug("unknown display type: outer=%d", display.outer);
             // skip the element
         }
     }
