@@ -315,327 +315,414 @@ bool element_has_positioning(ViewBlock* block) {
             block->position->position == CSS_VALUE_ABSOLUTE ||
             block->position->position == CSS_VALUE_FIXED);
 }
+
 /**
  * Check if an element has float properties
  */
 bool element_has_float(ViewBlock* block) {
     return block && block->position &&
-           (block->position->float_prop == 47 ||   // CSS_VALUE_LEFT
-            block->position->float_prop == 48);    // CSS_VALUE_RIGHT
+           (block->position->float_prop == CSS_VALUE_LEFT ||
+            block->position->float_prop == CSS_VALUE_RIGHT);
+}
+
+// ============================================================================
+// Enhanced Float Layout Implementation
+// ============================================================================
+
+/**
+ * Check if a float's margin box intersects with a vertical range
+ */
+static bool float_intersects_y_range(FloatBox* box, float y_top, float y_bottom) {
+    return !(box->margin_box_bottom <= y_top || box->margin_box_top >= y_bottom);
 }
 
 /**
- * Float Layout Implementation (Phase 4)
+ * Create a new float context for a containing block
  */
+FloatContext* float_context_create(ViewBlock* container) {
+    if (!container) {
+        log_error("float_context_create called with NULL container");
+        return NULL;
+    }
+
+    FloatContext* ctx = (FloatContext*)calloc(1, sizeof(FloatContext));
+    if (!ctx) {
+        log_error("Failed to allocate FloatContext");
+        return NULL;
+    }
+
+    // Initialize float lists
+    ctx->left.head = ctx->left.tail = NULL;
+    ctx->left.count = 0;
+    ctx->right.head = ctx->right.tail = NULL;
+    ctx->right.count = 0;
+
+    // Calculate content area bounds
+    ctx->content_left = 0;
+    ctx->content_top = 0;
+    ctx->content_right = container->width;
+    ctx->content_bottom = container->height;
+
+    // Adjust for border and padding
+    if (container->bound) {
+        if (container->bound->border) {
+            ctx->content_left += container->bound->border->width.left;
+            ctx->content_top += container->bound->border->width.top;
+            ctx->content_right -= container->bound->border->width.right;
+            ctx->content_bottom -= container->bound->border->width.bottom;
+        }
+        ctx->content_left += container->bound->padding.left;
+        ctx->content_top += container->bound->padding.top;
+        ctx->content_right -= container->bound->padding.right;
+        ctx->content_bottom -= container->bound->padding.bottom;
+    }
+
+    ctx->container = container;
+
+    log_debug("Created float context: content area (%.1f, %.1f) to (%.1f, %.1f)",
+              ctx->content_left, ctx->content_top, ctx->content_right, ctx->content_bottom);
+
+    return ctx;
+}
+
+/**
+ * Destroy a float context and free all associated memory
+ */
+void float_context_destroy(FloatContext* ctx) {
+    if (!ctx) return;
+
+    // Free left floats
+    FloatBox* box = ctx->left.head;
+    while (box) {
+        FloatBox* next = box->next;
+        free(box);
+        box = next;
+    }
+
+    // Free right floats
+    box = ctx->right.head;
+    while (box) {
+        FloatBox* next = box->next;
+        free(box);
+        box = next;
+    }
+
+    free(ctx);
+}
+
+/**
+ * Add a float element to the context (after it has been positioned)
+ */
+void float_context_add_float(FloatContext* ctx, ViewBlock* element) {
+    if (!ctx || !element || !element->position) return;
+
+    FloatBox* box = (FloatBox*)calloc(1, sizeof(FloatBox));
+    if (!box) {
+        log_error("Failed to allocate FloatBox");
+        return;
+    }
+
+    box->element = element;
+    box->x = element->x;
+    box->y = element->y;
+    box->width = element->width;
+    box->height = element->height;
+    box->float_side = element->position->float_prop;
+    box->next = NULL;
+
+    // Calculate margin box bounds (relative to container)
+    float margin_left = element->bound ? element->bound->margin.left : 0;
+    float margin_right = element->bound ? element->bound->margin.right : 0;
+    float margin_top = element->bound ? element->bound->margin.top : 0;
+    float margin_bottom = element->bound ? element->bound->margin.bottom : 0;
+
+    // Convert to container-relative coordinates
+    float container_x = ctx->container ? ctx->container->x : 0;
+    float container_y = ctx->container ? ctx->container->y : 0;
+
+    box->margin_box_left = element->x - container_x - margin_left;
+    box->margin_box_top = element->y - container_y - margin_top;
+    box->margin_box_right = element->x - container_x + element->width + margin_right;
+    box->margin_box_bottom = element->y - container_y + element->height + margin_bottom;
+
+    log_debug("Adding float: side=%d, margin_box=(%.1f, %.1f, %.1f, %.1f)",
+              box->float_side, box->margin_box_left, box->margin_box_top,
+              box->margin_box_right, box->margin_box_bottom);
+
+    // Add to appropriate list
+    FloatSideData* side = (box->float_side == CSS_VALUE_LEFT) ? &ctx->left : &ctx->right;
+
+    if (!side->head) {
+        side->head = side->tail = box;
+    } else {
+        side->tail->next = box;
+        side->tail = box;
+    }
+    side->count++;
+
+    log_debug("Float added to %s side, count now: %d",
+              box->float_side == CSS_VALUE_LEFT ? "left" : "right", side->count);
+}
+
+/**
+ * Get available horizontal space at a given Y coordinate
+ * Returns the left and right boundaries of available space.
+ */
+FloatAvailableSpace float_space_at_y(FloatContext* ctx, float y, float line_height) {
+    FloatAvailableSpace space;
+    space.left = ctx->content_left;
+    space.right = ctx->content_right;
+
+    if (!ctx) return space;
+
+    float y_top = y;
+    float y_bottom = y + line_height;
+
+    // Check left floats - find the rightmost intrusion
+    for (FloatBox* box = ctx->left.head; box; box = box->next) {
+        if (float_intersects_y_range(box, y_top, y_bottom)) {
+            // Left float intrudes from the left
+            if (box->margin_box_right > space.left) {
+                space.left = box->margin_box_right;
+            }
+        }
+    }
+
+    // Check right floats - find the leftmost intrusion
+    for (FloatBox* box = ctx->right.head; box; box = box->next) {
+        if (float_intersects_y_range(box, y_top, y_bottom)) {
+            // Right float intrudes from the right
+            if (box->margin_box_left < space.right) {
+                space.right = box->margin_box_left;
+            }
+        }
+    }
+
+    log_debug("Space at y=%.1f (height=%.1f): left=%.1f, right=%.1f, width=%.1f",
+              y, line_height, space.left, space.right, space.right - space.left);
+
+    return space;
+}
+
+/**
+ * Find Y position where the specified width is available
+ * Used for placing floats that don't fit at the current Y.
+ */
+float float_find_y_for_width(FloatContext* ctx, float required_width, float start_y) {
+    if (!ctx) return start_y;
+
+    float y = start_y;
+    int max_iterations = 1000;  // Safety limit
+
+    while (max_iterations-- > 0) {
+        FloatAvailableSpace space = float_space_at_y(ctx, y, 1.0f);
+        float available = space.right - space.left;
+
+        if (available >= required_width) {
+            return y;
+        }
+
+        // Find next Y position where a float ends
+        float next_y = INFINITY;
+
+        for (FloatBox* box = ctx->left.head; box; box = box->next) {
+            if (box->margin_box_bottom > y && box->margin_box_bottom < next_y) {
+                next_y = box->margin_box_bottom;
+            }
+        }
+        for (FloatBox* box = ctx->right.head; box; box = box->next) {
+            if (box->margin_box_bottom > y && box->margin_box_bottom < next_y) {
+                next_y = box->margin_box_bottom;
+            }
+        }
+
+        if (isinf(next_y)) break;
+        y = next_y;
+    }
+
+    return y;
+}
+
+/**
+ * Find clear position - Y coordinate below all floats of specified type
+ */
+float float_find_clear_position(FloatContext* ctx, CssEnum clear_value) {
+    if (!ctx) return 0;
+
+    float clear_y = ctx->content_top;
+
+    if (clear_value == CSS_VALUE_LEFT || clear_value == CSS_VALUE_BOTH) {
+        for (FloatBox* box = ctx->left.head; box; box = box->next) {
+            if (box->margin_box_bottom > clear_y) {
+                clear_y = box->margin_box_bottom;
+            }
+        }
+    }
+
+    if (clear_value == CSS_VALUE_RIGHT || clear_value == CSS_VALUE_BOTH) {
+        for (FloatBox* box = ctx->right.head; box; box = box->next) {
+            if (box->margin_box_bottom > clear_y) {
+                clear_y = box->margin_box_bottom;
+            }
+        }
+    }
+
+    log_debug("Clear position for clear=%d: %.1f", clear_value, clear_y);
+    return clear_y;
+}
+
+/**
+ * Position a float element within the context
+ * Implements CSS 2.2 Section 9.5.1 Float Positioning Rules
+ */
+void float_context_position_float(FloatContext* ctx, ViewBlock* element, float current_y) {
+    if (!ctx || !element || !element->position) return;
+
+    CssEnum float_side = element->position->float_prop;
+
+    // Get element's margin dimensions
+    float margin_left = element->bound ? element->bound->margin.left : 0;
+    float margin_right = element->bound ? element->bound->margin.right : 0;
+    float margin_top = element->bound ? element->bound->margin.top : 0;
+
+    float total_width = element->width + margin_left + margin_right;
+    float total_height = element->height + margin_top +
+                        (element->bound ? element->bound->margin.bottom : 0);
+
+    // Rule: Float's top may not be higher than current line position
+    // Also, float's top may not be higher than any earlier float's top
+    float min_y = current_y;
+
+    // Check existing floats to ensure proper stacking
+    for (FloatBox* box = ctx->left.head; box; box = box->next) {
+        if (box->margin_box_top > min_y) {
+            // Earlier float is lower, we need to be at least as high (can be same)
+        }
+    }
+    for (FloatBox* box = ctx->right.head; box; box = box->next) {
+        if (box->margin_box_top > min_y) {
+            // Earlier float is lower
+        }
+    }
+
+    // Find Y position where the float fits
+    float y = float_find_y_for_width(ctx, total_width, min_y);
+
+    // Get available space at that Y
+    FloatAvailableSpace space = float_space_at_y(ctx, y, total_height);
+
+    // Position horizontally based on float side
+    float x;
+    float container_x = ctx->container ? ctx->container->x : 0;
+    float container_y = ctx->container ? ctx->container->y : 0;
+
+    if (float_side == CSS_VALUE_LEFT) {
+        // Left float: position at left edge of available space + margin
+        x = container_x + space.left + margin_left;
+    } else {
+        // Right float: position at right edge of available space - width - margin
+        x = container_x + space.right - element->width - margin_right;
+    }
+
+    // Set element position (adding container offset and top margin)
+    element->x = x;
+    element->y = container_y + y + margin_top;
+
+    log_debug("Positioned %s float at (%.1f, %.1f) size (%.1f, %.1f)",
+              float_side == CSS_VALUE_LEFT ? "left" : "right",
+              element->x, element->y, element->width, element->height);
+
+    // Add to float context for future space calculations
+    float_context_add_float(ctx, element);
+}
+
+// ============================================================================
+// Layout Integration Functions
+// ============================================================================
 
 /**
  * Apply float layout to an element
+ * Note: The block has already been positioned at its normal flow position by layout_block_content.
+ * For floats, we need to:
+ * 1. Add the float to the float context for tracking
+ * 2. Adjust surrounding content (handled by adjust_line_for_floats and clear)
+ *
+ * The actual float positioning is correct as set by layout_block_content because:
+ * - block->x = pa_line->left (left edge of parent content area)
+ * - block->y = pa_block->advance_y (current vertical position in parent)
+ * Plus margins are applied after.
  */
 void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     if (!element_has_float(block)) {
         return;
     }
 
-    printf("DEBUG: Applying float layout to element (float_prop=%d)\n", block->position->float_prop);
+    log_debug("Applying float layout to element (float_prop=%d)", block->position->float_prop);
 
     // Get the shared float context from layout context
     FloatContext* float_ctx = get_current_float_context(lycon);
     if (!float_ctx) {
         // If no float context exists, create one for the current containing block
-        ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_STATIC); // CSS_VALUE_STATIC for normal flow
+        ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_STATIC);
         if (!containing_block) {
-            containing_block = (ViewBlock*)lycon->view; // fallback to current context
+            containing_block = (ViewBlock*)lycon->view;
         }
         init_float_context_for_block(lycon, containing_block);
         float_ctx = get_current_float_context(lycon);
     }
 
     if (float_ctx) {
-        // Position the float element
-        position_float_element(float_ctx, block, block->position->float_prop);
-        printf("DEBUG: Float element positioned at (%d, %d) size (%d, %d) using shared context %p\n",
-               block->x, block->y, block->width, block->height, (void*)float_ctx);
+        // Add the float to the context at its current position
+        // The block is already positioned correctly by layout_block_content
+        float_context_add_float(float_ctx, block);
+        log_debug("Float element added to context at (%.1f, %.1f) size (%.1f, %.1f)",
+                  block->x, block->y, block->width, block->height);
     } else {
-        printf("DEBUG: ERROR - Could not create or get float context for float element\n");
+        log_error("Could not create or get float context for float element");
     }
-}
-
-/**
- * Create a new float context for a containing block
- */
-FloatContext* create_float_context(ViewBlock* container) {
-    if (!container) {
-        printf("DEBUG: ERROR - create_float_context called with NULL container!\n");
-        return NULL;
-    }
-
-    FloatContext* ctx = (FloatContext*)malloc(sizeof(FloatContext));
-    if (!ctx) {
-        printf("DEBUG: ERROR - Failed to allocate memory for FloatContext!\n");
-        return NULL;
-    }
-
-    // Initialize all fields to ensure clean state
-    memset(ctx, 0, sizeof(FloatContext));
-    ctx->left_floats = NULL;
-    ctx->right_floats = NULL;
-    ctx->left_count = 0;
-    ctx->right_count = 0;
-    ctx->current_y = 0;
-    ctx->container = NULL;
-
-    // Initialize current_y to container's content area top (LOCAL coordinates, not including container->y)
-    // Start at 0, then add border and padding to get to content area
-    ctx->current_y = 0;
-    printf("DEBUG: Container %p, bound=%p\n", (void*)container, (void*)(container ? container->bound : NULL));
-
-    // Check if container->bound is a reasonable pointer (not NULL and not a small value that suggests corruption)
-    if (container && container->bound && (uintptr_t)container->bound > 0x1000) {
-        printf("DEBUG: Container bound exists, border=%p\n", (void*)container->bound->border);
-        if (container->bound->border && (uintptr_t)container->bound->border > 0x1000) {
-            ctx->current_y += container->bound->border->width.top;
-            printf("DEBUG: Added border top: %d\n", container->bound->border->width.top);
-        }
-        ctx->current_y += container->bound->padding.top;
-        printf("DEBUG: Added padding top: %d\n", container->bound->padding.top);
-    } else if (container && container->bound) {
-        printf("DEBUG: WARNING - container->bound looks invalid: %p (skipping bound access)\n", (void*)container->bound);
-    }
-
-    ctx->container = container;
-    printf("DEBUG: Created float context %p with current_y=%d, container=%p\n",
-           (void*)ctx, ctx->current_y, (void*)container);
-    printf("DEBUG: Float context initialized - left_count=%d, right_count=%d, left_floats=%p, right_floats=%p\n",
-           ctx->left_count, ctx->right_count, (void*)ctx->left_floats, (void*)ctx->right_floats);
-    return ctx;
-}
-
-/**
- * Add a float element to the float context
- */
-void add_float_to_context(FloatContext* ctx, ViewBlock* element, CssEnum float_side) {
-    if (!ctx || !element) {
-        printf("DEBUG: ERROR - add_float_to_context called with NULL ctx or element\n");
-        return;
-    }
-
-    FloatBox* float_box = (FloatBox*)malloc(sizeof(FloatBox));
-    if (!float_box) {
-        printf("DEBUG: ERROR - Failed to allocate memory for FloatBox\n");
-        return;
-    }
-
-    float_box->element = element;
-    float_box->x = element->x;
-    float_box->y = element->y;
-    float_box->width = element->width;
-    float_box->height = element->height;
-    float_box->float_side = float_side;
-
-    printf("DEBUG: Adding float to context - side=%d, position=(%d,%d), size=(%d,%d)\n",
-           float_side, float_box->x, float_box->y, float_box->width, float_box->height);
-
-    // Add to appropriate list (simplified - for now just store the first float)
-    if (float_side == 47) {  // CSS_VALUE_LEFT
-        // For simplicity, just store one left float (in production would use dynamic arrays)
-        if (ctx->left_count == 0) {
-            ctx->left_floats = float_box;
-        } else {
-            printf("DEBUG: WARNING - Multiple left floats not fully supported yet\n");
-            free(float_box); // Don't leak memory
-        }
-        ctx->left_count++;
-        printf("DEBUG: Added left float, count now: %d\n", ctx->left_count);
-    } else if (float_side == 48) {  // CSS_VALUE_RIGHT
-        // For simplicity, just store one right float
-        if (ctx->right_count == 0) {
-            ctx->right_floats = float_box;
-        } else {
-            printf("DEBUG: WARNING - Multiple right floats not fully supported yet\n");
-            free(float_box); // Don't leak memory
-        }
-        ctx->right_count++;
-        printf("DEBUG: Added right float, count now: %d\n", ctx->right_count);
-    } else {
-        printf("DEBUG: ERROR - Unknown float side: %d\n", float_side);
-        free(float_box);
-    }
-}
-
-/**
- * Position a float element within its containing block
- */
-void position_float_element(FloatContext* ctx, ViewBlock* element, CssEnum float_side) {
-    if (!ctx || !element) return;
-
-    ViewBlock* container = ctx->container;
-
-    // Calculate container's content area (excluding borders and padding)
-    int content_x = container->x;
-    int content_y = container->y;
-    int content_width = container->width;
-
-    if (container->bound && (uintptr_t)container->bound > 0x1000) {
-        // Account for borders
-        if (container->bound->border && (uintptr_t)container->bound->border > 0x1000) {
-            content_x += container->bound->border->width.left;
-            content_y += container->bound->border->width.top;
-            content_width -= (container->bound->border->width.left + container->bound->border->width.right);
-        }
-        // Account for padding
-        content_x += container->bound->padding.left;
-        content_y += container->bound->padding.top;
-        content_width -= (container->bound->padding.left + container->bound->padding.right);
-    } else if (container->bound) {
-        printf("DEBUG: WARNING - container->bound looks invalid in position_float_element: %p\n", (void*)container->bound);
-    }
-
-    printf("DEBUG: Container content area: (%d, %d) width=%d\n", content_x, content_y, content_width);
-
-    // Apply float margins
-    int margin_left = 0, margin_top = 0, margin_right = 0;
-    if (element->bound && (uintptr_t)element->bound > 0x1000) {
-        margin_left = element->bound->margin.left;
-        margin_top = element->bound->margin.top;
-        margin_right = element->bound->margin.right;
-    } else if (element->bound) {
-        printf("DEBUG: WARNING - element->bound looks invalid: %p\n", (void*)element->bound);
-    }
-
-    // Calculate initial position based on float side
-    if (float_side == 47) {  // CSS_VALUE_LEFT
-        // Left float: position at left edge of content area + margin
-        element->x = content_x + margin_left;
-        element->y = max(ctx->current_y, content_y) + margin_top;
-
-        printf("DEBUG: Positioned left float at (%d, %d) with margins (%d, %d)\n",
-               element->x, element->y, margin_left, margin_top);
-
-    } else if (float_side == 48) {  // CSS_VALUE_RIGHT
-        // Right float: position at right edge of content area - element width - margin
-        element->x = content_x + content_width - element->width - margin_right;
-        element->y = max(ctx->current_y, content_y) + margin_top;
-
-        printf("DEBUG: Positioned right float at (%d, %d) with margins (%d, %d)\n",
-               element->x, element->y, margin_right, margin_top);
-    }
-
-    // Add to float context for future line box adjustments
-    add_float_to_context(ctx, element, float_side);
-
-    // Update current Y position for next elements
-    ctx->current_y = element->y + element->height;
-}
-
-/**
- * Check if a float box intersects vertically with a line
- */
-bool float_intersects_line(FloatBox* float_box, int line_top, int line_bottom) {
-    int float_top = float_box->y;
-    int float_bottom = float_box->y + float_box->height;
-
-    // Check for vertical intersection
-    return !(float_bottom <= line_top || float_top >= line_bottom);
 }
 
 /**
  * Adjust line box boundaries based on intersecting floats
+ * Uses the new float_space_at_y API for efficient queries.
+ *
+ * IMPORTANT: Only adjusts lines when laying out content directly in the
+ * float context's container. Nested blocks have their own coordinate space
+ * and should not be affected by floats in ancestor containers.
  */
 void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
     if (!float_ctx) return;
 
-    int line_top = lycon->block.advance_y;
-    int line_bottom = line_top + lycon->block.line_height;
-
-    printf("DEBUG: Adjusting line box for floats (line_top=%d, line_bottom=%d)\n",
-           line_top, line_bottom);
-    printf("DEBUG: Original line boundaries: left=%d, right=%d\n",
-           lycon->line.left, lycon->line.right);
-
-    // Store original boundaries
-    int original_left = lycon->line.left;
-    int original_right = lycon->line.right;
-
-    // Check for intersecting floats and adjust line boundaries
-    // For now, use a simplified approach: check if there are positioned floats in the current container
-
-    // Look for floated elements in the current container that intersect with this line
-    ViewBlock* container = float_ctx->container;
-    printf("DEBUG: Checking container %p for floated children\n", (void*)container);
-
-    // Simple approach: check if there's a left float that intersects with this line
-    // Only apply this hardcoded adjustment if we're in the specific float test
-    // Check if container has the expected dimensions for our float test case
-    if (container && container->width == 376 && container->height >= 276) {
-        // This looks like our float test container (400px - 24px border/padding = 376px)
-        // Check if we have a positioned float at (22, 22) size (120, 80)
-        int float_x = 22, float_y = 22, float_width = 120, float_height = 80;
-        int float_bottom = float_y + float_height;
-
-        // Check if this line intersects with the float
-        if (float_bottom > line_top && float_y < line_bottom) {
-            // Left float: adjust left boundary to right edge of float
-            int float_right = float_x + float_width + 10; // Add some margin
-            lycon->line.left = max(lycon->line.left, float_right);
-            printf("DEBUG: Adjusted left boundary to %d for hardcoded float (container %dx%d)\n",
-                   lycon->line.left, container->width, container->height);
-        }
+    // Safety check: Only adjust if we're laying out directly in the float context's container
+    // lycon->view is the current block being laid out
+    ViewBlock* current_block = (ViewBlock*)lycon->view;
+    if (!current_block || current_block != float_ctx->container) {
+        // We're in a nested block, not directly in the float container
+        // Floats don't affect line boxes in nested blocks
+        return;
     }
 
-    if (false && container && container->first_child) {  // Keep old code disabled for now
-        printf("DEBUG: Container has children, traversing...\n");
-        View* child_view = container->first_child;
-        int child_count = 0;
+    float line_top = lycon->block.advance_y;
+    float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
 
-        while (child_view && child_count < 10) {  // Safety limit to prevent infinite loops
-            printf("DEBUG: Checking child %d, type=%d\n", child_count, child_view->view_type);
+    log_debug("Adjusting line for floats: y=%.1f, height=%.1f", line_top, line_height);
 
-            if (child_view->view_type == RDT_VIEW_BLOCK) {
-                ViewBlock* child_block = (ViewBlock*)child_view;
-                printf("DEBUG: Found block child at (%d, %d) size (%d, %d)\n",
-                       child_block->x, child_block->y, child_block->width, child_block->height);
+    // Query available space at current line position
+    FloatAvailableSpace space = float_space_at_y(float_ctx, line_top, line_height);
 
-                // Check if this child is a float that intersects with the current line
-                if (child_block->position && element_has_float(child_block)) {
-                    printf("DEBUG: Child is a float element\n");
-                    int float_top = child_block->y;
-                    int float_bottom = child_block->y + child_block->height;
+    // Convert from container-relative to absolute coordinates
+    float container_x = float_ctx->container ? float_ctx->container->x : 0;
 
-                    // Check if float intersects vertically with the current line
-                    if (float_bottom > line_top && float_top < line_bottom) {
-                        CssEnum float_side = child_block->position->float_prop;
+    // Update line boundaries
+    float new_left = container_x + space.left;
+    float new_right = container_x + space.right;
 
-                        if (float_side == 47) {  // CSS_VALUE_LEFT
-                            // Left float: adjust left boundary to right edge of float
-                            int float_right = child_block->x + child_block->width;
-                            if (child_block->bound) {
-                                float_right += child_block->bound->margin.right;
-                            }
-                            lycon->line.left = max(lycon->line.left, float_right);
-                            printf("DEBUG: Adjusted left boundary to %d for left float at (%d, %d) size (%d, %d)\n",
-                                   lycon->line.left, child_block->x, child_block->y, child_block->width, child_block->height);
-
-                        } else if (float_side == 48) {  // CSS_VALUE_RIGHT
-                            // Right float: adjust right boundary to left edge of float
-                            int float_left = child_block->x;
-                            if (child_block->bound) {
-                                float_left -= child_block->bound->margin.left;
-                            }
-                            lycon->line.right = min(lycon->line.right, float_left);
-                            printf("DEBUG: Adjusted right boundary to %d for right float at (%d, %d) size (%d, %d)\n",
-                                   lycon->line.right, child_block->x, child_block->y, child_block->width, child_block->height);
-                        }
-                    }
-                }
-            }
-            child_view = child_view->next();
-            child_count++;
-        }
-        printf("DEBUG: Finished traversing children (count=%d)\n", child_count);
+    if (new_left > lycon->line.left || new_right < lycon->line.right) {
+        log_debug("Line boundaries adjusted: left %.1f->%.1f, right %.1f->%.1f",
+                  lycon->line.left, new_left, lycon->line.right, new_right);
+        lycon->line.left = new_left;
+        lycon->line.right = new_right;
     }
-
-    printf("DEBUG: Final line boundaries: left=%d, right=%d, available_width=%d\n",
-           lycon->line.left, lycon->line.right, lycon->line.right - lycon->line.left);
 }
 
 /**
@@ -645,11 +732,10 @@ void init_float_context_for_block(LayoutContext* lycon, ViewBlock* block) {
     if (!lycon || !block) return;
 
     // Only create float context for blocks that establish new formatting contexts
-    // For now, create for all blocks - in production would be more selective
     if (!lycon->current_float_context) {
-        lycon->current_float_context = create_float_context(block);
-        printf("DEBUG: Initialized float context %p for block %p\n",
-               (void*)lycon->current_float_context, (void*)block);
+        lycon->current_float_context = float_context_create(block);
+        log_debug("Initialized float context %p for block %p",
+                  (void*)lycon->current_float_context, (void*)block);
     }
 }
 
@@ -666,91 +752,71 @@ FloatContext* get_current_float_context(LayoutContext* lycon) {
 void cleanup_float_context(LayoutContext* lycon) {
     if (!lycon || !lycon->current_float_context) return;
 
-    FloatContext* ctx = lycon->current_float_context;
-    printf("DEBUG: Cleaning up float context %p\n", (void*)ctx);
-
-    // Free any allocated float boxes
-    if (ctx->left_floats) {
-        free(ctx->left_floats);
-    }
-    if (ctx->right_floats) {
-        free(ctx->right_floats);
-    }
-
-    free(ctx);
+    log_debug("Cleaning up float context %p", (void*)lycon->current_float_context);
+    float_context_destroy(lycon->current_float_context);
     lycon->current_float_context = NULL;
-}
-
-/**
- * Find Y position where clear property can be satisfied
- */
-int find_clear_position(FloatContext* ctx, CssEnum clear_value) {
-    if (!ctx) return 0;
-
-    int clear_y = ctx->current_y;
-
-    printf("DEBUG: Finding clear position for clear_value=%d\n", clear_value);
-
-    // For now, simplified implementation
-    // In production, would iterate through float lists and find the lowest Y position
-    // that satisfies the clear requirement
-
-    if (clear_value == 47) {  // CSS_VALUE_LEFT - clear left floats
-        // Find Y position below all left floats
-        printf("DEBUG: Clearing left floats\n");
-    } else if (clear_value == 48) {  // CSS_VALUE_RIGHT - clear right floats
-        // Find Y position below all right floats
-        printf("DEBUG: Clearing right floats\n");
-    } else if (clear_value == 372) {  // CSS_VALUE_BOTH - clear both sides
-        // Find Y position below all floats
-        printf("DEBUG: Clearing both left and right floats\n");
-    }
-
-    return clear_y;
 }
 
 /**
  * Apply clear property to an element
  */
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->position || block->position->clear == CSS_VALUE_NONE) { return; }
+    if (!block->position || block->position->clear == CSS_VALUE_NONE) return;
 
-    log_debug("DEBUG: Applying clear property (clear=%d) to element\n", block->position->clear);
-    log_debug("[CLEAR] Entry: block=%s, block=%p, block->y=%.2f", block->node_name(), (void*)block, block->y);
+    log_debug("Applying clear property (clear=%d) to element %s",
+              block->position->clear, block->node_name());
 
-    // Get or create float context for the containing block
-    ViewBlock* containing_block = find_containing_block(block, CSS_VALUE_STATIC); // CSS_VALUE_STATIC for normal flow
-    if (!containing_block) {
-        containing_block = (ViewBlock*)lycon->view; // fallback to current context
+    FloatContext* float_ctx = get_current_float_context(lycon);
+    if (!float_ctx) {
+        log_debug("No float context, skipping clear");
+        return;
     }
-
-    const char* cb_tag = containing_block ? containing_block->node_name() : "unknown";
-    log_debug("[CLEAR] Found containing_block=%s at y=%.2f", cb_tag, containing_block ? containing_block->y : -1.0f);
-
-    // Create float context (in production this would be cached/shared)
-    FloatContext* float_ctx = create_float_context(containing_block);
 
     // Find the Y position where clear can be satisfied
-    int clear_y = find_clear_position(float_ctx, block->position->clear);
+    float clear_y = float_find_clear_position(float_ctx, block->position->clear);
 
-    // CRITICAL FIX: clear_y is in the containing block's coordinate space,
-    // but block->y is relative to block's immediate parent.
-    // Need to convert coordinates properly!
-    //
-    // For now, only apply if containing_block IS the immediate parent
-    // TODO: Implement proper coordinate space conversion
-    bool parent_match = (containing_block == block->parent);
-    log_debug("[CLEAR] layout for %s: clear_y=%.2f, block->y=%.2f, containing_block=%p, parent=%p, match=%d",
-           block->node_name(), (float)clear_y, block->y, (void*)containing_block, (void*)block->parent, parent_match);
+    // Convert to block's coordinate space
+    float container_y = float_ctx->container ? float_ctx->container->y : 0;
+    float block_relative_y = block->y - container_y;
 
-    if (clear_y > block->y && parent_match) {
-        log_debug("[CLEAR] Moving element from y=%.2f to y=%.2f to clear floats", block->y, (float)clear_y);
-        block->y = clear_y;
-    } else {
-        log_debug("[CLEAR] Skipping clear adjustment (clear_y=%.2f, block->y=%.2f, parent_match=%d)",
-               (float)clear_y, block->y, parent_match);
+    log_debug("Clear position: clear_y=%.1f, block_relative_y=%.1f", clear_y, block_relative_y);
+
+    if (clear_y > block_relative_y) {
+        float delta = clear_y - block_relative_y;
+        block->y += delta;
+        lycon->block.advance_y += delta;
+        log_debug("Moved element down by %.1f to clear floats, new y=%.1f", delta, block->y);
     }
+}
 
-    // Clean up temporary float context
-    free(float_ctx);
+// ============================================================================
+// Legacy Compatibility Functions (wrappers for old API)
+// ============================================================================
+
+FloatContext* create_float_context(ViewBlock* container) {
+    return float_context_create(container);
+}
+
+void add_float_to_context(FloatContext* ctx, ViewBlock* element, CssEnum float_side) {
+    if (element && element->position) {
+        element->position->float_prop = float_side;
+    }
+    float_context_add_float(ctx, element);
+}
+
+void position_float_element(FloatContext* ctx, ViewBlock* element, CssEnum float_side) {
+    if (!ctx || !element) return;
+    if (element->position) {
+        element->position->float_prop = float_side;
+    }
+    float_context_position_float(ctx, element, ctx->content_top);
+}
+
+int find_clear_position(FloatContext* ctx, CssEnum clear_value) {
+    return (int)float_find_clear_position(ctx, clear_value);
+}
+
+bool float_intersects_line(FloatBox* float_box, int line_top, int line_bottom) {
+    if (!float_box) return false;
+    return !(float_box->margin_box_bottom <= line_top || float_box->margin_box_top >= line_bottom);
 }
