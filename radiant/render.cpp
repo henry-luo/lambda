@@ -369,7 +369,18 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         render_list_bullet(rdcon, block);
     }
     if (block->bound) {
-        render_bound(rdcon, block);
+        // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
+        bool skip_bound = false;
+        if (block->view_type == RDT_VIEW_TABLE_CELL) {
+            ViewTableCell* cell = (ViewTableCell*)block;
+            if (cell->td && cell->td->hide_empty) {
+                skip_bound = true;
+                log_debug("Skipping bound for empty cell (empty-cells: hide)");
+            }
+        }
+        if (!skip_bound) {
+            render_bound(rdcon, block);
+        }
     }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;

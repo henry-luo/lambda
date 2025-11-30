@@ -699,6 +699,8 @@ struct TableCellProp {
     uint8_t is_annoy_tr:1;       // whether this element is doubled as an anonymous tr
     uint8_t is_annoy_td:1;       // whether this element is doubled as an anonymous td
     uint8_t is_annoy_colgroup:1; // whether this element is doubled as an anonymous colgroup
+    uint8_t is_empty:1;          // whether this cell has no content (for empty-cells: hide)
+    uint8_t hide_empty:1;        // combined flag: is_empty && table has empty-cells: hide
 };
 
 typedef struct ViewTableCell : ViewBlock {
