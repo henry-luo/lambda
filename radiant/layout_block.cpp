@@ -559,6 +559,14 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
+    // IMPORTANT: Apply clear BEFORE setting up inline context and laying out children
+    // Clear positions this element below earlier floats
+    // This must happen after Y position and margins are set, but before children are laid out
+    if (block->position && block->position->clear != CSS_VALUE_NONE) {
+        log_debug("Element has clear property, applying clear layout BEFORE children");
+        layout_clear_element(lycon, block);
+    }
+
     // setup inline context
     setup_inline(lycon, block);
 
@@ -584,15 +592,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         }
     }
 
-    // IMPORTANT: Apply clear BEFORE adding to float context
-    // Clear positions this element below earlier floats, but the element's
-    // own float status should not affect where it clears to.
-    if (block->position && block->position->clear != CSS_VALUE_NONE) {
-        log_debug("Element has clear property, applying clear layout");
-        layout_clear_element(lycon, block);
-    }
-
-    // Apply CSS float layout after clear has been applied
+    // Apply CSS float layout
     // This adds the element to the float context for affecting later content
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
@@ -706,7 +706,23 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line.reset_space();
         }
         else { // normal block
-            if (block->bound) {
+            // Check if this is a floated element - floats are out of normal flow
+            // and should NOT advance the parent's advance_y
+            bool is_float = block->position && element_has_float(block);
+
+            if (is_float) {
+                // Floated elements don't participate in normal flow
+                // They don't advance the parent's advance_y
+                // Only update max_width for containing block sizing
+                if (block->bound) {
+                    lycon->block.max_width = max(lycon->block.max_width, block->width
+                        + block->bound->margin.left + block->bound->margin.right);
+                } else {
+                    lycon->block.max_width = max(lycon->block.max_width, block->width);
+                }
+                log_debug("float block end (no advance_y update), pa max_width: %f, block hg: %f",
+                    lycon->block.max_width, block->height);
+            } else if (block->bound) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
                 if (block->parent_view()->first_placed_child() == block) {  // first child

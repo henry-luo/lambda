@@ -430,20 +430,20 @@ void float_context_add_float(FloatContext* ctx, ViewBlock* element) {
     box->float_side = element->position->float_prop;
     box->next = NULL;
 
-    // Calculate margin box bounds (relative to container)
+    // Calculate margin box bounds (relative to container's content area)
+    // Note: element->x and element->y are already relative to the container's content area
+    // We just need to account for margins to get the margin box
     float margin_left = element->bound ? element->bound->margin.left : 0;
     float margin_right = element->bound ? element->bound->margin.right : 0;
     float margin_top = element->bound ? element->bound->margin.top : 0;
     float margin_bottom = element->bound ? element->bound->margin.bottom : 0;
 
-    // Convert to container-relative coordinates
-    float container_x = ctx->container ? ctx->container->x : 0;
-    float container_y = ctx->container ? ctx->container->y : 0;
-
-    box->margin_box_left = element->x - container_x - margin_left;
-    box->margin_box_top = element->y - container_y - margin_top;
-    box->margin_box_right = element->x - container_x + element->width + margin_right;
-    box->margin_box_bottom = element->y - container_y + element->height + margin_bottom;
+    // element->y already includes margin.top (added in layout_block_content)
+    // For margin box, we need to go back to before margin was added
+    box->margin_box_left = element->x - margin_left;
+    box->margin_box_top = element->y - margin_top;
+    box->margin_box_right = element->x + element->width + margin_right;
+    box->margin_box_bottom = element->y + element->height + margin_bottom;
 
     log_debug("Adding float: side=%d, margin_box=(%.1f, %.1f, %.1f, %.1f)",
               box->float_side, box->margin_box_left, box->margin_box_top,
@@ -686,42 +686,126 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
  * Adjust line box boundaries based on intersecting floats
  * Uses the new float_space_at_y API for efficient queries.
  *
- * IMPORTANT: Only adjusts lines when laying out content directly in the
- * float context's container. Nested blocks have their own coordinate space
- * and should not be affected by floats in ancestor containers.
+ * For text to flow around floats, we need to adjust line boundaries
+ * when laying out content in blocks that are siblings of floats.
+ *
+ * Coordinate conversion:
+ * - Floats are stored with coordinates relative to the float context container
+ * - Line positions are relative to the current block being laid out
+ * - We need to convert between these coordinate spaces
+ * - Lines INSIDE a float should NOT be adjusted by the parent's float context
  */
 void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
-    if (!float_ctx) return;
+    if (!float_ctx || !float_ctx->container) return;
 
-    // Safety check: Only adjust if we're laying out directly in the float context's container
-    // lycon->view is the current block being laid out
-    ViewBlock* current_block = (ViewBlock*)lycon->view;
-    if (!current_block || current_block != float_ctx->container) {
-        // We're in a nested block, not directly in the float container
-        // Floats don't affect line boxes in nested blocks
+    // Get the current view being laid out - may not be a block
+    View* current_view = lycon->view;
+    if (!current_view) return;
+
+    // Check if current block is inside the float context container
+    // This handles both direct children and nested content
+    ViewBlock* container = float_ctx->container;
+
+    // Find the view's position relative to the container
+    // Walk up the parent chain to find relationship to container
+    // IMPORTANT: If we encounter a floated element on the way up,
+    // skip adjustment - lines inside floats don't adjust for parent's floats
+    float block_offset_x = 0;
+    float block_offset_y = 0;
+
+    ViewGroup* ancestor = (ViewGroup*)current_view;
+    bool found_container = false;
+    while (ancestor) {
+        if (ancestor == container) {
+            found_container = true;
+            break;
+        }
+        // Check if this ancestor is a floated block - if so, we're inside a float
+        // and should NOT adjust for the parent's float context
+        if (ancestor->is_block()) {
+            ViewBlock* block = (ViewBlock*)ancestor;
+            if (block->position && element_has_float(block)) {
+                // We're inside a floated element, don't adjust lines
+                log_debug("Skipping float adjustment: inside floated element %s at (%d, %d)",
+                          block->node_name(), (int)block->x, (int)block->y);
+                return;
+            }
+            block_offset_x += block->x;
+            block_offset_y += block->y;
+            // Add border and padding
+            if (block->bound) {
+                if (block->bound->border) {
+                    block_offset_x += block->bound->border->width.left;
+                    block_offset_y += block->bound->border->width.top;
+                }
+                block_offset_x += block->bound->padding.left;
+                block_offset_y += block->bound->padding.top;
+            }
+        }
+        ancestor = ancestor->parent_view();
+    }
+
+    if (!found_container) {
+        // Current view is not inside the float context container
         return;
     }
 
-    float line_top = lycon->block.advance_y;
+    // Find the containing block for coordinate calculations
+    ViewBlock* containing_block = nullptr;
+    ViewGroup* search = (ViewGroup*)current_view;
+    while (search && !containing_block) {
+        if (search->is_block()) {
+            containing_block = (ViewBlock*)search;
+        } else {
+            search = search->parent_view();
+        }
+    }
+    if (!containing_block) return;
+
+    // Convert current line Y to container-relative coordinates
+    float line_top_container = block_offset_y + lycon->block.advance_y;
     float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
 
-    log_debug("Adjusting line for floats: y=%.1f, height=%.1f", line_top, line_height);
+    log_debug("Adjusting line for floats: local_y=%.1f, container_y=%.1f, height=%.1f, offset=(%.1f, %.1f)",
+              lycon->block.advance_y, line_top_container, line_height, block_offset_x, block_offset_y);
 
-    // Query available space at current line position
-    FloatAvailableSpace space = float_space_at_y(float_ctx, line_top, line_height);
+    // Query available space at current line position (in container coordinates)
+    FloatAvailableSpace space = float_space_at_y(float_ctx, line_top_container, line_height);
 
-    // Convert from container-relative to absolute coordinates
-    float container_x = float_ctx->container ? float_ctx->container->x : 0;
+    // Convert available space from container-relative to local block coordinates
+    // The left/right from float_space_at_y are relative to container content area
+    // We need to adjust them to be relative to the current block's content area
+    float local_left = space.left - block_offset_x;
+    float local_right = space.right - block_offset_x;
 
-    // Update line boundaries
-    float new_left = container_x + space.left;
-    float new_right = container_x + space.right;
+    // Clamp to the current block's content area
+    local_left = max(local_left, 0.0f);
+    local_right = min(local_right, lycon->block.content_width);
 
-    if (new_left > lycon->line.left || new_right < lycon->line.right) {
-        log_debug("Line boundaries adjusted: left %.1f->%.1f, right %.1f->%.1f",
-                  lycon->line.left, new_left, lycon->line.right, new_right);
-        lycon->line.left = new_left;
-        lycon->line.right = new_right;
+    // Update line boundaries if floats intrude
+    if (local_left > 0 || local_right < lycon->block.content_width) {
+        // Convert to absolute coordinates for the line
+        float abs_left = containing_block->x + local_left;
+        float abs_right = containing_block->x + local_right;
+
+        // Add border and padding to absolute left
+        if (containing_block->bound) {
+            if (containing_block->bound->border) {
+                abs_left += containing_block->bound->border->width.left;
+            }
+            abs_left += containing_block->bound->padding.left;
+        }
+
+        if (abs_left > lycon->line.left || abs_right < lycon->line.right) {
+            log_debug("Line boundaries adjusted: left %.1f->%.1f, right %.1f->%.1f",
+                      lycon->line.left, abs_left, lycon->line.right, abs_right);
+            if (abs_left > lycon->line.left) lycon->line.left = abs_left;
+            if (abs_right < lycon->line.right) lycon->line.right = abs_right;
+            // Also update advance_x if we're at line start
+            if (lycon->line.is_line_start) {
+                lycon->line.advance_x = lycon->line.left;
+            }
+        }
     }
 }
 
@@ -773,18 +857,25 @@ void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // Find the Y position where clear can be satisfied
+    // This returns Y in container's content area coordinate space
     float clear_y = float_find_clear_position(float_ctx, block->position->clear);
 
-    // Convert to block's coordinate space
-    float container_y = float_ctx->container ? float_ctx->container->y : 0;
-    float block_relative_y = block->y - container_y;
+    // block->y is in container's content area coordinate space
+    // Compare directly since both are in the same coordinate system
+    log_debug("Clear position: clear_y=%.1f, block->y=%.1f", clear_y, block->y);
 
-    log_debug("Clear position: clear_y=%.1f, block_relative_y=%.1f", clear_y, block_relative_y);
-
-    if (clear_y > block_relative_y) {
-        float delta = clear_y - block_relative_y;
+    if (clear_y > block->y) {
+        float delta = clear_y - block->y;
         block->y += delta;
         lycon->block.advance_y += delta;
+
+        // IMPORTANT: Also update the parent's advance_y so container height is calculated correctly
+        // The parent's Blockbox is accessed via pa_block pointer
+        if (lycon->block.pa_block) {
+            lycon->block.pa_block->advance_y += delta;
+            log_debug("Updated parent advance_y by %.1f to %.1f", delta, lycon->block.pa_block->advance_y);
+        }
+
         log_debug("Moved element down by %.1f to clear floats, new y=%.1f", delta, block->y);
     }
 }
