@@ -81,10 +81,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 ```cpp
 // Clean separation: InlineLevelIterator produces items, LineBuilder consumes
 class InlineLevelIterator {
-    struct Item { 
+    struct Item {
         enum class Type { Text, Element, ForcedBreak, AbsolutelyPositionedElement, FloatingElement };
-        Type type; 
-        Node* node; 
+        Type type;
+        Node* node;
         RefPtr<Gfx::GlyphRun> glyph_run;  // Pre-shaped text
         CSSPixels width, padding_start, padding_end, border_start, border_end;
         CSSPixels margin_start, margin_end;
@@ -163,14 +163,14 @@ class BlockMarginState {
     CSSPixels m_current_negative_collapsible_margin { 0 };
     Function<void(CSSPixels)> m_block_container_y_position_update_callback;
     bool m_box_last_in_flow_child_margin_bottom_collapsed { false };
-    
+
     void add_margin(CSSPixels margin) {
         if (margin < 0)
             m_current_negative_collapsible_margin = min(margin, m_current_negative_collapsible_margin);
         else
             m_current_positive_collapsible_margin = max(margin, m_current_positive_collapsible_margin);
     }
-    
+
     CSSPixels current_collapsed_margin() const {
         return m_current_positive_collapsible_margin + m_current_negative_collapsible_margin;
     }
@@ -188,7 +188,7 @@ if (block->parent_view()->first_placed_child() == block) {  // first child
 // ... and more collapsing logic for siblings and bottom margins
 ```
 
-**Recommendation:** 
+**Recommendation:**
 - Create a `MarginCollapsingState` struct
 - Track positive/negative margins separately (CSS spec requires this)
 - Use a callback pattern for deferred Y positioning (needed for parent-child collapse)
@@ -250,17 +250,17 @@ CSSPixels calculate_min_content_width(Box const& box) const {
     // Check cache first
     auto& cache = box.cached_intrinsic_sizes().min_content_width;
     if (cache.has_value()) return cache.value();
-    
+
     // Create throwaway layout state - KEY PATTERN
     LayoutState throwaway_state;
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.width_constraint = SizeConstraint::MinContent;
     box_state.set_indefinite_content_width();
-    
+
     // Run layout, get result, cache it, return
     auto context = create_independent_formatting_context(throwaway_state, LayoutMode::IntrinsicSizing, box);
     context->run(AvailableSpace(AvailableSize::make_min_content(), ...));
-    
+
     auto result = context->automatic_content_width();
     cache = result;  // Cache the result
     return cache.value();
@@ -426,7 +426,7 @@ void line_break(LayoutContext* lycon) {
 ## Quick Wins (Can Implement Soon)
 
 1. **Replace `-1` magic values** with an `AvailableSize` enum/struct
-2. **Create `LineBox` struct** that holds fragments explicitly  
+2. **Create `LineBox` struct** that holds fragments explicitly
 3. **Extract margin collapsing logic** into a dedicated function/struct
 4. **Cache intrinsic size calculations** per-node to avoid redundant layout
 
