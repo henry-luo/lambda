@@ -49,11 +49,13 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     FlexContainerLayout* flex = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     lycon->flex_container = flex;
+    flex->lycon = lycon;  // Store layout context for intrinsic sizing
     if (container->embed && container->embed->flex) {
         FlexProp* source = container->embed->flex;
         log_debug("init_flex_container: source->direction=%d (0x%04X), row=%d, col=%d",
                   source->direction, source->direction, DIR_ROW, DIR_COLUMN);
         memcpy(flex, container->embed->flex, sizeof(FlexProp));
+        flex->lycon = lycon;  // Restore after memcpy
         log_debug("init_flex_container: after copy flex->direction=%d", flex->direction);
     }
     else {

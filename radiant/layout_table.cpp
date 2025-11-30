@@ -1,5 +1,6 @@
 #include "layout_table.hpp"
 #include "layout.hpp"
+#include "intrinsic_sizing.hpp"
 #include "../lib/log.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -1186,6 +1187,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
 
 // Measure cell's intrinsic content width (Preferred Content Width - PCW)
 // This performs accurate measurement using font metrics for CSS 2.1 compliance
+// REFACTORED: Now uses unified intrinsic_sizing.hpp for text measurement
 static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cell) {
     if (!cell || !cell->is_element()) return 20; // CSS minimum usable width
 
@@ -1226,52 +1228,18 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
     // Measure each child's natural width
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
-            // Measure text without wrapping
+            // Use unified text measurement from intrinsic_sizing.hpp
             const unsigned char* text = child->text_data();
             if (text && *text) {
-                log_debug("PCW measuring text: '%s' (len=%d)", text, (int)strlen((const char*)text));
-                // Measure text width using current font with kerning
-                float text_width = 0;
-                const unsigned char* p = text;
-                FT_UInt prev_glyph_index = 0;
-                bool has_kerning = lycon->font.ft_face && FT_HAS_KERNING(lycon->font.ft_face);
+                size_t text_len = strlen((const char*)text);
+                log_debug("PCW measuring text: '%s' (len=%zu)", text, text_len);
 
-                while (*p) {
-                    if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-                        // Use pre-calculated space width if available
-                        if (lycon->font.style && lycon->font.style->space_width > 0) {
-                            text_width += lycon->font.style->space_width;
-                        } else if (lycon->font.ft_face && lycon->font.ft_face->size) {
-                            text_width += lycon->font.ft_face->size->metrics.max_advance / 64.0f * 0.25f;
-                        } else {
-                            text_width += 4.0f; // Fallback space width
-                        }
-                        prev_glyph_index = 0; // Reset kerning after space
-                        p++;
-                        continue;
-                    }
+                // Use unified intrinsic sizing API
+                TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+                    lycon, (const char*)text, text_len);
 
-                    // Get glyph for character
-                    if (lycon->font.ft_face) {
-                        FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, *p);
-                        if (glyph_index) {
-                            // Apply kerning if available
-                            if (has_kerning && prev_glyph_index) {
-                                FT_Vector kerning;
-                                FT_Get_Kerning(lycon->font.ft_face, prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
-                                text_width += kerning.x / 64.0f;
-                            }
-                            FT_Load_Glyph(lycon->font.ft_face, glyph_index, FT_LOAD_DEFAULT);
-                            text_width += lycon->font.ft_face->glyph->advance.x / 64.0f;
-                            prev_glyph_index = glyph_index;
-                        }
-                    } else {
-                        // Fallback when no font face available - use average character width
-                        text_width += 8.0f; // Approximate character width
-                    }
-                    p++;
-                }
-                log_debug("PCW text measured width: %.2f (with kerning)", text_width);
+                float text_width = (float)widths.max_content;  // PCW uses max-content
+                log_debug("PCW text measured width: %.2f (unified API)", text_width);
                 if (text_width > max_width) max_width = text_width;
             }
         }
@@ -1338,6 +1306,7 @@ static int measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* cel
 
 // Measure cell's minimum content width (MCW) - narrowest width without overflow
 // This calculates the width needed for the longest word or unbreakable content
+// REFACTORED: Now uses unified intrinsic_sizing.hpp for text measurement
 static int measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cell) {
     if (!cell || !cell->is_element()) return 16; // Minimum default
 
@@ -1362,53 +1331,20 @@ static int measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cell)
 
     // For minimum width, we want the width of the longest word
     float min_width = 0.0f;
-    bool has_kerning = lycon->font.ft_face && FT_HAS_KERNING(lycon->font.ft_face);
 
     // Measure each child's minimum width
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
-            // For text, find the longest word (with kerning)
+            // Use unified text measurement from intrinsic_sizing.hpp
             const unsigned char* text = child->text_data();
             if (text && *text) {
-                float longest_word = 0.0f;
-                float current_word = 0.0f;
-                const unsigned char* p = text;
-                FT_UInt prev_glyph_index = 0;
+                size_t text_len = strlen((const char*)text);
 
-                while (*p) {
-                    if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
-                        // End of word
-                        if (current_word > longest_word) longest_word = current_word;
-                        current_word = 0.0f;
-                        prev_glyph_index = 0;
-                        p++;
-                        continue;
-                    }
+                // Use unified intrinsic sizing API - min_content gives longest word
+                TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+                    lycon, (const char*)text, text_len);
 
-                    // Add character to current word (with kerning)
-                    if (lycon->font.ft_face) {
-                        FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, *p);
-                        if (glyph_index) {
-                            // Apply kerning if available
-                            if (has_kerning && prev_glyph_index) {
-                                FT_Vector kerning;
-                                FT_Get_Kerning(lycon->font.ft_face, prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
-                                current_word += kerning.x / 64.0f;
-                            }
-                            FT_Load_Glyph(lycon->font.ft_face, glyph_index, FT_LOAD_DEFAULT);
-                            current_word += lycon->font.ft_face->glyph->advance.x / 64.0f;
-                            prev_glyph_index = glyph_index;
-                        }
-                    } else {
-                        // Fallback when no font face available - use average character width
-                        current_word += 8.0f; // Approximate character width
-                    }
-                    p++;
-                }
-
-                // Check final word
-                if (current_word > longest_word) longest_word = current_word;
-
+                float longest_word = (float)widths.min_content;
                 if (longest_word > min_width) min_width = longest_word;
             }
         }

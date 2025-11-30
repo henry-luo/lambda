@@ -121,6 +121,9 @@ typedef struct GridContainerLayout : GridProp {
     int container_height;
     int content_width;           // Width excluding padding/border
     int content_height;          // Height excluding padding/border
+
+    // Layout context for intrinsic sizing (set during init_grid_container)
+    struct LayoutContext* lycon;
 } GridContainerLayout;
 
 // Grid item placement state
@@ -194,7 +197,7 @@ void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
 // Utility functions
 bool is_valid_grid_item(struct ViewBlock* item);
 bool is_grid_item(struct ViewBlock* block);
-IntrinsicSizes calculate_grid_item_intrinsic_sizes(struct ViewBlock* item, bool is_row_axis);
+IntrinsicSizes calculate_grid_item_intrinsic_sizes(struct LayoutContext* lycon, struct ViewBlock* item, bool is_row_axis);
 int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value, const char* line_name, bool is_row, bool is_end_line);
 
 // Grid template area parsing

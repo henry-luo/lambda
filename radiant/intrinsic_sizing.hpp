@@ -11,6 +11,7 @@
 #pragma once
 #include "layout.hpp"
 #include "view.hpp"
+#include "available_space.hpp"
 
 // ============================================================================
 // Intrinsic Size Cache

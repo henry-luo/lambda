@@ -1,4 +1,5 @@
 #include "grid.hpp"
+#include "intrinsic_sizing.hpp"
 
 extern "C" {
 #include <stdlib.h>
@@ -350,23 +351,42 @@ void resolve_grid_template_areas(GridContainerLayout* grid_layout) {
     log_debug("Grid template areas resolved\n");
 }
 
-// Calculate intrinsic sizes for grid items
-IntrinsicSizes calculate_grid_item_intrinsic_sizes(ViewBlock* item, bool is_row_axis) {
+// Calculate intrinsic sizes for grid items using unified intrinsic sizing API
+IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis) {
     IntrinsicSizes sizes = {0};
 
     if (!item) return sizes;
 
-    // This is a simplified implementation
-    // Full implementation would measure actual content
+    // Use unified intrinsic sizing API if layout context is available
+    if (lycon && item->node) {
+        if (is_row_axis) {
+            // For row axis, we're measuring height
+            // Height depends on width, so use current width or estimate
+            int width = item->width > 0 ? item->width : 200;
+            sizes.min_content = calculate_min_content_height(lycon, item->node, width);
+            sizes.max_content = calculate_max_content_height(lycon, item->node, width);
 
-    if (is_row_axis) {
-        // For row axis, we're measuring height
-        sizes.min_content = 20;  // Minimum reasonable height
-        sizes.max_content = item->height > 0 ? item->height : 100; // Use current height or default
+            // Ensure reasonable minimums
+            if (sizes.min_content <= 0) sizes.min_content = 20;
+            if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+        } else {
+            // For column axis, we're measuring width
+            sizes.min_content = calculate_min_content_width(lycon, item->node);
+            sizes.max_content = calculate_max_content_width(lycon, item->node);
+
+            // Ensure reasonable minimums
+            if (sizes.min_content <= 0) sizes.min_content = 50;
+            if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
+        }
     } else {
-        // For column axis, we're measuring width
-        sizes.min_content = 50;  // Minimum reasonable width
-        sizes.max_content = item->width > 0 ? item->width : 200; // Use current width or default
+        // Fallback: use item dimensions if no layout context
+        if (is_row_axis) {
+            sizes.min_content = 20;  // Minimum reasonable height
+            sizes.max_content = item->height > 0 ? item->height : 100;
+        } else {
+            sizes.min_content = 50;  // Minimum reasonable width
+            sizes.max_content = item->width > 0 ? item->width : 200;
+        }
     }
 
     // Consider constraints

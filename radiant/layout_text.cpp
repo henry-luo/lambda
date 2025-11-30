@@ -5,6 +5,49 @@
 
 #include "../lib/log.h"
 
+// ============================================================================
+// Intrinsic Sizing Mode Helpers
+// ============================================================================
+
+/**
+ * Check if layout is in min-content measurement mode.
+ * In min-content mode, break at every opportunity (every word boundary).
+ */
+static inline bool is_min_content_mode(LayoutContext* lycon) {
+    return lycon->available_space.width.is_min_content();
+}
+
+/**
+ * Check if layout is in max-content measurement mode.
+ * In max-content mode, never break lines - measure full unwrapped width.
+ */
+static inline bool is_max_content_mode(LayoutContext* lycon) {
+    return lycon->available_space.width.is_max_content();
+}
+
+/**
+ * Check if line should break based on intrinsic sizing mode.
+ * Returns true if line is full and should break.
+ *
+ * In min-content mode: always break at word boundaries
+ * In max-content mode: never break (infinite available width)
+ * In normal mode: break when line is full
+ */
+static inline bool should_break_line(LayoutContext* lycon, float current_x, float width) {
+    if (is_max_content_mode(lycon)) {
+        // Never break in max-content mode
+        return false;
+    }
+    if (is_min_content_mode(lycon)) {
+        // In min-content mode, we break at every opportunity
+        // This is handled by the normal flow checking line.right
+        // but line.right should be set to 0 or very small
+        return current_x + width > lycon->line.right;
+    }
+    // Normal mode: check if line is full
+    return current_x + width > lycon->line.right;
+}
+
 // Forward declarations
 LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node);
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node);

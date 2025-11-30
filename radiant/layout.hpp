@@ -2,6 +2,7 @@
 #define LAYOUT_HPP
 #pragma once
 #include "view.hpp"
+#include "available_space.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 
@@ -77,6 +78,9 @@ typedef struct FlexContainerLayout : FlexProp {
     float main_axis_size;
     float cross_axis_size;
     bool needs_reflow;
+
+    // Layout context for intrinsic sizing (set during init_flex_container)
+    struct LayoutContext* lycon;
 } FlexContainerLayout;
 
 typedef struct GridContainerLayout GridContainerLayout;
@@ -99,6 +103,12 @@ typedef struct LayoutContext {
     float width, height;  // context dimensions
     float dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
+
+    // Available space constraints for current layout
+    // This enables layout code to distinguish between:
+    // - Normal layout (definite width/height)
+    // - Intrinsic sizing (min-content/max-content measurement)
+    AvailableSpace available_space;
 
     // Measurement mode flag - when true, layout is for measuring intrinsic sizes
     // and should not create permanent view structures or modify the main layout tree
