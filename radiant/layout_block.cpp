@@ -584,16 +584,19 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         }
     }
 
-    // apply CSS float layout after positioning
-    if (block->position && element_has_float(block)) {
-        log_debug("Element has float property, applying float layout");
-        layout_float_element(lycon, block);
-    }
-
-    // apply CSS clear property after float layout
+    // IMPORTANT: Apply clear BEFORE adding to float context
+    // Clear positions this element below earlier floats, but the element's
+    // own float status should not affect where it clears to.
     if (block->position && block->position->clear != CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
+    }
+
+    // Apply CSS float layout after clear has been applied
+    // This adds the element to the float context for affecting later content
+    if (block->position && element_has_float(block)) {
+        log_debug("Element has float property, applying float layout");
+        layout_float_element(lycon, block);
     }
 }
 
