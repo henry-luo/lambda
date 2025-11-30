@@ -182,8 +182,7 @@ make clean-grammar      # Remove generated files (parser.c, ts-enum.h)
 1. **Always use pool allocation** for Lambda objects: `pool_calloc()`, `arena_alloc()`
 2. **Reference counting**: Increment refs when storing, decrement when releasing
 3. **Validate pointers** before dereferencing: `if (!ptr) return ItemNull;`
-4. **Range check arrays**: Verify indices before access
-5. **Use MarkBuilder** for constructing complex structures (handles memory correctly)
+4. **Use MarkBuilder** for constructing complex structures (handles memory correctly)
 
 ### Debugging & Logging
 ```cpp
@@ -193,7 +192,6 @@ log_info("Loaded document: %zu bytes", size);
 log_error("Parse failed at line %d: %s", line, msg);
 
 // NEVER use printf/fprintf/std::cout for debugging
-// Configure logging levels in log.conf
 ```
 
 ### Code Style
@@ -267,7 +265,6 @@ if (type == LMD_TYPE_STRING) {
 - `radiant/layout.cpp` - Layout engine coordinator
 - `radiant/layout_flex.cpp` - Flexbox implementation
 - `radiant/layout_block.cpp` - Block layout
-- `test/layout/` - Layout test harness (browser reference comparison)
 
 ### Libraries (`lib/`)
 - `mempool.c/h` - Variable-size memory pool
@@ -304,17 +301,12 @@ if (type == LMD_TYPE_STRING) {
 5. Document in `doc/Lambda_Reference.md`
 
 ### Debugging a Crash
-1. Build debug version: `make debug` (enables AddressSanitizer)
-2. Enable debug logging in `log.conf`: set level to `DEBUG`
-3. Run with debugger: `lldb ./lambda.exe` or `gdb ./lambda.exe`
-4. Check `./log.txt` for detailed execution trace
-5. Use `log_debug()` liberally to trace execution flow
+1. Use `log_debug()` liberally to trace execution flow
+2. Check `./log.txt` for detailed execution trace
+3. Run with debugger: `lldb ./lambda.exe -- extra CLI arguments`
 
 ### Investigating Memory Issues
 1. Run with AddressSanitizer: `make debug && ./lambda.exe script.ls`
-2. Check for leaks with valgrind (Linux): `valgrind --leak-check=full ./lambda.exe`
-3. Review reference counting: ensure `heap_incref()`/`heap_decref()` are balanced
-4. Verify pool usage: check `pool_calloc()` returns are checked
 
 ## Platform-Specific Notes
 
