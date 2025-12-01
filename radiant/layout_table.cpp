@@ -1275,7 +1275,14 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->line.right = content_start_x + content_width;  // Text ends before right padding
     lycon->line.advance_x = content_start_x;   // Start advancing from padding offset
     lycon->line.is_line_start = true;
+    lycon->line.start_view = NULL;  // Reset start_view so new text nodes become start of line
     lycon->elmt = tcell;
+
+    // Propagate text-align from cell (e.g., TH has text-align: center by default)
+    if (tcell->blk && tcell->blk->text_align) {
+        lycon->block.text_align = tcell->blk->text_align;
+        log_debug("Table cell text-align: %d", tcell->blk->text_align);
+    }
 
     log_debug("Layout cell content - cell=%dx%d, border=(%d,%d), padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
         cell->width, cell->height, border_left, border_top,
@@ -1294,6 +1301,10 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
             layout_flow_node(lycon, cc);
         }
     }
+
+    // Apply horizontal text alignment (e.g., center for TH elements)
+    // This must be called after content layout to align the line of text
+    line_align(lycon);
 
     // Apply CSS vertical-align positioning after content layout
     apply_cell_vertical_alignment(lycon, tcell, content_height);
