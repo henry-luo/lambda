@@ -319,7 +319,7 @@ struct FontProp {
     bool has_kerning;  // whether the font has kerning
 };
 
-struct GridItemProp{
+struct GridItemProp {
     // Grid item properties (following flex pattern)
     int grid_row_start;          // Grid row start line
     int grid_row_end;            // Grid row end line

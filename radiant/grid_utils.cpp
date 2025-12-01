@@ -358,21 +358,23 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
     if (!item) return sizes;
 
     // Use unified intrinsic sizing API if layout context is available
-    if (lycon && item->node) {
+    // ViewBlock inherits from DomNode through the chain: ViewBlock -> ViewSpan -> ViewGroup -> DomElement -> DomNode
+    DomNode* node = (DomNode*)item;
+    if (lycon && node) {
         if (is_row_axis) {
             // For row axis, we're measuring height
             // Height depends on width, so use current width or estimate
             int width = item->width > 0 ? item->width : 200;
-            sizes.min_content = calculate_min_content_height(lycon, item->node, width);
-            sizes.max_content = calculate_max_content_height(lycon, item->node, width);
+            sizes.min_content = calculate_min_content_height(lycon, node, width);
+            sizes.max_content = calculate_max_content_height(lycon, node, width);
 
             // Ensure reasonable minimums
             if (sizes.min_content <= 0) sizes.min_content = 20;
             if (sizes.max_content <= 0) sizes.max_content = sizes.min_content;
         } else {
             // For column axis, we're measuring width
-            sizes.min_content = calculate_min_content_width(lycon, item->node);
-            sizes.max_content = calculate_max_content_width(lycon, item->node);
+            sizes.min_content = calculate_min_content_width(lycon, node);
+            sizes.max_content = calculate_max_content_width(lycon, node);
 
             // Ensure reasonable minimums
             if (sizes.min_content <= 0) sizes.min_content = 50;
@@ -389,18 +391,20 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlo
         }
     }
 
-    // Consider constraints
-    if (item->min_width > 0 && !is_row_axis) {
-        sizes.min_content = fmax(sizes.min_content, item->min_width);
-    }
-    if (item->max_width > 0 && !is_row_axis) {
-        sizes.max_content = fmin(sizes.max_content, item->max_width);
-    }
-    if (item->min_height > 0 && is_row_axis) {
-        sizes.min_content = fmax(sizes.min_content, item->min_height);
-    }
-    if (item->max_height > 0 && is_row_axis) {
-        sizes.max_content = fmin(sizes.max_content, item->max_height);
+    // Consider constraints from BlockProp
+    if (item->blk) {
+        if (item->blk->given_min_width > 0 && !is_row_axis) {
+            sizes.min_content = fmax(sizes.min_content, item->blk->given_min_width);
+        }
+        if (item->blk->given_max_width > 0 && !is_row_axis) {
+            sizes.max_content = fmin(sizes.max_content, item->blk->given_max_width);
+        }
+        if (item->blk->given_min_height > 0 && is_row_axis) {
+            sizes.min_content = fmax(sizes.min_content, item->blk->given_min_height);
+        }
+        if (item->blk->given_max_height > 0 && is_row_axis) {
+            sizes.max_content = fmin(sizes.max_content, item->blk->given_max_height);
+        }
     }
 
     return sizes;

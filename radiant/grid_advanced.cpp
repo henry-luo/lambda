@@ -183,7 +183,7 @@ void auto_place_grid_items_dense(GridContainerLayout* grid_layout) {
 
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
-        if (!item || !item->is_grid_auto_placed) continue;
+        if (!item || !item->gi || !item->gi->is_grid_auto_placed) continue;
 
         // Try to place the item starting from the beginning of the grid
         bool placed = false;
@@ -206,13 +206,13 @@ void auto_place_grid_items_dense(GridContainerLayout* grid_layout) {
 
 // Try to place an item at a specific position for dense packing
 bool try_place_item_dense(GridContainerLayout* grid_layout, ViewBlock* item, int start_row, int start_col) {
-    if (!grid_layout || !item) return false;
+    if (!grid_layout || !item || !item->gi) return false;
 
     // Calculate item span (default to 1x1 if not specified)
-    int row_span = (item->computed_grid_row_end > item->computed_grid_row_start) ?
-                   (item->computed_grid_row_end - item->computed_grid_row_start) : 1;
-    int col_span = (item->computed_grid_column_end > item->computed_grid_column_start) ?
-                   (item->computed_grid_column_end - item->computed_grid_column_start) : 1;
+    int row_span = (item->gi->computed_grid_row_end > item->gi->computed_grid_row_start) ?
+                   (item->gi->computed_grid_row_end - item->gi->computed_grid_row_start) : 1;
+    int col_span = (item->gi->computed_grid_column_end > item->gi->computed_grid_column_start) ?
+                   (item->gi->computed_grid_column_end - item->gi->computed_grid_column_start) : 1;
 
     // Check if the item fits at this position
     int end_row = start_row + row_span;
@@ -226,13 +226,13 @@ bool try_place_item_dense(GridContainerLayout* grid_layout, ViewBlock* item, int
     // Check for conflicts with existing items
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* existing_item = grid_layout->grid_items[i];
-        if (!existing_item || existing_item == item) continue;
+        if (!existing_item || existing_item == item || !existing_item->gi) continue;
 
         // Check if areas overlap
-        bool row_overlap = !(end_row <= existing_item->computed_grid_row_start ||
-                           existing_item->computed_grid_row_end <= start_row);
-        bool col_overlap = !(end_col <= existing_item->computed_grid_column_start ||
-                           existing_item->computed_grid_column_end <= start_col);
+        bool row_overlap = !(end_row <= existing_item->gi->computed_grid_row_start ||
+                           existing_item->gi->computed_grid_row_end <= start_row);
+        bool col_overlap = !(end_col <= existing_item->gi->computed_grid_column_start ||
+                           existing_item->gi->computed_grid_column_end <= start_col);
 
         if (row_overlap && col_overlap) {
             return false; // Conflict detected
@@ -240,10 +240,10 @@ bool try_place_item_dense(GridContainerLayout* grid_layout, ViewBlock* item, int
     }
 
     // Place the item
-    item->computed_grid_row_start = start_row;
-    item->computed_grid_row_end = end_row;
-    item->computed_grid_column_start = start_col;
-    item->computed_grid_column_end = end_col;
+    item->gi->computed_grid_row_start = start_row;
+    item->gi->computed_grid_row_end = end_row;
+    item->gi->computed_grid_column_start = start_col;
+    item->gi->computed_grid_column_end = end_col;
 
     return true;
 }

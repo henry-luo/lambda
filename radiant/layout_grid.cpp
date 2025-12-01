@@ -191,8 +191,10 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         ViewBlock* item = items[i];
         log_debug("FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d, grid_area: (%d-%d, %d-%d)",
             i, item->x, item->y, item->width, item->height,
-            item->computed_grid_row_start, item->computed_grid_row_end,
-            item->computed_grid_column_start, item->computed_grid_column_end);
+            item->gi ? item->gi->computed_grid_row_start : 0,
+            item->gi ? item->gi->computed_grid_row_end : 0,
+            item->gi ? item->gi->computed_grid_column_start : 0,
+            item->gi ? item->gi->computed_grid_column_end : 0);
     }
     log_debug("FINAL GRID POSITIONS:");
     for (int i = 0; i < item_count; i++) {
@@ -219,20 +221,21 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 
     int count = 0;
 
-    // Count children first - use ViewBlock hierarchy for grid items
+    // Count children first - use DomNode hierarchy, cast to ViewBlock as needed
     printf("DEBUG: About to access container->first_child\n");
-    ViewBlock* child = container->first_child;
-    printf("DEBUG: first_child=%p\n", child);
-    while (child) {
+    DomNode* child_node = container->first_child;
+    printf("DEBUG: first_child=%p\n", child_node);
+    while (child_node) {
+        ViewBlock* child = (ViewBlock*)child_node;
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
                           (child->position->position == CSS_VALUE_ABSOLUTE ||
                            child->position->position == CSS_VALUE_FIXED);
-        bool is_hidden = child->visibility == VIS_HIDDEN;
+        bool is_hidden = child->in_line && child->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             count++;
         }
-        child = child->next_sibling;
+        child_node = child_node->next_sibling;
     }
 
     if (count == 0) {
@@ -247,34 +250,40 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
             grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*));
     }
 
-    // Collect items - use ViewBlock hierarchy for grid items
+    // Collect items - use DomNode hierarchy, cast to ViewBlock as needed
     count = 0;
-    child = container->first_child;
-    while (child) {
+    child_node = container->first_child;
+    while (child_node) {
+        ViewBlock* child = (ViewBlock*)child_node;
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
                           (child->position->position == CSS_VALUE_ABSOLUTE ||
                            child->position->position == CSS_VALUE_FIXED);
-        bool is_hidden = child->visibility == VIS_HIDDEN;
+        bool is_hidden = child->in_line && child->in_line->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             grid_layout->grid_items[count] = child;
 
             // Initialize grid item properties with defaults if not set
-            if (child->grid_row_start == 0 && child->grid_row_end == 0 &&
-                child->grid_column_start == 0 && child->grid_column_end == 0) {
+            bool has_explicit_placement = child->gi && (
+                child->gi->grid_row_start != 0 || child->gi->grid_row_end != 0 ||
+                child->gi->grid_column_start != 0 || child->gi->grid_column_end != 0);
+            if (!has_explicit_placement) {
                 // Item has default/uninitialized grid properties - set proper defaults
-                child->grid_row_start = 0;    // auto
-                child->grid_row_end = 0;      // auto
-                child->grid_column_start = 0; // auto
-                child->grid_column_end = 0;   // auto
-                child->justify_self = CSS_VALUE_AUTO;
-                child->align_self_grid = CSS_VALUE_AUTO;
-                child->is_grid_auto_placed = true;
+                // Note: gi is allocated elsewhere, here we just mark as auto-placed
+                if (child->gi) {
+                    child->gi->grid_row_start = 0;    // auto
+                    child->gi->grid_row_end = 0;      // auto
+                    child->gi->grid_column_start = 0; // auto
+                    child->gi->grid_column_end = 0;   // auto
+                    child->gi->justify_self = CSS_VALUE_AUTO;
+                    child->gi->align_self_grid = CSS_VALUE_AUTO;
+                    child->gi->is_grid_auto_placed = true;
+                }
             }
 
             count++;
         }
-        child = child->next_sibling;
+        child_node = child_node->next_sibling;
     }
 
     grid_layout->item_count = count;
@@ -291,18 +300,19 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
     // Phase 1: Place items with explicit positions
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
+        if (!item->gi) continue;  // Skip items without grid item properties
 
         // Check if item has explicit grid positioning
-        if (item->grid_row_start > 0 || item->grid_row_end > 0 ||
-            item->grid_column_start > 0 || item->grid_column_end > 0 ||
-            item->grid_area) {
+        if (item->gi->grid_row_start > 0 || item->gi->grid_row_end > 0 ||
+            item->gi->grid_column_start > 0 || item->gi->grid_column_end > 0 ||
+            item->gi->grid_area) {
 
             GridItemPlacement placement = {0};
 
-            if (item->grid_area) {
+            if (item->gi->grid_area) {
                 // Resolve named grid area
                 for (int j = 0; j < grid_layout->area_count; j++) {
-                    if (strcmp(grid_layout->grid_areas[j].name, item->grid_area) == 0) {
+                    if (strcmp(grid_layout->grid_areas[j].name, item->gi->grid_area) == 0) {
                         placement.row_start = grid_layout->grid_areas[j].row_start;
                         placement.row_end = grid_layout->grid_areas[j].row_end;
                         placement.column_start = grid_layout->grid_areas[j].column_start;
@@ -312,18 +322,18 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
                 }
             } else {
                 // Use explicit line positions
-                placement.row_start = item->grid_row_start;
-                placement.row_end = item->grid_row_end;
-                placement.column_start = item->grid_column_start;
-                placement.column_end = item->grid_column_end;
+                placement.row_start = item->gi->grid_row_start;
+                placement.row_end = item->gi->grid_row_end;
+                placement.column_start = item->gi->grid_column_start;
+                placement.column_end = item->gi->grid_column_end;
             }
 
             // Store computed positions
-            item->computed_grid_row_start = placement.row_start;
-            item->computed_grid_row_end = placement.row_end;
-            item->computed_grid_column_start = placement.column_start;
-            item->computed_grid_column_end = placement.column_end;
-            item->is_grid_auto_placed = false;
+            item->gi->computed_grid_row_start = placement.row_start;
+            item->gi->computed_grid_row_end = placement.row_end;
+            item->gi->computed_grid_column_start = placement.column_start;
+            item->gi->computed_grid_column_end = placement.column_end;
+            item->gi->is_grid_auto_placed = false;
 
             log_debug("Explicit placement - item %d: row %d-%d, col %d-%d\n",
                       i, placement.row_start, placement.row_end,
@@ -334,15 +344,16 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
     // Phase 2: Auto-place remaining items
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
+        if (!item->gi) continue;  // Skip items without grid item properties
 
-        if (item->is_grid_auto_placed) {
+        if (item->gi->is_grid_auto_placed) {
             GridItemPlacement placement = {0};
             auto_place_grid_item(grid_layout, item, &placement);
 
-            item->computed_grid_row_start = placement.row_start;
-            item->computed_grid_row_end = placement.row_end;
-            item->computed_grid_column_start = placement.column_start;
-            item->computed_grid_column_end = placement.column_end;
+            item->gi->computed_grid_row_start = placement.row_start;
+            item->gi->computed_grid_row_end = placement.row_end;
+            item->gi->computed_grid_column_start = placement.column_start;
+            item->gi->computed_grid_column_end = placement.column_end;
 
             log_debug("Auto placement - item %d: row %d-%d, col %d-%d\n",
                       i, placement.row_start, placement.row_end,
@@ -456,14 +467,15 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     printf("DEBUG: Checking %d items for grid size requirements\n", grid_layout->item_count);
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
+        if (!item->gi) continue;  // Skip items without grid item properties
         printf("DEBUG: Item %d placement - row: %d-%d, col: %d-%d\n",
-               i, item->computed_grid_row_start, item->computed_grid_row_end,
-               item->computed_grid_column_start, item->computed_grid_column_end);
+               i, item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+               item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
 
         // CRITICAL FIX: Grid positions are 1-indexed, but we need the actual track count
         // If an item ends at position 2, it uses tracks 0 and 1 (2 tracks total)
-        max_row = fmax(max_row, item->computed_grid_row_end - 1);
-        max_column = fmax(max_column, item->computed_grid_column_end - 1);
+        max_row = fmax(max_row, item->gi->computed_grid_row_end - 1);
+        max_column = fmax(max_column, item->gi->computed_grid_column_end - 1);
     }
 
     // Ensure minimum grid size matches explicit template
@@ -503,6 +515,6 @@ bool is_grid_item(ViewBlock* block) {
     bool is_absolute = block->position &&
                       (block->position->position == CSS_VALUE_ABSOLUTE ||
                        block->position->position == CSS_VALUE_FIXED);
-    bool is_hidden = block->visibility == VIS_HIDDEN;
+    bool is_hidden = block->in_line && block->in_line->visibility == VIS_HIDDEN;
     return parent->embed && parent->embed->grid && !is_absolute && !is_hidden;
 }
