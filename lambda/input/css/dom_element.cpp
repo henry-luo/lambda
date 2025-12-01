@@ -271,13 +271,13 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
                 // First, clear existing classes
                 element->class_count = 0;
                 element->class_names = nullptr;
-                
+
                 // Parse and add each class
                 if (value && strlen(value) > 0) {
                     char* class_copy = (char*)arena_alloc(element->doc->arena, strlen(value) + 1);
                     if (class_copy) {
                         strcpy(class_copy, value);
-                        
+
                         // Split by spaces and add each class
                         char* token = strtok(class_copy, " \t\n\r");
                         while (token) {
@@ -582,19 +582,19 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
         char* decl_str = (char*)arena_alloc(element->doc->arena, decl_str_len);
         if (decl_str) {
             snprintf(decl_str, decl_str_len, "%s:%s", prop_name, prop_value);
-            
+
             // Tokenize the declaration
             size_t token_count = 0;
             CssToken* tokens = css_tokenize(decl_str, strlen(decl_str), element->doc->pool, &token_count);
-            
+
             if (tokens && token_count > 0) {
                 int pos = 0;
                 CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, element->doc->pool);
-                
+
                 if (decl) {
                     // Set origin to author (inline styles are author origin)
                     decl->origin = CSS_ORIGIN_AUTHOR;
-                    
+
                     // Set inline style specificity (1,0,0,0)
                     decl->specificity.inline_style = 1;
                     decl->specificity.ids = 0;
@@ -1219,9 +1219,45 @@ DomText* dom_text_create(String* native_string, DomElement* parent_element) {
     text_node->native_string = native_string;
     text_node->text = native_string->chars;  // Reference Lambda String's chars
     text_node->length = native_string->len;
+    text_node->content_type = DOM_TEXT_STRING;  // Plain text
     text_node->parent = parent_element;
 
     log_debug("dom_text_create: created backed text node, text='%s'", native_string->chars);
+    return text_node;
+}
+
+DomText* dom_text_create_symbol(String* symbol_string, DomElement* parent_element) {
+    if (!symbol_string || !parent_element) {
+        log_error("dom_text_create_symbol: symbol_string and parent_element required");
+        return nullptr;
+    }
+
+    if (!parent_element->doc) {
+        log_error("dom_text_create_symbol: parent_element has no document");
+        return nullptr;
+    }
+
+    // Allocate from parent's document arena
+    DomText* text_node = (DomText*)arena_calloc(parent_element->doc->arena, sizeof(DomText));
+    if (!text_node) {
+        log_error("dom_text_create_symbol: arena_calloc failed");
+        return nullptr;
+    }
+
+    // Initialize base DomNode fields
+    text_node->node_type = DOM_NODE_TEXT;
+    text_node->parent = parent_element;
+    text_node->next_sibling = nullptr;
+    text_node->prev_sibling = nullptr;
+
+    // Set Lambda backing - symbol name is stored in native_string
+    text_node->native_string = symbol_string;
+    text_node->text = symbol_string->chars;  // Symbol name
+    text_node->length = symbol_string->len;
+    text_node->content_type = DOM_TEXT_SYMBOL;  // Symbol (entity or emoji)
+    text_node->parent = parent_element;
+
+    log_debug("dom_text_create_symbol: created symbol node, name='%s'", symbol_string->chars);
     return text_node;
 }
 
@@ -1969,6 +2005,43 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
                     log_debug("  Created text node at index %lld: '%s' (len=%zu)",
                               i, text_str->chars, text_str->len);
+                }
+            }
+        } else if (child_type == LMD_TYPE_SYMBOL) {
+            // Symbol node (HTML entity or emoji) - create DomText with symbol type
+            String* symbol_str = (String*)child_item.pointer;
+            if (symbol_str && symbol_str->len > 0) {
+                // Create symbol text node (will be resolved at render time)
+                DomText* text_node = dom_text_create_symbol(symbol_str, dom_elem);
+                if (text_node) {
+                    text_node->parent = dom_elem;
+
+                    // Add symbol node to DOM sibling chain
+                    if (!dom_elem->first_child) {
+                        // First child
+                        dom_elem->first_child = text_node;
+                        dom_elem->last_child = text_node;
+                        text_node->prev_sibling = nullptr;
+                        text_node->next_sibling = nullptr;
+                    } else {
+                        // Use last_child for O(1) append
+                        DomNode* last = dom_elem->last_child;
+                        if (!last) {
+                            // Fallback if last_child not set (shouldn't happen)
+                            last = dom_elem->first_child;
+                            while (last->next_sibling) {
+                                last = last->next_sibling;
+                            }
+                        }
+                        // Append symbol node to last child
+                        last->next_sibling = text_node;
+                        text_node->prev_sibling = last;
+                        text_node->next_sibling = nullptr;
+                        dom_elem->last_child = text_node;
+                    }
+
+                    log_debug("  Created symbol node at index %lld: '%s' (len=%zu)",
+                              i, symbol_str->chars, symbol_str->len);
                 }
             }
         }

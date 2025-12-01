@@ -153,18 +153,37 @@ typedef struct TextRect TextRect;
 typedef struct FontProp FontProp;
 
 /**
+ * Content type for DomText nodes
+ * Indicates whether the text node contains plain text or a symbol reference
+ */
+enum DomTextContentType {
+    DOM_TEXT_STRING = 0,    // Plain text (default)
+    DOM_TEXT_SYMBOL = 1     // Symbol (HTML entity or emoji shortcode)
+};
+
+/**
  * DomText - Text node in DOM tree
  * Represents text content between elements
+ *
+ * Can contain either:
+ * - Plain text (content_type == DOM_TEXT_STRING)
+ * - Symbol reference (content_type == DOM_TEXT_SYMBOL)
+ *
+ * For symbols, the text/native_string fields contain the symbol name,
+ * and the actual UTF-8 rendering is resolved at render time via symbol_resolver.
  *
  * Always backed by Lambda String (references chars, no copy).
  * Maintains synchronization with Lambda tree via MarkEditor through parent element.
  */
 struct DomText : public DomNode {
     // Text-specific fields (reference to Lambda String)
-    const char* text;            // Text content (references native_string->chars)
-    size_t length;               // Text length
+    const char* text;            // Text content or symbol name (references native_string->chars)
+    size_t length;               // Text length or symbol name length
     // Lambda backing (required)
     String* native_string;       // Pointer to backing Lambda String
+
+    // Content type (string vs symbol)
+    DomTextContentType content_type;
 
     // view related fields
     TextRect *rect;  // first text rect
@@ -175,7 +194,10 @@ struct DomText : public DomNode {
 
     // Constructor
     DomText() : DomNode(DOM_NODE_TEXT), text(nullptr), length(0),
-        native_string(nullptr), rect(nullptr) {}
+        native_string(nullptr), content_type(DOM_TEXT_STRING), rect(nullptr) {}
+
+    // Check if this is a symbol node
+    bool is_symbol() const { return content_type == DOM_TEXT_SYMBOL; }
 };
 
 /**
@@ -185,6 +207,14 @@ struct DomText : public DomNode {
  * @return New DomText or NULL on failure
  */
 DomText* dom_text_create(String* native_string, DomElement* parent_element);
+
+/**
+ * Create a new DomText node for a symbol (entity or emoji)
+ * @param symbol_string Pointer to Lambda String containing symbol name
+ * @param parent_element Parent DomElement (provides document context)
+ * @return New DomText or NULL on failure
+ */
+DomText* dom_text_create_symbol(String* symbol_string, DomElement* parent_element);
 
 /**
  * Destroy a DomText node

@@ -93,6 +93,7 @@
         "radiant/grid_positioning.cpp",
         "radiant/grid_advanced.cpp",
         "radiant/intrinsic_sizing.cpp",
+        "radiant/symbol_resolver.cpp",
         "radiant/resolve_htm_style.cpp",
         "radiant/resolve_css_style.cpp",
         "radiant/scroller.cpp",
@@ -332,6 +333,7 @@
                 "lambda/input/parse_error.cpp",
                 "lambda/input/source_tracker.cpp",
                 "lambda/input/input-context.cpp",
+                "lambda/input/html_entities.cpp",
                 "lambda/input/css/css_tokenizer.cpp",
                 "lambda/input/css/css_properties.cpp",
                 "lambda/input/css/css_value_parser.cpp",
@@ -1185,6 +1187,19 @@
                             "rpmalloc"
                         ],
                         "binary": "test_markup_roundtrip_gtest.exe"
+                    },
+                    {
+                        "source": "test_entity_emoji_gtest.cpp",
+                        "name": "\ud83c\udf10 Entity/Emoji Symbol Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_entity_emoji_gtest.exe"
                     },
                     {
                         "source": "test_input_roundtrip_gtest.cpp",

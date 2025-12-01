@@ -1039,7 +1039,7 @@ TEST_F(LayoutDataBoxTests, Float001) {
 }
 
 TEST_F(LayoutDataBoxTests, Clear001) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/box/clear-001.html", "clear-001");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/baseline/clear-001.html", "clear-001");
     EXPECT_TRUE(result.success) << "Clear 001 should succeed";
 }
 
@@ -1118,7 +1118,7 @@ TEST_F(LayoutDataGridTests, Grid012NestedGrid) {
 class LayoutDataTableTests : public HtmlRoundtripTest {};
 
 TEST_F(LayoutDataTableTests, Table001BasicTable) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/table/table_001_basic_table.html", "table_001_basic_table");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/baseline/table_001_basic_table.html", "table_001_basic_table");
     EXPECT_TRUE(result.success) << "Table 001 basic table should succeed";
 }
 
@@ -1151,12 +1151,12 @@ TEST_F(LayoutDataPositionTests, Position001FloatLeft) {
 }
 
 TEST_F(LayoutDataPositionTests, Position007AbsoluteBasic) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/position/position_007_absolute_basic.html", "position_007_absolute_basic");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/baseline/position_007_absolute_basic.html", "position_007_absolute_basic");
     EXPECT_TRUE(result.success) << "Position 007 absolute basic should succeed";
 }
 
 TEST_F(LayoutDataPositionTests, Position010RelativeBasic) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/position/position_010_relative_basic.html", "position_010_relative_basic");
+    auto result = test_html_file_roundtrip_cli("./test/layout/data/baseline/position_010_relative_basic.html", "position_010_relative_basic");
     EXPECT_TRUE(result.success) << "Position 010 relative basic should succeed";
 }
 

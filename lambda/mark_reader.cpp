@@ -79,6 +79,10 @@ bool ItemReader::isString() const {
     return cached_type_ == LMD_TYPE_STRING;
 }
 
+bool ItemReader::isSymbol() const {
+    return cached_type_ == LMD_TYPE_SYMBOL;
+}
+
 bool ItemReader::isInt() const {
     return cached_type_ == LMD_TYPE_INT || cached_type_ == LMD_TYPE_INT64;
 }
@@ -110,6 +114,13 @@ bool ItemReader::isList() const {
 String* ItemReader::asString() const {
     if (isString()) {
         return get_string(item_);
+    }
+    return nullptr;
+}
+
+String* ItemReader::asSymbol() const {
+    if (isSymbol()) {
+        return (String*)item_.pointer;
     }
     return nullptr;
 }

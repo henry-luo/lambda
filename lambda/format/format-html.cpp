@@ -163,14 +163,14 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         stringbuf_append_str(ctx.output(), "<element/>");
         return;
     }
-    
+
     size_t tag_len = strlen(tag_name);
-    
+
     // special handling for HTML comments (tag name "!--")
     if (tag_len == 3 && memcmp(tag_name, "!--", 3) == 0) {
         // this is a comment element - format as <!--content-->
         stringbuf_append_str(ctx.output(), "<!--");
-        
+
         // output comment content (first child text node)
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
@@ -180,11 +180,11 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         }
-        
+
         stringbuf_append_str(ctx.output(), "-->");
         return;
     }
-    
+
     // special handling for DOCTYPE (tag name "!DOCTYPE" or "!doctype")
     if (tag_len >= 8 &&
         (memcmp(tag_name, "!DOCTYPE", 8) == 0 ||
@@ -193,7 +193,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         stringbuf_append_str(ctx.output(), "<!");
         // preserve the case of "DOCTYPE" or "doctype"
         stringbuf_append_format(ctx.output(), "%.*s", (int)(tag_len - 1), tag_name + 1);
-        
+
         // output DOCTYPE content (first child text node)
         ItemReader first_child = elem.childAt(0);
         if (first_child.isString()) {
@@ -204,11 +204,11 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
                 stringbuf_append_format(ctx.output(), "%.*s", (int)str->len, str->chars);
             }
         }
-        
+
         stringbuf_append_char(ctx.output(), '>');
         return;
     }
-    
+
     // special handling for XML declaration (tag name "?xml")
     if (tag_len == 4 && memcmp(tag_name, "?xml", 4) == 0) {
         // this is an XML declaration - output the stored text directly
@@ -222,32 +222,32 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         }
         return;
     }
-    
+
     // format as proper HTML element
     stringbuf_append_char(ctx.output(), '<');
     stringbuf_append_str(ctx.output(), tag_name);
-    
+
     // add attributes - iterate through element's type shape to get all attributes
     if (elem.element() && elem.element()->type && elem.element()->data) {
         const TypeElmt* elmt_type = (const TypeElmt*)elem.element()->type;
         const TypeMap* map_type = (const TypeMap*)elmt_type;
         const ShapeEntry* field = map_type->shape;
         const void* attr_data = elem.element()->data;
-        
+
         while (field) {
             if (field->name && field->type) {
                 const char* field_name = field->name->str;
                 int field_name_len = field->name->length;
-                
+
                 // skip the "_" field (children)
                 if (field_name_len == 1 && field_name[0] == '_') {
                     field = field->next;
                     continue;
                 }
-                
+
                 const void* data = ((const char*)attr_data) + field->byte_offset;
                 TypeId field_type = field->type->type_id;
-                
+
                 // add attribute based on type
                 if (field_type == LMD_TYPE_BOOL) {
                     // boolean attribute - output name only if true
@@ -270,26 +270,26 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
             field = field->next;
         }
     }
-    
+
     // check if this is a void element (self-closing)
     bool is_void = is_void_element(tag_name, tag_len);
-    
+
     if (is_void) {
         // void elements don't have closing tags in HTML5
         stringbuf_append_char(ctx.output(), '>');
     } else {
         stringbuf_append_char(ctx.output(), '>');
-        
+
         // check if this is a raw text element (script, style, etc.)
         bool is_raw = is_raw_text_element(tag_name, tag_len);
-        
+
         // add children if available
         auto it = elem.children();
         ItemReader child_item;
         while (it.next(&child_item)) {
             format_item_reader(ctx, child_item, depth + 1, is_raw);
         }
-        
+
         // close tag (only for non-void elements)
         stringbuf_append_str(ctx.output(), "</");
         stringbuf_append_str(ctx.output(), tag_name);
@@ -305,7 +305,7 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
         stringbuf_append_str(ctx.output(), "null");
         return;
     }
-    
+
     if (item.isBool()) {
         bool val = item.asBool();
         stringbuf_append_str(ctx.output(), val ? "true" : "false");
@@ -332,6 +332,16 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
                 // in normal mode, escape HTML entities
                 format_html_string_safe(ctx.output(), str, false);  // false = text content, not attribute
             }
+        }
+    }
+    else if (item.isSymbol()) {
+        // Symbol items represent HTML entities like &copy;, &mdash;, etc.
+        // Format them back as entity references for proper roundtrip
+        String* sym = item.asSymbol();
+        if (sym && sym->chars) {
+            stringbuf_append_char(ctx.output(), '&');
+            stringbuf_append_format(ctx.output(), "%.*s", (int)sym->len, sym->chars);
+            stringbuf_append_char(ctx.output(), ';');
         }
     }
     else if (item.isArray()) {

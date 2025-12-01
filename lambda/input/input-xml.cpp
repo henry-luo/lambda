@@ -2,6 +2,7 @@
 #include "../mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
+#include "html_entities.h"
 
 using namespace lambda;
 
@@ -13,18 +14,6 @@ static Item parse_doctype(InputContext& ctx, const char **xml);
 static Item parse_dtd_declaration(InputContext& ctx, const char **xml);
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char);
 
-// Simple entity resolution - for now just handle common predefined ones
-static const char* resolve_entity(const char* entity_name, size_t length) {
-    if (length == 2 && strncmp(entity_name, "lt", 2) == 0) return "<";
-    if (length == 2 && strncmp(entity_name, "gt", 2) == 0) return ">";
-    if (length == 3 && strncmp(entity_name, "amp", 3) == 0) return "&";
-    if (length == 4 && strncmp(entity_name, "quot", 4) == 0) return "\"";
-    if (length == 4 && strncmp(entity_name, "apos", 4) == 0) return "'";
-    if (length == 4 && strncmp(entity_name, "nbsp", 4) == 0) return "\xA0"; // Non-breaking space
-    if (length == 9 && strncmp(entity_name, "copyright", 9) == 0) return "Copyright 2025 Library Corp.";
-    return NULL; // Unknown entity
-}
-
 static String* parse_string_content(InputContext& ctx, const char **xml, char end_char) {
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
@@ -33,28 +22,11 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
     while (**xml && **xml != end_char) {
         if (**xml == '&') {
             (*xml)++; // Skip &
-            if (strncmp(*xml, "lt;", 3) == 0) {
-                stringbuf_append_char(sb, '<');
-                *xml += 3;
-            } else if (strncmp(*xml, "gt;", 3) == 0) {
-                stringbuf_append_char(sb, '>');
-                *xml += 3;
-            } else if (strncmp(*xml, "amp;", 4) == 0) {
-                stringbuf_append_char(sb, '&');
-                *xml += 4;
-            } else if (strncmp(*xml, "quot;", 5) == 0) {
-                stringbuf_append_char(sb, '"');
-                *xml += 5;
-            } else if (strncmp(*xml, "apos;", 5) == 0) {
-                stringbuf_append_char(sb, '\'');
-                *xml += 5;
-            } else if (strncmp(*xml, "nbsp;", 5) == 0) {
-                stringbuf_append_char(sb, 160); // Non-breaking space
-                *xml += 5;
-            } else if (**xml == '#') {
+
+            if (**xml == '#') {
                 // Numeric character references &#123; or &#x1F;
                 (*xml)++; // Skip #
-                int value = 0;
+                uint32_t value = 0;
                 bool is_hex = false;
 
                 if (**xml == 'x' || **xml == 'X') {
@@ -81,11 +53,13 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
 
                 if (**xml == ';') {
                     (*xml)++; // Skip ;
-                    if (value > 0 && value < 256) {
-                        stringbuf_append_char(sb, (char)value);
+                    // Convert Unicode codepoint to UTF-8
+                    char utf8_buf[8];
+                    int utf8_len = unicode_to_utf8(value, utf8_buf);
+                    if (utf8_len > 0) {
+                        stringbuf_append_str(sb, utf8_buf);
                     } else {
-                        // For Unicode values > 255, append as-is (simplified)
-                        stringbuf_append_char(sb, '?'); // Placeholder
+                        stringbuf_append_char(sb, '?'); // Invalid codepoint
                     }
                 } else {
                     // Invalid numeric reference, append as-is
@@ -93,31 +67,35 @@ static String* parse_string_content(InputContext& ctx, const char **xml, char en
                     stringbuf_append_char(sb, '#');
                 }
             } else {
-                // Check for custom entities or unknown entities
+                // Named entity reference - use html_entities module
                 const char* entity_start = *xml;
-                while (**xml && **xml != ';' && **xml != ' ' && **xml != '\t' && **xml != '\n') {
+                while (**xml && **xml != ';' && **xml != ' ' && **xml != '\t' &&
+                       **xml != '\n' && **xml != '<' && **xml != '&') {
                     (*xml)++;
                 }
 
                 if (**xml == ';') {
-                    // Try to resolve the entity
-                    const char* resolved = resolve_entity(entity_start, *xml - entity_start);
+                    size_t entity_len = *xml - entity_start;
+                    EntityResult result = html_entity_resolve(entity_start, entity_len);
                     (*xml)++; // Skip ;
 
-                    if (resolved) {
-                        // Append resolved entity value
-                        while (*resolved) {
-                            stringbuf_append_char(sb, *resolved);
-                            resolved++;
+                    if (result.type == ENTITY_ASCII_ESCAPE) {
+                        // ASCII escapes: decode inline
+                        stringbuf_append_str(sb, result.decoded);
+                    } else if (result.type == ENTITY_NAMED) {
+                        // Named entities: decode to UTF-8 for attribute values
+                        char utf8_buf[8];
+                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
+                        if (utf8_len > 0) {
+                            stringbuf_append_str(sb, utf8_buf);
                         }
                     } else {
                         // Unknown entity - preserve as-is for roundtrip compatibility
                         stringbuf_append_char(sb, '&');
-                        const char* temp = entity_start;
-                        while (temp < *xml) {
-                            stringbuf_append_char(sb, *temp);
-                            temp++;
+                        for (const char* p = entity_start; p < *xml - 1; p++) {
+                            stringbuf_append_char(sb, *p);
                         }
+                        stringbuf_append_char(sb, ';');
                     }
                 } else {
                     // Invalid entity, just append the &
@@ -634,23 +612,26 @@ static Item parse_element(InputContext& ctx, const char **xml) {
                                 }
 
                                 if (text_start < text_end && *text_start == ';') {
-                                    // Try to resolve entity
-                                    const char* resolved = resolve_entity(entity_start, text_start - entity_start);
+                                    // Try to resolve entity using html_entities module
+                                    size_t entity_len = text_start - entity_start;
+                                    EntityResult result = html_entity_resolve(entity_start, entity_len);
                                     text_start++; // Skip ;
 
-                                    if (resolved) {
-                                        // Append resolved entity value
-                                        while (*resolved) {
-                                            stringbuf_append_char(sb, *resolved);
-                                            resolved++;
+                                    if (result.type == ENTITY_ASCII_ESCAPE) {
+                                        // ASCII escapes: decode inline
+                                        stringbuf_append_str(sb, result.decoded);
+                                    } else if (result.type == ENTITY_NAMED) {
+                                        // Named entities: decode to UTF-8
+                                        char utf8_buf[8];
+                                        int utf8_len = unicode_to_utf8(result.named.codepoint, utf8_buf);
+                                        if (utf8_len > 0) {
+                                            stringbuf_append_str(sb, utf8_buf);
                                         }
                                     } else {
                                         // Unknown entity - preserve as-is for roundtrip compatibility
                                         stringbuf_append_char(sb, '&');
-                                        const char* temp = entity_start;
-                                        while (temp <= text_start) {
-                                            stringbuf_append_char(sb, *temp);
-                                            temp++;
+                                        for (const char* p = entity_start; p < text_start; p++) {
+                                            stringbuf_append_char(sb, *p);
                                         }
                                     }
                                 } else {

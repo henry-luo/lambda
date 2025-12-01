@@ -214,7 +214,7 @@ static void format_list_reader(MarkdownContext& ctx, const ElementReader& elem) 
     auto children_iter = elem.children();
     ItemReader child;
     long i = 0;
-    
+
     while (children_iter.next(&child)) {
         if (child.isElement()) {
             ElementReader li_elem = child.asElement();
@@ -273,12 +273,12 @@ static void format_markdown_table_row(
 ) {
     MarkdownTableContext* context = (MarkdownTableContext*)ctx_ptr;
     MarkdownContext& ctx = *context->ctx;
-    
+
     // Format table row
     ctx.write_char('|');
     auto row_children = row.children();
     ItemReader cell_item;
-    
+
     while (row_children.next(&cell_item)) {
         ctx.write_char(' ');
         if (cell_item.isElement()) {
@@ -288,7 +288,7 @@ static void format_markdown_table_row(
         ctx.write_text(" |");
     }
     ctx.write_char('\n');
-    
+
     // Add separator row after first header row
     if (is_header && row_idx == 0) {
         ctx.write_char('|');
@@ -429,7 +429,7 @@ static bool element_reader_contains_only_math(const ElementReader& elem, bool* o
     if (strcmp(elem_name, "span") == 0) {
         auto it = elem.children();
         ItemReader child;
-        
+
         while (it.next(&child)) {
             if (child.isElement()) {
                 ElementReader child_elem = child.asElement();
@@ -458,16 +458,16 @@ static bool element_reader_contains_only_math(const ElementReader& elem, bool* o
 }
 
 // Format paragraph elements
-// MarkReader version: Format paragraph elements  
+// MarkReader version: Format paragraph elements
 static void format_paragraph_reader(MarkdownContext& ctx, const ElementReader& elem) {
     // Check if paragraph contains only math (to avoid adding extra newline)
     bool only_display_math = true;
-    
+
     // Check each child of the paragraph
     bool contains_only_math = true;
     auto it = elem.children();
     ItemReader child;
-    
+
     while (it.next(&child)) {
         if (child.isElement()) {
             ElementReader child_elem = child.asElement();
@@ -492,9 +492,9 @@ static void format_paragraph_reader(MarkdownContext& ctx, const ElementReader& e
             break;
         }
     }
-    
+
     format_element_children_reader(ctx, elem);
-    
+
     // Only add newline if paragraph doesn't contain just inline math
     if (!contains_only_math || only_display_math) {
         ctx.write_char('\n');
@@ -789,7 +789,7 @@ static void format_element_children_raw(StringBuf* sb, Element* elem) {
 static void format_element_children_raw_reader(MarkdownContext& ctx, const ElementReader& elem) {
     auto children_iter = elem.children();
     ItemReader child;
-    
+
     while (children_iter.next(&child)) {
         if (child.isString()) {
             String* str = child.asString();
@@ -1050,7 +1050,7 @@ static void format_element(StringBuf* sb, Element* elem) {
 
         format_element_children(sb, elem);
     }
-    
+
     pool_destroy(temp_pool);
 }
 
@@ -1065,19 +1065,19 @@ static Pool* dispatcher_pool = NULL;
 // default handler for unknown elements
 static void format_element_default_reader(MarkdownContext& ctx, const ElementReader& elem) {
     const char* tag_name = elem.tagName();
-    
+
     // container elements: just format children
     if (tag_name && (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 ||
                       strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0)) {
         format_element_children_reader(ctx, elem);
         return;
     }
-    
+
     // meta elements: skip
     if (tag_name && strcmp(tag_name, "meta") == 0) {
         return;
     }
-    
+
     // jsx_element: try to output content directly
     if (tag_name && strcmp(tag_name, "jsx_element") == 0) {
         ItemReader content_attr = elem.get_attr("content");
@@ -1090,7 +1090,7 @@ static void format_element_default_reader(MarkdownContext& ctx, const ElementRea
             return;
         }
     }
-    
+
     // unknown elements: format children
     format_element_children_reader(ctx, elem);
 }
@@ -1117,7 +1117,7 @@ static void format_thematic_break_reader(MarkdownContext& ctx, const ElementRead
 static void format_math_element_reader(MarkdownContext& ctx, const ElementReader& elem_reader) {
     Element* elem = (Element*)elem_reader.element();
     String* type_attr = elem_reader.get_string_attr("type");
-    
+
     if (type_attr && strcmp(type_attr->chars, "block") == 0) {
         format_math_display(ctx.output(), elem);
     } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
@@ -1159,11 +1159,11 @@ CREATE_DISPATCHER_WRAPPER(format_element_default_reader)
 static void init_markdown_dispatcher(Pool* pool) {
     if (md_dispatcher) return;
     if (!pool) return;
-    
+
     dispatcher_pool = pool;
     md_dispatcher = dispatcher_create(pool);
     if (!md_dispatcher) return;
-    
+
     // register all element type handlers
     dispatcher_register(md_dispatcher, "h1", format_heading_reader_wrapper);
     dispatcher_register(md_dispatcher, "h2", format_heading_reader_wrapper);
@@ -1182,7 +1182,7 @@ static void init_markdown_dispatcher(Pool* pool) {
     dispatcher_register(md_dispatcher, "hr", format_thematic_break_reader_wrapper);
     dispatcher_register(md_dispatcher, "table", format_table_with_newline_reader_wrapper);
     dispatcher_register(md_dispatcher, "math", format_math_element_reader_wrapper);
-    
+
     // set default handler for unknown elements
     dispatcher_set_default(md_dispatcher, format_element_default_reader_wrapper);
 }
@@ -1258,12 +1258,12 @@ static void format_item_reader(MarkdownContext& ctx, const ItemReader& item) {
     if (guard.exceeded()) {
         return;
     }
-    
+
     if (item.isNull()) {
         // skip null items in markdown formatting
         return;
     }
-    
+
     if (item.isString()) {
         String* str = item.asString();
         if (str) {
@@ -1275,6 +1275,16 @@ static void format_item_reader(MarkdownContext& ctx, const ItemReader& item) {
             } else {
                 format_text(ctx, str);
             }
+        }
+    }
+    else if (item.isSymbol()) {
+        // Symbol items - these are emoji shortcodes (e.g., "smile" for :smile:)
+        String* sym = item.asSymbol();
+        if (sym && sym->chars) {
+            // Output as :shortcode: format for markdown emoji
+            ctx.write_char(':');
+            ctx.write_text(sym->chars);
+            ctx.write_char(':');
         }
     }
     else if (item.isElement()) {
