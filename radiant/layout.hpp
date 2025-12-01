@@ -191,7 +191,6 @@ int32_t get_lambda_specificity(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
 
 // Resolve Lambda CSS styles for a DomElement
-// Parallel function to resolve_element_style() for Lexbor
 void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 
 // Process single Lambda CSS property declaration

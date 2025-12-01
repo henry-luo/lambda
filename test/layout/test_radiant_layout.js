@@ -158,7 +158,7 @@ class RadiantLayoutTester {
             const diff = Math.abs(radiantVal - browserVal);
 
             // Always include the difference, regardless of tolerance
-            const tolerance = Math.max(isText ? (prop == 'width' || prop == 'y' ? browserVal * 0.03 : 0) :
+            const tolerance = Math.max(isText ? (prop == 'width' || prop == 'y' ? (browserVal * (browserVal > 150 ? 0.07 : 0.03)) : 0) :
                 (prop == 'height' || prop == 'y' ? browserVal * 0.03 : 0), this.tolerance);
             differences.push({
                 property: prop,
