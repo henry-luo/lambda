@@ -722,7 +722,34 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
             }
         }
 
-        // Parse vertical-align CSS property
+        // Parse vertical-align: check resolved in_line property first (set by apply_element_default_style),
+        // then check CSS declarations for overrides
+        bool valign_resolved = false;
+
+        // First, check the resolved in_line->vertical_align (set by HTML default styles in resolve_htm_style.cpp)
+        // This handles the CSS 2.1 default: vertical-align: middle for td/th
+        if (cell->in_line && cell->in_line->vertical_align) {
+            CssEnum valign_value = cell->in_line->vertical_align;
+            if (valign_value == CSS_VALUE_TOP) {
+                cell->td->vertical_align = TableCellProp::CELL_VALIGN_TOP;
+                valign_resolved = true;
+                log_debug("Cell vertical-align from in_line: top");
+            } else if (valign_value == CSS_VALUE_MIDDLE) {
+                cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
+                valign_resolved = true;
+                log_debug("Cell vertical-align from in_line: middle");
+            } else if (valign_value == CSS_VALUE_BOTTOM) {
+                cell->td->vertical_align = TableCellProp::CELL_VALIGN_BOTTOM;
+                valign_resolved = true;
+                log_debug("Cell vertical-align from in_line: bottom");
+            } else if (valign_value == CSS_VALUE_BASELINE) {
+                cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
+                valign_resolved = true;
+                log_debug("Cell vertical-align from in_line: baseline");
+            }
+        }
+
+        // Then check CSS declarations (may override the default)
         if (dom_elem->specified_style) {
             CssDeclaration* valign_decl = style_tree_get_declaration(
                 dom_elem->specified_style,
@@ -1099,6 +1126,98 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
                          vertical_offset, (int)valign);
             }
             // Apply to other child types as needed
+        }
+    }
+}
+
+// Re-apply vertical alignment for rowspan cells after their final height is computed
+// This is needed because rowspan cells are initially laid out with estimated height,
+// but their final height is only known after all row heights are calculated
+static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
+    if (!tcell || !tcell->td) return;
+    if (tcell->td->row_span <= 1) return;  // Only for rowspan cells
+
+    int valign = tcell->td->vertical_align;
+    if (valign == TableCellProp::CELL_VALIGN_TOP) return;  // No adjustment needed for top
+
+    // Calculate the content area (cell height minus border and padding)
+    int border_top = 1, border_bottom = 1;
+    int padding_top = 0, padding_bottom = 0;
+
+    if (tcell->bound) {
+        if (tcell->bound->padding.top >= 0) padding_top = tcell->bound->padding.top;
+        if (tcell->bound->padding.bottom >= 0) padding_bottom = tcell->bound->padding.bottom;
+        if (tcell->bound->border) {
+            if (tcell->bound->border->width.top >= 0) border_top = tcell->bound->border->width.top;
+            if (tcell->bound->border->width.bottom >= 0) border_bottom = tcell->bound->border->width.bottom;
+        }
+    }
+
+    int content_area_height = tcell->height - border_top - border_bottom - padding_top - padding_bottom;
+    int content_start_y = border_top + padding_top;
+
+    // Find content bounds (min and max Y of children)
+    float content_min_y = 1e9f;
+    float content_max_y = 0;
+    bool has_content = false;
+
+    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)child;
+            if (text->y < content_min_y) content_min_y = text->y;
+            float child_bottom = text->y + text->height;
+            if (child_bottom > content_max_y) content_max_y = child_bottom;
+            has_content = true;
+        }
+        // Handle other child types (ViewBlock, etc.)
+        else if (child->view_type >= RDT_VIEW_BLOCK) {
+            ViewBlock* block = (ViewBlock*)child;
+            if (block->y < content_min_y) content_min_y = block->y;
+            float child_bottom = block->y + block->height;
+            if (child_bottom > content_max_y) content_max_y = child_bottom;
+            has_content = true;
+        }
+    }
+
+    if (!has_content) return;
+
+    int content_actual_height = (int)(content_max_y - content_min_y);
+
+    // Calculate new vertical offset based on alignment
+    int new_offset = 0;
+    switch (valign) {
+        case TableCellProp::CELL_VALIGN_MIDDLE:
+            new_offset = content_start_y + (content_area_height - content_actual_height) / 2;
+            break;
+        case TableCellProp::CELL_VALIGN_BOTTOM:
+            new_offset = content_start_y + content_area_height - content_actual_height;
+            break;
+        default:
+            new_offset = content_start_y;
+            break;
+    }
+
+    // Calculate the adjustment needed (new position - current position)
+    int adjustment = new_offset - (int)content_min_y;
+
+    log_debug("Rowspan vertical-align: cell_height=%d, content_area=%d, content_height=%d, "
+              "valign=%d, content_min_y=%.1f, new_offset=%d, adjustment=%d",
+              (int)tcell->height, content_area_height, content_actual_height,
+              valign, content_min_y, new_offset, adjustment);
+
+    if (adjustment != 0) {
+        for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+            if (child->view_type == RDT_VIEW_TEXT) {
+                ViewText* text = (ViewText*)child;
+                text->y += adjustment;
+                if (text->rect) {
+                    text->rect->y += adjustment;
+                }
+            }
+            else if (child->view_type >= RDT_VIEW_BLOCK) {
+                ViewBlock* block = (ViewBlock*)child;
+                block->y += adjustment;
+            }
         }
     }
 }
@@ -2545,9 +2664,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // =========================================================================
-    // SECOND PASS: Fix rowspan cell heights
+    // SECOND PASS: Fix rowspan cell heights and re-apply vertical alignment
     // After all rows are positioned, update cells with rowspan > 1 to span
-    // the correct total height of their spanned rows
+    // the correct total height of their spanned rows, then re-apply vertical
+    // alignment since the content was laid out with estimated height
     // =========================================================================
     for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
@@ -2573,6 +2693,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             log_debug("Rowspan cell fix: rows %d-%d, old height=%d, new height=%d",
                                       start_row, end_row - 1, (int)tcell->height, spanned_height);
                             tcell->height = spanned_height;
+
+                            // Re-apply vertical alignment now that final height is known
+                            reapply_rowspan_vertical_alignment(tcell);
                         }
                     }
                 }
@@ -2599,6 +2722,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     log_debug("Rowspan cell fix (direct): rows %d-%d, old height=%d, new height=%d",
                               start_row, end_row - 1, (int)tcell->height, spanned_height);
                     tcell->height = spanned_height;
+
+                    // Re-apply vertical alignment now that final height is known
+                    reapply_rowspan_vertical_alignment(tcell);
                 }
             }
         }
