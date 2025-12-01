@@ -56,14 +56,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         block->bound->padding.left_specificity = -1;
         break;
-    case HTM_TAG_TH:
-        // font-weight: bold;  text-align: center;
-        log_debug("apply default TH styles");
-        if (!block->font) { block->font = alloc_font_prop(lycon); }
-        block->font->font_weight = CSS_VALUE_BOLD;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->text_align = CSS_VALUE_CENTER;
-        break;
     case HTM_TAG_CENTER:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;
@@ -272,13 +264,25 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // list item: display list-item handled elsewhere
         break;
     // ========== Table elements ==========
+    case HTM_TAG_TH:
+        // font-weight: bold;  text-align: center;  vertical-align: middle;
+        log_debug("apply default TH styles");
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        block->font->font_weight = CSS_VALUE_BOLD;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->text_align = CSS_VALUE_CENTER;
+        if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+        break;
     case HTM_TAG_TD:
-        // table data: default padding 1px (browsers vary)
+        // table data: default padding 1px (browsers vary), vertical-align: middle;
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->padding.top = block->bound->padding.right =
             block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
         block->bound->padding.top_specificity = block->bound->padding.right_specificity =
             block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
         break;
     case HTM_TAG_CAPTION:
         // table caption: text-align center
