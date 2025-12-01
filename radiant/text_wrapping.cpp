@@ -1,5 +1,6 @@
 #include "text_wrapping.h"
 #include "font_face.h"
+#include "symbol_resolver.h"
 #include "../lib/log.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -424,11 +425,33 @@ void wrap_text_in_layout_context(LayoutContext* lycon, void* text_node, int max_
 
     // Get text content from text node
     DomText* text_node_typed = node->as_text();
-    const char* text = text_node_typed ? text_node_typed->text : nullptr;
-    if (!text) return;
+    if (!text_node_typed) return;
 
-    int text_length = strlen(text);
-    if (text_length == 0) return;
+    const char* text = nullptr;
+    int text_length = 0;
+
+    // Check if this is a symbol node that needs resolution
+    if (text_node_typed->is_symbol()) {
+        // Resolve symbol to its UTF-8 representation
+        SymbolResolution resolved = resolve_symbol(text_node_typed->text, text_node_typed->length);
+        if (resolved.type != SYMBOL_UNKNOWN && resolved.utf8) {
+            text = resolved.utf8;
+            text_length = resolved.utf8_len;
+            log_debug("Resolved symbol '%s' to UTF-8: '%s' (len=%zu)",
+                      text_node_typed->text, text, resolved.utf8_len);
+        } else {
+            // Unknown symbol - use the symbol name as-is (for debugging)
+            text = text_node_typed->text;
+            text_length = text_node_typed->length;
+            log_warn("Unknown symbol: '%s'", text);
+        }
+    } else {
+        // Regular text node
+        text = text_node_typed->text;
+        text_length = text ? strlen(text) : 0;
+    }
+
+    if (!text || text_length == 0) return;
 
     // Create wrap configuration
     TextWrapConfig* config = create_text_wrap_config();

@@ -307,6 +307,14 @@ static void format_item_reader(XmlContext& ctx, const ItemReader& item, const ch
                             format_xml_string(ctx, str);
                         }
                     }
+                } else if (child.isSymbol()) {
+                    // Symbol items (named entities) - output as &name;
+                    String* sym = child.asSymbol();
+                    if (sym && sym->chars) {
+                        stringbuf_append_char(ctx.output(), '&');
+                        stringbuf_append_str(ctx.output(), sym->chars);
+                        stringbuf_append_char(ctx.output(), ';');
+                    }
                 } else {
                     // For child elements, format them recursively
                     format_item_reader(ctx, child, NULL);

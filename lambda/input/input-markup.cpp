@@ -162,6 +162,10 @@ static inline String* create_string(MarkupParser* parser, const char* str) {
     return parser->builder.createString(str);
 }
 
+static inline String* create_symbol(MarkupParser* parser, const char* name) {
+    return parser->builder.createSymbol(name);
+}
+
 static inline Element* create_element(MarkupParser* parser, const char* tag_name) {
     return parser->builder.element(tag_name).final().element;
 }
@@ -3447,6 +3451,7 @@ static const struct {
 };
 
 // Parse emoji shortcode (:emoji:)
+// Returns a Symbol item with the shortcode name (without colons) for roundtrip compatibility
 static Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
@@ -3468,48 +3473,55 @@ static Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Extract shortcode between :
-    size_t shortcode_len = (pos + 1) - start; // Include both :
-    char* shortcode = (char*)malloc(shortcode_len + 1);
-    if (!shortcode) {
+    // Extract shortcode name (without the colons)
+    size_t name_len = pos - content_start;
+    char* shortcode_name = (char*)malloc(name_len + 1);
+    if (!shortcode_name) {
         return (Item){.item = ITEM_ERROR};
     }
-    strncpy(shortcode, start, shortcode_len);
-    shortcode[shortcode_len] = '\0';
+    strncpy(shortcode_name, content_start, name_len);
+    shortcode_name[name_len] = '\0';
 
-    // Look up emoji in table
+    // Build full shortcode with colons for lookup
+    char* full_shortcode = (char*)malloc(name_len + 3);
+    if (!full_shortcode) {
+        free(shortcode_name);
+        return (Item){.item = ITEM_ERROR};
+    }
+    full_shortcode[0] = ':';
+    strncpy(full_shortcode + 1, shortcode_name, name_len);
+    full_shortcode[name_len + 1] = ':';
+    full_shortcode[name_len + 2] = '\0';
+
+    // Look up emoji in table to validate it exists
     const char* emoji_char = NULL;
     for (int i = 0; emoji_map[i].shortcode; i++) {
-        if (strcmp(shortcode, emoji_map[i].shortcode) == 0) {
+        if (strcmp(full_shortcode, emoji_map[i].shortcode) == 0) {
             emoji_char = emoji_map[i].emoji;
             break;
         }
     }
 
-    free(shortcode);
+    free(full_shortcode);
 
     if (!emoji_char) {
-        // Unknown emoji shortcode
+        // Unknown emoji shortcode - return error so it's preserved as literal text
+        free(shortcode_name);
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Create emoji element
-    Element* emoji_elem = create_element(parser, "emoji");
-    if (!emoji_elem) {
-        return (Item){.item = ITEM_ERROR};
-    }
+    // Create Symbol item with the shortcode name (e.g., "smile" for :smile:)
+    String* symbol_str = create_symbol(parser, shortcode_name);
+    free(shortcode_name);
 
-    // Add emoji character as content
-    String* emoji_str = create_string(parser, emoji_char);
-    if (emoji_str) {
-        Item emoji_item = {.item = s2it(emoji_str)};
-        list_push((List*)emoji_elem, emoji_item);
-        increment_element_content_length(emoji_elem);
+    if (!symbol_str) {
+        return (Item){.item = ITEM_ERROR};
     }
 
     *text = pos + 1; // Skip closing :
 
-    return (Item){.item = (uint64_t)emoji_elem};
+    // Return as Symbol type using y2it (symbol to item)
+    return (Item){.item = y2it(symbol_str)};
 }
 
 // Parse inline math ($expression$)

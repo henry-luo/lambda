@@ -126,6 +126,7 @@ public:
 
     bool isNull() const;
     bool isString() const;
+    bool isSymbol() const;
     bool isInt() const;
     bool isFloat() const;
     bool isBool() const;
@@ -136,6 +137,7 @@ public:
 
     // Safe type conversion (returns default-constructed on mismatch)
     String* asString() const;
+    String* asSymbol() const;  // Returns the symbol's String* representation
     int64_t asInt() const;
     int32_t asInt32() const;
     double asFloat() const;
