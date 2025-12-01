@@ -18,6 +18,13 @@ body {
   overflow: hidden;
 }
 
+/* Prevent iframe/embed from capturing mouse during resize */
+body.resizing iframe,
+body.resizing embed,
+body.resizing object {
+  pointer-events: none;
+}
+
 #root {
   width: 100vw;
   height: 100vh;
@@ -27,8 +34,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: #ffffff;
+  color: #333333;
 }
 
 /* Menu Bar */
@@ -37,8 +44,8 @@ body {
   justify-content: space-between;
   align-items: center;
   height: 40px;
-  background: #2d2d2d;
-  border-bottom: 1px solid #3e3e3e;
+  background: #f3f3f3;
+  border-bottom: 1px solid #e0e0e0;
   padding: 0 12px;
   flex-shrink: 0;
 }
@@ -52,12 +59,12 @@ body {
   padding: 6px 12px;
   cursor: pointer;
   font-size: 13px;
-  color: #cccccc;
+  color: #333333;
   transition: background 0.2s;
 }
 
 .menu-item:hover {
-  background: #3e3e3e;
+  background: #e0e0e0;
 }
 
 .toolbar {
@@ -86,20 +93,20 @@ body {
 }
 
 .btn-primary:disabled {
-  background: #3e3e3e;
-  color: #6e6e6e;
+  background: #cccccc;
+  color: #888888;
   cursor: not-allowed;
 }
 
 .btn-small {
   padding: 4px 10px;
   font-size: 12px;
-  background: #3e3e3e;
-  color: #cccccc;
+  background: #e0e0e0;
+  color: #333333;
 }
 
 .btn-small:hover {
-  background: #4e4e4e;
+  background: #d0d0d0;
 }
 
 /* Main Content Layout */
@@ -112,8 +119,8 @@ body {
 .left-sidebar {
   min-width: 200px;
   max-width: 600px;
-  border-right: 1px solid #3e3e3e;
-  background: #252526;
+  border-right: 1px solid #e0e0e0;
+  background: #f8f8f8;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -153,7 +160,7 @@ body {
 .top-panel {
   flex: 1;
   min-height: 0;
-  border-bottom: 1px solid #3e3e3e;
+  border-bottom: 1px solid #e0e0e0;
 }
 
 .bottom-panel {
@@ -169,7 +176,7 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #6e6e6e;
+  color: #888888;
   gap: 8px;
 }
 
@@ -188,6 +195,13 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #6e6e6e;
+  color: #888888;
   font-size: 14px;
+}
+
+/* Error Message */
+.error-message {
+  color: #cc0000;
+  padding: 16px;
+  text-align: center;
 }

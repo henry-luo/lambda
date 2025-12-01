@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 
-function ViewTreeViewer() {
+const ViewTreeViewer = forwardRef((props, ref) => {
   const [viewTreeContent, setViewTreeContent] = useState('');
   const [isJson, setIsJson] = useState(true);
 
@@ -26,6 +26,11 @@ function ViewTreeViewer() {
       setIsJson(false);
     }
   }
+
+  // Expose refresh method via ref
+  useImperativeHandle(ref, () => ({
+    refresh: loadViewTree
+  }));
 
   function formatJson(jsonStr) {
     try {
@@ -64,6 +69,8 @@ function ViewTreeViewer() {
       </div>
     </div>
   );
-}
+});
+
+ViewTreeViewer.displayName = 'ViewTreeViewer';
 
 export default ViewTreeViewer;

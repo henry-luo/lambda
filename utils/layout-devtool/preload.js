@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // View tree file
   readViewTreeFile: () => ipcRenderer.invoke('read-view-tree-file'),
 
+  // HTML source file
+  readHtmlSource: (testPath) => ipcRenderer.invoke('read-html-source', testPath),
+
   // Terminal output listener
   onTerminalOutput: (callback) => {
     ipcRenderer.on('terminal-output', (event, data) => callback(data));
