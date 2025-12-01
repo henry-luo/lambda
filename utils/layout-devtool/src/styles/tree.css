@@ -90,13 +90,13 @@
 
 .category-name {
   flex: 1;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: #333333;
 }
 
 .test-count {
-  font-size: 11px;
+  font-size: 13px;
   color: #666666;
 }
 
@@ -113,7 +113,7 @@
   user-select: none;
   transition: background 0.15s;
   gap: 8px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .test-item:hover {
@@ -130,7 +130,7 @@
 }
 
 .status-icon {
-  font-size: 12px;
+  font-size: 14px;
   width: 16px;
   display: inline-block;
   text-align: center;
