@@ -40,46 +40,6 @@ void compute_span_bounding_box(ViewSpan* span) {
     span->height = max_y - min_y;
 }
 
-void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
-    uintptr_t elmt_name = span->tag();
-    switch (elmt_name) {
-    case HTM_TAG_B:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->font_weight = CSS_VALUE_BOLD;
-        break;
-    case HTM_TAG_I:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->font_style = CSS_VALUE_ITALIC;
-        break;
-    case HTM_TAG_U:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->text_deco = CSS_VALUE_UNDERLINE;
-        break;
-    case HTM_TAG_S:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->text_deco = CSS_VALUE_LINE_THROUGH;
-        break;
-    case HTM_TAG_FONT: {
-        // parse font style
-        // Get color attribute using DomNode interface
-        const char* color_attr = span->get_attribute("color");
-        if (color_attr) {
-            log_debug("font color: %s", color_attr);
-        }
-        break;
-    }
-    case HTM_TAG_A: {
-        // anchor style
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
-        span->in_line->cursor = CSS_VALUE_POINTER;
-        span->in_line->color = color_name_to_rgb(CSS_VALUE_BLUE);
-        span->font = alloc_font_prop(lycon);
-        span->font->text_deco = CSS_VALUE_UNDERLINE;
-        break;
-    }
-    }
-}
-
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->node_name());
     if (elmt->tag() == HTM_TAG_BR) {
@@ -100,10 +60,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
-    // resolve element default styles
-    resolve_inline_default(lycon, span);
-    // resolve CSS styles
 
+    // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
 
     if (span->font) {

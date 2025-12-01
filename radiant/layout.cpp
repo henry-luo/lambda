@@ -22,6 +22,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 // Forward declarations
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
+// resolve default style for HTML inline elements
+void apply_element_default_style(LayoutContext* lycon, DomNode* elmt);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -121,8 +123,13 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
                 return;
             }
+
+            // resolve element default styles
+            apply_element_default_style(lycon, dom_elem);
+
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
             resolve_lambda_css_styles(dom_elem, lycon);
+
             // Mark as resolved for this layout pass
             // Don't mark as resolved during measurement mode - let the actual layout pass do that
             if (!lycon->is_measuring) {

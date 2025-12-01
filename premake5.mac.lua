@@ -414,6 +414,7 @@ project "lambda"
         "radiant/layout_flex_measurement.cpp",
         "radiant/layout_flex_multipass.cpp",
         "radiant/intrinsic_sizing.cpp",
+        "radiant/resolve_htm_style.cpp",
         "radiant/resolve_css_style.cpp",
         "radiant/scroller.cpp",
         "radiant/view_pool.cpp",
