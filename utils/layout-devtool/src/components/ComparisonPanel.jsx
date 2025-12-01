@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-function ComparisonPanel({ test }) {
+function ComparisonPanel({ test, lambdaRenderPath }) {
   const [browserView, setBrowserView] = useState(null);
-  const [lambdaView, setLambdaView] = useState(null);
   const [splitPos, setSplitPos] = useState(50);
   const isDragging = useRef(false);
   const containerRef = useRef(null);
@@ -12,7 +11,6 @@ function ComparisonPanel({ test }) {
       loadViews(test);
     } else {
       setBrowserView(null);
-      setLambdaView(null);
     }
   }, [test]);
 
@@ -26,9 +24,6 @@ function ComparisonPanel({ test }) {
       // Since we're in the renderer, we can use the file protocol
       const absolutePath = await getAbsolutePath(testPath);
       setBrowserView(`file://${absolutePath}`);
-
-      // Lambda view will be loaded after test execution
-      setLambdaView(null);
     } catch (error) {
       console.error('Failed to load views:', error);
     }
@@ -105,16 +100,15 @@ function ComparisonPanel({ test }) {
           <span className="panel-info">Rendered Output</span>
         </div>
         <div className="panel-content">
-          {lambdaView ? (
+          {lambdaRenderPath ? (
             <img
-              src={lambdaView}
+              src={lambdaRenderPath}
               alt="Lambda Render"
               className="lambda-render"
             />
           ) : (
             <div className="empty-state">
               <p>Run test to see Lambda output</p>
-              <p className="note">Render command coming soon</p>
             </div>
           )}
         </div>

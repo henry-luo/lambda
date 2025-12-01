@@ -57,10 +57,9 @@ class LayoutDevTool {
       return await this.loadReference(testName, category);
     });
 
-    // Render Lambda view (future: when render command is available)
+    // Render Lambda view - runs ./lambda.exe render <testPath> -o output.png
     ipcMain.handle('render-lambda-view', async (event, testPath) => {
-      // For now, return null (render command not yet implemented)
-      return null;
+      return await this.renderLambdaView(testPath);
     });
 
     // Read log file
@@ -71,6 +70,11 @@ class LayoutDevTool {
     // Read view tree file
     ipcMain.handle('read-view-tree-file', async () => {
       return await this.readViewTreeFile();
+    });
+
+    // Read HTML source file
+    ipcMain.handle('read-html-source', async (event, testPath) => {
+      return await this.readHtmlSource(testPath);
     });
 
     // Stream process output
@@ -207,6 +211,78 @@ class LayoutDevTool {
       console.error('Failed to read view_tree.txt:', error);
       return '';
     }
+  }
+
+  async readHtmlSource(testPath) {
+    try {
+      const absolutePath = path.join(this.projectRoot, testPath);
+      console.log('Reading HTML source:', absolutePath);
+      const content = await fs.readFile(absolutePath, 'utf8');
+      return content;
+    } catch (error) {
+      console.error('Failed to read HTML source:', error);
+      throw new Error(`Failed to read file: ${testPath}`);
+    }
+  }
+
+  async renderLambdaView(testPath) {
+    return new Promise((resolve, reject) => {
+      // Output path with timestamp to avoid caching
+      const outputDir = path.join(this.projectRoot, 'test_output');
+      const outputPath = path.join(outputDir, 'lambda_render.png');
+
+      // Construct the absolute path to the test file
+      const absoluteTestPath = path.join(this.projectRoot, testPath);
+
+      console.log('Rendering Lambda view:');
+      console.log('  testPath:', testPath);
+      console.log('  absoluteTestPath:', absoluteTestPath);
+      console.log('  outputPath:', outputPath);
+
+      // Run: ./lambda.exe render <testPath> -o output.png
+      const args = ['render', absoluteTestPath, '-o', outputPath];
+      const renderProcess = spawn(this.lambdaExe, args, {
+        cwd: this.projectRoot
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      renderProcess.stdout.on('data', (data) => {
+        const text = data.toString();
+        stdout += text;
+        this.mainWindow?.webContents.send('terminal-output', text);
+      });
+
+      renderProcess.stderr.on('data', (data) => {
+        const text = data.toString();
+        stderr += text;
+        this.mainWindow?.webContents.send('terminal-output', text);
+      });
+
+      renderProcess.on('close', async (code) => {
+        console.log('Render process exited with code:', code);
+        if (code === 0) {
+          // Check if output file exists
+          try {
+            await fs.access(outputPath);
+            // Return the file path with a cache-busting timestamp
+            const timestamp = Date.now();
+            resolve(`file://${outputPath}?t=${timestamp}`);
+          } catch (e) {
+            console.error('Output file not found:', outputPath);
+            reject(new Error('Render output file not created'));
+          }
+        } else {
+          reject(new Error(`Render failed with exit code ${code}: ${stderr}`));
+        }
+      });
+
+      renderProcess.on('error', (error) => {
+        console.error('Render process error:', error);
+        reject(error);
+      });
+    });
   }
 
   initialize() {

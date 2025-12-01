@@ -9,6 +9,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
   const [terminalHeight, setTerminalHeight] = useState(250);
+  const [lambdaRenderPath, setLambdaRenderPath] = useState(null);
   const terminalRef = useRef(null);
   const isDraggingLeftRef = useRef(false);
   const isDraggingBottomRef = useRef(false);
@@ -16,6 +17,7 @@ function App() {
   const handleTestSelect = (test) => {
     setSelectedTest(test);
     setTestResults(null);
+    setLambdaRenderPath(null);
   };
 
   const handleRunTest = async () => {
@@ -23,14 +25,31 @@ function App() {
 
     console.log('Running test:', selectedTest);
     setIsRunning(true);
+    setLambdaRenderPath(null);
     terminalRef.current?.clear();
     terminalRef.current?.writeln(`Running test: ${selectedTest.category}/${selectedTest.testFile}`);
     terminalRef.current?.writeln('');
 
     try {
-      const testPath = `./test/layout/data/${selectedTest.category}/${selectedTest.testFile}`;
+      const testPath = `test/layout/data/${selectedTest.category}/${selectedTest.testFile}`;
       console.log('Test path:', testPath);
-      const result = await window.electronAPI.runTest(testPath);
+
+      // Render the Lambda view
+      terminalRef.current?.writeln('Rendering Lambda view...');
+      try {
+        const renderPath = await window.electronAPI.renderLambdaView(testPath);
+        console.log('Render path:', renderPath);
+        setLambdaRenderPath(renderPath);
+        terminalRef.current?.writeln('\x1b[32m✓ Render completed\x1b[0m');
+      } catch (renderError) {
+        console.error('Render error:', renderError);
+        terminalRef.current?.writeln(`\x1b[31m✗ Render failed: ${renderError.message}\x1b[0m`);
+      }
+
+      terminalRef.current?.writeln('');
+      terminalRef.current?.writeln('Running layout comparison...');
+
+      const result = await window.electronAPI.runTest(`./test/layout/data/${selectedTest.category}/${selectedTest.testFile}`);
       console.log('Test result:', result);
 
       terminalRef.current?.writeln('');
@@ -41,6 +60,9 @@ function App() {
       }
 
       setTestResults(result);
+
+      // Refresh the View Tree panel
+      terminalRef.current?.refreshViewTree();
     } catch (error) {
       console.error('Test execution error:', error);
       terminalRef.current?.writeln(`\x1b[31mError: ${error.message}\x1b[0m`);
@@ -52,6 +74,9 @@ function App() {
   // Handle left panel resize
   const handleLeftMouseDown = (e) => {
     isDraggingLeftRef.current = true;
+    document.body.classList.add('resizing');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
     e.preventDefault();
   };
 
@@ -62,12 +87,20 @@ function App() {
   };
 
   const handleLeftMouseUp = () => {
-    isDraggingLeftRef.current = false;
+    if (isDraggingLeftRef.current) {
+      isDraggingLeftRef.current = false;
+      document.body.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
   };
 
   // Handle terminal resize
   const handleBottomMouseDown = (e) => {
     isDraggingBottomRef.current = true;
+    document.body.classList.add('resizing');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
     e.preventDefault();
   };
 
@@ -78,7 +111,12 @@ function App() {
   };
 
   const handleBottomMouseUp = () => {
-    isDraggingBottomRef.current = false;
+    if (isDraggingBottomRef.current) {
+      isDraggingBottomRef.current = false;
+      document.body.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
   };
 
   useEffect(() => {
@@ -125,11 +163,14 @@ function App() {
 
         <div className="right-content">
           <div className="top-panel">
-            <ComparisonPanel test={selectedTest} />
+            <ComparisonPanel test={selectedTest} lambdaRenderPath={lambdaRenderPath} />
           </div>
           <div className="resize-handle-horizontal" onMouseDown={handleBottomMouseDown} />
           <div className="bottom-panel" style={{ height: `${terminalHeight}px` }}>
-            <BottomPanel ref={terminalRef} />
+            <BottomPanel
+              ref={terminalRef}
+              testPath={selectedTest ? `test/layout/data/${selectedTest.category}/${selectedTest.testFile}` : null}
+            />
           </div>
         </div>
       </div>

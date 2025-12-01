@@ -8,35 +8,35 @@
 
 .tree-header {
   padding: 12px;
-  border-bottom: 1px solid #3e3e3e;
-  background: #2d2d2d;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f3f3f3;
 }
 
 .tree-header h3 {
   font-size: 14px;
   font-weight: 600;
   margin-bottom: 8px;
-  color: #cccccc;
+  color: #333333;
 }
 
 .search-input {
   width: 100%;
   padding: 6px 10px;
-  background: #3c3c3c;
-  border: 1px solid #3e3e3e;
+  background: #ffffff;
+  border: 1px solid #d0d0d0;
   border-radius: 4px;
-  color: #cccccc;
+  color: #333333;
   font-size: 13px;
   outline: none;
 }
 
 .search-input:focus {
   border-color: #0e639c;
-  background: #1e1e1e;
+  background: #ffffff;
 }
 
 .search-input::placeholder {
-  color: #6e6e6e;
+  color: #999999;
 }
 
 .tree-content {
@@ -50,16 +50,16 @@
 }
 
 .tree-content::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: #f0f0f0;
 }
 
 .tree-content::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: #c0c0c0;
   border-radius: 5px;
 }
 
 .tree-content::-webkit-scrollbar-thumb:hover {
-  background: #4e4e4e;
+  background: #a0a0a0;
 }
 
 /* Category */
@@ -78,12 +78,12 @@
 }
 
 .category-header:hover {
-  background: #2a2d2e;
+  background: #e8e8e8;
 }
 
 .expand-icon {
   font-size: 10px;
-  color: #cccccc;
+  color: #333333;
   width: 12px;
   display: inline-block;
 }
@@ -92,12 +92,12 @@
   flex: 1;
   font-size: 13px;
   font-weight: 500;
-  color: #cccccc;
+  color: #333333;
 }
 
 .test-count {
   font-size: 11px;
-  color: #858585;
+  color: #666666;
 }
 
 /* Test List */
@@ -117,16 +117,16 @@
 }
 
 .test-item:hover {
-  background: #2a2d2e;
+  background: #e8e8e8;
 }
 
 .test-item.selected {
-  background: #094771;
-  color: white;
+  background: #cce5ff;
+  color: #004085;
 }
 
 .test-item.selected .test-name {
-  color: white;
+  color: #004085;
 }
 
 .status-icon {
@@ -138,7 +138,7 @@
 
 .test-name {
   flex: 1;
-  color: #cccccc;
+  color: #333333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
