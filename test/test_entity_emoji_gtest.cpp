@@ -404,4 +404,3 @@ TEST_F(EntityEmojiIntegrationTest, XmlEntityHandling) {
 
     printf("XML entity output: %s\n", output->chars);
 }
-
