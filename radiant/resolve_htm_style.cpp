@@ -151,5 +151,178 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         span->font->text_deco = CSS_VALUE_UNDERLINE;
         break;
     }
+    // ========== Additional text formatting elements ==========
+    case HTM_TAG_STRONG:
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_weight = CSS_VALUE_BOLD;
+        break;
+    case HTM_TAG_EM:  case HTM_TAG_CITE:  case HTM_TAG_DFN:  case HTM_TAG_VAR:
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_style = CSS_VALUE_ITALIC;
+        break;
+    case HTM_TAG_CODE:  case HTM_TAG_KBD:  case HTM_TAG_SAMP:  case HTM_TAG_TT:
+        // monospace font family
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->family = (char*)"monospace";
+        break;
+    case HTM_TAG_MARK:
+        // yellow background highlight - handled via background property on block
+        // Note: InlineProp doesn't have bg_color; would need BackgroundProp
+        break;
+    case HTM_TAG_SMALL:
+        // font-size: smaller (0.83em)
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_size = lycon->font.style->font_size * 0.83;
+        break;
+    case HTM_TAG_BIG:
+        // font-size: larger (1.17em) - deprecated but still supported
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_size = lycon->font.style->font_size * 1.17;
+        break;
+    case HTM_TAG_SUB:
+        // subscript: smaller font, lowered baseline
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_size = lycon->font.style->font_size * 0.83;
+        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        span->in_line->vertical_align = CSS_VALUE_SUB;
+        break;
+    case HTM_TAG_SUP:
+        // superscript: smaller font, raised baseline
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_size = lycon->font.style->font_size * 0.83;
+        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        span->in_line->vertical_align = CSS_VALUE_SUPER;
+        break;
+    case HTM_TAG_DEL:  case HTM_TAG_STRIKE:
+        // strikethrough
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->text_deco = CSS_VALUE_LINE_THROUGH;
+        break;
+    case HTM_TAG_INS:
+        // underline for inserted text
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->text_deco = CSS_VALUE_UNDERLINE;
+        break;
+    case HTM_TAG_Q:
+        // inline quotation - browser adds quotes via CSS content, we just style italic
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_style = CSS_VALUE_ITALIC;
+        break;
+    case HTM_TAG_ABBR:  case HTM_TAG_ACRONYM:
+        // abbreviation/acronym - dotted underline in some browsers
+        // we'll use standard underline for simplicity
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->text_deco = CSS_VALUE_UNDERLINE;
+        break;
+    // ========== Block elements ==========
+    case HTM_TAG_PRE:  case HTM_TAG_LISTING:  case HTM_TAG_XMP:
+        // preformatted: monospace, preserve whitespace, margin 1em 0
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        block->font->family = (char*)"monospace";
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->white_space = CSS_VALUE_PRE;
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        break;
+    case HTM_TAG_BLOCKQUOTE:
+        // margin: 1em 40px
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
+        block->bound->margin.left = block->bound->margin.right = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
+            block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
+        break;
+    case HTM_TAG_ADDRESS:
+        // italic, block display
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        block->font->font_style = CSS_VALUE_ITALIC;
+        break;
+    case HTM_TAG_FIGURE:
+        // margin: 1em 40px
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
+        block->bound->margin.left = block->bound->margin.right = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
+            block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
+        break;
+    case HTM_TAG_FIGCAPTION:
+        // text-align: center (common default)
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->text_align = CSS_VALUE_CENTER;
+        break;
+    case HTM_TAG_DL:
+        // definition list: margin 1em 0
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        break;
+    case HTM_TAG_DD:
+        // definition description: margin-left 40px
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->margin.left = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.left_specificity = -1;
+        break;
+    case HTM_TAG_DT:
+        // definition term: bold (common style, not strictly default)
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        block->font->font_weight = CSS_VALUE_BOLD;
+        break;
+    case HTM_TAG_LI:
+        // list item: display list-item handled elsewhere
+        break;
+    // ========== Table elements ==========
+    case HTM_TAG_TD:
+        // table data: default padding 1px (browsers vary)
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->padding.top = block->bound->padding.right =
+            block->bound->padding.bottom = block->bound->padding.left = 1 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.top_specificity = block->bound->padding.right_specificity =
+            block->bound->padding.bottom_specificity = block->bound->padding.left_specificity = -1;
+        break;
+    case HTM_TAG_CAPTION:
+        // table caption: text-align center
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->text_align = CSS_VALUE_CENTER;
+        break;
+    // ========== Form elements ==========
+    case HTM_TAG_FIELDSET:
+        // fieldset: border and padding
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+        block->bound->border->width.top = block->bound->border->width.right =
+            block->bound->border->width.bottom = block->bound->border->width.left = 2 * lycon->ui_context->pixel_ratio;
+        block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
+            block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
+        block->bound->padding.top = block->bound->padding.bottom = 0.35 * lycon->font.style->font_size;
+        block->bound->padding.left = block->bound->padding.right = 0.75 * lycon->font.style->font_size;
+        block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
+            block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size * 0.5;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        break;
+    case HTM_TAG_LEGEND:
+        // legend: padding
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->padding.left = block->bound->padding.right = 2 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+        break;
+    case HTM_TAG_BUTTON:
+        // button: centered text, some padding
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->text_align = CSS_VALUE_CENTER;
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        block->bound->padding.top = block->bound->padding.bottom = 1 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.left = block->bound->padding.right = 6 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
+            block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+        break;
+    // ========== Semantic/sectioning elements with no visual default ==========
+    case HTM_TAG_ARTICLE:  case HTM_TAG_SECTION:  case HTM_TAG_NAV:
+    case HTM_TAG_ASIDE:  case HTM_TAG_HEADER:  case HTM_TAG_FOOTER:
+    case HTM_TAG_MAIN:  case HTM_TAG_HGROUP:  case HTM_TAG_DETAILS:
+    case HTM_TAG_SUMMARY:
+        // these are block-level but have no special default styling
+        break;
     }
 }
