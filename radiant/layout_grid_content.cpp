@@ -61,7 +61,7 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
 
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
-    DomNode* child = grid_item->child();
+    DomNode* child = grid_item->first_child;
     if (child) {
         int child_count = 0;
         do {

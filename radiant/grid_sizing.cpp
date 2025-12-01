@@ -178,14 +178,15 @@ int calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_i
     // Find all items that span this track
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
+        if (!item->gi) continue;  // Skip items without grid item properties
 
         bool spans_track = false;
         if (is_row) {
-            spans_track = (item->computed_grid_row_start <= track_index + 1 &&
-                          item->computed_grid_row_end > track_index + 1);
+            spans_track = (item->gi->computed_grid_row_start <= track_index + 1 &&
+                          item->gi->computed_grid_row_end > track_index + 1);
         } else {
-            spans_track = (item->computed_grid_column_start <= track_index + 1 &&
-                          item->computed_grid_column_end > track_index + 1);
+            spans_track = (item->gi->computed_grid_column_start <= track_index + 1 &&
+                          item->gi->computed_grid_column_end > track_index + 1);
         }
 
         if (spans_track) {
@@ -211,9 +212,9 @@ int calculate_track_intrinsic_size(GridContainerLayout* grid_layout, int track_i
             // If item spans multiple tracks, distribute size proportionally
             int span_count = 1;
             if (is_row) {
-                span_count = item->computed_grid_row_end - item->computed_grid_row_start;
+                span_count = item->gi->computed_grid_row_end - item->gi->computed_grid_row_start;
             } else {
-                span_count = item->computed_grid_column_end - item->computed_grid_column_start;
+                span_count = item->gi->computed_grid_column_end - item->gi->computed_grid_column_start;
             }
 
             if (span_count > 1) {

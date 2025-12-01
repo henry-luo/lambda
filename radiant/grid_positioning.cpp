@@ -61,12 +61,13 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     // Position each grid item
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
+        if (!item->gi) continue;  // Skip items without grid item properties
 
         // Get grid area bounds (convert from 1-indexed to 0-indexed)
-        int row_start = item->computed_grid_row_start - 1;
-        int row_end = item->computed_grid_row_end - 1;
-        int col_start = item->computed_grid_column_start - 1;
-        int col_end = item->computed_grid_column_end - 1;
+        int row_start = item->gi->computed_grid_row_start - 1;
+        int row_end = item->gi->computed_grid_row_end - 1;
+        int col_start = item->gi->computed_grid_column_start - 1;
+        int col_end = item->gi->computed_grid_column_end - 1;
 
         // Clamp to valid ranges
         row_start = fmax(0, fmin(row_start, grid_layout->computed_row_count - 1));
@@ -141,13 +142,13 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
 // Align a single grid item
 void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
-    if (!item || !grid_layout) return;
+    if (!item || !grid_layout || !item->gi) return;
 
     // Get the item's grid area dimensions
-    int row_start = item->computed_grid_row_start - 1;
-    int row_end = item->computed_grid_row_end - 1;
-    int col_start = item->computed_grid_column_start - 1;
-    int col_end = item->computed_grid_column_end - 1;
+    int row_start = item->gi->computed_grid_row_start - 1;
+    int row_end = item->gi->computed_grid_row_end - 1;
+    int col_start = item->gi->computed_grid_column_start - 1;
+    int col_end = item->gi->computed_grid_column_end - 1;
 
     // Calculate available space in the grid area
     int available_width = 0;
@@ -163,8 +164,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     available_height += (row_end - row_start - 1) * grid_layout->row_gap;
 
     // Apply justify-self (horizontal alignment)
-    int justify = (item->justify_self != CSS_VALUE_AUTO) ?
-                  item->justify_self : grid_layout->justify_items;
+    int justify = (item->gi->justify_self != CSS_VALUE_AUTO) ?
+                  item->gi->justify_self : grid_layout->justify_items;
 
     switch (justify) {
         case CSS_VALUE_START:
@@ -190,8 +191,8 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     }
 
     // Apply align-self (vertical alignment)
-    int align = (item->align_self_grid != CSS_VALUE_AUTO) ?
-                item->align_self_grid : grid_layout->align_items;
+    int align = (item->gi->align_self_grid != CSS_VALUE_AUTO) ?
+                item->gi->align_self_grid : grid_layout->align_items;
 
     switch (align) {
         case CSS_VALUE_START:

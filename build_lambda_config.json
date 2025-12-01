@@ -9,14 +9,6 @@
         "lambda/input/css",
         "lambda/format"
     ],
-    "flex_source": [
-        "radiant/layout_grid.cpp",
-        "radiant/layout_grid_content.cpp",
-        "radiant/grid_utils.cpp",
-        "radiant/grid_sizing.cpp",
-        "radiant/grid_positioning.cpp",
-        "radiant/grid_advanced.cpp"
-    ],
     "source_files": [
         "lib/strbuf.c",
         "lib/stringbuf.c",
@@ -94,6 +86,12 @@
         "radiant/layout_flex.cpp",
         "radiant/layout_flex_measurement.cpp",
         "radiant/layout_flex_multipass.cpp",
+        "radiant/layout_grid.cpp",
+        "radiant/layout_grid_content.cpp",
+        "radiant/grid_utils.cpp",
+        "radiant/grid_sizing.cpp",
+        "radiant/grid_positioning.cpp",
+        "radiant/grid_advanced.cpp",
         "radiant/intrinsic_sizing.cpp",
         "radiant/resolve_htm_style.cpp",
         "radiant/resolve_css_style.cpp",
