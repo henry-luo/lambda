@@ -148,9 +148,10 @@ class RadiantLayoutTester {
     /**
      * Compare layout bounds with tolerance
      */
-    compareLayout(radiantLayout, browserLayout, isText = false) {
+    compareLayout(radiantLayout, browserLayout, isText = false, isCentered = false) {
         const differences = [];
         const properties = ['x', 'y', 'width', 'height'];
+        const widthDiff = Math.abs((radiantLayout.width || 0) - (browserLayout.width || 0));
 
         for (const prop of properties) {
             const radiantVal = radiantLayout[prop] || 0;
@@ -158,8 +159,14 @@ class RadiantLayoutTester {
             const diff = Math.abs(radiantVal - browserVal);
 
             // Always include the difference, regardless of tolerance
-            const tolerance = Math.max(isText ? (prop == 'width' || prop == 'y' ? (browserVal * (browserVal > 150 ? 0.07 : 0.03)) : 0) :
+            let tolerance = Math.max(isText ? (prop == 'width' || prop == 'y' ? (browserVal * (browserVal > 150 ? 0.07 : 0.03)) : 0) :
                 (prop == 'height' || prop == 'y' ? browserVal * 0.03 : 0), this.tolerance);
+
+            // For centered text, x position shifts by ~half the width difference
+            if (prop === 'x' && isText && isCentered) {
+                tolerance += widthDiff / 6;
+            }
+
             differences.push({
                 property: prop,
                 radiant: radiantVal,
@@ -391,7 +398,7 @@ class RadiantLayoutTester {
     /**
      * Compare two tree structures node by node with unified child comparison
      */
-    compareNodes(radiantNode, browserNode, path = '', results = null, depth = 0) {
+    compareNodes(radiantNode, browserNode, path = '', results = null, depth = 0, parentComputed = null) {
         if (!results) {
             results = {
                 totalElements: 0,
@@ -484,7 +491,11 @@ class RadiantLayoutTester {
                     browserLayout = browserNode.layout.rects[0];
                 }
 
-                const layoutDiffs = this.compareLayout(radiantLayout, browserLayout, true);
+                // Check if text is center-aligned (from parent's computed styles)
+                const isCentered = parentComputed &&
+                    (parentComputed.text_align === 'center' || parentComputed.textAlign === 'center');
+
+                const layoutDiffs = this.compareLayout(radiantLayout, browserLayout, true, isCentered);
                 const maxDiff = layoutDiffs.length > 0 ? Math.max(...layoutDiffs.map(d => d.difference)) : 0;
                 const exceedsToleranceCount = layoutDiffs.filter(d => d.exceedsTolerance).length;
 
@@ -509,7 +520,11 @@ class RadiantLayoutTester {
                         maxTolerance: maxTolerance,
                     });
                     if (this.verbose) {
-                        console.log(`${indent()}   ❌ TEXT LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${maxTolerance}px)`);
+                        // Show per-property comparison for failed text nodes
+                        const failedProps = layoutDiffs.filter(d => d.exceedsTolerance);
+                        for (const d of failedProps) {
+                            console.log(`${indent()}   ❌ ${d.property}: ${d.radiant.toFixed(1)} vs ${d.browser.toFixed(1)} (diff=${d.difference.toFixed(1)}px > tol=${d.tolerance.toFixed(1)}px)`);
+                        }
                     }
                 }
             } else {
@@ -709,8 +724,11 @@ class RadiantLayoutTester {
             const childType = radiantChildren[i]?.type || browserChildren[i]?.type || 'unknown';
             const childPath = path ? `${path} > ${childType}[${i}]` : `${childType}[${i}]`;
 
+            // Pass current node's computed styles to children for text-align detection
+            const currentComputed = radiantNode?.computed || browserNode?.computed || null;
+
             try {
-                this.compareNodes(radiantChild, browserChild, childPath, results, depth + 1);
+                this.compareNodes(radiantChild, browserChild, childPath, results, depth + 1, currentComputed);
             } catch (childError) {
                 // Log child comparison error but continue with other children
                 results.differences.push({
