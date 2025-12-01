@@ -5,7 +5,7 @@ import ViewTreeViewer from './ViewTreeViewer';
 import HtmlSourceViewer from './HtmlSourceViewer';
 
 const BottomPanel = forwardRef(({ testPath }, ref) => {
-  const [activeTab, setActiveTab] = useState('terminal');
+  const [activeTab, setActiveTab] = useState('htmlsource');
   const terminalRef = useRef(null);
   const viewTreeRef = useRef(null);
   const htmlSourceRef = useRef(null);
@@ -22,6 +22,12 @@ const BottomPanel = forwardRef(({ testPath }, ref) => {
   return (
     <div className="bottom-panel-container">
       <div className="bottom-panel-tabs">
+        <button
+          className={`tab-button ${activeTab === 'htmlsource' ? 'active' : ''}`}
+          onClick={() => setActiveTab('htmlsource')}
+        >
+          Html Source
+        </button>
         <button
           className={`tab-button ${activeTab === 'terminal' ? 'active' : ''}`}
           onClick={() => setActiveTab('terminal')}
@@ -40,14 +46,11 @@ const BottomPanel = forwardRef(({ testPath }, ref) => {
         >
           View Tree
         </button>
-        <button
-          className={`tab-button ${activeTab === 'htmlsource' ? 'active' : ''}`}
-          onClick={() => setActiveTab('htmlsource')}
-        >
-          Html Source
-        </button>
       </div>
       <div className="bottom-panel-content">
+        <div className={`tab-content ${activeTab === 'htmlsource' ? 'active' : ''}`}>
+          <HtmlSourceViewer ref={htmlSourceRef} testPath={testPath} />
+        </div>
         <div className={`tab-content ${activeTab === 'terminal' ? 'active' : ''}`}>
           <TerminalPanel ref={terminalRef} />
         </div>
@@ -56,9 +59,6 @@ const BottomPanel = forwardRef(({ testPath }, ref) => {
         </div>
         <div className={`tab-content ${activeTab === 'viewtree' ? 'active' : ''}`}>
           <ViewTreeViewer ref={viewTreeRef} />
-        </div>
-        <div className={`tab-content ${activeTab === 'htmlsource' ? 'active' : ''}`}>
-          <HtmlSourceViewer ref={htmlSourceRef} testPath={testPath} />
         </div>
       </div>
     </div>
