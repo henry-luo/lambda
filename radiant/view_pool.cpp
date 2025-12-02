@@ -516,10 +516,11 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 ViewText* text = (ViewText*)view;
                 unsigned char* text_data = view->text_data();
                 strbuf_append_char_n(buf, ' ', indent);
-                strbuf_append_format(buf, "[text: {x:%.1f, y:%.1f, wd:%.1f, hg:%.1f}\n",
+                strbuf_append_format(buf, "[text: {x:%.1f, y:%.1f, wd:%.1f, hg:%.1f}",
                     text->x, text->y, text->width, text->height);
                 TextRect* rect = text->rect;
                 while (rect) {
+                    strbuf_append_char(buf, '\n');
                     strbuf_append_char_n(buf, ' ', indent+1);
                     unsigned char* str = text_data ? text_data + rect->start_index : nullptr;
                     if (!str || !(*str) || rect->length <= 0) {
@@ -533,11 +534,12 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                             if (*s == '\n' || *s == '\r') { *s = '^'; }
                             s++;
                         }
-                        strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]]\n",
+                        strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]",
                             rect->start_index, rect->length, rect->x, rect->y, rect->width, rect->height);
                     }
                     rect = rect->next;
                 }
+                strbuf_append_str(buf, "]\n");
             }
             else if (view->view_type == RDT_VIEW_NONE) {
                 strbuf_append_char_n(buf, ' ', indent);
