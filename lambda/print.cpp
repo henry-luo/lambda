@@ -212,8 +212,6 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             print_named_items(strbuf, nest_map_type, nest_map->data, depth, indent, is_attrs);
         }
         else {
-            // printf("field %d: %p, name: %.*s, type: %d, data: %p\n",
-            //     i, field, (int)field->name->length, field->name->str, field->type->type_id, data);
             // Safety check for field name and type
             if (!field->name || (uintptr_t)field->name < 0x1000) {
                 log_error("invalid field name: %p", field->name);
@@ -393,7 +391,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
 
     TypeId type_id = get_type_id(item);
-    // printf("TRACE: print_item - item type: %d\n", type_id);
     switch (type_id) { // packed value
     case LMD_TYPE_NULL:
         strbuf_append_str(strbuf, "null");
@@ -489,7 +486,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_LIST: {
         List *list = item.list;
-        // printf("print list: %p, length: %ld, depth: %d\n", list, list->length, depth);
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
@@ -582,7 +578,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_TYPE: {
         TypeType *type = (TypeType*)item.type;
-        // printf("print type: %p, type_id: %d\n", type, type->type->type_id);
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
             // print as "type.null"
