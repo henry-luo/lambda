@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pseudo-element Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            margin: 20px;
+        }
+
+        /* Basic ::before test */
+        .note::before {
+            content: "Note: ";
+            font-weight: bold;
+        }
+
+        /* Basic ::after test */
+        .external::after {
+            content: " ↗";
+            color: gray;
+        }
+
+        /* Both ::before and ::after */
+        .quote::before {
+            content: """;
+        }
+        .quote::after {
+            content: """;
+        }
+
+        /* Numbered list with ::before */
+        .step::before {
+            content: "Step ";
+        }
+
+        /* Empty content (should not show) */
+        .empty::before {
+            content: "";
+        }
+    </style>
+</head>
+<body>
+    <h1>Pseudo-element Layout Test</h1>
+
+    <p class="note">This is an important note.</p>
+
+    <p>Visit our <a class="external" href="https://example.com">website</a> for more info.</p>
+
+    <p class="quote">To be or not to be</p>
+
+    <div>
+        <p class="step">First, do this.</p>
+        <p class="step">Then, do that.</p>
+    </div>
+
+    <p class="empty">This should have no prefix.</p>
+</body>
+</html>
