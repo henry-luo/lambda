@@ -1303,6 +1303,16 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
         font->family_name = arena_strdup(arena, "Courier");
     } else if (strstr(filename, "Georgia") || strstr(filename, "georgia")) {
         font->family_name = arena_strdup(arena, "Georgia");
+    } else if (strstr(filename, "Apple Color Emoji") || strstr(filename, "AppleColorEmoji")) {
+        font->family_name = arena_strdup(arena, "Apple Color Emoji");
+    } else if (strstr(filename, "PingFang") || strstr(filename, "pingfang")) {
+        font->family_name = arena_strdup(arena, "PingFang SC");
+    } else if (strstr(filename, "STHeiti") || strstr(filename, "stheiti")) {
+        font->family_name = arena_strdup(arena, "STHeiti");
+    } else if (strstr(filename, "Heiti") || strstr(filename, "heiti")) {
+        font->family_name = arena_strdup(arena, "Heiti SC");
+    } else if (strstr(filename, "Songti") || strstr(filename, "songti")) {
+        font->family_name = arena_strdup(arena, "Songti SC");
     } else {
         // Unknown family - will be parsed on demand
         font->family_name = NULL;
@@ -1385,7 +1395,21 @@ static bool parse_placeholder_font(FontEntry* placeholder, Arena* arena) {
     log_debug("Parsing placeholder font: %s", placeholder->file_path);
     #endif
     
-    // Parse the font metadata in-place
+    // Check if this is a TTC file - TTC files cannot be parsed in-place
+    // because they contain multiple fonts
+    FontFormat format = detect_font_format(placeholder->file_path);
+    if (format == FONT_FORMAT_TTC) {
+        #ifdef FONT_DEBUG_VERBOSE
+        log_debug("Placeholder is TTC file, requires special handling: %s", placeholder->file_path);
+        #endif
+        // TTC files need to be parsed by parse_ttc_font_metadata which adds entries to the database
+        // We can't parse in-place, so just mark this placeholder as parsed but empty
+        placeholder->is_placeholder = false;
+        placeholder->family_name = arena_strdup(arena, "TTC-Placeholder");  // Dummy name
+        return false;  // Signal that we couldn't parse in-place
+    }
+    
+    // Parse the font metadata in-place for single-font files
     bool success = parse_font_metadata(placeholder->file_path, placeholder, arena);
     if (success) {
         placeholder->is_placeholder = false;  // No longer a placeholder
@@ -1682,15 +1706,37 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
         for (size_t i = 0; i < db->all_fonts->length && parsed_count < 10; i++) {
             FontEntry* placeholder = (FontEntry*)db->all_fonts->data[i];
             if (placeholder && placeholder->is_placeholder) {
-                if (parse_placeholder_font(placeholder, db->string_arena)) {
-                    parsed_count++;
-                    
-                    // Check if this font matches what we're looking for
-                    if (placeholder->family_name && 
-                        string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
-                        // Found matching family, organize it and break
+                // Check if placeholder family name matches what we're looking for
+                bool potential_match = false;
+                if (placeholder->family_name) {
+                    potential_match = string_match_ignore_case(placeholder->family_name, criteria->family_name);
+                }
+                
+                // For TTC files, trigger full lazy loading which parses all fonts in the collection
+                FontFormat format = detect_font_format(placeholder->file_path);
+                if (format == FONT_FORMAT_TTC && potential_match) {
+                    #ifdef FONT_DEBUG_VERBOSE
+                    log_debug("Lazy loading TTC placeholder: %s", placeholder->file_path);
+                    #endif
+                    FontEntry* loaded = lazy_load_font(db, placeholder->file_path);
+                    if (loaded) {
+                        // TTC files add multiple entries, reorganize families
                         organize_fonts_into_families(db);
-                        break;
+                        parsed_count += 5;  // Count as multiple fonts
+                        break;  // Found matching TTC, stop searching
+                    }
+                } else if (format != FONT_FORMAT_TTC) {
+                    // For single-font files, parse in-place
+                    if (parse_placeholder_font(placeholder, db->string_arena)) {
+                        parsed_count++;
+                        
+                        // Check if this font matches what we're looking for
+                        if (placeholder->family_name && 
+                            string_match_ignore_case(placeholder->family_name, criteria->family_name)) {
+                            // Found matching family, organize it and break
+                            organize_fonts_into_families(db);
+                            break;
+                        }
                     }
                 }
             }
