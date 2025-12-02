@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feature Comparison Table</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; padding: 2rem 1rem; }
+    
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { text-align: center; color: #333; margin-bottom: 0.5rem; }
+    .subtitle { text-align: center; color: #666; margin-bottom: 2rem; }
+    
+    /* Comparison Table */
+    .table-wrapper { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
+    
+    table { width: 100%; border-collapse: collapse; }
+    
+    /* Header Row */
+    thead { background: #2c3e50; color: white; }
+    th { padding: 1.5rem; text-align: left; font-weight: 600; }
+    th:first-child { width: 30%; }
+    
+    /* Body Rows */
+    tbody td { padding: 1.5rem; border-bottom: 1px solid #e0e0e0; }
+    tbody tr:last-child td { border-bottom: none; }
+    
+    /* Alternating rows */
+    tbody tr:nth-child(even) { background: #f9f9f9; }
+    tbody tr:hover { background: #f0f4f8; }
+    
+    /* Feature name column */
+    td:first-child { font-weight: 500; color: #2c3e50; }
+    
+    /* Status cells */
+    .yes { color: #27ae60; font-weight: 600; }
+    .no { color: #e74c3c; font-weight: 600; }
+    .partial { color: #f39c12; font-weight: 600; }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      table { font-size: 0.9rem; }
+      th, td { padding: 1rem; }
+    }
+    
+    .note { margin-top: 2rem; padding: 1rem; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px; }
+    .note strong { color: #856404; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Feature Comparison</h1>
+    <p class="subtitle">Compare our service tiers and find the perfect plan for your needs</p>
+    
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Starter</th>
+            <th>Professional</th>
+            <th>Enterprise</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>API Access</td>
+            <td class="no">✗</td>
+            <td class="yes">✓</td>
+            <td class="yes">✓</td>
+          </tr>
+          <tr>
+            <td>Email Support</td>
+            <td class="yes">✓</td>
+            <td class="yes">✓</td>
+            <td class="yes">✓</td>
+          </tr>
+          <tr>
+            <td>Priority Support</td>
+            <td class="no">✗</td>
+            <td class="partial">Business hours</td>
+            <td class="yes">24/7</td>
+          </tr>
+          <tr>
+            <td>Custom Branding</td>
+            <td class="no">✗</td>
+            <td class="yes">✓</td>
+            <td class="yes">✓</td>
+          </tr>
+          <tr>
+            <td>Advanced Analytics</td>
+            <td class="no">✗</td>
+            <td class="no">✗</td>
+            <td class="yes">✓</td>
+          </tr>
+          <tr>
+            <td>Webhooks</td>
+            <td class="no">✗</td>
+            <td class="yes">✓</td>
+            <td class="yes">✓</td>
+          </tr>
+          <tr>
+            <td>SSO/SAML</td>
+            <td class="no">✗</td>
+            <td class="no">✗</td>
+            <td class="yes">✓</td>
+          </tr>
+          <tr>
+            <td>Service Level Agreement</td>
+            <td class="no">Standard</td>
+            <td class="partial">99.5%</td>
+            <td class="yes">99.99%</td>
+          </tr>
+          <tr>
+            <td>Storage</td>
+            <td>10 GB</td>
+            <td>1 TB</td>
+            <td>Unlimited</td>
+          </tr>
+          <tr>
+            <td>Team Members</td>
+            <td>1</td>
+            <td>Up to 10</td>
+            <td>Unlimited</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    
+    <div class="note">
+      <strong>Note:</strong> All plans include basic features like account management, data backup, and standard analytics. Enterprise customers can negotiate custom features and pricing.
+    </div>
+  </div>
+</body>
+</html>

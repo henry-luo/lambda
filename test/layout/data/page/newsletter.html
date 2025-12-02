@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Our Newsletter</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    
+    .newsletter-container {
+      background: white;
+      padding: 3rem 2rem;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      max-width: 500px;
+      text-align: center;
+    }
+    
+    .newsletter-icon {
+      width: 100px;
+      height: 100px;
+      margin: 0 auto 1.5rem;
+    }
+    
+    h1 {
+      font-size: 2rem;
+      color: #333;
+      margin-bottom: 0.5rem;
+    }
+    
+    .tagline {
+      font-size: 1.1rem;
+      color: #666;
+      margin-bottom: 2rem;
+      line-height: 1.6;
+    }
+    
+    .form-group {
+      margin: 1.5rem 0;
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    input[type="email"] {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 1rem;
+      transition: border-color 0.3s;
+    }
+    
+    input[type="email"]:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    button {
+      padding: 0.75rem 2rem;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    
+    button:hover {
+      background: #764ba2;
+    }
+    
+    .social-signup {
+      margin-top: 2.5rem;
+      padding-top: 2rem;
+      border-top: 1px solid #e0e0e0;
+    }
+    
+    .social-signup h3 {
+      font-size: 0.9rem;
+      color: #999;
+      margin-bottom: 1rem;
+      text-transform: uppercase;
+    }
+    
+    .social-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+    }
+    
+    .social-btn {
+      padding: 0.5rem 1rem;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-decoration: none;
+      display: inline-block;
+    }
+    
+    .social-btn:hover {
+      border-color: #667eea;
+      color: #667eea;
+    }
+    
+    .privacy {
+      margin-top: 1.5rem;
+      font-size: 0.85rem;
+      color: #999;
+    }
+    
+    .privacy a {
+      color: #667eea;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="newsletter-container">
+    <svg class="newsletter-icon" viewBox="0 0 100 100" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px;">
+      <text x="50" y="55" font-size="18" fill="white" text-anchor="middle" dominant-baseline="central">✉️</text>
+    </svg>
+    
+    <h1>Stay Updated</h1>
+    <p class="tagline">Get the latest articles, tips, and insights delivered straight to your inbox every week.</p>
+    
+    <form class="form-group">
+      <input type="email" placeholder="your@email.com" required>
+      <button type="submit">Subscribe</button>
+    </form>
+    
+    <div class="social-signup">
+      <h3>Or follow us on</h3>
+      <div class="social-buttons">
+        <a href="#twitter" class="social-btn">Twitter</a>
+        <a href="#facebook" class="social-btn">Facebook</a>
+        <a href="#linkedin" class="social-btn">LinkedIn</a>
+      </div>
+    </div>
+    
+    <p class="privacy">
+      We respect your privacy. <a href="#unsubscribe">Unsubscribe</a> anytime.
+    </p>
+  </div>
+</body>
+</html>
