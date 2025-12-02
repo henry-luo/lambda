@@ -600,8 +600,8 @@ CSSVarRef* css_parse_var_function(CssPropertyValueParser* parser,
                                  int token_count) {
     if (!parser || !tokens || token_count < 1) return NULL;
 
-    // First token should be the variable name
-    if (tokens[0].type != CSS_TOKEN_IDENT) {
+    // First token should be the variable name (either CSS_TOKEN_IDENT or CSS_TOKEN_CUSTOM_PROPERTY)
+    if (tokens[0].type != CSS_TOKEN_IDENT && tokens[0].type != CSS_TOKEN_CUSTOM_PROPERTY) {
         css_property_value_parser_add_error(parser, "var() function requires identifier argument");
         return NULL;
     }
@@ -751,7 +751,7 @@ bool css_value_is_keyword(const CssValue* value, const char* keyword) {
 
 bool css_value_is_function(const CssValue* value, const char* function_name) {
     return value && value->type == CSS_VALUE_TYPE_FUNCTION &&
-           value->data.function && value->data.function->name && 
+           value->data.function && value->data.function->name &&
            strcmp(value->data.function->name, function_name) == 0;
 }
 
@@ -829,7 +829,7 @@ CssValue* css_parse_min_max_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
     if (!value->data.function) return NULL;
-    
+
     value->data.function->name = (op_type == 0) ? "min" : "max";
     value->data.function->arg_count = 0;
     value->data.function->args = NULL;
@@ -849,7 +849,7 @@ CssValue* css_parse_clamp_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
     if (!value->data.function) return NULL;
-    
+
     value->data.function->name = "clamp";
     value->data.function->arg_count = 0;
     value->data.function->args = NULL;
@@ -870,7 +870,7 @@ CssValue* css_parse_math_function(CssPropertyValueParser* parser,
     value->type = CSS_VALUE_TYPE_FUNCTION;
     value->data.function = (CssFunction*)pool_alloc(parser->pool, sizeof(CssFunction));
     if (!value->data.function) return NULL;
-    
+
     value->data.function->name = "math";
     value->data.function->args = NULL;
     value->data.function->arg_count = 0;

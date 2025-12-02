@@ -178,6 +178,9 @@ CssValue* css_get_custom_property(CssEngine* engine, const CssComputedStyle* sty
 bool css_set_custom_property(CssEngine* engine, CssComputedStyle* style,
                             const char* name, CssValue* value);
 
+// Media query evaluation
+bool css_evaluate_media_query(CssEngine* engine, const char* media_query);
+
 // Statistics and debugging
 typedef struct CssEngineStats {
     size_t rules_processed;

@@ -47,7 +47,8 @@ void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
-void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool);
+void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
+static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool);
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
@@ -455,10 +456,114 @@ const char* extract_inline_css(Element* root) {
 }
 
 /**
+ * Apply a single CSS rule to a DOM element (and recursively to its children)
+ * Handles style rules directly, and recursively processes media rules
+ */
+static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
+    if (!elem || !rule || !matcher || !pool) return;
+
+    // Handle media rules by evaluating the condition
+    if (rule->type == CSS_RULE_MEDIA) {
+        const char* media_condition = rule->data.conditional_rule.condition;
+
+        log_debug("[CSS] Processing @media rule with condition: %s",
+                  media_condition ? media_condition : "(null)");
+
+        // Evaluate media query
+        bool matches = css_evaluate_media_query(engine, media_condition);
+
+        if (matches) {
+            log_debug("[CSS] @media query MATCHES, applying %zu nested rules",
+                      rule->data.conditional_rule.rule_count);
+
+            // Apply all nested rules
+            for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+                CssRule* nested_rule = rule->data.conditional_rule.rules[i];
+                if (nested_rule) {
+                    apply_rule_to_dom_element(elem, nested_rule, matcher, pool, engine);
+                }
+            }
+        } else {
+            log_debug("[CSS] @media query does NOT match, skipping %zu nested rules",
+                      rule->data.conditional_rule.rule_count);
+        }
+        return;
+    }
+
+    // Handle @supports rules similarly (if condition evaluation is implemented)
+    if (rule->type == CSS_RULE_SUPPORTS) {
+        // For now, skip @supports rules as we'd need @supports condition evaluation
+        log_debug("[CSS] Skipping @supports rule (not yet implemented)");
+        return;
+    }
+
+    // Skip other at-rules (@import, @charset, @namespace, etc.)
+    if (rule->type != CSS_RULE_STYLE) {
+        log_debug("[CSS] Skipping non-style rule type %d", rule->type);
+        return;
+    }
+
+    // Process style rule
+    CssSelector* selector = rule->data.style_rule.selector;
+    CssSelectorGroup* selector_group = rule->data.style_rule.selector_group;
+
+    // Handle selector groups (comma-separated selectors like "th, td")
+    if (selector_group && selector_group->selector_count > 0) {
+        // Try matching each selector in the group
+        bool any_match = false;
+        CssSpecificity best_specificity = {0, 0, 0, 0, false};
+
+        for (size_t sel_idx = 0; sel_idx < selector_group->selector_count; sel_idx++) {
+            CssSelector* group_sel = selector_group->selectors[sel_idx];
+            if (!group_sel) continue;
+
+            // Calculate and cache specificity if not already done
+            if (group_sel->specificity.inline_style == 0 &&
+                group_sel->specificity.ids == 0 &&
+                group_sel->specificity.classes == 0 &&
+                group_sel->specificity.elements == 0) {
+                group_sel->specificity = selector_matcher_calculate_specificity(matcher, group_sel);
+            }
+
+            MatchResult match_result;
+            if (selector_matcher_matches(matcher, group_sel, elem, &match_result)) {
+                any_match = true;
+                best_specificity = match_result.specificity;
+                break;
+            }
+        }
+
+        if (any_match && rule->data.style_rule.declaration_count > 0) {
+            dom_element_apply_rule(elem, rule, best_specificity);
+        }
+        return;
+    }
+
+    // Handle single selector
+    if (!selector) return;
+
+    // Calculate and cache specificity
+    if (selector->specificity.inline_style == 0 &&
+        selector->specificity.ids == 0 &&
+        selector->specificity.classes == 0 &&
+        selector->specificity.elements == 0) {
+        selector->specificity = selector_matcher_calculate_specificity(matcher, selector);
+    }
+
+    // Check if selector matches
+    MatchResult match_result;
+    if (selector_matcher_matches(matcher, selector, elem, &match_result)) {
+        if (rule->data.style_rule.declaration_count > 0) {
+            dom_element_apply_rule(elem, rule, match_result.specificity);
+        }
+    }
+}
+
+/**
  * Apply CSS stylesheet rules to DOM tree
  * Walks the tree recursively and matches selectors to elements
  */
-void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool) {
+void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
     if (!root || !stylesheet || !matcher || !pool) return;
 
     log_debug("[CSS] Applying stylesheet with %zu rules to element <%s>",
@@ -474,118 +579,8 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 
         log_debug("[CSS] Processing rule %d, type=%d", rule_idx, rule->type);
 
-        // Only process style rules (skip @media, @import, etc.)
-        if (rule->type != CSS_RULE_STYLE) {
-            log_debug("[CSS] Rule %d is not a style rule, skipping", rule_idx);
-            continue;
-        }
-
-        // Get selector or selector group from style_rule union
-        CssSelector* selector = rule->data.style_rule.selector;
-        CssSelectorGroup* selector_group = rule->data.style_rule.selector_group;
-
-        // Handle selector groups (comma-separated selectors like "th, td")
-        if (selector_group && selector_group->selector_count > 0) {
-            log_debug("[CSS] Rule %d has selector group with %zu selectors",
-                      rule_idx, selector_group->selector_count);
-
-            // Try matching each selector in the group
-            bool any_match = false;
-            CssSpecificity best_specificity = {0, 0, 0, 0, false};
-
-            for (size_t sel_idx = 0; sel_idx < selector_group->selector_count; sel_idx++) {
-                CssSelector* group_sel = selector_group->selectors[sel_idx];
-                if (!group_sel) continue;
-
-                // calculate and cache specificity if not already done
-                if (group_sel->specificity.inline_style == 0 &&
-                    group_sel->specificity.ids == 0 &&
-                    group_sel->specificity.classes == 0 &&
-                    group_sel->specificity.elements == 0) {
-                    group_sel->specificity = selector_matcher_calculate_specificity(matcher, group_sel);
-                }
-
-                MatchResult match_result;
-                if (selector_matcher_matches(matcher, group_sel, root, &match_result)) {
-                    log_debug("[CSS] Rule %d selector [%zu] MATCHES <%s>",
-                              rule_idx, sel_idx, root->tag_name);
-                    any_match = true;
-                    best_specificity = match_result.specificity;
-                    break; // Found a match, no need to test other selectors in group
-                }
-            }
-
-            if (any_match) {
-                log_debug("[CSS] Rule %d group MATCHES <%s>: applying %zu declarations",
-                          rule_idx, root->tag_name, rule->data.style_rule.declaration_count);
-                if (rule->data.style_rule.declaration_count > 0) {
-                    dom_element_apply_rule(root, rule, best_specificity);
-                }
-            } else {
-                log_debug("[CSS] Rule %d group does NOT match <%s>", rule_idx, root->tag_name);
-            }
-
-            // Continue to next rule
-            continue;
-        }
-
-        // Handle single selector (backward compatibility)
-        if (!selector) {
-            log_debug("[CSS] Rule %d has no selector or selector group", rule_idx);
-            continue;
-        }
-
-        // Calculate and cache specificity if not already done
-        if (selector->specificity.inline_style == 0 &&
-            selector->specificity.ids == 0 &&
-            selector->specificity.classes == 0 &&
-            selector->specificity.elements == 0) {
-            selector->specificity = selector_matcher_calculate_specificity(matcher, selector);
-            log_debug("[CSS] Calculated specificity for rule %d: (%d,%d,%d,%d)",
-                      rule_idx,
-                      selector->specificity.inline_style,
-                      selector->specificity.ids,
-                      selector->specificity.classes,
-                      selector->specificity.elements);
-        }
-
-        log_debug("[CSS] Rule %d has selector, testing match against <%s>", rule_idx, root->tag_name);
-
-        // Log rule details
-        if (rule->data.style_rule.declaration_count > 0) {
-            log_debug("[CSS] Rule %d has %zu declarations (array @%p):",
-                      rule_idx, rule->data.style_rule.declaration_count,
-                      (void*)rule->data.style_rule.declarations);
-            for (size_t d = 0; d < rule->data.style_rule.declaration_count && d < 5; d++) {
-                CssDeclaration* decl = rule->data.style_rule.declarations[d];
-                if (decl) {
-                    log_debug("[CSS]   - [%zu] property_id=%d (@%p)", d, decl->property_id, (void*)decl);
-                }
-            }
-        }
-
-        // Check if the selector matches this element
-        MatchResult match_result;
-        if (selector_matcher_matches(matcher, selector, root, &match_result)) {
-            log_debug("[CSS] Rule %d MATCHES <%s>: specificity (%d,%d,%d,%d)",
-                      rule_idx, root->tag_name,
-                      match_result.specificity.inline_style,
-                      match_result.specificity.ids,
-                      match_result.specificity.classes,
-                      match_result.specificity.elements);
-
-            // Apply all declarations from this rule
-            size_t decl_count = rule->data.style_rule.declaration_count;
-            log_debug("[CSS] Applying %zu declarations from rule %d", decl_count, rule_idx);
-
-            if (decl_count > 0) {
-                dom_element_apply_rule(root, rule, match_result.specificity);
-                log_debug("[CSS] Applied %zu declarations to <%s>",
-                          decl_count, root->tag_name);
-            }
-        } else {
-            log_debug("[CSS] Rule %d does NOT match <%s>", rule_idx, root->tag_name);
-        }
+        // Apply rule to this element (handles media queries internally)
+        apply_rule_to_dom_element(root, rule, matcher, pool, engine);
     }
 
     // Recursively apply to children (only element children)
@@ -593,7 +588,7 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
     while (child) {
         if (child->is_element()) {
             DomElement* child_elem = (DomElement*)child;
-            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool);
+            apply_stylesheet_to_dom_tree(child_elem, stylesheet, matcher, pool, engine);
         }
         child = child->next_sibling;
     }
@@ -743,7 +738,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // Apply external stylesheet first (lower priority)
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
         log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
-        apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool);
+        apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool, css_engine);
     }
 
     // Apply inline stylesheets (higher priority)
@@ -754,7 +749,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             log_debug("[Lambda CSS] Stylesheet %d is not null, rule_count=%zu", i, inline_stylesheets[i]->rule_count);
             if (inline_stylesheets[i]->rule_count > 0) {
                 log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules", i, inline_stylesheets[i]->rule_count);
-                apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool);
+                apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
                 log_debug("[Lambda CSS] Finished applying inline stylesheet %d", i);
             } else {
                 log_debug("[Lambda CSS] Skipping stylesheet %d: rule_count=%zu is not > 0", i, inline_stylesheets[i]->rule_count);

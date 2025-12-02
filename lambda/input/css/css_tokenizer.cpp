@@ -533,10 +533,10 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
         dst->start = src->start;
         dst->length = src->length;
         dst->value = src->value;
-        
+
         // Copy union data - use memcpy to ensure all union members are copied
         memcpy(&dst->data, &src->data, sizeof(src->data));
-        
+
         // Copy metadata fields
         dst->line = src->line;
         dst->column = src->column;
@@ -864,7 +864,6 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 }
                 break;
             case '+':
-            case '-':
                 // Check if this is a signed number
                 if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
                     // Number parsing (same as digit case)
@@ -916,6 +915,98 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                             token->data.number_value = atof(num_str);
                         }
                     }
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '-':
+                // Check for CSS custom property (--name)
+                if (pos + 1 < length && input[pos + 1] == '-') {
+                    // CSS Custom Property: starts with --
+                    size_t start = pos;
+                    pos += 2; // Skip --
+
+                    // Parse the rest of the name (can include letters, digits, hyphens, underscores)
+                    while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
+                        pos++;
+                    }
+
+                    token->type = CSS_TOKEN_CUSTOM_PROPERTY;
+                    token->length = pos - start;
+
+                    // Store the property name (without --) in the token value
+                    // This will be set by css_token_set_value
+                }
+                // Check if this is a signed number
+                else if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
+                    // Number parsing (same as digit case)
+                    size_t start = pos;
+                    pos++; // Skip sign
+
+                    // Parse integer part
+                    while (pos < length && isdigit(input[pos])) {
+                        pos++;
+                    }
+
+                    // Parse decimal part
+                    if (pos < length && input[pos] == '.') {
+                        pos++;
+                        while (pos < length && isdigit(input[pos])) {
+                            pos++;
+                        }
+                    }
+
+                    // Check for dimension unit or percentage
+                    size_t number_end = pos;
+                    if (pos < length && input[pos] == '%') {
+                        pos++;
+                        token->type = CSS_TOKEN_PERCENTAGE;
+                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
+                        // Parse unit
+                        size_t unit_start = pos;
+                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
+                            pos++;
+                        }
+                        token->type = CSS_TOKEN_DIMENSION;
+                        // Parse the unit string and convert to CssUnit enum
+                        CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
+                        token->data.dimension.unit = parsed_unit;
+                    } else {
+                        token->type = CSS_TOKEN_NUMBER;
+                    }
+
+                    token->length = pos - start;
+
+                    // Parse number value
+                    char* num_str = static_cast<char*>(pool_alloc(tokenizer->pool, number_end - start + 1));
+                    if (num_str) {
+                        strncpy(num_str, token->start, number_end - start);
+                        num_str[number_end - start] = '\0';
+                        if (token->type == CSS_TOKEN_DIMENSION) {
+                            token->data.dimension.value = atof(num_str);
+                        } else {
+                            token->data.number_value = atof(num_str);
+                        }
+                    }
+                }
+                // Check for identifier starting with - (e.g., -webkit-transform)
+                else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_')) {
+                    // Identifier starting with -
+                    size_t start = pos;
+                    while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
+                        pos++;
+                    }
+
+                    // Check for function
+                    if (pos < length && input[pos] == '(') {
+                        token->type = CSS_TOKEN_FUNCTION;
+                        pos++; // Include the opening parenthesis
+                    } else {
+                        token->type = CSS_TOKEN_IDENT;
+                    }
+                    token->length = pos - start;
                 } else {
                     token->type = CSS_TOKEN_DELIM;
                     token->data.delimiter = ch;
