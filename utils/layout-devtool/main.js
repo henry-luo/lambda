@@ -77,6 +77,11 @@ class LayoutDevTool {
       return await this.readHtmlSource(testPath);
     });
 
+    // Read HTML tree file
+    ipcMain.handle('read-html-tree-file', async () => {
+      return await this.readHtmlTreeFile();
+    });
+
     // Stream process output
     ipcMain.on('process-output', (event, data) => {
       if (this.mainWindow) {
@@ -209,6 +214,17 @@ class LayoutDevTool {
       return content;
     } catch (error) {
       console.error('Failed to read view_tree.txt:', error);
+      return '';
+    }
+  }
+
+  async readHtmlTreeFile() {
+    try {
+      const htmlTreePath = path.join(this.projectRoot, 'html_tree.txt');
+      const content = await fs.readFile(htmlTreePath, 'utf8');
+      return content;
+    } catch (error) {
+      console.error('Failed to read html_tree.txt:', error);
       return '';
     }
   }
