@@ -3802,3 +3802,232 @@ TEST_F(HtmlParserTest, Phase10RealWorldFragment) {
     int a_count = countElementsByTag(result, "a");
     EXPECT_EQ(a_count, 2);
 }
+
+// ============================================================================
+// DT/DD Auto-Close Tests (HTML Spec Optional End Tags)
+// ============================================================================
+
+// Test: DT elements should auto-close previous DT (basic case)
+TEST_F(HtmlParserTest, AutoCloseDtClosesOtherDt) {
+    Item result = parseHtml(R"(
+        <dl>
+            <dt>Term 1
+            <dt>Term 2
+        </dl>
+    )");
+
+    // Should have 2 DT elements as siblings in DL
+    int dt_count = countElementsByTag(result, "dt");
+    EXPECT_EQ(dt_count, 2);
+
+    // Verify they are siblings (children of DL), not nested
+    Element* dl = findElementByTag(result, "dl");
+    ASSERT_NE(dl, nullptr);
+    
+    // Count direct DT children of DL
+    List* dl_list = (List*)dl;
+    TypeElmt* dl_type = (TypeElmt*)dl->type;
+    int64_t attr_count = dl_list->length - dl_type->content_length;
+    
+    int direct_dt_count = 0;
+    for (int64_t i = attr_count; i < dl_list->length; i++) {
+        Item child = dl_list->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            TypeElmt* child_type = (TypeElmt*)child_elem->type;
+            if (strview_equal(&child_type->name, "dt")) {
+                direct_dt_count++;
+            }
+        }
+    }
+    EXPECT_EQ(direct_dt_count, 2);
+}
+
+// Test: DD elements should auto-close previous DT
+TEST_F(HtmlParserTest, AutoCloseDdClosesDt) {
+    Item result = parseHtml(R"(
+        <dl>
+            <dt>Term
+            <dd>Definition
+        </dl>
+    )");
+
+    // Should have 1 DT and 1 DD as siblings
+    int dt_count = countElementsByTag(result, "dt");
+    int dd_count = countElementsByTag(result, "dd");
+    EXPECT_EQ(dt_count, 1);
+    EXPECT_EQ(dd_count, 1);
+
+    // Verify DD is NOT nested inside DT
+    Element* dt = findElementByTag(result, "dt");
+    ASSERT_NE(dt, nullptr);
+    
+    // DD should not be a child of DT
+    Element* dd_in_dt = findElementByTag(Item{.element = dt}, "dd");
+    EXPECT_EQ(dd_in_dt, nullptr);
+}
+
+// Test: DT elements should auto-close previous DD
+TEST_F(HtmlParserTest, AutoCloseDtClosesDd) {
+    Item result = parseHtml(R"(
+        <dl>
+            <dd>Definition 1
+            <dt>Term 2
+            <dd>Definition 2
+        </dl>
+    )");
+
+    // Should have 1 DT and 2 DD as siblings
+    int dt_count = countElementsByTag(result, "dt");
+    int dd_count = countElementsByTag(result, "dd");
+    EXPECT_EQ(dt_count, 1);
+    EXPECT_EQ(dd_count, 2);
+}
+
+// Test: DD elements should auto-close previous DD
+TEST_F(HtmlParserTest, AutoCloseDdClosesOtherDd) {
+    Item result = parseHtml(R"(
+        <dl>
+            <dt>Term
+            <dd>Definition 1
+            <dd>Definition 2
+        </dl>
+    )");
+
+    // Should have 1 DT and 2 DD as siblings
+    int dt_count = countElementsByTag(result, "dt");
+    int dd_count = countElementsByTag(result, "dd");
+    EXPECT_EQ(dt_count, 1);
+    EXPECT_EQ(dd_count, 2);
+}
+
+// Test: Complete DL with multiple DT/DD pairs (typical use case)
+TEST_F(HtmlParserTest, AutoCloseMultipleDtDdPairs) {
+    Item result = parseHtml(R"(
+        <dl>
+            <dt>HTML
+            <dd>HyperText Markup Language
+            <dt>CSS
+            <dd>Cascading Style Sheets
+            <dt>JS
+            <dd>JavaScript
+        </dl>
+    )");
+
+    // Should have 3 DT and 3 DD as siblings
+    int dt_count = countElementsByTag(result, "dt");
+    int dd_count = countElementsByTag(result, "dd");
+    EXPECT_EQ(dt_count, 3);
+    EXPECT_EQ(dd_count, 3);
+}
+
+// Test: DT/DD with nested elements inside (content should remain)
+TEST_F(HtmlParserTest, AutoCloseDtDdWithNestedContent) {
+    Item result = parseHtml(R"(
+        <dl>
+            <dt><a href="link1.html">Term with link</a>
+            <dd>Definition with <strong>bold</strong> text
+            <dt><code>code-term</code>
+            <dd>Another definition
+        </dl>
+    )");
+
+    // Should have 2 DT and 2 DD
+    int dt_count = countElementsByTag(result, "dt");
+    int dd_count = countElementsByTag(result, "dd");
+    EXPECT_EQ(dt_count, 2);
+    EXPECT_EQ(dd_count, 2);
+
+    // Nested elements should still be there
+    EXPECT_NE(findElementByTag(result, "a"), nullptr);
+    EXPECT_NE(findElementByTag(result, "strong"), nullptr);
+    EXPECT_NE(findElementByTag(result, "code"), nullptr);
+}
+
+// Test: CERN.html style - HTML 1.0 with multi-line tags
+TEST_F(HtmlParserTest, AutoCloseCernHtmlStyle) {
+    Item result = parseHtml(R"(
+<dl>
+<dt><a href="link1.html">What's out there?</a>
+<dd> Pointers to the world's online information
+<dt><a href="link2.html">Help</a>
+<dd> on the browser you are using
+<dt><a href="link3.html">Software Products</a>
+<dd> A list of project components
+</dl>
+    )");
+
+    // Should have 3 DT and 3 DD as siblings
+    int dt_count = countElementsByTag(result, "dt");
+    int dd_count = countElementsByTag(result, "dd");
+    EXPECT_EQ(dt_count, 3);
+    EXPECT_EQ(dd_count, 3);
+
+    // All 3 links should be present
+    int a_count = countElementsByTag(result, "a");
+    EXPECT_EQ(a_count, 3);
+}
+
+// Test: LI auto-close (similar pattern)
+TEST_F(HtmlParserTest, AutoCloseLiClosesOtherLi) {
+    Item result = parseHtml(R"(
+        <ul>
+            <li>Item 1
+            <li>Item 2
+            <li>Item 3
+        </ul>
+    )");
+
+    // Should have 3 LI elements as siblings
+    int li_count = countElementsByTag(result, "li");
+    EXPECT_EQ(li_count, 3);
+}
+
+// Test: P auto-close when followed by block element
+TEST_F(HtmlParserTest, AutoClosePClosedByDiv) {
+    Item result = parseHtml(R"(
+        <p>Paragraph text
+        <div>Block content</div>
+    )");
+
+    // P should be closed by div, both should exist
+    int p_count = countElementsByTag(result, "p");
+    int div_count = countElementsByTag(result, "div");
+    EXPECT_EQ(p_count, 1);
+    EXPECT_EQ(div_count, 1);
+
+    // Div should NOT be nested inside P
+    Element* p = findElementByTag(result, "p");
+    ASSERT_NE(p, nullptr);
+    Element* div_in_p = findElementByTag(Item{.element = p}, "div");
+    EXPECT_EQ(div_in_p, nullptr);
+}
+
+// Test: TR auto-close
+TEST_F(HtmlParserTest, AutoCloseTrClosesOtherTr) {
+    Item result = parseHtml(R"(
+        <table>
+            <tr><td>R1C1</td>
+            <tr><td>R2C1</td>
+        </table>
+    )");
+
+    int tr_count = countElementsByTag(result, "tr");
+    EXPECT_EQ(tr_count, 2);
+}
+
+// Test: TD auto-close
+TEST_F(HtmlParserTest, AutoCloseTdClosesOtherTd) {
+    Item result = parseHtml(R"(
+        <table>
+            <tr>
+                <td>Cell 1
+                <td>Cell 2
+                <td>Cell 3
+            </tr>
+        </table>
+    )");
+
+    int td_count = countElementsByTag(result, "td");
+    EXPECT_EQ(td_count, 3);
+}

@@ -712,6 +712,7 @@ typedef enum HtmlVersion {
     HTML4_01_TRANSITIONAL,  // HTML4.01 Transitional
     HTML4_01_FRAMESET,      // HTML4.01 Frameset
     HTML_QUIRKS,            // Legacy HTML or missing DOCTYPE
+    HTML1_0,                // HTML 1.0 (1991) - uses <HEADER> as head, <NEXTID> void element
 } HtmlVersion;
 
 struct ViewTree {
