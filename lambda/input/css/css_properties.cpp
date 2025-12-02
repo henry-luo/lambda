@@ -1141,14 +1141,52 @@ bool css_parse_color(const char* value_str, CssColor* color) {
 
     // Handle hex colors
     if (value_str[0] == '#') {
-        // Simple hex parsing (full implementation would handle 3/4/6/8 digit hex)
-        if (strlen(value_str) == 7) { // #rrggbb
+        size_t len = strlen(value_str);
+        if (len == 7) { // #rrggbb
             unsigned int rgb;
             if (sscanf(value_str + 1, "%6x", &rgb) == 1) {
                 color->r = (rgb >> 16) & 0xFF;
                 color->g = (rgb >> 8) & 0xFF;
                 color->b = rgb & 0xFF;
                 color->a = 255;
+                color->type = CSS_COLOR_RGB;
+                return true;
+            }
+        } else if (len == 4) { // #rgb - expand to #rrggbb
+            unsigned int rgb;
+            if (sscanf(value_str + 1, "%3x", &rgb) == 1) {
+                // Expand: #348 -> #334488
+                unsigned int r = (rgb >> 8) & 0xF;
+                unsigned int g = (rgb >> 4) & 0xF;
+                unsigned int b = rgb & 0xF;
+                color->r = (r << 4) | r;  // 3 -> 33
+                color->g = (g << 4) | g;  // 4 -> 44
+                color->b = (b << 4) | b;  // 8 -> 88
+                color->a = 255;
+                color->type = CSS_COLOR_RGB;
+                return true;
+            }
+        } else if (len == 9) { // #rrggbbaa
+            unsigned int rgba;
+            if (sscanf(value_str + 1, "%8x", &rgba) == 1) {
+                color->r = (rgba >> 24) & 0xFF;
+                color->g = (rgba >> 16) & 0xFF;
+                color->b = (rgba >> 8) & 0xFF;
+                color->a = rgba & 0xFF;
+                color->type = CSS_COLOR_RGB;
+                return true;
+            }
+        } else if (len == 5) { // #rgba - expand to #rrggbbaa
+            unsigned int rgba;
+            if (sscanf(value_str + 1, "%4x", &rgba) == 1) {
+                unsigned int r = (rgba >> 12) & 0xF;
+                unsigned int g = (rgba >> 8) & 0xF;
+                unsigned int b = (rgba >> 4) & 0xF;
+                unsigned int a = rgba & 0xF;
+                color->r = (r << 4) | r;
+                color->g = (g << 4) | g;
+                color->b = (b << 4) | b;
+                color->a = (a << 4) | a;
                 color->type = CSS_COLOR_RGB;
                 return true;
             }

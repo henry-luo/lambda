@@ -1900,6 +1900,17 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         }
     }
 
+    // Set :link pseudo-state for anchor and area elements with href attribute
+    // Per HTML spec: :link matches <a> and <area> elements with href that haven't been visited
+    if (strcasecmp(tag_name, "a") == 0 || strcasecmp(tag_name, "area") == 0) {
+        const char* href_value = extract_element_attribute(elem, "href", doc->arena);
+        if (href_value && strlen(href_value) > 0) {
+            dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_LINK);
+            // Store href attribute for later use (e.g., navigation)
+            dom_element_set_attribute(dom_elem, "href", href_value);
+        }
+    }
+
     // set parent relationship if provided
     // Use link_child since the Lambda tree already contains this element
     // (we're building DOM wrappers from existing Lambda structure)
