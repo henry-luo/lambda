@@ -341,37 +341,29 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
             item->gi->grid_column_start > 0 || item->gi->grid_column_end > 0 ||
             item->gi->grid_area) {
 
-            GridItemPlacement placement = {0};
-
             if (item->gi->grid_area) {
                 // Resolve named grid area
                 for (int j = 0; j < grid_layout->area_count; j++) {
                     if (strcmp(grid_layout->grid_areas[j].name, item->gi->grid_area) == 0) {
-                        placement.row_start = grid_layout->grid_areas[j].row_start;
-                        placement.row_end = grid_layout->grid_areas[j].row_end;
-                        placement.column_start = grid_layout->grid_areas[j].column_start;
-                        placement.column_end = grid_layout->grid_areas[j].column_end;
+                        item->gi->computed_grid_row_start = grid_layout->grid_areas[j].row_start;
+                        item->gi->computed_grid_row_end = grid_layout->grid_areas[j].row_end;
+                        item->gi->computed_grid_column_start = grid_layout->grid_areas[j].column_start;
+                        item->gi->computed_grid_column_end = grid_layout->grid_areas[j].column_end;
                         break;
                     }
                 }
             } else {
                 // Use explicit line positions
-                placement.row_start = item->gi->grid_row_start;
-                placement.row_end = item->gi->grid_row_end;
-                placement.column_start = item->gi->grid_column_start;
-                placement.column_end = item->gi->grid_column_end;
+                item->gi->computed_grid_row_start = item->gi->grid_row_start;
+                item->gi->computed_grid_row_end = item->gi->grid_row_end;
+                item->gi->computed_grid_column_start = item->gi->grid_column_start;
+                item->gi->computed_grid_column_end = item->gi->grid_column_end;
             }
-
-            // Store computed positions
-            item->gi->computed_grid_row_start = placement.row_start;
-            item->gi->computed_grid_row_end = placement.row_end;
-            item->gi->computed_grid_column_start = placement.column_start;
-            item->gi->computed_grid_column_end = placement.column_end;
             item->gi->is_grid_auto_placed = false;
 
             log_debug("Explicit placement - item %d: row %d-%d, col %d-%d\n",
-                      i, placement.row_start, placement.row_end,
-                      placement.column_start, placement.column_end);
+                      i, item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+                      item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
         }
     }
 
@@ -381,24 +373,18 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
         if (!item->gi) continue;  // Skip items without grid item properties
 
         if (item->gi->is_grid_auto_placed) {
-            GridItemPlacement placement = {0};
-            auto_place_grid_item(grid_layout, item, &placement);
-
-            item->gi->computed_grid_row_start = placement.row_start;
-            item->gi->computed_grid_row_end = placement.row_end;
-            item->gi->computed_grid_column_start = placement.column_start;
-            item->gi->computed_grid_column_end = placement.column_end;
+            auto_place_grid_item(grid_layout, item);
 
             log_debug("Auto placement - item %d: row %d-%d, col %d-%d\n",
-                      i, placement.row_start, placement.row_end,
-                      placement.column_start, placement.column_end);
+                      i, item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+                      item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
         }
     }
 }
 
-// Auto-place a grid item
-void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, GridItemPlacement* placement) {
-    if (!grid_layout || !item || !placement) return;
+// Auto-place a grid item (writes directly to item->gi->computed_* fields)
+void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
+    if (!grid_layout || !item || !item->gi) return;
 
     log_debug(" auto_place_grid_item called for item %p\n", item);
 
@@ -427,10 +413,10 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
 
     if (grid_layout->grid_auto_flow == CSS_VALUE_ROW) {
         // Place items row by row (default behavior)
-        placement->row_start = current_row;
-        placement->row_end = current_row + 1;
-        placement->column_start = current_column;
-        placement->column_end = current_column + 1;
+        item->gi->computed_grid_row_start = current_row;
+        item->gi->computed_grid_row_end = current_row + 1;
+        item->gi->computed_grid_column_start = current_column;
+        item->gi->computed_grid_column_end = current_column + 1;
 
         log_debug(" Placing item %d at row %d, col %d\n", item_counter, current_row, current_column);
 
@@ -445,10 +431,10 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
         // Without explicit template, there's 1 implicit row
         if (max_rows <= 0) max_rows = 1;
 
-        placement->column_start = current_column;
-        placement->column_end = current_column + 1;
-        placement->row_start = current_row;
-        placement->row_end = current_row + 1;
+        item->gi->computed_grid_column_start = current_column;
+        item->gi->computed_grid_column_end = current_column + 1;
+        item->gi->computed_grid_row_start = current_row;
+        item->gi->computed_grid_row_end = current_row + 1;
 
         log_debug(" Placing item %d at row %d, col %d (column-first)\n", item_counter, current_row, current_column);
 
@@ -468,11 +454,8 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
     }
 
     log_debug(" Auto-placed item at row %d-%d, col %d-%d\n",
-           placement->row_start, placement->row_end,
-           placement->column_start, placement->column_end);
-    log_debug("Auto-placed item at row %d-%d, col %d-%d\n",
-              placement->row_start, placement->row_end,
-              placement->column_start, placement->column_end);
+           item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+           item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
 }
 
 // Determine the size of the grid
