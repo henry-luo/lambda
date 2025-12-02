@@ -12,6 +12,19 @@ using namespace lambda;
 
 static Item parse_element(HtmlInputContext& ctx, const char **html, const char *html_start);
 
+// Callback context for html_parse_mixed_content
+struct MixedContentContext {
+    Element* parent;
+};
+
+// Callback function for html_parse_mixed_content to add items as children
+static void mixed_content_callback(Item item, void* user_data) {
+    MixedContentContext* ctx = (MixedContentContext*)user_data;
+    if (ctx->parent && get_type_id(item) != LMD_TYPE_NULL) {
+        html_append_child(ctx->parent, item);
+    }
+}
+
 // Global length limit for text content, strings, and raw text elements
 static const int MAX_CONTENT_CHARS = 256 * 1024; // 256KB
 
@@ -634,27 +647,26 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
                     }
                 }
                 else {
-                    // Parse text content including whitespace
-                    // Start building text content
+                    // Parse text content including whitespace, with HTML entity handling
+                    // Use html_parse_mixed_content which:
+                    // - Decodes ASCII escapes (&lt; &gt; &amp; &quot; &apos;) inline
+                    // - Decodes numeric references (&#123; &#x1F;) inline to UTF-8
+                    // - Emits named entities (&copy; &mdash; etc.) as Symbol items
                     StringBuf* text_sb = ctx.sb;
                     stringbuf_reset(text_sb);
 
-                    // Collect text until we hit '<' or closing tag
-                    int text_chars = 0;
-                    while (**html && **html != '<' && text_chars < MAX_CONTENT_CHARS &&
-                        strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
-                        stringbuf_append_char(text_sb, **html);
-                        (*html)++;  text_chars++;
-                    }
+                    // Set up callback context
+                    MixedContentContext mc_ctx = { element };
 
-                    // Create text string if we have content (preserve all whitespace)
-                    if (text_chars > 0) {
-                        String *text_string = stringbuf_to_string(text_sb);
-                        log_debug("got text content: '%t'", text_string->chars);
-                        Item text_item = {.item = s2it(text_string)};
-                        log_debug("pushing text to element %p", element);
-                        html_append_child(element, text_item);
-                    }
+                    // Parse mixed content until we hit '<'
+                    html_parse_mixed_content(
+                        ctx.builder,
+                        text_sb,
+                        html,
+                        '<',  // Stop at '<' (start of tag or closing tag)
+                        mixed_content_callback,
+                        &mc_ctx
+                    );
                 }
 
                 // Safety check: if HTML pointer didn't advance, force it to avoid infinite loop
