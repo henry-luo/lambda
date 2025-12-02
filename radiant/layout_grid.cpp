@@ -181,9 +181,8 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 7 - Aligning grid items");
     align_grid_items(grid_layout);
 
-    // Phase 8: Layout grid item content (Enhanced - based on flex layout success)
-    log_debug("DEBUG: Phase 8 - Layout grid item content");
-    layout_grid_items_content(lycon, grid_layout);
+    // Note: Phase 8 (content layout) is now handled by layout_grid_multipass.cpp Pass 3
+    // The multipass flow calls layout_final_grid_content() after this function returns
 
     // Debug: Final item positions
     log_debug("DEBUG: FINAL GRID POSITIONS:");

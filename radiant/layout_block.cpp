@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_flex_multipass.hpp"
+#include "layout_grid_multipass.hpp"
 #include "layout_positioned.hpp"
 #include "grid.hpp"
 
@@ -374,32 +375,11 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 return;
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
-                log_debug("Setting up grid container for %s", block->node_name());
-                GridContainerLayout* pa_grid = lycon->grid_container;
-                init_grid_container(lycon, block);
-                // Process DOM children into View objects first
-                // Grid containers need their DOM children converted to View objects
-                // before the grid algorithm can work
-                int child_count = 0;
-                const int MAX_CHILDREN = 100; // Safety limit
-                do {
-                    log_debug("Processing grid child %p (count: %d)", child, child_count);
-                    if (child_count >= MAX_CHILDREN) {
-                        log_error("ERROR: Too many children, breaking to prevent infinite loop");
-                        break;
-                    }
-                    layout_flow_node(lycon, child);
-                    child = child->next_sibling;
-                    child_count++;
-                } while (child);
-
-                // Now run the grid layout algorithm with the processed children
-                log_debug("About to call layout_grid_container");
-                layout_grid_container(lycon, block);
-
-                cleanup_grid_container(lycon);
-                lycon->grid_container = pa_grid;
-                log_debug("Finished layout_grid_container");
+                log_debug("Setting up grid container for %s (multipass)", block->node_name());
+                // Use multipass grid layout (similar to flex layout pattern)
+                layout_grid_content(lycon, block);
+                log_debug("Finished grid container layout for %s", block->node_name());
+                return;
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
