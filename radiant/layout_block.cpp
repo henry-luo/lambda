@@ -159,7 +159,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             else if (block->display.inner == CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s", block->node_name());
                 GridContainerLayout* pa_grid = lycon->grid_container;
-                // init_grid_container(lycon, block);
+                init_grid_container(lycon, block);
                 // Process DOM children into View objects first
                 // Grid containers need their DOM children converted to View objects
                 // before the grid algorithm can work
@@ -178,9 +178,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 
                 // Now run the grid layout algorithm with the processed children
                 log_debug("About to call layout_grid_container");
-                // layout_grid_container(lycon, block);
+                layout_grid_container(lycon, block);
 
-                // cleanup_grid_container(lycon);
+                cleanup_grid_container(lycon);
                 lycon->grid_container = pa_grid;
                 log_debug("Finished layout_grid_container");
             }
