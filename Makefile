@@ -1492,6 +1492,42 @@ test-layout:
 # layout: Alias for test-layout
 layout: test-layout
 
+# compare-layout: Run Radiant layout and compare with browser reference
+# Usage: make compare-layout test=<test-name> [category=<category>] [options]
+# Example: make compare-layout test=sample3.html category=page
+# Example: make compare-layout test=baseline_301 category=baseline verbose=1
+compare-layout: build
+	@if [ -z "$(test)" ] && [ -z "$(TEST)" ]; then \
+		echo "Usage: make compare-layout test=<test-name> [category=<category>]"; \
+		echo ""; \
+		echo "Examples:"; \
+		echo "  make compare-layout test=sample3.html category=page"; \
+		echo "  make compare-layout test=baseline_301 category=baseline"; \
+		echo "  make compare-layout test=sample3 category=page verbose=1"; \
+		echo ""; \
+		echo "Options (pass as make variables):"; \
+		echo "  test=NAME       Test file name (required)"; \
+		echo "  category=CAT    Test category (default: page)"; \
+		echo "  verbose=1       Show all comparisons"; \
+		echo "  threshold=N     Difference threshold (default: 0.5)"; \
+		echo "  elements=LIST   Comma-separated list of elements"; \
+		exit 1; \
+	fi; \
+	TEST_VAR="$${test:-$(TEST)}"; \
+	CAT_VAR="$${category:-$(CATEGORY)}"; \
+	CAT_VAR="$${CAT_VAR:-page}"; \
+	OPTS="--run --test $$TEST_VAR --category $$CAT_VAR"; \
+	if [ -n "$(verbose)" ] || [ -n "$(VERBOSE)" ]; then \
+		OPTS="$$OPTS --verbose"; \
+	fi; \
+	if [ -n "$(threshold)" ] || [ -n "$(THRESHOLD)" ]; then \
+		OPTS="$$OPTS --threshold $${threshold:-$(THRESHOLD)}"; \
+	fi; \
+	if [ -n "$(elements)" ] || [ -n "$(ELEMENTS)" ]; then \
+		OPTS="$$OPTS --elements $${elements:-$(ELEMENTS)}"; \
+	fi; \
+	node test/layout/compare-layout.js $$OPTS
+
 # layout-devtool: Launch the Layout DevTool Electron app
 # Usage: make layout-devtool
 layout-devtool:
