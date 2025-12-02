@@ -8,6 +8,7 @@
 #include "../../../lib/string.h"
 #include "../../../lib/hashmap.h"
 #include "../../../radiant/view.hpp"  // For HTM_TAG_* constants
+#include "../../../radiant/symbol_resolver.h"  // For symbol resolution
 #include <strings.h>  // For strcasecmp
 
 /**
@@ -230,8 +231,21 @@ uintptr_t DomNode::tag() const {
 }
 
 // Get text content for text nodes
+// For symbol nodes (HTML entities/emoji), resolves to UTF-8 representation
 unsigned char* DomNode::text_data() const {
     const DomText* text = as_text();
+    if (!text) return nullptr;
+
+    // For symbol nodes, resolve to UTF-8 representation
+    if (text->content_type == DOM_TEXT_SYMBOL && text->text) {
+        SymbolResolution resolved = resolve_symbol(text->text, text->length);
+        if (resolved.type != SYMBOL_UNKNOWN && resolved.utf8) {
+            // Return the resolved UTF-8 string
+            return (unsigned char*)resolved.utf8;
+        }
+        // Unknown symbol - fall through to return raw text
+    }
+
     return text ? (unsigned char*)text->text : nullptr;
 }
 

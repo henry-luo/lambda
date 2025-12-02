@@ -15,8 +15,7 @@ Radiant uses a **single inheritance tree** where DOM nodes are their own View re
 ```
 DomNode (base)
     ├── DomText → ViewText
-    └── DomElement → ViewGroup → ViewSpan → ViewBlock
-                                    │
+    └── DomElement → ViewElement → ViewSpan → ViewBlock
                                     ├── ViewTable
                                     ├── ViewTableRow
                                     └── ViewTableCell
@@ -300,6 +299,32 @@ Pass 4: Item Layout
 - `ViewTableRowGroup` - thead/tbody/tfoot
 - `ViewTableRow` - tr element
 - `ViewTableCell` - td/th elements
+
+**Anonymous Box Handling:**
+They are handled using flags is_annoy_* under TableProp and TableCellProp.
+
+### 4.6 Pseudo Elements
+
+**Entry:** `alloc_pseudo_content_prop()` in `layout_block.cpp`
+
+`::before` and `::after` pseudo-elements are created during layout:
+- Check `dom_element_has_before_content()` / `dom_element_has_after_content()`
+- Create synthetic `DomElement` with `display: inline`
+- Create `DomText` child with resolved `content` value
+- Insert as first/last child of defining element
+- Reuse existing pseudo-elements on reflow
+
+### 4.7 HTML Entity Handling
+
+HTML entities are processed during parsing (`input-html.cpp`):
+
+| Entity Type | Handling | Example |
+|-------------|----------|---------|
+| ASCII escapes | Decoded inline | `&lt;` → `<`, `&amp;` → `&` |
+| Numeric refs | Decoded to UTF-8 | `&#169;` → `©` |
+| Named entities | Stored as Lambda Symbol | `&copy;` → Symbol("copy") |
+
+**Symbol Resolution:** At render time, `DomNode::text_data()` calls `resolve_symbol()` to convert symbol names to UTF-8 characters (©, €, ™, etc.).
 
 ---
 
