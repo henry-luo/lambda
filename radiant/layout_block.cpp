@@ -88,6 +88,12 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("finalize block flow, set block height to flow height: %f", flow_height);
         block->height = flow_height;
     }
+    // Update scroller clip if height changed and scroller has clipping enabled
+    // This ensures the clip region is correct after auto-height is calculated
+    if (block->scroller && block->scroller->has_clip) {
+        block->scroller->clip.right = block->width;
+        block->scroller->clip.bottom = block->height;
+    }
     log_debug("finalized block wd:%f, hg:%f", block->width, block->height);
 }
 

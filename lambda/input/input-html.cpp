@@ -1068,6 +1068,89 @@ void parse_html_impl(Input* input, const char* html_string) {
         log_info("Created normalized HTML structure for HTML 1.0 document");
     }
 
+    // HTML5 normalization: If root has <head> and/or <body> as siblings without <html> wrapper,
+    // create an implicit <html> element to wrap them (browser behavior)
+    // This handles cases like: <!DOCTYPE html><head>...</head><body>...</body>
+    if (!has_html && (has_body || root_list->length > 0)) {
+        // Re-scan for head/body since we may not have found them in the HTML 1.0 check
+        Element* head_elem_found = nullptr;
+        Element* body_elem_found = nullptr;
+        bool found_html = false;
+
+        for (size_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+                Element* elem = item.element;
+                TypeElmt* type = (TypeElmt*)elem->type;
+                if (type) {
+                    if (strcasecmp(type->name.str, "head") == 0) {
+                        head_elem_found = elem;
+                    } else if (strcasecmp(type->name.str, "body") == 0) {
+                        body_elem_found = elem;
+                    } else if (strcasecmp(type->name.str, "html") == 0) {
+                        found_html = true;
+                    }
+                }
+            }
+        }
+
+        // If we have head or body but no html, create implicit html wrapper
+        if (!found_html && (head_elem_found || body_elem_found)) {
+            log_info("Creating implicit <html> element to wrap <head> and <body>");
+
+            MarkBuilder builder(input);
+            ElementBuilder html_builder = builder.element("html");
+
+            // Build new root list preserving DOCTYPE and comments before html
+            List* new_root_list = (List*)pool_calloc(input->pool, sizeof(List));
+            if (new_root_list) {
+                new_root_list->type_id = LMD_TYPE_LIST;
+                new_root_list->length = 0;
+                new_root_list->capacity = 0;
+                new_root_list->items = nullptr;
+
+                // First pass: add DOCTYPE and comments to new root, add head/body to html
+                for (size_t i = 0; i < root_list->length; i++) {
+                    Item item = root_list->items[i];
+                    TypeId item_type = get_type_id(item);
+
+                    if (item_type == LMD_TYPE_ELEMENT) {
+                        Element* elem = item.element;
+                        TypeElmt* type = (TypeElmt*)elem->type;
+                        if (type) {
+                            const char* tag = type->name.str;
+                            // DOCTYPE, comments, and XML declarations stay at root level
+                            if (tag[0] == '!' || tag[0] == '?') {
+                                list_push(new_root_list, item);
+                            } else if (strcasecmp(tag, "head") == 0 || strcasecmp(tag, "body") == 0) {
+                                // head and body go inside html
+                                html_builder.child(item);
+                            } else {
+                                // Other elements (unlikely at root) go inside body
+                                // If no body exists, add them to html directly
+                                html_builder.child(item);
+                            }
+                        }
+                    } else if (item_type == LMD_TYPE_STRING) {
+                        // Text at root level - usually whitespace, skip it
+                        // (browsers don't preserve root-level text outside html)
+                    }
+                }
+
+                // Finalize the html element and add it to new root
+                Element* html_elem = html_builder.final().element;
+                list_push(new_root_list, (Item){.element = html_elem});
+
+                // Replace root_list with new_root_list
+                root_list->items = new_root_list->items;
+                root_list->length = new_root_list->length;
+                root_list->capacity = new_root_list->capacity;
+
+                log_info("Created implicit <html> wrapper for document");
+            }
+        }
+    }
+
     // If list contains only one item, return that item and free the list
     if (root_list->length == 1) {
         input->root = root_list->items[0];
