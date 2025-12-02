@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pricing Plans</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 2rem 1rem; }
+    
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { text-align: center; margin-bottom: 1rem; color: #333; }
+    .subtitle { text-align: center; color: #666; margin-bottom: 3rem; font-size: 1.1rem; }
+    
+    /* Pricing Table */
+    table { width: 100%; background: white; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    th, td { padding: 1.5rem; text-align: left; border-bottom: 1px solid #e0e0e0; }
+    th { background: #f9f9f9; font-weight: 600; color: #333; }
+    tr:last-child td { border-bottom: none; }
+    
+    td { color: #666; }
+    .price { font-size: 1.8rem; font-weight: bold; color: #667eea; }
+    .feature-yes { color: #28a745; font-weight: 500; }
+    .feature-no { color: #ccc; }
+    button { background: #667eea; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+    button:hover { background: #764ba2; }
+    
+    .comparison { margin-top: 3rem; }
+    .comparison h2 { margin-bottom: 1.5rem; }
+    
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; }
+    .feature-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .feature-card h3 { color: #333; margin-bottom: 1rem; }
+    .feature-card ul { list-style: none; }
+    .feature-card li { padding: 0.5rem 0; color: #666; }
+    .feature-card li:before { content: "✓ "; color: #28a745; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Simple, Transparent Pricing</h1>
+    <p class="subtitle">Choose the plan that works best for your needs</p>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Starter</th>
+          <th>Professional</th>
+          <th>Enterprise</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Monthly Price</strong></td>
+          <td class="price">$29</td>
+          <td class="price">$99</td>
+          <td class="price">Custom</td>
+        </tr>
+        <tr>
+          <td>Users</td>
+          <td class="feature-yes">Up to 5</td>
+          <td class="feature-yes">Up to 50</td>
+          <td class="feature-yes">Unlimited</td>
+        </tr>
+        <tr>
+          <td>Projects</td>
+          <td class="feature-yes">Up to 10</td>
+          <td class="feature-yes">Unlimited</td>
+          <td class="feature-yes">Unlimited</td>
+        </tr>
+        <tr>
+          <td>Storage</td>
+          <td class="feature-yes">10 GB</td>
+          <td class="feature-yes">1 TB</td>
+          <td class="feature-yes">Unlimited</td>
+        </tr>
+        <tr>
+          <td>API Access</td>
+          <td class="feature-no">✗</td>
+          <td class="feature-yes">✓</td>
+          <td class="feature-yes">✓</td>
+        </tr>
+        <tr>
+          <td>Priority Support</td>
+          <td class="feature-no">✗</td>
+          <td class="feature-yes">✓</td>
+          <td class="feature-yes">✓</td>
+        </tr>
+        <tr>
+          <td>SLA</td>
+          <td class="feature-no">Standard</td>
+          <td class="feature-yes">99.5%</td>
+          <td class="feature-yes">99.99%</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td><button>Get Started</button></td>
+          <td><button>Get Started</button></td>
+          <td><button>Contact Sales</button></td>
+        </tr>
+      </tbody>
+    </table>
+    
+    <div class="comparison">
+      <h2>Included Features</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3>📊 Analytics</h3>
+          <ul>
+            <li>Real-time dashboards</li>
+            <li>Custom reports</li>
+            <li>Data exports</li>
+          </ul>
+        </div>
+        <div class="feature-card">
+          <h3>🔒 Security</h3>
+          <ul>
+            <li>End-to-end encryption</li>
+            <li>Two-factor authentication</li>
+            <li>Audit logs</li>
+          </ul>
+        </div>
+        <div class="feature-card">
+          <h3>🚀 Performance</h3>
+          <ul>
+            <li>Global CDN</li>
+            <li>Auto-scaling</li>
+            <li>99.99% uptime</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

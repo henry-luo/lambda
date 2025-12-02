@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; }
+    
+    /* Header */
+    header { background: white; border-bottom: 1px solid #e0e0e0; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 1.5rem; color: #333; }
+    header nav { display: flex; gap: 1.5rem; }
+    header a { text-decoration: none; color: #666; transition: color 0.3s; }
+    header a:hover { color: #333; }
+    
+    /* Main Container */
+    .container { max-width: 1400px; margin: 0 auto; padding: 2rem 1rem; }
+    
+    /* Top Stats */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+    
+    .stat-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .stat-card h3 { color: #666; font-size: 0.95rem; margin-bottom: 0.75rem; text-transform: uppercase; }
+    .stat-value { font-size: 2rem; font-weight: bold; color: #333; }
+    .stat-change { color: #27ae60; font-size: 0.9rem; margin-top: 0.5rem; }
+    .stat-change.down { color: #e74c3c; }
+    
+    /* Charts Section */
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+    
+    .chart-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .chart-card h2 { font-size: 1.15rem; color: #333; margin-bottom: 1rem; }
+    
+    .chart-placeholder { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 200px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.1rem; }
+    
+    /* Table */
+    .table-card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .table-card h2 { font-size: 1.15rem; color: #333; margin-bottom: 1rem; }
+    
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f9f9f9; padding: 0.75rem; text-align: left; color: #666; font-weight: 600; font-size: 0.9rem; border-bottom: 1px solid #e0e0e0; }
+    td { padding: 0.75rem; border-bottom: 1px solid #f0f0f0; }
+    
+    tr:hover { background: #f9f9f9; }
+    
+    .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 500; }
+    .status.active { background: #d4edda; color: #155724; }
+    .status.pending { background: #fff3cd; color: #856404; }
+    .status.inactive { background: #f8d7da; color: #721c24; }
+    
+    @media (max-width: 768px) {
+      .stats { grid-template-columns: 1fr; }
+      .charts { grid-template-columns: 1fr; }
+      header { flex-direction: column; gap: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dashboard</h1>
+    <nav>
+      <a href="#overview">Overview</a>
+      <a href="#analytics">Analytics</a>
+      <a href="#settings">Settings</a>
+    </nav>
+  </header>
+  
+  <div class="container">
+    <!-- Statistics Cards -->
+    <div class="stats">
+      <div class="stat-card">
+        <h3>Total Revenue</h3>
+        <div class="stat-value">$124,820</div>
+        <div class="stat-change">↑ 12.5% from last month</div>
+      </div>
+      
+      <div class="stat-card">
+        <h3>Active Users</h3>
+        <div class="stat-value">8,456</div>
+        <div class="stat-change">↑ 23.1% from last month</div>
+      </div>
+      
+      <div class="stat-card">
+        <h3>Conversion Rate</h3>
+        <div class="stat-value">3.24%</div>
+        <div class="stat-change down">↓ 0.8% from last month</div>
+      </div>
+      
+      <div class="stat-card">
+        <h3>Avg Order Value</h3>
+        <div class="stat-value">$287</div>
+        <div class="stat-change">↑ 5.2% from last month</div>
+      </div>
+    </div>
+    
+    <!-- Charts -->
+    <div class="charts">
+      <div class="chart-card">
+        <h2>Revenue Trend</h2>
+        <div class="chart-placeholder">Chart</div>
+      </div>
+      
+      <div class="chart-card">
+        <h2>User Growth</h2>
+        <div class="chart-placeholder">Chart</div>
+      </div>
+    </div>
+    
+    <!-- Recent Orders Table -->
+    <div class="table-card">
+      <h2>Recent Orders</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Order ID</th>
+            <th>Customer</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>#ORD-2025-001</td>
+            <td>Alice Johnson</td>
+            <td>$425.00</td>
+            <td><span class="status active">Active</span></td>
+            <td>Dec 1, 2025</td>
+          </tr>
+          <tr>
+            <td>#ORD-2025-002</td>
+            <td>Bob Smith</td>
+            <td>$189.50</td>
+            <td><span class="status active">Active</span></td>
+            <td>Nov 30, 2025</td>
+          </tr>
+          <tr>
+            <td>#ORD-2025-003</td>
+            <td>Carol White</td>
+            <td>$312.75</td>
+            <td><span class="status pending">Pending</span></td>
+            <td>Nov 29, 2025</td>
+          </tr>
+          <tr>
+            <td>#ORD-2025-004</td>
+            <td>David Brown</td>
+            <td>$567.25</td>
+            <td><span class="status active">Active</span></td>
+            <td>Nov 28, 2025</td>
+          </tr>
+          <tr>
+            <td>#ORD-2025-005</td>
+            <td>Eva Davis</td>
+            <td>$234.00</td>
+            <td><span class="status inactive">Inactive</span></td>
+            <td>Nov 27, 2025</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>

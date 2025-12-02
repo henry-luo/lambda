@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Understanding Modern CSS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Georgia, serif; line-height: 1.8; color: #333; background: white; }
+    
+    header { background: #2c3e50; color: white; padding: 3rem 1rem; text-align: center; }
+    header h1 { font-size: 2.5rem; margin-bottom: 1rem; }
+    .meta { font-size: 0.95rem; opacity: 0.9; }
+    
+    .container { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 300px; gap: 2rem; padding: 2rem 1rem; }
+    
+    /* Main Article */
+    article { line-height: 1.9; }
+    article h2 { font-size: 1.8rem; margin: 2rem 0 1rem 0; color: #2c3e50; }
+    article h3 { font-size: 1.3rem; margin: 1.5rem 0 0.75rem 0; color: #34495e; }
+    article p { margin-bottom: 1.5rem; color: #555; }
+    
+    .highlight { background: #fffbea; padding: 1rem; border-left: 4px solid #f39c12; margin: 1.5rem 0; }
+    .highlight p { margin: 0; }
+    
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Monaco', monospace; font-size: 0.9rem; }
+    
+    blockquote { border-left: 4px solid #3498db; padding-left: 1.5rem; margin: 2rem 0; color: #7f8c8d; font-style: italic; }
+    
+    ul, ol { margin-bottom: 1.5rem; padding-left: 2rem; }
+    li { margin-bottom: 0.5rem; }
+    
+    /* Sidebar */
+    aside { background: #f9f9f9; padding: 1.5rem; border-radius: 8px; height: fit-content; }
+    aside h3 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.1rem; }
+    aside nav ul { list-style: none; padding: 0; }
+    aside nav li { margin-bottom: 0.75rem; }
+    aside nav a { color: #3498db; text-decoration: none; }
+    aside nav a:hover { text-decoration: underline; }
+    
+    .toc-section { margin-bottom: 2rem; }
+    .toc-section strong { display: block; margin-bottom: 0.5rem; color: #2c3e50; font-size: 0.95rem; }
+    
+    footer { background: #ecf0f1; padding: 2rem 1rem; text-align: center; color: #666; }
+    
+    @media (max-width: 768px) {
+      .container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Understanding Modern CSS</h1>
+    <div class="meta">Published on December 2, 2025 by Jane Doe</div>
+  </header>
+  
+  <div class="container">
+    <article>
+      <p>CSS has evolved dramatically over the past decade. What started as simple styling rules has become a powerful system for creating responsive, accessible, and performant web experiences.</p>
+      
+      <h2>1. The Foundation: Box Model and Layout</h2>
+      <p>The CSS box model is fundamental to understanding how layouts work. Every element is contained within a box with content, padding, border, and margin.</p>
+      <div class="highlight">
+        <p><strong>Key Point:</strong> Use <code>box-sizing: border-box</code> to include padding and border in the element's total width and height.</p>
+      </div>
+      
+      <h2>2. Flexbox: One-Dimensional Layouts</h2>
+      <p>Flexbox revolutionized how we create flexible, responsive layouts. It excels at distributing space in one dimension—either rows or columns.</p>
+      <blockquote>
+        "Flexbox makes it incredibly easy to align and distribute space among elements, solving problems that were previously difficult or impossible." — CSS Tricks
+      </blockquote>
+      
+      <h3>Common Flexbox Properties</h3>
+      <ul>
+        <li><code>display: flex</code> - Activates flex container</li>
+        <li><code>flex-direction</code> - Sets row or column direction</li>
+        <li><code>justify-content</code> - Aligns items along main axis</li>
+        <li><code>align-items</code> - Aligns items along cross axis</li>
+        <li><code>gap</code> - Creates space between items</li>
+      </ul>
+      
+      <h2>3. Grid: Two-Dimensional Layouts</h2>
+      <p>CSS Grid takes layout to the next level by enabling two-dimensional control over both rows and columns simultaneously.</p>
+      
+      <h3>Grid vs Flexbox</h3>
+      <p>While Flexbox is ideal for one-dimensional layouts like navigation bars or button groups, Grid shines when you need to control both dimensions—think page layouts, image galleries, and dashboards.</p>
+      
+      <h2>4. Responsive Design Patterns</h2>
+      <p>Modern CSS provides media queries and flexible units to create truly responsive designs:</p>
+      <ul>
+        <li>Use relative units like <code>rem</code> and <code>em</code> instead of fixed pixels</li>
+        <li>Leverage media queries for breakpoint-specific styling</li>
+        <li>Use container queries for component-level responsiveness</li>
+        <li>Implement fluid typography with <code>clamp()</code></li>
+      </ul>
+      
+      <h2>Conclusion</h2>
+      <p>Modern CSS has given developers powerful tools to create beautiful, responsive, and accessible web experiences. By mastering Flexbox, Grid, and responsive techniques, you'll be well-equipped to tackle any layout challenge.</p>
+    </article>
+    
+    <aside>
+      <div class="toc-section">
+        <strong>Table of Contents</strong>
+        <nav>
+          <ul>
+            <li><a href="#foundation">Box Model</a></li>
+            <li><a href="#flexbox">Flexbox</a></li>
+            <li><a href="#grid">Grid</a></li>
+            <li><a href="#responsive">Responsive Design</a></li>
+          </ul>
+        </nav>
+      </div>
+      
+      <div class="toc-section">
+        <strong>Resources</strong>
+        <nav>
+          <ul>
+            <li><a href="#">CSS Specs</a></li>
+            <li><a href="#">Browser Support</a></li>
+            <li><a href="#">Tutorials</a></li>
+            <li><a href="#">Tools</a></li>
+          </ul>
+        </nav>
+      </div>
+      
+      <div class="toc-section">
+        <strong>Related Articles</strong>
+        <nav>
+          <ul>
+            <li><a href="#">CSS Animation</a></li>
+            <li><a href="#">Responsive Images</a></li>
+            <li><a href="#">Performance Tips</a></li>
+          </ul>
+        </nav>
+      </div>
+    </aside>
+  </div>
+  
+  <footer>
+    <p>&copy; 2025 Tech Blog. All rights reserved.</p>
+  </footer>
+</body>
+</html>

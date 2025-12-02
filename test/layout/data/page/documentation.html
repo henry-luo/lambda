@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Documentation</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; }
+    
+    .container { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; }
+    
+    /* Sidebar Navigation */
+    nav { background: #2c3e50; color: white; padding: 1.5rem; overflow-y: auto; max-height: 100vh; position: sticky; top: 0; }
+    nav h2 { font-size: 1.2rem; margin-bottom: 1.5rem; }
+    nav ul { list-style: none; }
+    nav li { margin-bottom: 0.5rem; }
+    nav a { color: #ecf0f1; text-decoration: none; display: block; padding: 0.5rem 0.75rem; border-radius: 4px; transition: background 0.3s; }
+    nav a:hover { background: #34495e; }
+    nav a.active { background: #3498db; color: white; }
+    
+    .nav-section { margin-bottom: 2rem; }
+    .nav-section-title { font-size: 0.9rem; color: #bdc3c7; text-transform: uppercase; margin-bottom: 0.75rem; }
+    
+    /* Main Content */
+    main { padding: 2rem; }
+    
+    .header { background: white; padding: 2rem; border-radius: 8px; margin-bottom: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header h1 { color: #2c3e50; margin-bottom: 0.5rem; }
+    .header p { color: #7f8c8d; }
+    
+    /* Content Sections */
+    section { background: white; padding: 2rem; margin-bottom: 2rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    
+    h2 { color: #2c3e50; border-bottom: 2px solid #ecf0f1; padding-bottom: 0.75rem; margin-bottom: 1.5rem; }
+    h3 { color: #34495e; margin: 1.5rem 0 0.75rem 0; }
+    
+    p { color: #555; line-height: 1.7; margin-bottom: 1rem; }
+    
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Monaco', monospace; font-size: 0.9rem; }
+    
+    pre { background: #2c3e50; color: #ecf0f1; padding: 1rem; border-radius: 4px; overflow-x: auto; margin: 1rem 0; }
+    pre code { background: none; color: inherit; padding: 0; }
+    
+    .endpoint { background: #f9f9f9; padding: 1rem; border-left: 4px solid #3498db; margin: 1rem 0; }
+    .endpoint-method { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 3px; font-weight: bold; font-size: 0.85rem; color: white; }
+    .method-get { background: #27ae60; }
+    .method-post { background: #3498db; }
+    .method-put { background: #f39c12; }
+    .method-delete { background: #e74c3c; }
+    
+    .param-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    .param-table thead { background: #ecf0f1; }
+    .param-table th, .param-table td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #ecf0f1; }
+    
+    .note { background: #fff3cd; padding: 1rem; border-left: 4px solid #ffc107; margin: 1rem 0; }
+    
+    @media (max-width: 768px) {
+      .container { grid-template-columns: 1fr; }
+      nav { max-height: none; position: static; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <nav>
+      <h2>Documentation</h2>
+      
+      <div class="nav-section">
+        <div class="nav-section-title">Getting Started</div>
+        <ul>
+          <li><a href="#intro" class="active">Introduction</a></li>
+          <li><a href="#auth">Authentication</a></li>
+          <li><a href="#errors">Error Handling</a></li>
+        </ul>
+      </div>
+      
+      <div class="nav-section">
+        <div class="nav-section-title">API Endpoints</div>
+        <ul>
+          <li><a href="#users">Users</a></li>
+          <li><a href="#posts">Posts</a></li>
+          <li><a href="#comments">Comments</a></li>
+          <li><a href="#search">Search</a></li>
+        </ul>
+      </div>
+      
+      <div class="nav-section">
+        <div class="nav-section-title">Resources</div>
+        <ul>
+          <li><a href="#schemas">Schemas</a></li>
+          <li><a href="#examples">Examples</a></li>
+          <li><a href="#sdks">SDKs</a></li>
+        </ul>
+      </div>
+    </nav>
+    
+    <main>
+      <div class="header">
+        <h1>API Documentation</h1>
+        <p>Complete reference for our REST API. Get started by setting up authentication, then explore available endpoints.</p>
+      </div>
+      
+      <section id="intro">
+        <h2>Introduction</h2>
+        <p>Our API is organized around REST principles. All API requests should be made over HTTPS. Authentication is required for all requests.</p>
+        <p>The API base URL is: <code>https://api.example.com/v1</code></p>
+      </section>
+      
+      <section id="auth">
+        <h2>Authentication</h2>
+        <p>All API requests require an API key in the Authorization header:</p>
+        <pre><code>Authorization: Bearer YOUR_API_KEY</code></pre>
+        <div class="note">
+          <strong>Note:</strong> Store your API keys securely. Never commit them to version control.
+        </div>
+      </section>
+      
+      <section id="users">
+        <h2>Users Endpoint</h2>
+        
+        <h3>List Users</h3>
+        <div class="endpoint">
+          <span class="endpoint-method method-get">GET</span>
+          <code>/users</code>
+        </div>
+        <p>Retrieve a list of all users.</p>
+        <table class="param-table">
+          <thead>
+            <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>page</td><td>integer</td><td>Page number (default: 1)</td></tr>
+            <tr><td>limit</td><td>integer</td><td>Items per page (default: 20)</td></tr>
+            <tr><td>sort</td><td>string</td><td>Sort field (default: -created_at)</td></tr>
+          </tbody>
+        </table>
+        
+        <h3>Get User</h3>
+        <div class="endpoint">
+          <span class="endpoint-method method-get">GET</span>
+          <code>/users/{id}</code>
+        </div>
+        <p>Retrieve a specific user by ID.</p>
+        
+        <h3>Create User</h3>
+        <div class="endpoint">
+          <span class="endpoint-method method-post">POST</span>
+          <code>/users</code>
+        </div>
+        <p>Create a new user account.</p>
+      </section>
+      
+      <section id="errors">
+        <h2>Error Handling</h2>
+        <p>The API returns standard HTTP status codes. Error responses include a JSON body with details:</p>
+        <pre><code>{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid request parameters",
+    "details": { "email": "Invalid email format" }
+  }
+}</code></pre>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
