@@ -1,8 +1,10 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 #include "view.hpp"
 #include "font_face.h"
+#include "font_lookup_platform.h"
 #include "../lib/log.h"
 #include "../lib/font_config.h"
 
@@ -36,11 +38,19 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
     ArrayList* matches = font_database_find_all_matches(font_db, font_name);
     if (!matches || matches->length == 0) {
         if (font_log) {
-            clog_warn(font_log, "Font not found: %s", font_name);
+            clog_warn(font_log, "Font not found in database: %s", font_name);
         } else {
-            log_warn("Font not found: %s", font_name);
+            log_warn("Font not found in database: %s", font_name);
         }
         if (matches) arraylist_free(matches);
+        
+        // Fallback: Try platform-specific font lookup
+        log_debug("Font database lookup failed, trying platform-specific lookup for: %s", font_name);
+        char* result = find_font_path_fallback(font_name);
+        if (result) {
+            log_debug("Found font via platform lookup: %s", result);
+            return result;
+        }
         return NULL;
     }
 
@@ -144,7 +154,11 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     FontDatabaseResult result = font_database_find_best_match(uicon->font_db, &criteria);
     FT_Face face = NULL;
     
-    if (result.font && result.font->file_path) {
+    // If score is too low (< 0.5), the match is poor - try platform lookup instead
+    const float SCORE_THRESHOLD = 0.5f;
+    bool use_database_result = (result.font && result.font->file_path && result.match_score >= SCORE_THRESHOLD);
+    
+    if (use_database_result) {
         FontEntry* font = result.font;
         // Create cache key for this specific font file and size
         StrBuf* cache_key = strbuf_create(font->file_path);
@@ -168,8 +182,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
             }
         }
         
-        // Load the font file
-        if (FT_New_Face(uicon->ft_library, font->file_path, 0, &face) == 0) {
+        // Load the font file (use collection_index for TTC files)
+        FT_Long face_index = font->is_collection ? font->collection_index : 0;
+        if (FT_New_Face(uicon->ft_library, font->file_path, face_index, &face) == 0) {
             FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
             
             // Cache the loaded font
@@ -181,9 +196,10 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 hashmap_set(uicon->fontface_map, &new_entry);
             }
             
-            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s), ascd: %f, desc: %f, em size: %f, font height: %f",
+            log_info("Loading styled font: %s (family: %s, weight: %d, style: %s, %s), ascd: %f, desc: %f, em size: %f, font height: %f",
                 font_name, font->family_name, font->weight, 
                 font_style_to_string(font->style),
+                font->is_collection ? "TTC" : "single",
                 face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0,
                 face->units_per_EM / 64.0, face->size->metrics.height / 64.0);
         } else {
@@ -192,7 +208,60 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
         
         strbuf_free(cache_key);
     } else {
-        log_error("Failed to find styled font: %s (weight: %d, style: %d)", font_name, criteria.weight, criteria.style);
+        log_warn("Font database lookup failed for: %s (weight: %d, style: %d)", font_name, criteria.weight, criteria.style);
+        
+        // Fallback: Try platform-specific font lookup
+        log_debug("Trying platform-specific lookup for: %s", font_name);
+        char* font_path = find_font_path_fallback(font_name);
+        if (font_path) {
+            log_debug("Found font via platform lookup: %s", font_path);
+            
+            // Create cache key for this font
+            StrBuf* cache_key = strbuf_create(font_path);
+            strbuf_append_str(cache_key, ":");
+            strbuf_append_int(cache_key, (int)font_style->font_size);
+            
+            // Initialize fontface map if needed
+            if (uicon->fontface_map == NULL) {
+                uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
+                    fontface_hash, fontface_compare, NULL, NULL);
+            }
+            
+            // Check cache first
+            if (uicon->fontface_map) {
+                FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
+                FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
+                if (entry) {
+                    log_debug("Fontface loaded from cache (platform): %s", cache_key->str);
+                    strbuf_free(cache_key);
+                    free(font_path);
+                    return entry->face;
+                }
+            }
+            
+            // Load the font file
+            if (FT_New_Face(uicon->ft_library, font_path, 0, &face) == 0) {
+                FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+                
+                // Cache the loaded font
+                if (uicon->fontface_map) {
+                    char* name = (char*)malloc(cache_key->length + 1);
+                    memcpy(name, cache_key->str, cache_key->length);
+                    name[cache_key->length] = '\0';
+                    FontfaceEntry new_entry = {.name=name, .face=face};
+                    hashmap_set(uicon->fontface_map, &new_entry);
+                }
+                
+                log_info("Loaded font via platform lookup: %s (path: %s)", font_name, font_path);
+            } else {
+                log_error("Failed to load font face via platform lookup: %s (path: %s)", font_name, font_path);
+            }
+            
+            strbuf_free(cache_key);
+            free(font_path);
+        } else {
+            log_error("Platform lookup also failed for: %s", font_name);
+        }
     }
     
     return face;
