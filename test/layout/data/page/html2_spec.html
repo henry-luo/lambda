@@ -1,0 +1,1081 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0 Strict Level 2//EN"><HTML>
+<HEAD>
+<!-- This HTML file has been created by texi2html 1.36
+     from html-spec.texi on 18 October 1995 -->
+
+<TITLE>Hypertext Markup Language - 2.0  - Document Structure</TITLE>
+</HEAD>
+<BODY>
+<P>Go to the <A HREF="html-spec_1.html" REL=FIRST>first</A>, <A HREF="html-spec_4.html" REL=PREVIOUS>previous</A>, <A HREF="html-spec_6.html" REL=NEXT>next</A>, <A HREF="html-spec_14.html" REL=LAST>last</A> section, <A HREF="html-spec_toc.html" REL=TOC>table of contents</A>.
+<HR>
+
+
+<H1><A NAME="SEC5" HREF="html-spec_toc.html#SEC5" REL=TOC>Document Structure</A></H1>
+<P>
+An <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A> is a tree of elements, including a head and body,
+headings, paragraphs, lists, etc.  Form elements are discussed in
+section <A HREF="html-spec_8.html#SEC8" REL=XREF>Forms</A>.
+
+</P>
+
+
+
+<H2><A NAME="SEC5.1" HREF="html-spec_toc.html#SEC5.1" REL=TOC>Document Element:  HTML</A></H2>
+<P>
+The <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> consists of a head and a body, much
+like a memo or a mail message.  The head contains the
+title and optional elements.  The body is a text flow
+consisting of paragraphs, lists, and other elements.
+
+</P>
+
+
+
+<H2><A NAME="SEC5.2" HREF="html-spec_toc.html#SEC5.2" REL=TOC>Head:  HEAD</A></H2>
+
+<P>
+The head of an <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A> is an unordered collection of
+information about the document.  For example:
+
+</P>
+
+<PRE>
+&#60;!DOCTYPE HTML PUBLIC "-//IETF//<A HREF="html-spec_2.html#GLOSS12" REL=GLOSSARY>DTD</A> HTML 2.0//EN"&#62;
+&#60;HEAD&#62;
+&#60;TITLE&#62;Introduction to HTML&#60;/TITLE&#62;
+&#60;/HEAD&#62;
+...
+</PRE>
+
+
+
+<H3><A NAME="SEC5.2.1" HREF="html-spec_toc.html#SEC5.2.1" REL=TOC>Title:  TITLE</A></H3>
+
+<P>
+Every <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A> <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> contain a <EM>TITLE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>.
+
+</P>
+<P>
+The title <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> identify the contents of the document in a global
+context.  A short title, such as "Introduction" <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be meaningless out
+of context.  A title such as "Introduction to HTML Elements" is more
+appropriate.
+<A NAME="FOOT12" HREF="html-spec_foot.html#FOOT12" REL=FOOTNOTE>(12)</A>
+
+</P>
+<P>
+A <A HREF="html-spec_2.html#GLOSS36" REL=GLOSSARY>user agent</A> <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> display the title of a document in a history list
+or as a label for the window displaying the document.  This differs
+from headings (section <A HREF="html-spec_5.html#SEC5.4" REL=XREF>Headings:  H1 ...  H6</A>), which are typically displayed
+within the body text flow.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.2.2" HREF="html-spec_toc.html#SEC5.2.2" REL=TOC>Base Address:  BASE</A></H3>
+
+<P>
+The optional <EM>BASE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> provides a base address for
+interpreting relative URLs when the document is read out of context
+(see section <A HREF="html-spec_7.html#SEC7" REL=XREF>Hyperlinks</A>).  The value of the <EM>HREF</EM> attribute
+<A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> be an <A HREF="html-spec_2.html#GLOSS1" REL=GLOSSARY>absolute URI</A>.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.2.3" HREF="html-spec_toc.html#SEC5.2.3" REL=TOC>Keyword Index:  ISINDEX</A></H3>
+
+<P>
+The <EM>ISINDEX</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates that the <A HREF="html-spec_2.html#GLOSS36" REL=GLOSSARY>user agent</A> <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A>
+allow the user to search an index by giving keywords.  See section <A HREF="html-spec_7.html#SEC7.5" REL=XREF>Queries and Indexes</A> for details.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.2.4" HREF="html-spec_toc.html#SEC5.2.4" REL=TOC>Link:  LINK</A></H3>
+
+<P>
+The <EM>LINK</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> represents a <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A> (see section <A HREF="html-spec_7.html#SEC7" REL=XREF>Hyperlinks</A>).  Any number of LINK elements <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> occur in the
+<EM>HEAD</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> of an <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A>.  It has the same attributes as
+the <EM>A</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> (see section <A HREF="html-spec_5.html#SEC5.7.3" REL=XREF>Anchor:  A</A>).
+
+</P>
+<P>
+The <EM>LINK</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is typically used to indicate authorship,
+related indexes and glossaries, older or more recent versions,
+document hierarchy, associated resources such as style sheets, etc.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.2.5" HREF="html-spec_toc.html#SEC5.2.5" REL=TOC>Associated Meta-information:  META</A></H3>
+
+<P>
+The <EM>META</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is an extensible container for use in
+identifying specialized document meta-information.  Meta-information
+has two main functions:
+
+</P>
+
+<UL>
+<LI>
+
+to provide a means to discover that the data set exists and
+how it might be obtained or accessed;  and 
+
+<LI>
+
+to document the content, quality, and features of a data set,
+indicating its fitness for use.  
+</UL>
+
+<P>
+Each <EM>META</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> specifies a name/value pair.  If multiple
+META elements are provided with the same name, their combined
+contents--concatenated as a comma-separated list--is the value
+associated with that name.
+<A NAME="FOOT13" HREF="html-spec_foot.html#FOOT13" REL=FOOTNOTE>(13)</A>
+
+</P>
+<P>
+HTTP servers <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> read the content of the document <EM>HEAD</EM> to
+generate header fields corresponding to any elements defining a value
+for the attribute <EM>HTTP-EQUIV</EM>.
+<A NAME="FOOT14" HREF="html-spec_foot.html#FOOT14" REL=FOOTNOTE>(14)</A>
+
+</P>
+<P>
+Attributes of the META <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>:
+
+</P>
+<DL COMPACT>
+
+<DT><EM>HTTP-EQUIV</EM>
+<DD>
+binds the <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> to an HTTP header
+field.  An HTTP server <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> use this information to process the
+document.  In particular, it <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> include a header field in the
+responses to requests for this document:  the header name is
+taken from the <EM>HTTP-EQUIV</EM> attribute value, and the header value
+is taken from the value of the <EM>CONTENT</EM> attribute.  HTTP header
+names are not case sensitive.
+
+<DT><EM>NAME</EM>
+<DD>
+specifies the name of the name/value pair.  If not present,
+<EM>HTTP-EQUIV</EM> gives the name.
+
+<DT><EM>CONTENT</EM>
+<DD>
+specifies the value of the name/value pair.
+
+</DL>
+
+<P>
+Examples
+
+</P>
+<P>
+If the document contains:
+
+</P>
+
+<PRE>
+&#60;META HTTP-EQUIV="Expires"
+      CONTENT="Tue, 04 Dec 1993 21:29:02 GMT"&#62;
+&#60;meta http-equiv="Keywords" CONTENT="Fred"&#62;
+&#60;META HTTP-EQUIV="Reply-to"
+      content="fielding@ics.uci.edu (Roy Fielding)"&#62;
+&#60;Meta Http-equiv="Keywords" CONTENT="Barney"&#62;
+</PRE>
+
+<P>
+then the server <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> include the following header fields:
+
+</P>
+
+<PRE>
+Expires: Tue, 04 Dec 1993 21:29:02 GMT
+Keywords: Fred, Barney
+Reply-to: fielding@ics.uci.edu (Roy Fielding)
+</PRE>
+
+<P>
+as part of the HTTP response to a <SAMP>`GET'</SAMP> or <SAMP>`HEAD'</SAMP> request
+for that document.
+
+</P>
+<P>
+An HTTP server <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> not use the <EM>META</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> to form an HTTP
+response header unless the <EM>HTTP-EQUIV</EM> attribute is present.
+
+</P>
+<P>
+An HTTP server <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> disregard any <EM>META</EM> elements that specify
+information controlled by the HTTP server, for example <SAMP>`Server'</SAMP>,
+<SAMP>`Date'</SAMP>, and <SAMP>`Last-modified'</SAMP>.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.2.6" HREF="html-spec_toc.html#SEC5.2.6" REL=TOC>Next Id:  NEXTID</A></H3>
+
+<P>
+The <EM>NEXTID</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is included for historical reasons only.
+HTML documents <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> not contain <EM>NEXTID</EM> elements.
+
+</P>
+<P>
+The <EM>NEXTID</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> gives a hint for the name to use for a
+new <EM>A</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> when editing an <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A>.  It <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> be
+distinct from all <EM>NAME</EM> attribute values on <EM>A</EM>
+elements.  For example:
+
+</P>
+
+<PRE>
+&#60;NEXTID N=Z27&#62;
+</PRE>
+
+
+
+<H2><A NAME="SEC5.3" HREF="html-spec_toc.html#SEC5.3" REL=TOC>Body:  BODY</A></H2>
+
+<P>
+The <EM>BODY</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> contains the text flow of the document,
+including headings, paragraphs, lists, etc.
+
+</P>
+<P>
+For example:
+
+</P>
+
+<PRE>
+&#60;BODY&#62;
+&#60;h1&#62;Important Stuff&#60;/h1&#62;
+&#60;p&#62;Explanation about important stuff...
+&#60;/BODY&#62;
+</PRE>
+
+
+
+<H2><A NAME="SEC5.4" HREF="html-spec_toc.html#SEC5.4" REL=TOC>Headings:  H1 ...  H6</A></H2>
+
+<P>
+The six heading elements, <EM>H1</EM> through <EM>H6</EM>, denote section
+headings.  Although the order and occurrence of headings is not
+constrained by the HTML <A HREF="html-spec_2.html#GLOSS12" REL=GLOSSARY>DTD</A>, documents <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> not skip levels (for
+example, from H1 to H3), as converting such documents to other
+representations is often problematic.
+
+</P>
+<P>
+Example of use:
+
+</P>
+
+<PRE>
+&#60;H1&#62;This is a heading&#60;/H1&#62;
+Here is some text
+&#60;H2&#62;Second level heading&#60;/H2&#62;
+Here is some more text.
+</PRE>
+
+<P>
+<A HREF="html-spec_2.html#GLOSS34" REL=GLOSSARY>Typical</A> renderings are:
+
+</P>
+<DL COMPACT>
+
+<DT><EM>H1</EM>
+<DD>
+Bold, very-large font, centered.  One or two blank lines
+above and below.
+
+<DT><EM>H2</EM>
+<DD>
+Bold, large font, flush-left.  One or two blank lines
+above and below.
+
+<DT><EM>H3</EM>
+<DD>
+Italic, large font, slightly indented from the left
+margin.  One or two blank lines above and below.
+
+<DT><EM>H4</EM>
+<DD>
+Bold, normal font, indented more than H3.  One blank
+line above and below.
+
+<DT><EM>H5</EM>
+<DD>
+Italic, normal font, indented as H4.  One blank line
+above.
+
+<DT><EM>H6</EM>
+<DD>
+Bold, indented same as normal text, more than H5.  One
+blank line above.
+
+</DL>
+
+
+
+<H2><A NAME="SEC5.5" HREF="html-spec_toc.html#SEC5.5" REL=TOC>Block Structuring Elements</A></H2>
+
+<P>
+Block structuring elements include paragraphs, lists, and block
+quotes.  They <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> not contain heading elements, but they <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> contain
+phrase <A HREF="html-spec_2.html#GLOSS20" REL=GLOSSARY>markup</A>, and in some cases, they <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be nested.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.5.1" HREF="html-spec_toc.html#SEC5.5.1" REL=TOC>Paragraph:  P</A></H3>
+
+<P>
+The <EM>P</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates a paragraph.  The exact indentation,
+leading space, etc.  of a paragraph is not specified and <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be a
+function of other tags, style sheets, etc.
+
+</P>
+<P>
+Typically, paragraphs are surrounded by a vertical space of one
+line or half a line.  The first line in a paragraph is indented in some
+cases.
+
+</P>
+<P>
+Example of use:
+
+</P>
+
+<PRE>
+&#60;H1&#62;This Heading Precedes the Paragraph&#60;/H1&#62;
+&#60;P&#62;This is the text of the first paragraph.
+&#60;P&#62;This is the text of the second paragraph. Although you do not 
+need to start paragraphs on new lines, maintaining this 
+convention facilitates document maintenance.&#60;/P&#62;
+&#60;P&#62;This is the text of a third paragraph.&#60;/P&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.5.2" HREF="html-spec_toc.html#SEC5.5.2" REL=TOC>Preformatted Text:  PRE</A></H3>
+
+<P>
+The <EM>PRE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> represents a <A HREF="html-spec_2.html#GLOSS4" REL=GLOSSARY>character</A> cell block of text and
+is suitable for text that has been formatted for a monospaced font.
+
+</P>
+<P>
+The <EM>PRE</EM> <A HREF="html-spec_2.html#GLOSS32" REL=GLOSSARY>tag</A> <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be used with the optional <EM>WIDTH</EM>
+attribute.  The WIDTH attribute specifies the maximum number of
+characters for a line and allows the HTML <A HREF="html-spec_2.html#GLOSS36" REL=GLOSSARY>user agent</A> to select a
+suitable font and indentation.
+
+</P>
+<P>
+Within preformatted text:
+
+</P>
+
+<UL>
+<LI>
+
+Line breaks within the text are rendered as a move to the
+beginning of the next line.
+<A NAME="FOOT15" HREF="html-spec_foot.html#FOOT15" REL=FOOTNOTE>(15)</A>
+
+<LI>
+
+<A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>Anchor</A> elements and phrase <A HREF="html-spec_2.html#GLOSS20" REL=GLOSSARY>markup</A> <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be used.
+<A NAME="FOOT16" HREF="html-spec_foot.html#FOOT16" REL=FOOTNOTE>(16)</A>
+
+<LI>
+
+Elements that define paragraph formatting (headings, address,
+etc.) <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> not be used.
+<A NAME="FOOT17" HREF="html-spec_foot.html#FOOT17" REL=FOOTNOTE>(17)</A>
+
+<LI>
+
+The horizontal tab <A HREF="html-spec_2.html#GLOSS4" REL=GLOSSARY>character</A> (<A HREF="html-spec_2.html#GLOSS7" REL=GLOSSARY>code position</A> 9 in the <A HREF="html-spec_2.html#GLOSS18" REL=GLOSSARY>HTML document</A>
+<A HREF="html-spec_2.html#GLOSS4" REL=GLOSSARY>character</A> set) <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> be interpreted as the smallest positive nonzero
+number of spaces which will leave the number of characters so far on
+the line as a multiple of 8.  Documents <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> not contain tab
+characters, as they are not supported consistently.
+</UL>
+
+<P>
+Example of use:
+
+</P>
+
+<PRE>
+&#60;PRE&#62;
+Line 1.
+       Line 2 is to the right of line 1.     &#60;a href="abc"&#62;abc&#60;/a&#62;
+       Line 3 aligns with line 2.            &#60;a href="def"&#62;def&#60;/a&#62;
+&#60;/PRE&#62;
+</PRE>
+
+
+
+<H4><A NAME="SEC5.5.2.1" HREF="html-spec_toc.html#SEC5.5.2.1" REL=TOC>Example and Listing:  XMP, LISTING</A></H4>
+
+<P>
+The <EM>XMP</EM> and <EM>LISTING</EM> elements are similar to the
+<EM>PRE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>, but they have a different syntax.  Their content is
+declared as CDATA, which means that no <A HREF="html-spec_2.html#GLOSS20" REL=GLOSSARY>markup</A> except the <A HREF="html-spec_2.html#GLOSS14" REL=GLOSSARY>end-tag</A> open
+delimiter-in-context is recognized (see 9.6 "Delimiter Recognition" of
+<A HREF="html-spec_11.html#BIB14" REL=BIBLIOGRAPHY>[SGML]</A>).
+<A NAME="FOOT18" HREF="html-spec_foot.html#FOOT18" REL=FOOTNOTE>(18)</A>
+
+</P>
+<P>
+Since CDATA declared content has a number of unfortunate
+interactions with processing techniques and tends to be used and
+implemented inconsistently, HTML documents <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> not contain
+<EM>XMP</EM> nor <EM>LISTING</EM> elements -- the <EM>PRE</EM> <A HREF="html-spec_2.html#GLOSS32" REL=GLOSSARY>tag</A> is more
+expressive and more consistently supported.
+
+</P>
+<P>
+The <EM>LISTING</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> be rendered so that at least 132
+characters fit on a line.  The <EM>XMP</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> be rendered so
+that at least 80 characters fit on a line but is otherwise identical
+to the <EM>LISTING</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>.
+<A NAME="FOOT19" HREF="html-spec_foot.html#FOOT19" REL=FOOTNOTE>(19)</A>
+
+</P>
+
+
+
+<H3><A NAME="SEC5.5.3" HREF="html-spec_toc.html#SEC5.5.3" REL=TOC>Address:  ADDRESS</A></H3>
+
+<P>
+The <EM>ADDRESS</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> contains such information as address,
+signature and authorship, often at the beginning or end of the body of
+a document.
+
+</P>
+<P>
+Typically, the <EM>ADDRESS</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is rendered in an italic
+typeface and <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be indented.
+
+</P>
+<P>
+Example of use:
+
+</P>
+
+<PRE>
+&#60;ADDRESS&#62;
+Newsletter editor&#60;BR&#62;
+J.R. Brown&#60;BR&#62;
+JimquickPost News, Jimquick, CT 01234&#60;BR&#62;
+Tel (123) 456 7890
+&#60;/ADDRESS&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.5.4" HREF="html-spec_toc.html#SEC5.5.4" REL=TOC>Block Quote:  BLOCKQUOTE</A></H3>
+
+<P>
+The <EM>BLOCKQUOTE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> contains text quoted from another
+source.
+
+</P>
+<P>
+A <A HREF="html-spec_2.html#GLOSS34" REL=GLOSSARY>typical</A> rendering might be a slight extra left and right indent,
+and/or italic font.  The <EM>BLOCKQUOTE</EM> typically provides space
+above and below the quote.
+
+</P>
+<P>
+Single-font rendition <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> reflect the quotation style of Internet
+mail by putting a vertical line of graphic characters, such as the
+greater than symbol (&#62;), in the left margin.
+
+</P>
+<P>
+Example of use:
+
+</P>
+
+<PRE>
+I think the play ends
+&#60;BLOCKQUOTE&#62;
+&#60;P&#62;Soft you now, the fair Ophelia. Nymph, in thy orisons, be all 
+my sins remembered.
+&#60;/BLOCKQUOTE&#62;
+but I am not sure.
+</PRE>
+
+
+
+<H2><A NAME="SEC5.6" HREF="html-spec_toc.html#SEC5.6" REL=TOC>List Elements</A></H2>
+
+<P>
+HTML includes a number of list elements.  They <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be used in
+combination;  for example, a <EM>OL</EM> <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be nested in an <EM>LI</EM>
+<A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> of a <EM>UL</EM>.
+
+</P>
+<P>
+The <EM>COMPACT</EM> attribute suggests that a compact rendering be
+used.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.6.1" HREF="html-spec_toc.html#SEC5.6.1" REL=TOC>Unordered List:  UL, LI</A></H3>
+
+<P>
+The <EM>UL</EM> represents a list of items -- typically rendered
+as a bulleted list.
+
+</P>
+<P>
+The content of a <EM>UL</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a sequence of <EM>LI</EM>
+elements.  For example:
+
+</P>
+
+<PRE>
+&#60;UL&#62;
+&#60;LI&#62;First list item
+&#60;LI&#62;Second list item
+ &#60;p&#62;second paragraph of second item
+&#60;LI&#62;Third list item
+&#60;/UL&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.6.2" HREF="html-spec_toc.html#SEC5.6.2" REL=TOC>Ordered List:  OL</A></H3>
+
+<P>
+The <EM>OL</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> represents an ordered list of items, sorted by
+sequence or order of importance.  It is typically rendered as a
+numbered list.
+
+</P>
+<P>
+The content of a <EM>OL</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a sequence of <EM>LI</EM>
+elements.  For example:
+
+</P>
+
+<PRE>
+&#60;OL&#62;
+&#60;LI&#62;Click the Web button to open <A HREF="html-spec_2.html#GLOSS35" REL=GLOSSARY>URI</A> window.
+&#60;LI&#62;Enter the <A HREF="html-spec_2.html#GLOSS35" REL=GLOSSARY>URI</A> number in the text field of the Open <A HREF="html-spec_2.html#GLOSS35" REL=GLOSSARY>URI</A> 
+window. The Web document you specified is displayed.
+  &#60;ol&#62;
+   &#60;li&#62;substep 1
+   &#60;li&#62;substep 2
+  &#60;/ol&#62;
+&#60;LI&#62;Click highlighted text to move from one link to another.
+&#60;/OL&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.6.3" HREF="html-spec_toc.html#SEC5.6.3" REL=TOC>Directory List:  DIR</A></H3>
+
+<P>
+The <EM>DIR</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is similar to the <EM>UL</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>.  It
+represents a list of short items, typically up to 20 characters
+each.  Items in a directory list <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be arranged in columns, typically
+24 characters wide.
+
+</P>
+<P>
+The content of a <EM>DIR</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a sequence of <EM>LI</EM>
+elements.  Nested block elements are not allowed in the content of
+<EM>DIR</EM> elements.  For example:
+
+</P>
+
+<PRE>
+&#60;DIR&#62;
+&#60;LI&#62;A-H&#60;LI&#62;I-M
+&#60;LI&#62;M-R&#60;LI&#62;S-Z
+&#60;/DIR&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.6.4" HREF="html-spec_toc.html#SEC5.6.4" REL=TOC>Menu List:  MENU</A></H3>
+
+<P>
+The <EM>MENU</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a list of items with typically one line
+per item.  The menu list style is typically more compact than the style
+of an unordered list.
+
+</P>
+<P>
+The content of a <EM>MENU</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a sequence of <EM>LI</EM>
+elements.  Nested block elements are not allowed in the content of
+<EM>MENU</EM> elements.  For example:
+
+</P>
+
+<PRE>
+&#60;MENU&#62;
+&#60;LI&#62;First item in the list.
+&#60;LI&#62;Second item in the list.
+&#60;LI&#62;Third item in the list.
+&#60;/MENU&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.6.5" HREF="html-spec_toc.html#SEC5.6.5" REL=TOC>Definition List:  DL, DT, DD</A></H3>
+
+<P>
+A definition list is a list of terms and corresponding
+definitions.  Definition lists are typically formatted with the term
+flush-left and the definition, formatted paragraph style, indented
+after the term.
+
+</P>
+<P>
+The content of a <EM>DL</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a sequence of <EM>DT</EM>
+elements and/or <EM>DD</EM> elements, usually in pairs.  Multiple <EM>DT</EM>
+<A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be paired with a single <EM>DD</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>.  Documents <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> not
+contain multiple consecutive <EM>DD</EM> elements.
+
+</P>
+<P>
+Example of use:
+
+</P>
+
+<PRE>
+&#60;DL&#62;
+&#60;DT&#62;Term&#60;DD&#62;This is the definition of the first term.
+&#60;DT&#62;Term&#60;DD&#62;This is the definition of the second term.
+&#60;/DL&#62;
+</PRE>
+
+<P>
+If the DT term does not fit in the DT column (typically one third
+of the display area), it <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be extended across the page with the DD
+section moved to the next line, or it <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be wrapped onto successive
+lines of the left hand column.
+
+</P>
+<P>
+The optional <EM>COMPACT</EM> attribute suggests that a compact
+rendering be used, because the list items are small and/or the entire
+list is large.
+
+</P>
+<P>
+Unless the <EM>COMPACT</EM> attribute is present, an HTML <A HREF="html-spec_2.html#GLOSS36" REL=GLOSSARY>user agent</A>
+<A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> leave white space between successive DT, DD pairs.  The
+<EM>COMPACT</EM> attribute <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> also reduce the width of the left-hand
+(DT) column.
+
+</P>
+
+<PRE>
+&#60;DL COMPACT&#62;
+&#60;DT&#62;Term&#60;DD&#62;This is the first definition in compact format.
+&#60;DT&#62;Term&#60;DD&#62;This is the second definition in compact format.
+&#60;/DL&#62;
+</PRE>
+
+
+
+<H2><A NAME="SEC5.7" HREF="html-spec_toc.html#SEC5.7" REL=TOC>Phrase Markup</A></H2>
+
+<P>
+Phrases <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be marked up according to idiomatic usage,
+typographic appearance, or for use as <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A> anchors.
+
+</P>
+<P>
+User agents <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> render highlighted phrases distinctly from plain
+text.  Additionally, <EM>EM</EM> content <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> be rendered as distinct from
+<EM>STRONG</EM> content, and <EM>B</EM> content <A HREF="html-spec_2.html#GLOSS25" REL=GLOSSARY>must</A> rendered as distinct
+from <EM>I</EM> content.
+
+</P>
+<P>
+Phrase elements <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be nested within the content of other phrase
+elements;  however, HTML user agents <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> render nested phrase
+elements indistinctly from non-nested elements:
+
+</P>
+
+<PRE>
+plain &#60;B&#62;bold &#60;I&#62;italic&#60;/I&#62;&#60;/B&#62; <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be rendered 
+the same as plain &#60;B&#62;bold &#60;/B&#62;&#60;I&#62;italic&#60;/I&#62;
+</PRE>
+
+
+
+<H3><A NAME="SEC5.7.1" HREF="html-spec_toc.html#SEC5.7.1" REL=TOC>Idiomatic Elements</A></H3>
+<P>
+Phrases <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be marked up to indicate certain idioms.
+<A NAME="FOOT20" HREF="html-spec_foot.html#FOOT20" REL=FOOTNOTE>(20)</A>
+
+</P>
+
+
+
+<H4><A NAME="SEC5.7.1.1" HREF="html-spec_toc.html#SEC5.7.1.1" REL=TOC>Citation:  CITE</A></H4>
+
+<P>
+The <EM>CITE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is used to indicate the title of a book or
+other citation.  It is typically rendered as italics.  For example:
+
+</P>
+
+<PRE>
+He just couldn't get enough of &#60;cite&#62;The Grapes of Wrath&#60;/cite&#62;.
+</PRE>
+
+
+
+<H4><A NAME="SEC5.7.1.2" HREF="html-spec_toc.html#SEC5.7.1.2" REL=TOC>Code:  CODE</A></H4>
+
+<P>
+The <EM>CODE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates an example of code, typically
+rendered in a mono-spaced font.  The <EM>CODE</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is intended
+for short words or phrases of code;  the <EM>PRE</EM> block
+structuring <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> (section <A HREF="html-spec_5.html#SEC5.5.2" REL=XREF>Preformatted Text:  PRE</A>) is more appropriate for
+multiple-line listings.  For example:
+
+</P>
+
+<PRE>
+The expression &#60;code&#62;x += 1&#60;/code&#62;
+is short for &#60;code&#62;x = x + 1&#60;/code&#62;.
+</PRE>
+
+
+
+<H4><A NAME="SEC5.7.1.3" HREF="html-spec_toc.html#SEC5.7.1.3" REL=TOC>Emphasis:  EM</A></H4>
+
+<P>
+The <EM>EM</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates an emphasized phrase, typically
+rendered as italics.  For example:
+
+</P>
+
+<PRE>
+A singular subject &#60;em&#62;always&#60;/em&#62; takes a singular verb.
+</PRE>
+
+
+
+<H4><A NAME="SEC5.7.1.4" HREF="html-spec_toc.html#SEC5.7.1.4" REL=TOC>Keyboard:  KBD</A></H4>
+
+<P>
+The <EM>KBD</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates text typed by a user, typically
+rendered in a mono-spaced font.  This is commonly used in instruction
+manuals.  For example:
+
+</P>
+
+<PRE>
+Enter &#60;kbd&#62;FIND IT&#60;/kbd&#62; to search the database.
+</PRE>
+
+
+
+<H4><A NAME="SEC5.7.1.5" HREF="html-spec_toc.html#SEC5.7.1.5" REL=TOC>Sample:  SAMP</A></H4>
+
+<P>
+The <EM>SAMP</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates a sequence of literal characters,
+typically rendered in a mono-spaced font.  For example:
+
+</P>
+
+<PRE>
+The only word containing the letters &#60;samp&#62;mt&#60;/samp&#62; is dreamt.
+</PRE>
+
+
+
+<H4><A NAME="SEC5.7.1.6" HREF="html-spec_toc.html#SEC5.7.1.6" REL=TOC>Strong Emphasis:  STRONG</A></H4>
+
+<P>
+The <EM>STRONG</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates strong emphasis,
+typically rendered in bold.  For example:
+
+</P>
+
+<PRE>
+&#60;strong&#62;STOP&#60;/strong&#62;, or I'll say "&#60;strong&#62;STOP&#60;/strong&#62;" again!
+</PRE>
+
+
+
+<H4><A NAME="SEC5.7.1.7" HREF="html-spec_toc.html#SEC5.7.1.7" REL=TOC>Variable:  VAR</A></H4>
+
+<P>
+The <EM>VAR</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates a placeholder variable, typically rendered
+as italic.  For example:
+
+</P>
+
+<PRE>
+Type &#60;SAMP&#62;html-check &#60;VAR&#62;file&#60;/VAR&#62; | more&#60;/SAMP&#62;
+to check &#60;VAR&#62;file&#60;/VAR&#62; for <A HREF="html-spec_2.html#GLOSS20" REL=GLOSSARY>markup</A> errors.
+</PRE>
+
+
+
+<H3><A NAME="SEC5.7.2" HREF="html-spec_toc.html#SEC5.7.2" REL=TOC>Typographic Elements</A></H3>
+
+<P>
+Typographic elements are used to specify the format of marked text.
+
+</P>
+<P>
+<A HREF="html-spec_2.html#GLOSS34" REL=GLOSSARY>Typical</A> renderings for idiomatic elements <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> vary between user
+agents.  If a specific rendering is necessary -- for example, when
+referring to a specific text attribute as in "The italic parts are
+mandatory" -- a typographic <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> can be used to ensure that the
+intended typography is used where possible.
+
+</P>
+<P>
+<A NAME="FOOT21" HREF="html-spec_foot.html#FOOT21" REL=FOOTNOTE>(21)</A>
+
+</P>
+
+
+
+<H4><A NAME="SEC5.7.2.1" HREF="html-spec_toc.html#SEC5.7.2.1" REL=TOC>Bold:  B</A></H4>
+
+<P>
+The <EM>B</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates bold text.  Where bold typography is
+unavailable, an alternative representation <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be used.
+
+</P>
+
+
+
+<H4><A NAME="SEC5.7.2.2" HREF="html-spec_toc.html#SEC5.7.2.2" REL=TOC>Italic:  I</A></H4>
+
+<P>
+The <EM>I</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates italic text.  Where italic typography
+is unavailable, an alternative representation <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be used.
+
+</P>
+
+
+
+<H4><A NAME="SEC5.7.2.3" HREF="html-spec_toc.html#SEC5.7.2.3" REL=TOC>Teletype:  TT</A></H4>
+
+<P>
+The <EM>TT</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates teletype (monospaced )text.  Where a
+teletype font is unavailable, an alternative representation <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be
+used.
+
+</P>
+
+
+
+<H3><A NAME="SEC5.7.3" HREF="html-spec_toc.html#SEC5.7.3" REL=TOC>Anchor:  A</A></H3>
+
+<P>
+The <EM>A</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> indicates a <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A> <A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>anchor</A> (see section <A HREF="html-spec_7.html#SEC7" REL=XREF>Hyperlinks</A>).  At least one of the <EM>NAME</EM> and <EM>HREF</EM>
+attributes <A HREF="html-spec_2.html#GLOSS29" REL=GLOSSARY>should</A> be present.  Attributes of the <EM>A</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>:
+
+</P>
+<DL COMPACT>
+
+<DT><EM>HREF</EM>
+<DD>
+gives the <A HREF="html-spec_2.html#GLOSS35" REL=GLOSSARY>URI</A> of the head <A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>anchor</A> of a <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A>.
+
+<DT><EM>NAME</EM>
+<DD>
+gives the name of the <A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>anchor</A>, and makes it available as
+a head of a <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A>.
+
+<DT><EM>TITLE</EM>
+<DD>
+suggests a title for the destination resource ---
+advisory only.  The <EM>TITLE</EM> attribute <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be used:
+
+
+<UL>
+<LI>
+
+for display prior to accessing the destination resource, for
+example, as a margin note or on a small box while the mouse is over
+the <A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>anchor</A>, or while the document is being loaded;
+
+<LI>
+
+for resources that do not include a title, such as graphics, plain
+text and Gopher menus, for use as a window title.
+</UL>
+
+<DT><EM>REL</EM>
+<DD>
+The <EM>REL</EM> attribute gives the relationship(s) described
+by the <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A>.  The value is a whitespace separated list of
+relationship names.  The semantics of link relationships are not
+specified in this document.
+
+<DT><EM>REV</EM>
+<DD>
+same as the REL attribute, but the semantics of the
+relationship are in the reverse direction.  A link from A to B with
+REL="X" expresses the same relationship as a link from B to A with
+REV="X".  An <A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>anchor</A> <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> have both REL and REV attributes.
+
+<DT><EM>URN</EM>
+<DD>
+specifies a preferred, more persistent identifier for the
+head <A HREF="html-spec_2.html#GLOSS2" REL=GLOSSARY>anchor</A> of the <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A>.  The syntax and semantics of the
+<EM>URN</EM> attribute are not yet specified.
+
+<DT><EM>METHODS</EM>
+<DD>
+specifies methods to be used in accessing the
+destination, as a whitespace-separated list of names.  The set of
+applicable names is a function of the scheme of the <A HREF="html-spec_2.html#GLOSS35" REL=GLOSSARY>URI</A> in the
+<EM>HREF</EM> attribute.  For similar reasons as for the TITLE attribute,
+it <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> be useful to include the information in advance in the
+link.  For example, the HTML <A HREF="html-spec_2.html#GLOSS36" REL=GLOSSARY>user agent</A> <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> chose a different rendering
+as a function of the methods allowed;  for example, something that is
+searchable <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> get a different icon.
+
+</DL>
+
+
+
+<H2><A NAME="SEC5.8" HREF="html-spec_toc.html#SEC5.8" REL=TOC>Line Break:  BR</A></H2>
+
+<P>
+The <EM>BR</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> specifies a line break between words (see
+section <A HREF="html-spec_6.html#SEC6" REL=XREF>Characters, Words, and Paragraphs</A>).  For example:
+
+</P>
+
+<PRE>
+&#60;P&#62; Pease porridge hot&#60;BR&#62;
+Pease porridge cold&#60;BR&#62;
+Pease porridge in the pot&#60;BR&#62;
+Nine days old.
+</PRE>
+
+
+
+<H2><A NAME="SEC5.9" HREF="html-spec_toc.html#SEC5.9" REL=TOC>Horizontal Rule:  HR</A></H2>
+
+<P>
+The <EM>HR</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> is a divider between sections of text;
+typically a full width horizontal rule or equivalent graphic.  For
+example:
+
+</P>
+
+<PRE>
+&#60;HR&#62;
+&#60;ADDRESS&#62;February 8, 1995, CERN&#60;/ADDRESS&#62;
+&#60;/BODY&#62;
+</PRE>
+
+
+
+<H2><A NAME="SEC5.10" HREF="html-spec_toc.html#SEC5.10" REL=TOC>Image:  IMG</A></H2>
+
+<P>
+The <EM>IMG</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A> refers to an image or icon via a <A HREF="html-spec_2.html#GLOSS19" REL=GLOSSARY>hyperlink</A>
+(see section <A HREF="html-spec_7.html#SEC7.3" REL=XREF>Simultaneous Presentation of Image Resources</A>).
+
+</P>
+<P>
+HTML user agents <A HREF="html-spec_2.html#GLOSS21" REL=GLOSSARY>may</A> process the value of the <EM>ALT</EM> attribute
+as an alternative to processing the image resource indicated by the
+<EM>SRC</EM> attribute.
+<A NAME="FOOT22" HREF="html-spec_foot.html#FOOT22" REL=FOOTNOTE>(22)</A>
+
+</P>
+<P>
+Attributes of the <EM>IMG</EM> <A HREF="html-spec_2.html#GLOSS13" REL=GLOSSARY>element</A>:
+
+</P>
+<DL COMPACT>
+
+<DT><EM>ALIGN</EM>
+<DD>
+alignment of the image with respect to the text
+baseline.
+
+
+<UL>
+<LI>
+
+<SAMP>`TOP'</SAMP> specifies that the top of the image aligns with the
+tallest item on the line containing the image.
+
+<LI>
+
+<SAMP>`MIDDLE'</SAMP> specifies that the center of the image aligns with
+the baseline of the line containing the image.
+
+<LI>
+
+<SAMP>`BOTTOM'</SAMP> specifies that the bottom of the image aligns with
+the baseline of the line containing the image.
+</UL>
+
+<DT><EM>ALT</EM>
+<DD>
+text to use in place of the referenced image resource, for
+example due to processing constraints or user preference.
+
+<DT><EM>ISMAP</EM>
+<DD>
+indicates an image map (see section <A HREF="html-spec_7.html#SEC7.6" REL=XREF>Image Maps</A>).
+
+<DT><EM>SRC</EM>
+<DD>
+specifies the <A HREF="html-spec_2.html#GLOSS35" REL=GLOSSARY>URI</A> of the image resource.
+<A NAME="FOOT23" HREF="html-spec_foot.html#FOOT23" REL=FOOTNOTE>(23)</A>
+
+</DL>
+
+<P>
+Examples of use:
+
+</P>
+
+<PRE>
+&#60;IMG SRC="triangle.xbm" ALT="Warning:"&#62; Be sure 
+to read these instructions.
+</PRE>
+
+
+<PRE>
+&#60;a href="http://machine/htbin/imagemap/sample"&#62;
+&#60;IMG SRC="sample.xbm" ISMAP&#62;
+&#60;/a&#62;
+</PRE>
+
+<HR>
+Go to the <A HREF="html-spec_1.html" REL=FIRST>first</A>, <A HREF="html-spec_4.html" REL=PREVIOUS>previous</A>, <A HREF="html-spec_6.html" REL=NEXT>next</A>, <A HREF="html-spec_14.html" REL=LAST>last</A> section, <A HREF="html-spec_toc.html" REL=TOC>table of contents</A>.
+</BODY>
+</HTML>
