@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Line Placement</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - line number placement */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item-a {
+            background-color: #ffcccc;
+            grid-column: 1 / 3;
+            grid-row: 1 / 2;
+        }
+        .item-b {
+            background-color: #ccffcc;
+            grid-column: 3 / 4;
+            grid-row: 1 / 3;
+        }
+        .item-c {
+            background-color: #ccccff;
+            grid-column: 1 / 2;
+            grid-row: 2 / 4;
+        }
+        .item-d {
+            background-color: #ffffcc;
+            grid-column: 2 / 4;
+            grid-row: 3 / 4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item item-a">A</div>
+        <div class="item item-b">B</div>
+        <div class="item item-c">C</div>
+        <div class="item item-d">D</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_118_line_placement",
+        "category": "no-template",
+        "features": ["display-grid", "grid-column", "grid-row", "line-numbers"],
+        "description": "Complex grid placement using explicit line numbers (start/end)",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

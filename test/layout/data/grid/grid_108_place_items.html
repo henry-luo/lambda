@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Place Items</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - place-items (center both axes) */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-auto-rows: 1fr;
+            place-items: center;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            width: 80px;
+            height: 40px;
+            padding: 10px;
+            text-align: center;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">A</div>
+        <div class="item">B</div>
+        <div class="item">C</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_108_place_items",
+        "category": "no-template",
+        "features": ["display-grid", "place-items", "grid-auto-rows"],
+        "description": "Grid with items centered both horizontally and vertically",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

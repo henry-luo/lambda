@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Auto Rows</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - auto rows sizing */
+        .container {
+            width: 400px;
+            display: grid;
+            grid-auto-rows: 60px;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Row 1</div>
+        <div class="item">Row 2</div>
+        <div class="item">Row 3</div>
+        <div class="item">Row 4</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_103_auto_rows",
+        "category": "no-template",
+        "features": ["display-grid", "grid-auto-rows", "gap"],
+        "description": "Grid with fixed-height auto rows (60px each)",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>
