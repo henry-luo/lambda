@@ -126,31 +126,10 @@ typedef struct GridContainerLayout : GridProp {
     struct LayoutContext* lycon;
 } GridContainerLayout;
 
-// Grid item placement state
-typedef struct GridItemPlacement {
-    int row_start;
-    int row_end;
-    int column_start;
-    int column_end;
-    bool has_explicit_row_start;
-    bool has_explicit_row_end;
-    bool has_explicit_column_start;
-    bool has_explicit_column_end;
-    char* grid_area_name;
-    bool is_auto_placed;
-} GridItemPlacement;
+// Note: Grid item placement is stored directly in GridItemProp (elem->gi->computed_*)
+// GridItemPlacement struct was removed - use GridItemProp fields directly
 
-// IntrinsicSizes is defined in layout_flex_content.hpp - include it when needed
-
-// Grid sizing algorithm state
-typedef struct GridSizingState {
-    GridTrack* tracks;
-    int track_count;
-    struct ViewBlock** items;
-    int item_count;
-    int available_space;
-    bool is_row_axis;            // true for rows, false for columns
-} GridSizingState;
+// Note: GridSizingState was removed as unused
 
 #ifdef __cplusplus
 extern "C" {
@@ -177,7 +156,7 @@ int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_
 // Grid item collection and placement
 int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
 void place_grid_items(GridContainerLayout* grid_layout, struct ViewBlock** items, int item_count);
-void auto_place_grid_item(GridContainerLayout* grid_layout, struct ViewBlock* item, GridItemPlacement* placement);
+void auto_place_grid_item(GridContainerLayout* grid_layout, struct ViewBlock* item);
 
 // Grid sizing algorithm
 void determine_grid_size(GridContainerLayout* grid_layout);
