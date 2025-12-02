@@ -681,6 +681,313 @@ bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssSty
     return false; // Requires DOM element context
 }
 
+// ============================================================================
+// Media Query Evaluation
+// ============================================================================
+
+/**
+ * Parse a length value from a media query condition.
+ * Returns the value in pixels, or -1 on error.
+ */
+static double parse_media_length(const char* value) {
+    if (!value) return -1;
+
+    // Skip whitespace
+    while (*value && (*value == ' ' || *value == '\t')) value++;
+
+    char* end;
+    double num = strtod(value, &end);
+    if (end == value) return -1;  // No number found
+
+    // Skip whitespace before unit
+    while (*end && (*end == ' ' || *end == '\t')) end++;
+
+    // Parse unit
+    if (strncmp(end, "px", 2) == 0) {
+        return num;
+    } else if (strncmp(end, "em", 2) == 0) {
+        return num * 16.0;  // Assume 16px root font size
+    } else if (strncmp(end, "rem", 3) == 0) {
+        return num * 16.0;  // Assume 16px root font size
+    } else if (strncmp(end, "vw", 2) == 0) {
+        return -1;  // Would need viewport context
+    } else if (strncmp(end, "vh", 2) == 0) {
+        return -1;  // Would need viewport context
+    } else if (*end == '\0' || *end == ')') {
+        // Unitless - treat as pixels
+        return num;
+    }
+
+    return -1;
+}
+
+/**
+ * Evaluate a single media feature condition like "(min-width: 768px)"
+ */
+static bool evaluate_media_feature(CssEngine* engine, const char* feature, const char* value) {
+    if (!engine || !feature) return false;
+
+    log_debug("[Media Query] Evaluating feature: %s = %s", feature, value ? value : "(no value)");
+
+    double viewport_width = engine->context.viewport_width;
+    double viewport_height = engine->context.viewport_height;
+
+    // min-width
+    if (strcmp(feature, "min-width") == 0) {
+        double min_w = parse_media_length(value);
+        if (min_w < 0) return false;
+        bool result = viewport_width >= min_w;
+        log_debug("[Media Query] min-width: viewport=%f >= min=%f -> %s",
+                  viewport_width, min_w, result ? "true" : "false");
+        return result;
+    }
+
+    // max-width
+    if (strcmp(feature, "max-width") == 0) {
+        double max_w = parse_media_length(value);
+        if (max_w < 0) return false;
+        bool result = viewport_width <= max_w;
+        log_debug("[Media Query] max-width: viewport=%f <= max=%f -> %s",
+                  viewport_width, max_w, result ? "true" : "false");
+        return result;
+    }
+
+    // min-height
+    if (strcmp(feature, "min-height") == 0) {
+        double min_h = parse_media_length(value);
+        if (min_h < 0) return false;
+        bool result = viewport_height >= min_h;
+        log_debug("[Media Query] min-height: viewport=%f >= min=%f -> %s",
+                  viewport_height, min_h, result ? "true" : "false");
+        return result;
+    }
+
+    // max-height
+    if (strcmp(feature, "max-height") == 0) {
+        double max_h = parse_media_length(value);
+        if (max_h < 0) return false;
+        bool result = viewport_height <= max_h;
+        log_debug("[Media Query] max-height: viewport=%f <= max=%f -> %s",
+                  viewport_height, max_h, result ? "true" : "false");
+        return result;
+    }
+
+    // width (exact match)
+    if (strcmp(feature, "width") == 0) {
+        double w = parse_media_length(value);
+        if (w < 0) return false;
+        return viewport_width == w;
+    }
+
+    // height (exact match)
+    if (strcmp(feature, "height") == 0) {
+        double h = parse_media_length(value);
+        if (h < 0) return false;
+        return viewport_height == h;
+    }
+
+    // orientation
+    if (strcmp(feature, "orientation") == 0) {
+        if (!value) return false;
+        if (strcmp(value, "portrait") == 0) {
+            return viewport_height >= viewport_width;
+        } else if (strcmp(value, "landscape") == 0) {
+            return viewport_width > viewport_height;
+        }
+        return false;
+    }
+
+    // prefers-color-scheme
+    if (strcmp(feature, "prefers-color-scheme") == 0) {
+        if (!value || !engine->context.color_scheme) return false;
+        return strcmp(engine->context.color_scheme, value) == 0;
+    }
+
+    // prefers-reduced-motion
+    if (strcmp(feature, "prefers-reduced-motion") == 0) {
+        if (!value) return false;
+        if (strcmp(value, "reduce") == 0) {
+            return engine->context.reduced_motion;
+        } else if (strcmp(value, "no-preference") == 0) {
+            return !engine->context.reduced_motion;
+        }
+        return false;
+    }
+
+    // Unknown feature - assume it doesn't match
+    log_debug("[Media Query] Unknown feature: %s", feature);
+    return false;
+}
+
+/**
+ * Evaluate a media type like "screen", "print", "all"
+ */
+static bool evaluate_media_type(const char* type) {
+    if (!type) return true;  // No type specified = matches all
+
+    // Skip leading whitespace
+    while (*type && (*type == ' ' || *type == '\t')) type++;
+
+    // Check known media types
+    if (strcmp(type, "all") == 0) return true;
+    if (strcmp(type, "screen") == 0) return true;  // Assume screen media
+    if (strcmp(type, "print") == 0) return false;  // Not print media
+    if (strcmp(type, "speech") == 0) return false;
+
+    // Unknown type - assume it matches (forward compatibility)
+    return true;
+}
+
+/**
+ * Evaluate a complete media query string.
+ *
+ * Supports:
+ * - Media types: screen, print, all
+ * - Features: min-width, max-width, min-height, max-height, orientation
+ * - Logical operators: and, not, or (via comma)
+ * - Parenthesized feature conditions
+ *
+ * Examples:
+ * - "screen"
+ * - "screen and (min-width: 768px)"
+ * - "(min-width: 768px) and (max-width: 1024px)"
+ * - "screen, print"
+ */
+bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
+    if (!engine || !media_query) return true;  // Empty query matches all
+
+    log_debug("[Media Query] Evaluating: '%s'", media_query);
+    log_debug("[Media Query] Viewport: %f x %f",
+              engine->context.viewport_width, engine->context.viewport_height);
+
+    // Make a copy we can modify
+    size_t len = strlen(media_query);
+    char* query = (char*)pool_alloc(engine->pool, len + 1);
+    if (!query) return false;
+    strcpy(query, media_query);
+
+    // Handle comma-separated queries (OR logic)
+    char* saveptr1;
+    char* query_part = strtok_r(query, ",", &saveptr1);
+
+    while (query_part) {
+        // Trim whitespace
+        while (*query_part && (*query_part == ' ' || *query_part == '\t')) query_part++;
+        char* end = query_part + strlen(query_part) - 1;
+        while (end > query_part && (*end == ' ' || *end == '\t')) *end-- = '\0';
+
+        if (strlen(query_part) == 0) {
+            query_part = strtok_r(NULL, ",", &saveptr1);
+            continue;
+        }
+
+        log_debug("[Media Query] Processing part: '%s'", query_part);
+
+        // Check for 'not' prefix
+        bool negated = false;
+        if (strncmp(query_part, "not ", 4) == 0) {
+            negated = true;
+            query_part += 4;
+            while (*query_part == ' ') query_part++;
+        }
+
+        // Check for 'only' prefix (ignore it, just for compatibility)
+        if (strncmp(query_part, "only ", 5) == 0) {
+            query_part += 5;
+            while (*query_part == ' ') query_part++;
+        }
+
+        bool part_result = true;
+
+        // Split by 'and' (AND logic within a query)
+        // Make another copy for tokenizing by 'and'
+        char* and_copy = (char*)pool_alloc(engine->pool, strlen(query_part) + 1);
+        if (!and_copy) return false;
+        strcpy(and_copy, query_part);
+
+        // Replace " and " with null terminators to split
+        char* condition = and_copy;
+        while (*condition && part_result) {
+            // Find next " and " or end
+            char* and_pos = strstr(condition, " and ");
+            if (and_pos) {
+                *and_pos = '\0';  // Terminate current condition
+            }
+
+            // Trim the condition
+            while (*condition && (*condition == ' ' || *condition == '\t')) condition++;
+            char* cond_end = condition + strlen(condition) - 1;
+            while (cond_end > condition && (*cond_end == ' ' || *cond_end == '\t')) *cond_end-- = '\0';
+
+            if (strlen(condition) > 0) {
+                // Check if this is a parenthesized feature
+                if (condition[0] == '(') {
+                    // Parse feature condition: (feature: value) or (feature)
+                    char* paren_end = strchr(condition, ')');
+                    if (paren_end) {
+                        *paren_end = '\0';
+                        char* feature_start = condition + 1;
+
+                        // Find colon separator
+                        char* colon = strchr(feature_start, ':');
+                        if (colon) {
+                            *colon = '\0';
+                            char* feature_name = feature_start;
+                            char* feature_value = colon + 1;
+
+                            // Trim feature name and value
+                            while (*feature_name == ' ') feature_name++;
+                            char* name_end = feature_name + strlen(feature_name) - 1;
+                            while (name_end > feature_name && *name_end == ' ') *name_end-- = '\0';
+
+                            while (*feature_value == ' ') feature_value++;
+                            char* val_end = feature_value + strlen(feature_value) - 1;
+                            while (val_end > feature_value && *val_end == ' ') *val_end-- = '\0';
+
+                            part_result = evaluate_media_feature(engine, feature_name, feature_value);
+                        } else {
+                            // Boolean feature like (color)
+                            while (*feature_start == ' ') feature_start++;
+                            char* feat_end = feature_start + strlen(feature_start) - 1;
+                            while (feat_end > feature_start && *feat_end == ' ') *feat_end-- = '\0';
+
+                            // For now, assume all boolean features are supported
+                            part_result = true;
+                        }
+                    }
+                } else {
+                    // Media type
+                    part_result = evaluate_media_type(condition);
+                }
+            }
+
+            if (and_pos) {
+                condition = and_pos + 5;  // Move past " and "
+            } else {
+                break;
+            }
+        }
+
+        // Apply negation
+        if (negated) {
+            part_result = !part_result;
+        }
+
+        log_debug("[Media Query] Part result: %s", part_result ? "true" : "false");
+
+        // If any comma-separated part matches, the whole query matches
+        if (part_result) {
+            log_debug("[Media Query] MATCHES: '%s'", media_query);
+            return true;
+        }
+
+        query_part = strtok_r(NULL, ",", &saveptr1);
+    }
+
+    log_debug("[Media Query] DOES NOT MATCH: '%s'", media_query);
+    return false;
+}
+
 CssEngineStats css_engine_get_stats(const CssEngine* engine) {
     CssEngineStats stats = {0};
     if (!engine) return stats;
