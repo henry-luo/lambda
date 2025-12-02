@@ -8,10 +8,14 @@
 #include <strings.h>
 
 // HTML5 void elements (self-closing tags)
+// Also includes legacy HTML 1.0 void elements like NEXTID for backwards compatibility
 const char* HTML5_VOID_ELEMENTS[] = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr", "command",
-    "keygen", "menuitem", "slot", NULL
+    "keygen", "menuitem", "slot",
+    // HTML 1.0 legacy void elements
+    "nextid", "isindex",
+    NULL
 };
 
 // HTML5 semantic elements that should be parsed as containers
@@ -134,4 +138,103 @@ bool html_is_data_attribute(const char* attr_name) {
 // Check if attribute is an ARIA attribute (accessibility)
 bool html_is_aria_attribute(const char* attr_name) {
     return strncmp(attr_name, "aria-", 5) == 0;
+}
+
+// Optional end tag / auto-close support per HTML spec
+// Returns true if opening <new_tag> should implicitly close <current_tag>
+// This implements the "Tag omission in text/html" rules from the HTML Living Standard
+bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
+    if (!current_tag || !new_tag) return false;
+    
+    // DT/DD auto-close rules (HTML spec 4.4.10, 4.4.11):
+    // - A dt element's end tag can be omitted if followed by another dt or dd element
+    // - A dd element's end tag can be omitted if followed by another dd or dt element,
+    //   or if there is no more content in the parent element
+    if (strcasecmp(current_tag, "dt") == 0 || strcasecmp(current_tag, "dd") == 0) {
+        if (strcasecmp(new_tag, "dt") == 0 || strcasecmp(new_tag, "dd") == 0) {
+            return true;
+        }
+    }
+    
+    // LI auto-close rules (HTML spec 4.4.8):
+    // - A li element's end tag can be omitted if followed by another li element
+    //   or if there is no more content in the parent element
+    if (strcasecmp(current_tag, "li") == 0) {
+        if (strcasecmp(new_tag, "li") == 0) {
+            return true;
+        }
+    }
+    
+    // P auto-close rules (HTML spec 4.4.1):
+    // - A p element's end tag can be omitted if followed by certain block elements
+    if (strcasecmp(current_tag, "p") == 0) {
+        // P closes when followed by: address, article, aside, blockquote, details,
+        // dialog, div, dl, fieldset, figcaption, figure, footer, form, h1-h6,
+        // header, hgroup, hr, main, menu, nav, ol, p, pre, search, section, table, ul
+        const char* p_closers[] = {
+            "address", "article", "aside", "blockquote", "details", "dialog",
+            "div", "dl", "fieldset", "figcaption", "figure", "footer", "form",
+            "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr",
+            "main", "menu", "nav", "ol", "p", "pre", "search", "section",
+            "table", "ul", NULL
+        };
+        for (int i = 0; p_closers[i]; i++) {
+            if (strcasecmp(new_tag, p_closers[i]) == 0) {
+                return true;
+            }
+        }
+    }
+    
+    // TR auto-close rules:
+    // - A tr element's end tag can be omitted if followed by another tr
+    if (strcasecmp(current_tag, "tr") == 0) {
+        if (strcasecmp(new_tag, "tr") == 0) {
+            return true;
+        }
+    }
+    
+    // TD/TH auto-close rules:
+    // - A td/th element's end tag can be omitted if followed by td, th, or tr
+    if (strcasecmp(current_tag, "td") == 0 || strcasecmp(current_tag, "th") == 0) {
+        if (strcasecmp(new_tag, "td") == 0 || strcasecmp(new_tag, "th") == 0 ||
+            strcasecmp(new_tag, "tr") == 0) {
+            return true;
+        }
+    }
+    
+    // THEAD/TBODY/TFOOT auto-close rules:
+    // These close when followed by another table section
+    if (strcasecmp(current_tag, "thead") == 0 || strcasecmp(current_tag, "tbody") == 0 ||
+        strcasecmp(current_tag, "tfoot") == 0) {
+        if (strcasecmp(new_tag, "thead") == 0 || strcasecmp(new_tag, "tbody") == 0 ||
+            strcasecmp(new_tag, "tfoot") == 0) {
+            return true;
+        }
+    }
+    
+    // OPTION auto-close rules:
+    // - An option element's end tag can be omitted if followed by another option or optgroup
+    if (strcasecmp(current_tag, "option") == 0) {
+        if (strcasecmp(new_tag, "option") == 0 || strcasecmp(new_tag, "optgroup") == 0) {
+            return true;
+        }
+    }
+    
+    // OPTGROUP auto-close rules:
+    // - An optgroup element's end tag can be omitted if followed by another optgroup
+    if (strcasecmp(current_tag, "optgroup") == 0) {
+        if (strcasecmp(new_tag, "optgroup") == 0) {
+            return true;
+        }
+    }
+    
+    // RP/RT auto-close rules (ruby annotations):
+    // - rp/rt element's end tag can be omitted if followed by rp or rt
+    if (strcasecmp(current_tag, "rp") == 0 || strcasecmp(current_tag, "rt") == 0) {
+        if (strcasecmp(new_tag, "rp") == 0 || strcasecmp(new_tag, "rt") == 0) {
+            return true;
+        }
+    }
+    
+    return false;
 }

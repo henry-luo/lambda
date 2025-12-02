@@ -46,6 +46,11 @@ bool html_is_valid_custom_element_name(const char* name);
 bool html_is_data_attribute(const char* attr_name);
 bool html_is_aria_attribute(const char* attr_name);
 
+// Optional end tag / auto-close support per HTML spec
+// Returns true if opening <new_tag> should implicitly close <current_tag>
+// Per HTML spec: DT/DD close each other, LI closes LI, P closes P, etc.
+bool html_tag_closes_parent(const char* current_tag, const char* new_tag);
+
 #ifdef __cplusplus
 }
 #endif

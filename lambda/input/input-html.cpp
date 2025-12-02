@@ -275,6 +275,30 @@ static void skip_cdata(const char **html) {
     }
 }
 
+// Peek at the next opening tag name without consuming input
+// Returns a temporary static buffer with the lowercase tag name, or NULL if not a start tag
+// This is used for auto-close detection (dt/dd, li, p, etc.)
+static const char* peek_next_tag_name(const char* html) {
+    static char tag_buffer[64];  // Static buffer for tag name
+    
+    if (!html || *html != '<') return NULL;
+    html++; // Skip '<'
+    
+    // Not a start tag if it's a closing tag, comment, doctype, etc.
+    if (*html == '/' || *html == '!' || *html == '?') return NULL;
+    
+    // Extract tag name (up to space, >, /, or end of buffer)
+    int i = 0;
+    while (*html && i < 63 && *html != ' ' && *html != '\t' && 
+           *html != '\n' && *html != '\r' && *html != '>' && *html != '/') {
+        tag_buffer[i++] = tolower(*html);
+        html++;
+    }
+    tag_buffer[i] = '\0';
+    
+    return i > 0 ? tag_buffer : NULL;
+}
+
 // Compatibility wrappers for custom element and attribute checks (now in input-html-tokens.cpp)
 static bool is_valid_custom_element_name(const char* name) {
     return html_is_valid_custom_element_name(name);
@@ -566,6 +590,16 @@ static Item parse_element(HtmlInputContext& ctx, const char **html, const char *
                 if (**html == '<') {
                     // Check if it's the closing tag again (redundant check for safety)
                     if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
+                        break;
+                    }
+
+                    // Auto-close detection: check if next tag implicitly closes current element
+                    // Per HTML spec: dt/dd close each other, li closes li, p closes p, etc.
+                    const char* next_tag = peek_next_tag_name(*html);
+                    if (next_tag && html_tag_closes_parent(tag_name->chars, next_tag)) {
+                        log_debug("Auto-close: <%s> closes <%s>, breaking out of content loop",
+                                  next_tag, tag_name->chars);
+                        // Don't consume the tag - let the parent parse it as a sibling
                         break;
                     }
 
@@ -908,6 +942,130 @@ void parse_html_impl(Input* input, const char* html_string) {
     // This must be done before setting input->root to ensure the DOM tree is compliant
     for (size_t i = 0; i < root_list->length; i++) {
         process_implicit_tbody(input, root_list->items[i]);
+    }
+
+    // HTML 1.0 normalization: If root has <HEADER> and <BODY> as siblings (no <html> wrapper),
+    // normalize to match browser behavior:
+    // - <HEADER> becomes <header> (HTML5 semantic element) inside <body>
+    // - <TITLE> moves to implicit <head>
+    // - <BODY> content follows <header> in the body
+    // Result: <html><head><title>...</title></head><body><header>...</header>...body content...</body></html>
+    bool has_header = false;
+    bool has_body = false;
+    bool has_html = false;
+    Element* header_elem = nullptr;
+    Element* body_elem = nullptr;
+
+    for (size_t i = 0; i < root_list->length; i++) {
+        Item item = root_list->items[i];
+        if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+            Element* elem = item.element;
+            TypeElmt* type = (TypeElmt*)elem->type;
+            if (type) {
+                if (strcasecmp(type->name.str, "header") == 0) {
+                    has_header = true;
+                    header_elem = elem;
+                } else if (strcasecmp(type->name.str, "body") == 0) {
+                    has_body = true;
+                    body_elem = elem;
+                } else if (strcasecmp(type->name.str, "html") == 0) {
+                    has_html = true;
+                }
+            }
+        }
+    }
+
+    // HTML 1.0 detection: has HEADER and BODY as root siblings, no html wrapper
+    if (has_header && has_body && !has_html) {
+        log_info("Detected HTML 1.0 format: normalizing to match browser behavior");
+
+        MarkBuilder builder(input);
+        
+        // Create <head> and extract <title> from HEADER
+        ElementBuilder head_builder = builder.element("head");
+        
+        // Search HEADER children for <title> and move it to <head>
+        if (header_elem) {
+            List* header_list = (List*)header_elem;
+            for (size_t i = 0; i < header_list->length; i++) {
+                Item child = header_list->items[i];
+                if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = child.element;
+                    TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                    if (child_type && strcasecmp(child_type->name.str, "title") == 0) {
+                        head_builder.child(child);
+                        // Mark as moved by setting to null (will be skipped later)
+                        header_list->items[i] = (Item){.item = ITEM_NULL};
+                        log_debug("Moved <title> to <head>");
+                        break;
+                    }
+                }
+            }
+        }
+        Element* head_elem = head_builder.final().element;
+
+        // Create new <body> that contains:
+        // 1. <header> (the original HEADER element, keeping its remaining children)
+        // 2. All original <body> children
+        ElementBuilder new_body_builder = builder.element("body");
+        
+        // Add <header> (original HEADER) as first child of body
+        // But first, remove null items (moved title) and whitespace-only text from header
+        if (header_elem) {
+            List* header_list = (List*)header_elem;
+            List* cleaned_header = (List*)pool_calloc(input->pool, sizeof(List));
+            cleaned_header->type_id = LMD_TYPE_LIST;
+            cleaned_header->length = 0;
+            cleaned_header->capacity = 0;
+            cleaned_header->items = nullptr;
+            
+            for (size_t i = 0; i < header_list->length; i++) {
+                Item child = header_list->items[i];
+                TypeId child_type_id = get_type_id(child);
+                if (child_type_id == LMD_TYPE_NULL) continue;  // Skip moved items
+                if (child_type_id == LMD_TYPE_STRING) {
+                    // Skip whitespace-only strings
+                    String* str = (String*)child.pointer;
+                    bool is_whitespace = true;
+                    for (size_t j = 0; j < str->len; j++) {
+                        if (!isspace(str->chars[j])) {
+                            is_whitespace = false;
+                            break;
+                        }
+                    }
+                    if (is_whitespace) continue;
+                }
+                list_push(cleaned_header, child);
+            }
+            
+            // Update header element's children
+            header_list->items = cleaned_header->items;
+            header_list->length = cleaned_header->length;
+            header_list->capacity = cleaned_header->capacity;
+            
+            new_body_builder.child((Item){.element = header_elem});
+        }
+        
+        // Add all children from original <body>
+        if (body_elem) {
+            List* body_list = (List*)body_elem;
+            for (size_t i = 0; i < body_list->length; i++) {
+                new_body_builder.child(body_list->items[i]);
+            }
+        }
+        Element* new_body_elem = new_body_builder.final().element;
+
+        // Create <html> wrapper
+        ElementBuilder html_builder = builder.element("html");
+        html_builder.child((Item){.element = head_elem});
+        html_builder.child((Item){.element = new_body_elem});
+        Element* html_elem = html_builder.final().element;
+
+        // Replace root_list contents with just the html element
+        root_list->length = 0;
+        list_push(root_list, (Item){.element = html_elem});
+
+        log_info("Created normalized HTML structure for HTML 1.0 document");
     }
 
     // If list contains only one item, return that item and free the list
