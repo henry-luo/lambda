@@ -280,22 +280,22 @@ static void skip_cdata(const char **html) {
 // This is used for auto-close detection (dt/dd, li, p, etc.)
 static const char* peek_next_tag_name(const char* html) {
     static char tag_buffer[64];  // Static buffer for tag name
-    
+
     if (!html || *html != '<') return NULL;
     html++; // Skip '<'
-    
+
     // Not a start tag if it's a closing tag, comment, doctype, etc.
     if (*html == '/' || *html == '!' || *html == '?') return NULL;
-    
+
     // Extract tag name (up to space, >, /, or end of buffer)
     int i = 0;
-    while (*html && i < 63 && *html != ' ' && *html != '\t' && 
+    while (*html && i < 63 && *html != ' ' && *html != '\t' &&
            *html != '\n' && *html != '\r' && *html != '>' && *html != '/') {
         tag_buffer[i++] = tolower(*html);
         html++;
     }
     tag_buffer[i] = '\0';
-    
+
     return i > 0 ? tag_buffer : NULL;
 }
 
@@ -980,10 +980,10 @@ void parse_html_impl(Input* input, const char* html_string) {
         log_info("Detected HTML 1.0 format: normalizing to match browser behavior");
 
         MarkBuilder builder(input);
-        
+
         // Create <head> and extract <title> from HEADER
         ElementBuilder head_builder = builder.element("head");
-        
+
         // Search HEADER children for <title> and move it to <head>
         if (header_elem) {
             List* header_list = (List*)header_elem;
@@ -1008,7 +1008,7 @@ void parse_html_impl(Input* input, const char* html_string) {
         // 1. <header> (the original HEADER element, keeping its remaining children)
         // 2. All original <body> children
         ElementBuilder new_body_builder = builder.element("body");
-        
+
         // Add <header> (original HEADER) as first child of body
         // But first, remove null items (moved title) and whitespace-only text from header
         if (header_elem) {
@@ -1018,7 +1018,7 @@ void parse_html_impl(Input* input, const char* html_string) {
             cleaned_header->length = 0;
             cleaned_header->capacity = 0;
             cleaned_header->items = nullptr;
-            
+
             for (size_t i = 0; i < header_list->length; i++) {
                 Item child = header_list->items[i];
                 TypeId child_type_id = get_type_id(child);
@@ -1037,15 +1037,15 @@ void parse_html_impl(Input* input, const char* html_string) {
                 }
                 list_push(cleaned_header, child);
             }
-            
+
             // Update header element's children
             header_list->items = cleaned_header->items;
             header_list->length = cleaned_header->length;
             header_list->capacity = cleaned_header->capacity;
-            
+
             new_body_builder.child((Item){.element = header_elem});
         }
-        
+
         // Add all children from original <body>
         if (body_elem) {
             List* body_list = (List*)body_elem;
