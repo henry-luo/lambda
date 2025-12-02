@@ -3823,12 +3823,12 @@ TEST_F(HtmlParserTest, AutoCloseDtClosesOtherDt) {
     // Verify they are siblings (children of DL), not nested
     Element* dl = findElementByTag(result, "dl");
     ASSERT_NE(dl, nullptr);
-    
+
     // Count direct DT children of DL
     List* dl_list = (List*)dl;
     TypeElmt* dl_type = (TypeElmt*)dl->type;
     int64_t attr_count = dl_list->length - dl_type->content_length;
-    
+
     int direct_dt_count = 0;
     for (int64_t i = attr_count; i < dl_list->length; i++) {
         Item child = dl_list->items[i];
@@ -3861,7 +3861,7 @@ TEST_F(HtmlParserTest, AutoCloseDdClosesDt) {
     // Verify DD is NOT nested inside DT
     Element* dt = findElementByTag(result, "dt");
     ASSERT_NE(dt, nullptr);
-    
+
     // DD should not be a child of DT
     Element* dd_in_dt = findElementByTag(Item{.element = dt}, "dd");
     EXPECT_EQ(dd_in_dt, nullptr);

@@ -145,7 +145,7 @@ bool html_is_aria_attribute(const char* attr_name) {
 // This implements the "Tag omission in text/html" rules from the HTML Living Standard
 bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
     if (!current_tag || !new_tag) return false;
-    
+
     // DT/DD auto-close rules (HTML spec 4.4.10, 4.4.11):
     // - A dt element's end tag can be omitted if followed by another dt or dd element
     // - A dd element's end tag can be omitted if followed by another dd or dt element,
@@ -155,7 +155,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // LI auto-close rules (HTML spec 4.4.8):
     // - A li element's end tag can be omitted if followed by another li element
     //   or if there is no more content in the parent element
@@ -164,7 +164,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // P auto-close rules (HTML spec 4.4.1):
     // - A p element's end tag can be omitted if followed by certain block elements
     if (strcasecmp(current_tag, "p") == 0) {
@@ -184,7 +184,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             }
         }
     }
-    
+
     // TR auto-close rules:
     // - A tr element's end tag can be omitted if followed by another tr
     if (strcasecmp(current_tag, "tr") == 0) {
@@ -192,7 +192,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // TD/TH auto-close rules:
     // - A td/th element's end tag can be omitted if followed by td, th, or tr
     if (strcasecmp(current_tag, "td") == 0 || strcasecmp(current_tag, "th") == 0) {
@@ -201,7 +201,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // THEAD/TBODY/TFOOT auto-close rules:
     // These close when followed by another table section
     if (strcasecmp(current_tag, "thead") == 0 || strcasecmp(current_tag, "tbody") == 0 ||
@@ -211,7 +211,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // OPTION auto-close rules:
     // - An option element's end tag can be omitted if followed by another option or optgroup
     if (strcasecmp(current_tag, "option") == 0) {
@@ -219,7 +219,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // OPTGROUP auto-close rules:
     // - An optgroup element's end tag can be omitted if followed by another optgroup
     if (strcasecmp(current_tag, "optgroup") == 0) {
@@ -227,7 +227,7 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     // RP/RT auto-close rules (ruby annotations):
     // - rp/rt element's end tag can be omitted if followed by rp or rt
     if (strcasecmp(current_tag, "rp") == 0 || strcasecmp(current_tag, "rt") == 0) {
@@ -235,6 +235,6 @@ bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
             return true;
         }
     }
-    
+
     return false;
 }

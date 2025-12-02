@@ -18,7 +18,7 @@ Radiant has **strong layout fundamentals** with complete implementations of bloc
 ### ✅ HTML 1.0 Support (cern.html - World's First Web Page)
 
 **Problem**: Ancient HTML 1.0 documents (like cern.html from 1991) use a different structure:
-- `<HEADER>` tag instead of `<head>` 
+- `<HEADER>` tag instead of `<head>`
 - `<BODY>` as a sibling of `<HEADER>`, not wrapped in `<html>`
 - `<NEXTID>` as a void element (was being parsed as container)
 
@@ -158,7 +158,7 @@ Radiant has **strong layout fundamentals** with complete implementations of bloc
 [CSS Parser] After parsing: decl=0x0
 ```
 
-**Impact**: 
+**Impact**:
 - Modern CSS heavily uses custom properties
 - `cnn_lite.html` has hundreds of `var(--color-*)` declarations that all fail
 - Results in missing styles that affect layout (widths, margins, etc.)
