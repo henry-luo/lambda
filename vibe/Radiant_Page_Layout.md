@@ -7,7 +7,7 @@ This document analyzes the layout capabilities of the Radiant HTML/CSS rendering
 Radiant has **strong layout fundamentals** with complete implementations of block, inline, and flexbox layouts. The main gaps are:
 1. **CSS Custom Properties** - Parser fails on `--*` variables (critical for modern CSS)
 2. **`@media` Query Evaluation** - Responsive layouts broken
-3. **`::before` / `::after`** - Generated content not supported
+3. ~~**`::before` / `::after`**~~ - ✅ **Implemented** (DOM node creation approach)
 4. **CSS Grid** - Algorithm exists but needs integration
 5. **`position: sticky`** - Not implemented
 
@@ -110,12 +110,40 @@ Radiant has **strong layout fundamentals** with complete implementations of bloc
 
 | Feature | Status | Impact on Layout |
 |---------|--------|------------------|
-| `::before` | ❌ **Missing** | Creates inline box before element content |
-| `::after` | ❌ **Missing** | Creates inline box after element content |
-| `content` property | ❌ **Missing** | Required for pseudo-elements |
+| `::before` | ✅ **Complete** | Creates inline box before element content |
+| `::after` | ✅ **Complete** | Creates inline box after element content |
+| `content` property | ✅ **Complete** | String content extracted and rendered |
 | List markers (`::marker`) | ⚠️ Basic | `list-style-type` works |
 
-**Note**: `::before` and `::after` pseudo-elements affect layout by inserting generated boxes. Many modern designs rely on these for layout purposes (clearfixes, decorative elements that take space, etc.).
+### Pseudo-element Implementation Design
+
+**Architecture**: DOM Node Creation (Option B)
+
+During layout, pseudo-elements are created as actual DOM nodes rather than storing content strings:
+
+1. **CSS Parsing**: Parser detects `::before`/`::after` selectors, stores rules in `before_styles`/`after_styles` on `DomElement`
+2. **DOM Creation**: `create_pseudo_element()` creates:
+   - `DomElement` with tag "::before" or "::after"
+   - `DomText` child node containing the `content` property value
+3. **DOM Integration**: Pseudo-elements inserted into parent's child list:
+   - `::before` at front of children
+   - `::after` at end of children
+4. **Layout**: `layout_inline()` called on pseudo `DomElement`, integrating with normal inline flow
+5. **Reflow Safety**: Guard in `alloc_pseudo_content_prop()` reuses existing pseudo-elements
+
+**Key Files**:
+- `radiant/view.hpp` - `PseudoContentProp` holds `DomElement*` pointers
+- `radiant/layout_block.cpp` - `create_pseudo_element()`, `alloc_pseudo_content_prop()`, `layout_pseudo_element()`
+
+**View Tree Output**:
+```
+[view-block:p, ...]
+  [view-inline:::before, x:0.0, y:0.0, wd:42.0, hg:18.0
+    [text: {x:0.0, y:0.0, wd:42.7, hg:18.0}
+     [rect:'Note: ', start:0, len:6, ...]]]
+  [text: {x:42.7, y:0.0, ...}
+   [rect:'This is an important note.', ...]]
+```
 
 ---
 
@@ -200,9 +228,11 @@ Radiant has **strong layout fundamentals** with complete implementations of bloc
    - Issue: Media rules skipped entirely
    - Solution: Evaluate media conditions, apply matching rules
 
-3. **`::before` / `::after` Pseudo-elements**
-   - Location: Needs new implementation in style resolution + layout
-   - Impact: Missing generated content boxes affect layout
+3. ~~**`::before` / `::after` Pseudo-elements**~~ ✅ **COMPLETED**
+   - Creates `DomElement` + `DomText` nodes during layout
+   - Inserted into DOM tree (::before at front, ::after at end)
+   - Laid out via `layout_inline()` within block flow
+   - See Section 5 for implementation details
 
 ### 🟡 Medium Priority
 
@@ -279,7 +309,7 @@ layout_html_doc()
 Radiant's layout engine is **fundamentally solid** for CSS 2.1 and Flexbox layouts. The primary blockers for rendering modern web pages are:
 
 1. **CSS parsing issues** (custom properties, @media) - These prevent styles from being applied at all
-2. **Generated content** (`::before`/`::after`) - Affects layout calculations
+2. ~~**Generated content** (`::before`/`::after`)~~ - ✅ **Implemented** - Pseudo-elements now create DOM nodes during layout
 3. **Grid layout** - Needs testing and integration work
 
-Fixing the CSS parsing issues (#1 and #2 in High Priority) would immediately improve compatibility with most modern web pages.
+Fixing the CSS parsing issues (#1 in High Priority) would immediately improve compatibility with most modern web pages.

@@ -749,7 +749,11 @@ bool dom_element_remove_property(DomElement* element, CssPropertyId property_id)
 
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                                           CssSpecificity specificity, int pseudo_element) {
+    log_debug("[CSS-PSEUDO] Applying pseudo-element rule to <%s>, pseudo_type=%d",
+              element ? element->tag_name : "NULL", pseudo_element);
+
     if (!element || !rule || !element->doc) {
+        log_debug("[CSS-PSEUDO] Early return due to null element/rule/doc");
         return 0;
     }
 

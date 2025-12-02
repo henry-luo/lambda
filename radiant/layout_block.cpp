@@ -6,6 +6,7 @@
 #include "grid.hpp"
 
 #include "../lib/log.h"
+#include "../lambda/input/css/selector_matcher.hpp"
 
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 // void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
@@ -14,6 +15,162 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
+
+// ============================================================================
+// Pseudo-element (::before/::after) Layout Support
+// ============================================================================
+
+/**
+ * Create a pseudo-element DomElement with a DomText child for the content
+ *
+ * @param lycon Layout context
+ * @param parent The parent element
+ * @param content The content string for the pseudo-element
+ * @param is_before true for ::before, false for ::after
+ * @return The created DomElement or NULL on failure
+ */
+static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* parent,
+                                          const char* content, bool is_before) {
+    if (!lycon || !parent || !content || !*content) return nullptr;
+
+    Pool* pool = lycon->doc->view_tree->pool;
+    if (!pool) return nullptr;
+
+    // Create the pseudo DomElement
+    // Per CSS spec: pseudo-element is child of defining element,
+    // text node is child of pseudo-element
+    DomElement* pseudo_elem = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    if (!pseudo_elem) return nullptr;
+
+    // Initialize as element node
+    pseudo_elem->node_type = DOM_NODE_ELEMENT;
+    pseudo_elem->tag_name = is_before ? "::before" : "::after";
+    pseudo_elem->doc = parent->doc;
+    // Pseudo-element is child of defining element
+    pseudo_elem->parent = parent;
+    pseudo_elem->first_child = nullptr;
+    pseudo_elem->next_sibling = nullptr;
+    pseudo_elem->prev_sibling = nullptr;
+
+    // Copy inherited styles from parent
+    pseudo_elem->font = parent->font;
+    pseudo_elem->bound = parent->bound;
+    pseudo_elem->in_line = parent->in_line;
+
+    // Set display to inline by default for pseudo-elements
+    pseudo_elem->display.outer = CSS_VALUE_INLINE;
+    pseudo_elem->display.inner = CSS_VALUE_FLOW;
+
+    // Create the text child
+    DomText* text_node = (DomText*)pool_calloc(pool, sizeof(DomText));
+    if (!text_node) return nullptr;
+
+    // Initialize as text node
+    text_node->node_type = DOM_NODE_TEXT;
+    // Text node is child of pseudo-element
+    text_node->parent = pseudo_elem;
+    text_node->next_sibling = nullptr;
+    text_node->prev_sibling = nullptr;
+
+    // Copy the content string
+    size_t content_len = strlen(content);
+    char* text_content = (char*)pool_calloc(pool, content_len + 1);
+    if (text_content) {
+        memcpy(text_content, content, content_len);
+        text_content[content_len] = '\0';
+    }
+    text_node->text = text_content;
+    text_node->length = content_len;
+    text_node->native_string = nullptr;  // Not backed by Lambda String
+    text_node->content_type = DOM_TEXT_STRING;
+
+    // Link text node as child of pseudo element
+    pseudo_elem->first_child = text_node;
+
+    log_debug("[PSEUDO] Created ::%s element for <%s> with content \"%s\"",
+              is_before ? "before" : "after",
+              parent->tag_name ? parent->tag_name : "unknown",
+              content);
+
+    return pseudo_elem;
+}
+
+/**
+ * Allocate PseudoContentProp and create pseudo-elements if needed
+ *
+ * On first layout: creates pseudo-elements and inserts them into DOM tree
+ * On reflow: reuses existing pseudo-elements (already in DOM tree)
+ *
+ * @param lycon Layout context
+ * @param block The block element to check
+ * @return PseudoContentProp pointer or NULL if no pseudo content
+ */
+PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block) {
+    if (!block || !block->is_element()) return nullptr;
+
+    DomElement* elem = (DomElement*)block;
+
+    // Check if pseudo-elements already exist (reflow case)
+    if (block->pseudo) {
+        log_debug("[PSEUDO] Reusing existing pseudo-elements for <%s>",
+                  elem->tag_name ? elem->tag_name : "unknown");
+        return block->pseudo;
+    }
+
+    // Check if element has ::before or ::after content
+    bool has_before = dom_element_has_before_content(elem);
+    bool has_after = dom_element_has_after_content(elem);
+
+    if (!has_before && !has_after) return nullptr;
+
+    // Allocate PseudoContentProp
+    PseudoContentProp* pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+    if (!pseudo) return nullptr;
+
+    // Initialize
+    memset(pseudo, 0, sizeof(PseudoContentProp));
+
+    // Create ::before pseudo-element if needed
+    if (has_before) {
+        const char* before_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_BEFORE);
+        if (before_content && *before_content) {
+            pseudo->before = create_pseudo_element(lycon, elem, before_content, true);
+        }
+    }
+
+    // Create ::after pseudo-element if needed
+    if (has_after) {
+        const char* after_content = dom_element_get_pseudo_element_content(elem, PSEUDO_ELEMENT_AFTER);
+        if (after_content && *after_content) {
+            pseudo->after = create_pseudo_element(lycon, elem, after_content, false);
+        }
+    }
+
+    return pseudo;
+}
+
+/**
+ * Layout a pseudo-element using the existing inline layout infrastructure
+ *
+ * Per CSS spec: pseudo-element is child of defining element, with display: inline.
+ * We use layout_inline to handle the pseudo-element which will recursively
+ * lay out its text child.
+ *
+ * @param lycon Layout context
+ * @param pseudo_elem The pseudo-element DomElement (created by create_pseudo_element)
+ */
+static void layout_pseudo_element(LayoutContext* lycon, DomElement* pseudo_elem) {
+    if (!pseudo_elem) return;
+
+    log_debug("[PSEUDO] Laying out %s content", pseudo_elem->tag_name);
+
+    // Layout the pseudo-element as inline (it will lay out its text child)
+    layout_inline(lycon, pseudo_elem, pseudo_elem->display);
+}
+
+// ============================================================================
+// End of Pseudo-element Layout Support
+// ============================================================================
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     // finalize the block size
@@ -135,8 +292,59 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     finalize_block_flow(lycon, block, display.outer);
 }
 
+/**
+ * Insert pseudo-element into DOM tree at appropriate position
+ * ::before is inserted as first child, ::after as last child
+ */
+static void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
+    if (!parent || !pseudo) return;
+
+    if (is_before) {
+        // Insert as first child
+        DomNode* old_first = parent->first_child;
+        pseudo->next_sibling = old_first;
+        pseudo->prev_sibling = nullptr;
+        if (old_first) {
+            old_first->prev_sibling = pseudo;
+        }
+        parent->first_child = pseudo;
+    } else {
+        // Insert as last child
+        if (!parent->first_child) {
+            parent->first_child = pseudo;
+            pseudo->prev_sibling = nullptr;
+            pseudo->next_sibling = nullptr;
+        } else {
+            // Find last child
+            DomNode* last = parent->first_child;
+            while (last->next_sibling) {
+                last = last->next_sibling;
+            }
+            last->next_sibling = pseudo;
+            pseudo->prev_sibling = last;
+            pseudo->next_sibling = nullptr;
+        }
+    }
+}
+
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("layout block inner content");
+
+    // Allocate pseudo-element content if ::before or ::after is present
+    if (block->is_element()) {
+        block->pseudo = alloc_pseudo_content_prop(lycon, block);
+
+        // Insert pseudo-elements into DOM tree for proper view tree linking
+        if (block->pseudo) {
+            if (block->pseudo->before) {
+                insert_pseudo_into_dom((DomElement*)block, block->pseudo->before, true);
+            }
+            if (block->pseudo->after) {
+                insert_pseudo_into_dom((DomElement*)block, block->pseudo->after, false);
+            }
+        }
+    }
+
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
         uintptr_t elmt_name = block->tag();
         if (elmt_name == HTM_TAG_IFRAME) {
@@ -144,6 +352,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         }
         // else HTM_TAG_IMG
     } else {  // layout block child content
+        // No longer need separate pseudo-element layout - they're part of child list now
         DomNode *child = nullptr;
         if (block->is_element()) { child = block->first_child; }
         if (child) {
@@ -154,7 +363,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     child = child->next_sibling;
                 } while (child);
                 // handle last line
-                if (!lycon->line.is_line_start) { line_break(lycon); }
+                if (!lycon->line.is_line_start) {
+                    line_break(lycon);
+                }
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
                 log_debug("Setting up flex container for %s", block->node_name());
@@ -200,6 +411,12 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("unknown display type");
             }
         }
+
+        // Final line break after all content
+        if (!lycon->line.is_line_start) {
+            line_break(lycon);
+        }
+
         finalize_block_flow(lycon, block, block->display.outer);
     }
 }

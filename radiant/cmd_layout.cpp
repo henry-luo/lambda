@@ -531,6 +531,8 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
                 any_match = true;
                 best_specificity = match_result.specificity;
                 pseudo_element = match_result.pseudo_element;
+                log_debug("[PSEUDO-MATCH] Group selector matched <%s>, pseudo_element=%d",
+                          elem->tag_name, (int)pseudo_element);
                 break;
             }
         }
@@ -538,6 +540,8 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
         if (any_match && rule->data.style_rule.declaration_count > 0) {
             if (pseudo_element != PSEUDO_ELEMENT_NONE) {
                 // Apply to pseudo-element
+                log_debug("[PSEUDO-APPLY] Applying pseudo-element rule to <%s>, pseudo=%d",
+                          elem->tag_name, (int)pseudo_element);
                 dom_element_apply_pseudo_element_rule(elem, rule, best_specificity, (int)pseudo_element);
             } else {
                 // Apply to regular element
@@ -561,9 +565,13 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
     // Check if selector matches
     MatchResult match_result;
     if (selector_matcher_matches(matcher, selector, elem, &match_result)) {
+        log_debug("[PSEUDO-SINGLE] Single selector matched <%s>, pseudo_element=%d",
+                  elem->tag_name, (int)match_result.pseudo_element);
         if (rule->data.style_rule.declaration_count > 0) {
             if (match_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
                 // Apply to pseudo-element
+                log_debug("[PSEUDO-SINGLE-APPLY] Applying pseudo-element rule to <%s>, pseudo=%d",
+                          elem->tag_name, (int)match_result.pseudo_element);
                 dom_element_apply_pseudo_element_rule(elem, rule, match_result.specificity,
                                                       (int)match_result.pseudo_element);
             } else {
