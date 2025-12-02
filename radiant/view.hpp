@@ -439,6 +439,21 @@ typedef struct PositionProp {
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
 } PositionProp;
 
+/**
+ * PseudoContentProp - Stores dynamically created ::before and ::after pseudo-elements
+ *
+ * Instead of storing content strings and layout bounds, we create actual DomElement
+ * and DomText nodes for pseudo-elements. This allows reusing the existing layout
+ * infrastructure for text and inline content.
+ *
+ * The pseudo DomElements are created during style cascade when 'content' property
+ * is resolved, and laid out as part of normal block layout flow.
+ */
+typedef struct PseudoContentProp {
+    DomElement* before;    // ::before pseudo-element (NULL if none)
+    DomElement* after;     // ::after pseudo-element (NULL if none)
+} PseudoContentProp;
+
 typedef struct BlockProp {
     CssEnum text_align;
     const CssValue* line_height;

@@ -78,6 +78,7 @@ typedef struct BoundaryProp BoundaryProp;
 typedef struct BlockProp BlockProp;
 typedef struct ScrollProp ScrollProp;
 typedef struct PositionProp PositionProp;
+typedef struct PseudoContentProp PseudoContentProp;
 typedef struct EmbedProp EmbedProp;
 typedef struct TableCellProp TableCellProp;
 typedef struct TableProp TableProp;
@@ -143,6 +144,8 @@ struct DomElement : DomNode {
     EmbedProp* embed;
     // positioning properties for CSS positioning
     PositionProp* position;
+    // pseudo-element content and layout state (::before/::after)
+    PseudoContentProp* pseudo;
 
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
