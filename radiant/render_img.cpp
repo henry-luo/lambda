@@ -140,8 +140,9 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 }
 
 // Main function to layout HTML and render to PNG
-int render_html_to_png(const char* html_file, const char* png_file) {
-    log_debug("render_html_to_png called with html_file='%s', png_file='%s'", html_file, png_file);
+int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height) {
+    log_debug("render_html_to_png called with html_file='%s', png_file='%s', viewport=%dx%d",
+              html_file, png_file, viewport_width, viewport_height);
 
     // Initialize UI context in headless mode
     UiContext ui_context;
@@ -150,10 +151,8 @@ int render_html_to_png(const char* html_file, const char* png_file) {
         return 1;
     }
 
-    // Create a surface for rendering (default viewport 1200x800 matches browser test viewport)
-    int default_width = 1200;  // Default width
-    int default_height = 800;  // Default height
-    ui_context_create_surface(&ui_context, default_width, default_height);
+    // Create a surface for rendering with specified viewport dimensions
+    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -193,8 +192,9 @@ int render_html_to_png(const char* html_file, const char* png_file) {
 }
 
 // Main function to layout HTML and render to JPEG
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality) {
-    log_debug("render_html_to_jpeg called with html_file='%s', jpeg_file='%s', quality=%d", html_file, jpeg_file, quality);
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height) {
+    log_debug("render_html_to_jpeg called with html_file='%s', jpeg_file='%s', quality=%d, viewport=%dx%d",
+              html_file, jpeg_file, quality, viewport_width, viewport_height);
 
     // Initialize UI context in headless mode
     UiContext ui_context;
@@ -203,10 +203,8 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
         return 1;
     }
 
-    // Create a surface for rendering
-    int default_width = 800;   // Default width
-    int default_height = 1200; // Default height
-    ui_context_create_surface(&ui_context, default_width, default_height);
+    // Create a surface for rendering with specified viewport dimensions
+    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();

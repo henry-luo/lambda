@@ -46,16 +46,16 @@ int cmd_layout(int argc, char** argv);
 int run_layout(const char* html_file);
 
 // SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_svg(const char* html_file, const char* svg_file);
+int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width = 1200, int viewport_height = 800);
 
 // PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_pdf(const char* html_file, const char* pdf_file);
+int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width = 800, int viewport_height = 1200);
 
 // PNG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_png(const char* html_file, const char* png_file);
+int render_html_to_png(const char* html_file, const char* png_file, int viewport_width = 1200, int viewport_height = 800);
 
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality);
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800);
 
 // PDF viewer functions from radiant (cmd_view_pdf.cpp)
 extern int view_pdf_in_window(const char* pdf_file);
@@ -824,18 +824,18 @@ int main(int argc, char *argv[]) {
             printf("  CSS system (separate from Lexbor-based layout). It parses HTML with\n");
             printf("  Lambda parser, applies CSS using Lambda CSS engine, and outputs layout.\n");
             printf("\nOptions:\n");
-            printf("  -o, --output FILE    Output file for layout results (default: stdout)\n");
-            printf("  -c, --css FILE       External CSS file to apply\n");
-            printf("  -w, --width WIDTH    Viewport width in pixels (default: 800)\n");
-            printf("  -h, --height HEIGHT  Viewport height in pixels (default: 600)\n");
-            printf("  --debug              Enable debug output\n");
-            printf("  --help               Show this help message\n");
+            printf("  -o, --output FILE                  Output file for layout results (default: stdout)\n");
+            printf("  -c, --css FILE                     External CSS file to apply\n");
+            printf("  -vw, --viewport-width WIDTH        Viewport width in pixels (default: 1200)\n");
+            printf("  -vh, --viewport-height HEIGHT      Viewport height in pixels (default: 800)\n");
+            printf("  --debug                            Enable debug output\n");
+            printf("  --help                             Show this help message\n");
             printf("\nExamples:\n");
-            printf("  %s layout index.html              # Basic layout analysis\n", argv[0]);
-            printf("  %s layout test.html --debug       # With debug output\n", argv[0]);
-            printf("  %s layout page.html -c styles.css # With external CSS\n", argv[0]);
-            printf("  %s layout doc.html -w 1024 -h 768 # Custom viewport\n", argv[0]);
-            printf("  %s layout index.html -o layout.json # Save to file\n", argv[0]);
+            printf("  %s layout index.html                   # Basic layout analysis\n", argv[0]);
+            printf("  %s layout test.html --debug            # With debug output\n", argv[0]);
+            printf("  %s layout page.html -c styles.css      # With external CSS\n", argv[0]);
+            printf("  %s layout doc.html -vw 1024 -vh 768    # Custom viewport\n", argv[0]);
+            printf("  %s layout index.html -o layout.json    # Save to file\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
         }
@@ -857,7 +857,7 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'render' command layouts an HTML file and renders the result as SVG, PDF, or PNG.\n");
             printf("  It parses the HTML, applies CSS styles, calculates layout, and generates\n");
@@ -869,13 +869,16 @@ int main(int argc, char *argv[]) {
             printf("  .jpg    Joint Photographic Experts Group (JPEG)\n");
             printf("  .jpeg   Joint Photographic Experts Group (JPEG)\n");
             printf("\nOptions:\n");
-            printf("  -o <output>        Output file path (required, format detected by extension)\n");
-            printf("  -h, --help         Show this help message\n");
+            printf("  -o <output>              Output file path (required, format detected by extension)\n");
+            printf("  -vw, --viewport-width    Viewport width in pixels (default: 1200 for SVG/PNG/JPEG, 800 for PDF)\n");
+            printf("  -vh, --viewport-height   Viewport height in pixels (default: 800 for SVG/PNG/JPEG, 1200 for PDF)\n");
+            printf("  -h, --help               Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Render HTML to SVG\n", argv[0]);
             printf("  %s render index.html -o output.pdf        # Render HTML to PDF\n", argv[0]);
             printf("  %s render index.html -o output.png        # Render HTML to PNG\n", argv[0]);
             printf("  %s render index.html -o output.jpg        # Render HTML to JPEG\n", argv[0]);
+            printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport\n", argv[0]);
             printf("  %s render test/page.html -o result.svg    # Render with relative paths\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
@@ -884,6 +887,8 @@ int main(int argc, char *argv[]) {
         // Parse arguments
         const char* html_file = NULL;
         const char* output_file = NULL;
+        int viewport_width = 0;   // 0 means use format-specific default
+        int viewport_height = 0;  // 0 means use format-specific default
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
@@ -891,6 +896,32 @@ int main(int argc, char *argv[]) {
                     output_file = argv[++i];
                 } else {
                     printf("Error: -o option requires an output file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
+                if (i + 1 < argc) {
+                    viewport_width = atoi(argv[++i]);
+                    if (viewport_width <= 0) {
+                        printf("Error: Invalid viewport width '%s'. Must be a positive integer.\n", argv[i]);
+                        log_finish();
+                        return 1;
+                    }
+                } else {
+                    printf("Error: -vw option requires a width value\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
+                if (i + 1 < argc) {
+                    viewport_height = atoi(argv[++i]);
+                    if (viewport_height <= 0) {
+                        printf("Error: Invalid viewport height '%s'. Must be a positive integer.\n", argv[i]);
+                        log_finish();
+                        return 1;
+                    }
+                } else {
+                    printf("Error: -vh option requires a height value\n");
                     log_finish();
                     return 1;
                 }
@@ -934,28 +965,37 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        log_debug("Rendering HTML '%s' to output '%s'", html_file, output_file);
+        log_debug("Rendering HTML '%s' to output '%s' with viewport %dx%d",
+                  html_file, output_file, viewport_width, viewport_height);
 
         // Determine output format based on file extension
         const char* ext = strrchr(output_file, '.');
         int exit_code;
 
         if (ext && strcmp(ext, ".pdf") == 0) {
-            // Call the PDF rendering function
+            // Call the PDF rendering function (defaults to A4 portrait: 800x1200)
             log_debug("Detected PDF output format");
-            exit_code = render_html_to_pdf(html_file, output_file);
+            int pdf_width = viewport_width > 0 ? viewport_width : 800;
+            int pdf_height = viewport_height > 0 ? viewport_height : 1200;
+            exit_code = render_html_to_pdf(html_file, output_file, pdf_width, pdf_height);
         } else if (ext && strcmp(ext, ".svg") == 0) {
-            // Call the SVG rendering function
+            // Call the SVG rendering function (defaults to 1200x800)
             log_debug("Detected SVG output format");
-            exit_code = render_html_to_svg(html_file, output_file);
+            int svg_width = viewport_width > 0 ? viewport_width : 1200;
+            int svg_height = viewport_height > 0 ? viewport_height : 800;
+            exit_code = render_html_to_svg(html_file, output_file, svg_width, svg_height);
         } else if (ext && strcmp(ext, ".png") == 0) {
-            // Call the PNG rendering function
+            // Call the PNG rendering function (defaults to 1200x800)
             log_debug("Detected PNG output format");
-            exit_code = render_html_to_png(html_file, output_file);
+            int png_width = viewport_width > 0 ? viewport_width : 1200;
+            int png_height = viewport_height > 0 ? viewport_height : 800;
+            exit_code = render_html_to_png(html_file, output_file, png_width, png_height);
         } else if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
-            // Call the JPEG rendering function with default quality of 85
+            // Call the JPEG rendering function with default quality of 85 (defaults to 1200x800)
             log_debug("Detected JPEG output format");
-            exit_code = render_html_to_jpeg(html_file, output_file, 85);
+            int jpeg_width = viewport_width > 0 ? viewport_width : 1200;
+            int jpeg_height = viewport_height > 0 ? viewport_height : 800;
+            exit_code = render_html_to_jpeg(html_file, output_file, 85, jpeg_width, jpeg_height);
         } else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
             printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
@@ -967,6 +1007,7 @@ int main(int argc, char *argv[]) {
         log_finish();  // Cleanup logging before exit
         return exit_code;
     }
+
 
     // Handle view command (open PDF or HTML in window)
     log_debug("Checking for view command");
