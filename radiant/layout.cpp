@@ -459,6 +459,10 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
 
+    // Initialize viewport dimensions for vw/vh units
+    lycon->width = uicon->window_width;
+    lycon->height = uicon->window_height;
+
     // Initialize available space to indefinite (will be set properly during layout)
     lycon->available_space = AvailableSpace::make_indefinite();
 
