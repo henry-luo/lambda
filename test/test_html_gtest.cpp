@@ -290,8 +290,8 @@ TEST_F(HtmlParserTest, EntityDecoding) {
     Item result = parseHtml("<p>&lt;div&gt;</p>");
 
     std::string text = getTextContent(result);
-    // Note: Lambda HTML parser preserves entities in raw form
-    EXPECT_EQ(text, "&lt;div&gt;");
+    // ASCII entities are decoded to actual characters
+    EXPECT_EQ(text, "<div>");
 }
 
 TEST_F(HtmlParserTest, MultipleRootElements) {
@@ -903,15 +903,21 @@ TEST_F(HtmlParserTest, EntityDecodingExtendedLatin) {
 }
 
 TEST_F(HtmlParserTest, EntityDecodingSpecialChars) {
+    // Non-ASCII entities are converted to Lambda symbols
     Item result = parseHtml("<p>&nbsp;&copy;&reg;&trade;&deg;</p>");
-    std::string text = getTextContent(result);
-    EXPECT_FALSE(text.empty());
+    Element* p = result.element;
+    ASSERT_NE(p, nullptr);
+    TypeElmt* type = (TypeElmt*)p->type;
+    EXPECT_GT(type->content_length, 0);  // Should have symbol content items
 }
 
 TEST_F(HtmlParserTest, EntityDecodingMathSymbols) {
+    // Non-ASCII math entities are converted to Lambda symbols
     Item result = parseHtml("<p>&plusmn;&times;&divide;&frac14;&frac12;&frac34;</p>");
-    std::string text = getTextContent(result);
-    EXPECT_FALSE(text.empty());
+    Element* p = result.element;
+    ASSERT_NE(p, nullptr);
+    TypeElmt* type = (TypeElmt*)p->type;
+    EXPECT_GT(type->content_length, 0);  // Should have symbol content items
 }
 
 TEST_F(HtmlParserTest, EntityDecodingInAttribute) {
