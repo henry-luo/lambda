@@ -341,6 +341,15 @@ struct GridItemProp {
     bool has_explicit_grid_column_start;
     bool has_explicit_grid_column_end;
     bool is_grid_auto_placed;
+
+    // Measured dimensions (from multipass measurement phase)
+    int measured_width;          // Content-based width (from measure pass)
+    int measured_height;         // Content-based height (from measure pass)
+    int measured_min_width;      // Minimum content width (longest word)
+    int measured_max_width;      // Maximum content width (no wrapping)
+    int measured_min_height;     // Minimum content height
+    int measured_max_height;     // Maximum content height
+    bool has_measured_size;      // Whether measurement pass has been done
 };
 
 // Intrinsic size type (shared by flex and grid layout)

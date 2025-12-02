@@ -87,7 +87,7 @@
         "radiant/layout_flex_measurement.cpp",
         "radiant/layout_flex_multipass.cpp",
         "radiant/layout_grid.cpp",
-        "radiant/layout_grid_content.cpp",
+        "radiant/layout_grid_multipass.cpp",
         "radiant/grid_utils.cpp",
         "radiant/grid_sizing.cpp",
         "radiant/grid_positioning.cpp",

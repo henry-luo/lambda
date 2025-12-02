@@ -204,11 +204,8 @@ int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value,
 void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string);
 void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 
-// Grid content layout functions
-void layout_grid_item_content(struct LayoutContext* lycon, struct ViewBlock* grid_item);
-void layout_grid_item_content_for_sizing(struct LayoutContext* lycon, struct ViewBlock* grid_item);
-void layout_grid_item_final_content(struct LayoutContext* lycon, struct ViewBlock* grid_item);
-void layout_grid_items_content(struct LayoutContext* lycon, struct GridContainerLayout* grid_layout);
+// Grid content layout functions - now in layout_grid_multipass.cpp
+// See layout_grid_multipass.hpp for the new multi-pass API
 
 // Advanced grid features (Phase 6)
 // Minmax function support
