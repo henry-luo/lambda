@@ -283,7 +283,7 @@ static bool is_visibility_collapse(ViewBlock* element) {
 static int measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
     int content_height = 0;
 
-    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
             int text_height = text->height > 0 ? text->height : 17;
@@ -363,7 +363,7 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, int cell_height, int
     }
 
     if (y_adjustment > 0) {
-        for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
             child->y += y_adjustment;
             // Also update TextRect for ViewText nodes
             if (child->view_type == RDT_VIEW_TEXT) {
@@ -386,7 +386,7 @@ static void position_cell_text_children(ViewTableCell* tcell) {
         content_y += tcell->bound->padding.top;
     }
 
-    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             child->x = content_x;
             child->y = content_y;
@@ -896,7 +896,7 @@ static void detect_anonymous_boxes(ViewTable* table) {
 // =============================================================================
 
 // Recursive helper to mark table structure nodes with correct view types
-static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* parent) {
+static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* parent) {
     if (!node || !node->is_element()) return;
 
     DisplayValue display = resolve_display_value(node);
@@ -973,7 +973,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
-                if (child->is_element()) mark_table_node(lycon, child, (ViewGroup*)group);
+                if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)group);
             }
         }
     }
@@ -985,7 +985,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewGroup* pare
             dom_node_resolve_style(node, lycon);  // Resolve styles for proper font inheritance
             DomNode* child = static_cast<DomElement*>(node)->first_child;
             for (; child; child = child->next_sibling) {
-                if (child->is_element()) mark_table_node(lycon, child, (ViewGroup*)row);
+                if (child->is_element()) mark_table_node(lycon, child, (ViewElement*)row);
             }
         }
     }
@@ -1017,7 +1017,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
         DomNode* child = static_cast<DomElement*>(tableNode)->first_child;
         for (; child; child = child->next_sibling) {
             if (child->is_element()) {
-                mark_table_node(lycon, child, (ViewGroup*)table);
+                mark_table_node(lycon, child, (ViewElement*)table);
             }
         }
     }
@@ -1077,7 +1077,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
     float max_y = 0;
 
     // Find the maximum Y position of all child content to determine actual height
-    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
             float child_bottom = text->y + text->height;
@@ -1118,7 +1118,7 @@ static void apply_cell_vertical_alignment(LayoutContext* lycon, ViewTableCell* t
 
     // Apply offset to all child content
     if (vertical_offset > 0) {
-        for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
             if (child->view_type == RDT_VIEW_TEXT) {
                 ViewText* text = (ViewText*)child;
                 text->y += vertical_offset;
@@ -1161,7 +1161,7 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
     float content_max_y = 0;
     bool has_content = false;
 
-    for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+    for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)child;
             if (text->y < content_min_y) content_min_y = text->y;
@@ -1206,7 +1206,7 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
               valign, content_min_y, new_offset, adjustment);
 
     if (adjustment != 0) {
-        for (View* child = ((ViewGroup*)tcell)->first_child; child; child = child->next_sibling) {
+        for (View* child = ((ViewElement*)tcell)->first_child; child; child = child->next_sibling) {
             if (child->view_type == RDT_VIEW_TEXT) {
                 ViewText* text = (ViewText*)child;
                 text->y += adjustment;

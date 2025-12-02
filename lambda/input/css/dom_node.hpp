@@ -45,7 +45,7 @@ typedef enum {
 
 typedef struct DomNode DomNode;
 typedef DomNode View;
-typedef struct ViewGroup ViewGroup;
+typedef struct ViewElement ViewElement;
 
 /**
  * DomNode - Base struct/class for all DOM nodes
@@ -123,7 +123,7 @@ struct DomNode {
         }
         return nullptr;
     }
-    inline ViewGroup* parent_view() { return (ViewGroup*)this->parent; }
+    inline ViewElement* parent_view() { return (ViewElement*)this->parent; }
 
     inline bool is_group() { return view_type >= RDT_VIEW_INLINE; }
 

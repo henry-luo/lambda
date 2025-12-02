@@ -59,7 +59,7 @@ float calc_normal_line_height(FT_Face face) {
 CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     // Inherit line height from parent
     INHERIT:
-    ViewGroup* parent = block->parent_view();
+    ViewElement* parent = block->parent_view();
     if (parent) { // parent can be block or span
         // inherit the specified css value, not the resolved value
         if (parent->blk && parent->blk->line_height) {
@@ -556,7 +556,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("DOM tree: html version %d", doc->view_tree->html_version);
         log_debug("calling print_view_tree...");
-        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
+        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
         log_debug("print_view_tree complete");
     } else {
         log_debug("Warning: No view tree generated");

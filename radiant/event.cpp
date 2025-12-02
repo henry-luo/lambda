@@ -364,7 +364,7 @@ View* find_view(View* view, DomNode* node) {
     if (view == node) { return view; }
 
     if (view->is_group()) {
-        ViewGroup* group = (ViewGroup*)view;
+        ViewElement* group = (ViewElement*)view;
         View* child = group->first_child;
         while (child) {
             View* found = find_view(child, node);
