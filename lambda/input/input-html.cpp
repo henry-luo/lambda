@@ -864,7 +864,7 @@ void parse_html_impl(Input* input, const char* html_string) {
         root_list->length = 0;
         root_list->capacity = 0;
         root_list->items = NULL;
-        log_debug("Created root_list=%p, type_id=%d (should be %d)", 
+        log_debug("Created root_list=%p, type_id=%d (should be %d)",
                   (void*)root_list, root_list->type_id, LMD_TYPE_LIST);
     }
 
@@ -1088,7 +1088,7 @@ void parse_html_impl(Input* input, const char* html_string) {
     } else if (root_list->length > 1) {
         // Return the list as the root
         input->root = (Item){.list = root_list};
-        log_debug("Setting input->root to list with %zu items, root_list=%p, root_list->type_id=%d", 
+        log_debug("Setting input->root to list with %zu items, root_list=%p, root_list->type_id=%d",
                   root_list->length, (void*)root_list, root_list->type_id);
         log_debug("Verifying: input->root.item=%llx, input->root.list=%p, type_id=%d",
                   (unsigned long long)input->root.item, (void*)input->root.list, get_type_id(input->root));
