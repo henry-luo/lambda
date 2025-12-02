@@ -23,6 +23,7 @@ extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
 #include "../lib/string.h"
+#include "../lib/strbuf.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
 }
@@ -42,6 +43,7 @@ void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio);
+void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
@@ -631,6 +633,15 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     Input* input = input_from_source(html_content, html_url, type_str, nullptr);
     free(html_content);
+    StrBuf* htm_buf = strbuf_new();
+    print_item(htm_buf, input->root, 0);
+    // write html to 'html_tree.txt' for debugging
+    FILE* htm_file = fopen("html_tree.txt", "w");
+    if (htm_file) {
+        fwrite(htm_buf->str, 1, htm_buf->length, htm_file);
+        fclose(htm_file);
+    }
+    strbuf_free(htm_buf);
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
