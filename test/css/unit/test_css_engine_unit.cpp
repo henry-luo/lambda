@@ -1331,5 +1331,233 @@ TEST_F(CssEngineTest, MediaRule_RelativeUnits) {
 }
 
 // ============================================================================
+// Category 8: Pseudo-Element Parsing (15 tests)
+// ============================================================================
+
+// Test 8.1: Parse simple ::before rule
+TEST_F(CssEngineTest, PseudoElement_BeforeParse) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "p::before { content: \">>> \"; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.2: Parse simple ::after rule
+TEST_F(CssEngineTest, PseudoElement_AfterParse) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "p::after { content: \" <<<\"; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.3: Parse ::before with complex selector
+TEST_F(CssEngineTest, PseudoElement_BeforeComplexSelector) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "ul.nav li::before { content: \"• \"; color: red; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.4: Parse ::after with complex selector
+TEST_F(CssEngineTest, PseudoElement_AfterComplexSelector) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "a.external::after { content: \" ↗\"; font-size: 0.8em; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.5: Parse multiple pseudo-element rules
+TEST_F(CssEngineTest, PseudoElement_MultipleParse) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        ".quote::before { content: open-quote; }\n"
+        ".quote::after { content: close-quote; }";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 2);
+}
+
+// Test 8.6: Parse ::before with display property
+TEST_F(CssEngineTest, PseudoElement_BeforeWithDisplay) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        ".clearfix::before {\n"
+        "  content: \"\";\n"
+        "  display: table;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.7: Parse ::after with positioning
+TEST_F(CssEngineTest, PseudoElement_AfterWithPositioning) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        ".tooltip::after {\n"
+        "  content: attr(data-tooltip);\n"
+        "  position: absolute;\n"
+        "  top: 100%;\n"
+        "  left: 50%;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.8: Parse ::before with counter
+TEST_F(CssEngineTest, PseudoElement_BeforeWithCounter) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "ol li::before {\n"
+        "  content: counter(item) \". \";\n"
+        "  counter-increment: item;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.9: Parse ::before and ::after together
+TEST_F(CssEngineTest, PseudoElement_BeforeAndAfterTogether) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        ".icon::before { content: \"[\"; }\n"
+        ".icon::after { content: \"]\"; }";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 2);
+}
+
+// Test 8.10: Parse ::first-line pseudo-element
+TEST_F(CssEngineTest, PseudoElement_FirstLine) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css = "p::first-line { font-weight: bold; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.11: Parse ::first-letter pseudo-element
+TEST_F(CssEngineTest, PseudoElement_FirstLetter) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "p::first-letter {\n"
+        "  font-size: 2em;\n"
+        "  float: left;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.12: Parse ::selection pseudo-element
+TEST_F(CssEngineTest, PseudoElement_Selection) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "::selection {\n"
+        "  background-color: yellow;\n"
+        "  color: black;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.13: Parse ::placeholder pseudo-element
+TEST_F(CssEngineTest, PseudoElement_Placeholder) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "input::placeholder {\n"
+        "  color: #999;\n"
+        "  font-style: italic;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.14: Parse ::marker pseudo-element
+TEST_F(CssEngineTest, PseudoElement_Marker) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "li::marker {\n"
+        "  color: blue;\n"
+        "  font-size: 1.2em;\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 8.15: Parse pseudo-element with pseudo-class
+TEST_F(CssEngineTest, PseudoElement_WithPseudoClass) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    // Note: The order is important - pseudo-class before pseudo-element
+    const char* css = "a:hover::after { content: \" →\"; }";
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// ============================================================================
 // Main Entry Point - Using GTest default main
 // ============================================================================
