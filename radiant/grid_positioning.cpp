@@ -12,11 +12,11 @@ extern "C" {
 void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container) {
     if (!grid_layout || !container) return;
 
-    printf("DEBUG: Positioning grid items - container: %dx%d at (%d,%d)\n",
+    log_debug(" Positioning grid items - container: %.0fx%.0f at (%.0f,%.0f)\n",
            container->width, container->height, container->x, container->y);
-    printf("DEBUG: Grid content dimensions: %dx%d\n",
+    log_debug(" Grid content dimensions: %dx%d\n",
            grid_layout->content_width, grid_layout->content_height);
-    printf("DEBUG: Grid gaps - row: %d, column: %d\n",
+    log_debug(" Grid gaps - row: %.1f, column: %.1f\n",
            grid_layout->row_gap, grid_layout->column_gap);
     log_debug("Positioning grid items\n");
 
@@ -26,34 +26,34 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
 
     // Calculate row positions
     int current_y = 0;
-    printf("DEBUG: Calculating row positions for %d rows:\n", grid_layout->computed_row_count);
+    log_debug(" Calculating row positions for %d rows:\n", grid_layout->computed_row_count);
     for (int i = 0; i <= grid_layout->computed_row_count; i++) {
         row_positions[i] = current_y;
-        printf("DEBUG: Row %d position: %d\n", i, current_y);
+        log_debug(" Row %d position: %d\n", i, current_y);
         if (i < grid_layout->computed_row_count) {
             int track_size = grid_layout->computed_rows[i].computed_size;
-            printf("DEBUG: Row %d size: %d\n", i, track_size);
+            log_debug(" Row %d size: %d\n", i, track_size);
             current_y += track_size;
             if (i < grid_layout->computed_row_count - 1) {
-                current_y += grid_layout->row_gap;
-                printf("DEBUG: Added row gap: %d, new current_y: %d\n", grid_layout->row_gap, current_y);
+                current_y += (int)grid_layout->row_gap;
+                log_debug(" Added row gap: %.1f, new current_y: %d\n", grid_layout->row_gap, current_y);
             }
         }
     }
 
     // Calculate column positions
     int current_x = 0;
-    printf("DEBUG: Calculating column positions for %d columns:\n", grid_layout->computed_column_count);
+    log_debug(" Calculating column positions for %d columns:\n", grid_layout->computed_column_count);
     for (int i = 0; i <= grid_layout->computed_column_count; i++) {
         column_positions[i] = current_x;
-        printf("DEBUG: Column %d position: %d\n", i, current_x);
+        log_debug(" Column %d position: %d\n", i, current_x);
         if (i < grid_layout->computed_column_count) {
             int track_size = grid_layout->computed_columns[i].computed_size;
-            printf("DEBUG: Column %d size: %d\n", i, track_size);
+            log_debug(" Column %d size: %d\n", i, track_size);
             current_x += track_size;
             if (i < grid_layout->computed_column_count - 1) {
-                current_x += grid_layout->column_gap;
-                printf("DEBUG: Added column gap: %d, new current_x: %d\n", grid_layout->column_gap, current_x);
+                current_x += (int)grid_layout->column_gap;
+                log_debug(" Added column gap: %.1f, new current_x: %d\n", grid_layout->column_gap, current_x);
             }
         }
     }
@@ -61,6 +61,7 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     // Position each grid item
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
+        log_debug(" Item pointer %d: %p, item->gi=%p\n", i, (void*)item, item ? (void*)item->gi : nullptr);
         if (!item->gi) continue;  // Skip items without grid item properties
 
         // Get grid area bounds (convert from 1-indexed to 0-indexed)
@@ -102,12 +103,19 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         }
 
         // Set item position and size
-        item->x = container->x + container_offset_x + item_x;
-        item->y = container->y + container_offset_y + item_y;
-        item->width = item_width;
-        item->height = item_height;
+        float new_x = container->x + container_offset_x + item_x;
+        float new_y = container->y + container_offset_y + item_y;
+        log_debug(" Assigning item %d: x=%.0f (%.0f+%d+%d), y=%.0f, width=%d, height=%d\n",
+               i, new_x, container->x, container_offset_x, item_x, new_y, item_width, item_height);
+        log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
+        item->x = new_x;
+        item->y = new_y;
+        item->width = (float)item_width;
+        item->height = (float)item_height;
+        log_debug(" After assignment item %d: x=%.0f, y=%.0f, width=%.0f, height=%.0f at item=%p\n",
+               i, item->x, item->y, item->width, item->height, (void*)item);
 
-        printf("DEBUG: Grid item %d positioning:\n", i);
+        log_debug(" Grid item %d positioning:\n", i);
         printf("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
         printf("  Track positions: x=%d, y=%d\n", item_x, item_y);
         printf("  Track sizes: width=%d, height=%d\n", item_width, item_height);

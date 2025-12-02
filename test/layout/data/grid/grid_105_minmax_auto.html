@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Minmax Auto Rows</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - minmax auto rows */
+        .container {
+            width: 400px;
+            display: grid;
+            grid-auto-rows: minmax(50px, auto);
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) {
+            background-color: #ccffcc;
+            padding: 40px 15px;
+        }
+        .item:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Short</div>
+        <div class="item">Taller content that needs more space</div>
+        <div class="item">Short</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_105_minmax_auto",
+        "category": "no-template",
+        "features": ["display-grid", "grid-auto-rows", "minmax"],
+        "description": "Grid with minmax auto rows - minimum 50px, grows with content",
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

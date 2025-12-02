@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Order</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - order property */
+        .container {
+            width: 400px;
+            display: grid;
+            grid-auto-rows: 60px;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item:nth-child(1) {
+            background-color: #ffcccc;
+            order: 3;
+        }
+        .item:nth-child(2) {
+            background-color: #ccffcc;
+            order: 1;
+        }
+        .item:nth-child(3) {
+            background-color: #ccccff;
+            order: 2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">First (order:3)</div>
+        <div class="item">Second (order:1)</div>
+        <div class="item">Third (order:2)</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_117_order",
+        "category": "no-template",
+        "features": ["display-grid", "order", "grid-auto-rows"],
+        "description": "Grid items reordered using the order property",
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

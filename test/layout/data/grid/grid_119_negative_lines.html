@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Negative Line Numbers</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - negative line numbers */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item-a {
+            background-color: #ffcccc;
+            grid-column: 1 / -1;  /* Full width */
+            grid-row: 1;
+        }
+        .item-b {
+            background-color: #ccffcc;
+            grid-column: 1;
+            grid-row: 2 / -1;  /* From row 2 to end */
+        }
+        .item-c {
+            background-color: #ccccff;
+            grid-column: 2 / -1;  /* From col 2 to end */
+            grid-row: 2;
+        }
+        .item-d {
+            background-color: #ffffcc;
+            grid-column: -2 / -1;  /* Last column */
+            grid-row: -2 / -1;  /* Last row */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item item-a">A (full)</div>
+        <div class="item item-b">B</div>
+        <div class="item item-c">C</div>
+        <div class="item item-d">D</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_119_negative_lines",
+        "category": "no-template",
+        "features": ["display-grid", "grid-column", "grid-row", "negative-line-numbers"],
+        "description": "Grid placement using negative line numbers to reference from end",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

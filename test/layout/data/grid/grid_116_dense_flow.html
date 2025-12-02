@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Dense Flow</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - dense packing */
+        .container {
+            width: 400px;
+            display: grid;
+            grid-auto-flow: dense;
+            grid-auto-rows: 60px;
+            grid-auto-columns: 1fr;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item:nth-child(1) {
+            background-color: #ffcccc;
+            grid-column: 1;
+            grid-row: 1;
+        }
+        .item:nth-child(2) {
+            background-color: #ccffcc;
+            grid-column: 1;
+            grid-row: 2 / span 2;
+        }
+        .item:nth-child(3) {
+            background-color: #ccccff;
+            /* Auto-placed - should fill gap with dense */
+        }
+        .item:nth-child(4) {
+            background-color: #ffffcc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">A</div>
+        <div class="item">B</div>
+        <div class="item">C</div>
+        <div class="item">D</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_116_dense_flow",
+        "category": "no-template",
+        "features": ["display-grid", "grid-auto-flow", "dense"],
+        "description": "Grid with dense auto-flow packing algorithm",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Justify Content</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS - justify-content for grid tracks */
+        .container {
+            width: 400px;
+            height: 150px;
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: 80px;
+            justify-content: space-between;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 15px;
+            text-align: center;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">A</div>
+        <div class="item">B</div>
+        <div class="item">C</div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_111_justify_content",
+        "category": "no-template",
+        "features": ["display-grid", "justify-content", "grid-auto-flow", "grid-auto-columns"],
+        "description": "Grid tracks distributed with space-between horizontally",
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

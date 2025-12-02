@@ -780,7 +780,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     else if (block->view_type == RDT_VIEW_TABLE_ROW_GROUP) display = "table-row-group";
     else if (block->view_type == RDT_VIEW_TABLE_ROW) display = "table-row";
     else if (block->view_type == RDT_VIEW_TABLE_CELL) display = "table-cell";
-    // CRITICAL FIX: Check for flex container
+    // Check for grid/flex container by display.inner
+    else if (block->display.inner == CSS_VALUE_GRID) display = "grid";
+    else if (block->display.inner == CSS_VALUE_FLEX) display = "flex";
     else if (block->embed && block->embed->flex) display = "flex";
     strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
 
