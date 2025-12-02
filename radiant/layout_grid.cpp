@@ -53,11 +53,32 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     grid->allocated_line_names = 8;
     grid->line_names = (GridLineName*)calloc(grid->allocated_line_names, sizeof(GridLineName));
 
-    // Initialize track lists
-    grid->grid_template_rows = create_grid_track_list(4);
-    grid->grid_template_columns = create_grid_track_list(4);
-    grid->grid_auto_rows = create_grid_track_list(2);
-    grid->grid_auto_columns = create_grid_track_list(2);
+    // Initialize track lists - only create new ones if not already copied from embed->grid
+    // Track ownership to avoid double-free
+    if (!grid->grid_template_rows) {
+        grid->grid_template_rows = create_grid_track_list(4);
+        grid->owns_template_rows = true;
+    } else {
+        grid->owns_template_rows = false;  // Shared with embed->grid
+    }
+    if (!grid->grid_template_columns) {
+        grid->grid_template_columns = create_grid_track_list(4);
+        grid->owns_template_columns = true;
+    } else {
+        grid->owns_template_columns = false;  // Shared with embed->grid
+    }
+    if (!grid->grid_auto_rows) {
+        grid->grid_auto_rows = create_grid_track_list(2);
+        grid->owns_auto_rows = true;
+    } else {
+        grid->owns_auto_rows = false;  // Shared with embed->grid
+    }
+    if (!grid->grid_auto_columns) {
+        grid->grid_auto_columns = create_grid_track_list(2);
+        grid->owns_auto_columns = true;
+    } else {
+        grid->owns_auto_columns = false;  // Shared with embed->grid
+    }
 
     grid->needs_reflow = false;
 
@@ -70,11 +91,19 @@ void cleanup_grid_container(LayoutContext* lycon) {
     log_debug("Cleaning up grid container for %p\n", lycon->grid_container);
     GridContainerLayout* grid = lycon->grid_container;
 
-    // Free track lists
-    destroy_grid_track_list(grid->grid_template_rows);
-    destroy_grid_track_list(grid->grid_template_columns);
-    destroy_grid_track_list(grid->grid_auto_rows);
-    destroy_grid_track_list(grid->grid_auto_columns);
+    // Free track lists only if we own them (not shared with embed->grid)
+    if (grid->owns_template_rows) {
+        destroy_grid_track_list(grid->grid_template_rows);
+    }
+    if (grid->owns_template_columns) {
+        destroy_grid_track_list(grid->grid_template_columns);
+    }
+    if (grid->owns_auto_rows) {
+        destroy_grid_track_list(grid->grid_auto_rows);
+    }
+    if (grid->owns_auto_columns) {
+        destroy_grid_track_list(grid->grid_auto_columns);
+    }
 
     // Free computed tracks
     if (grid->computed_rows) {
@@ -178,20 +207,24 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 2 - Resolving grid template areas");
     resolve_grid_template_areas(grid_layout);
 
-    // Phase 3: Place grid items (with dense packing if enabled)
-    log_debug("DEBUG: Phase 3 - Placing grid items");
+    // Phase 3: Determine initial grid size from templates (before placement)
+    log_debug("DEBUG: Phase 3 - Determining initial grid size from templates");
+    determine_grid_size(grid_layout);
+
+    // Phase 4: Place grid items (with dense packing if enabled)
+    log_debug("DEBUG: Phase 4 - Placing grid items");
     if (grid_layout->is_dense_packing) {
         auto_place_grid_items_dense(grid_layout);
     } else {
         place_grid_items(grid_layout, items, item_count);
     }
 
-    // Phase 4: Determine grid size
-    log_debug("DEBUG: Phase 4 - Determining grid size");
+    // Phase 5: Update grid size after placement (may have grown due to auto-placement)
+    log_debug("DEBUG: Phase 5 - Updating grid size after placement");
     determine_grid_size(grid_layout);
 
-    // Phase 5: Resolve track sizes
-    log_debug("DEBUG: Phase 5 - Resolving track sizes");
+    // Phase 6: Resolve track sizes
+    log_debug("DEBUG: Phase 6 - Resolving track sizes");
     resolve_track_sizes(grid_layout, container);
 
     // Phase 6: Position grid items
