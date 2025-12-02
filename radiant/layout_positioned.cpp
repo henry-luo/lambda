@@ -25,7 +25,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // Get parent's text direction to determine horizontal offset precedence
     // The CSS 'direction' property determines which value wins when both left and right are specified
     TextDirection parent_direction = TD_LTR;  // default to LTR
-    ViewGroup* parent = block->parent_view();
+    ViewElement* parent = block->parent_view();
     if (parent && parent->is_element()) {
         DomElement* parent_elem = (DomElement*)parent;
         if (parent_elem->specified_style) {
@@ -110,7 +110,7 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
 
     if (position_type == CSS_VALUE_ABSOLUTE) {
         // Find nearest positioned ancestor
-        ViewGroup* ancestor = element->parent_view();
+        ViewElement* ancestor = element->parent_view();
         while (ancestor) {
             if (ancestor->is_block()) {
                 ViewBlock* ancestor_block = (ViewBlock*)ancestor;
@@ -131,7 +131,7 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
     }
 
     // For relative positioning, use nearest block container
-    ViewGroup* ancestor = element->parent_view();
+    ViewElement* ancestor = element->parent_view();
     while (ancestor) {
         if (ancestor->is_block()) {
             return (ViewBlock*)ancestor;
@@ -713,7 +713,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
     float block_offset_x = 0;
     float block_offset_y = 0;
 
-    ViewGroup* ancestor = (ViewGroup*)current_view;
+    ViewElement* ancestor = (ViewElement*)current_view;
     bool found_container = false;
     while (ancestor) {
         if (ancestor == container) {
@@ -752,7 +752,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
 
     // Find the containing block for coordinate calculations
     ViewBlock* containing_block = nullptr;
-    ViewGroup* search = (ViewGroup*)current_view;
+    ViewElement* search = (ViewElement*)current_view;
     while (search && !containing_block) {
         if (search->is_block()) {
             containing_block = (ViewBlock*)search;

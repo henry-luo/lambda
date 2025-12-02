@@ -42,7 +42,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio);
+void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio);
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
 
 // Forward declarations
@@ -981,7 +981,7 @@ int cmd_layout(int argc, char** argv) {
     // It writes to /tmp/view_tree.json which is what the test framework expects
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("[Layout] Calling print_view_tree for complete layout output...");
-        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, 1.0f);
+        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, 1.0f);
         log_debug("[Layout] Layout tree written to /tmp/view_tree.json");
     } else {
         log_warn("No view tree available to output");

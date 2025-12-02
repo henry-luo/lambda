@@ -224,7 +224,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     View* child = container->first_child;
                     while (child) {
                         if (child->view_type == RDT_VIEW_BLOCK) {
-                            ViewGroup* item = (ViewGroup*)child->as_element();
+                            ViewElement* item = (ViewElement*)child->as_element();
                             if (item) {
                                 int item_height = 0;
                                 // Check for explicit height
@@ -276,7 +276,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     View* child = container->first_child;
                     while (child) {
                         if (child->view_type == RDT_VIEW_BLOCK) {
-                            ViewGroup* item = (ViewGroup*)child->as_element();
+                            ViewElement* item = (ViewElement*)child->as_element();
                             if (item && item->fi) {
                                 // Use flex-basis if specified, otherwise use intrinsic/explicit height
                                 int item_height = 0;
@@ -357,7 +357,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Debug: Print initial item dimensions
     for (int i = 0; i < item_count; i++) {
-        ViewGroup* item = (ViewGroup*)items[i]->as_element();
+        ViewElement* item = (ViewElement*)items[i]->as_element();
         log_debug("Item %d initial: %dx%d at (%d,%d)", i, item->width, item->height, item->x, item->y);
         if (item->blk) {
             log_debug("Item %d box-sizing: %d, given: %dx%d", i, item->blk->box_sizing,
@@ -453,7 +453,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             // For column flex, sum up item heights (main sizes)
             FlexLineInfo* line = &flex_layout->lines[i];
             for (int j = 0; j < line->item_count; j++) {
-                ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
+                ViewElement* item = (ViewElement*)line->items[j]->as_element();
                 if (item) {
                     total_line_main += item->height;
                 }
@@ -510,7 +510,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("FINAL FLEX POSITIONS:");
     for (int i = 0; i < item_count; i++) {
         View* item = items[i];
-        ViewGroup* item_elmt = (ViewGroup*)item->as_element();
+        ViewElement* item_elmt = (ViewElement*)item->as_element();
         int order_val = item_elmt && item_elmt->fi ? item_elmt->fi->order : -999;
         log_debug("FINAL_ITEM %d (order=%d, ptr=%p) - pos: (%d,%d), size: %dx%d", i, order_val, item, item->x, item->y, item->width, item->height);
     }
@@ -539,7 +539,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
         }
 
         // Filter out absolutely positioned and hidden items
-        ViewGroup* child_elmt = (ViewGroup*)child->as_element();
+        ViewElement* child_elmt = (ViewElement*)child->as_element();
         // CRITICAL: Check position->position (PositionProp), NOT in_line->position
         ViewBlock* child_block = (ViewBlock*)child_elmt;
         bool is_absolute = child_block && child_block->position && child_block->position->position &&
@@ -580,7 +580,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, View*** 
         }
 
         // Filter out absolutely positioned and hidden items
-        ViewGroup* child_elmt = (ViewGroup*)child->as_element();
+        ViewElement* child_elmt = (ViewElement*)child->as_element();
         // CRITICAL: Check position->position (PositionProp), NOT in_line->position
         ViewBlock* child_block2 = (ViewBlock*)child_elmt;
         bool is_absolute = child_block2 && child_block2->position && child_block2->position->position &&
@@ -644,23 +644,23 @@ void sort_flex_items_by_order(View** items, int count) {
     // Log initial order
     log_debug("sort_flex_items_by_order: Sorting %d items", count);
     for (int i = 0; i < count; i++) {
-        ViewGroup* item = (ViewGroup*)items[i]->as_element();
+        ViewElement* item = (ViewElement*)items[i]->as_element();
         int order_val = item && item->fi ? item->fi->order : 0;
         log_debug("  Before sort: items[%d] order=%d", i, order_val);
     }
 
     // simple insertion sort by order, maintaining document order for equal values
     for (int i = 1; i < count; ++i) {
-        ViewGroup* key = (ViewGroup*)items[i]->as_element();
+        ViewElement* key = (ViewElement*)items[i]->as_element();
         int key_order = key ? key->fi ? key->fi->order : 0 : 0;
         int j = i - 1;
-        ViewGroup* item_j = (ViewGroup*)items[j]->as_element();
+        ViewElement* item_j = (ViewElement*)items[j]->as_element();
         int item_j_order = item_j ? item_j->fi ? item_j->fi->order : 0 : 0;
         while (j >= 0 && item_j_order > key_order) {
             items[j + 1] = items[j];
             j--;
             if (j >= 0) {
-                item_j = (ViewGroup*)items[j]->as_element();
+                item_j = (ViewElement*)items[j]->as_element();
                 item_j_order = item_j ? item_j->fi ? item_j->fi->order : 0 : 0;
             }
         }
@@ -669,7 +669,7 @@ void sort_flex_items_by_order(View** items, int count) {
 
     // Log final order
     for (int i = 0; i < count; i++) {
-        ViewGroup* item = (ViewGroup*)items[i]->as_element();
+        ViewElement* item = (ViewElement*)items[i]->as_element();
         int order_val = item && item->fi ? item->fi->order : 0;
         log_debug("  After sort: items[%d] order=%d", i, order_val);
     }
@@ -681,7 +681,7 @@ void sort_flex_items_by_order(View** items, int count) {
 // ============================================================================
 
 // Helper: Check if a child should be skipped as a flex item
-static bool should_skip_flex_item(ViewGroup* item) {
+static bool should_skip_flex_item(ViewElement* item) {
     if (!item) return true;
 
     // Skip absolutely positioned items
@@ -746,7 +746,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         init_flex_item_view(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup
-        ViewGroup* item = (ViewGroup*)child->as_element();
+        ViewElement* item = (ViewElement*)child->as_element();
 
         // Step 3: Check if should skip (absolute, hidden)
         if (should_skip_flex_item(item)) {
@@ -845,7 +845,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
 }
 
 // Calculate flex basis for an item
-int calculate_flex_basis(ViewGroup* item, FlexContainerLayout* flex_layout) {
+int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item->fi) return 0;
 
     log_debug("calculate_flex_basis for item %p", item);
@@ -922,7 +922,7 @@ int calculate_flex_basis(ViewGroup* item, FlexContainerLayout* flex_layout) {
 // ============================================================================
 
 // Resolve min/max constraints for a flex item
-void resolve_flex_item_constraints(ViewGroup* item, FlexContainerLayout* flex_layout) {
+void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item || !item->fi) {
         log_debug("resolve_flex_item_constraints: invalid item or no flex properties");
         return;
@@ -977,7 +977,7 @@ void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout) {
     log_debug("Applying constraints to %d flex items", flex_layout->item_count);
 
     for (int i = 0; i < flex_layout->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)flex_layout->flex_items[i]->as_element();
+        ViewElement* item = (ViewElement*)flex_layout->flex_items[i]->as_element();
         if (item && item->fi) {
             resolve_flex_item_constraints(item, flex_layout);
         }
@@ -1063,7 +1063,7 @@ void apply_constraints(ViewBlock* item, int container_width, int container_heigh
  * @return The constrained (clamped) size
  */
 int apply_flex_constraint(
-    ViewGroup* item,
+    ViewElement* item,
     int computed_size,
     bool is_main_axis,
     FlexContainerLayout* flex_layout,
@@ -1132,7 +1132,7 @@ int apply_flex_constraint(
  * Overloaded version without hit flags for simpler use cases.
  */
 int apply_flex_constraint(
-    ViewGroup* item,
+    ViewElement* item,
     int computed_size,
     bool is_main_axis,
     FlexContainerLayout* flex_layout
@@ -1145,7 +1145,7 @@ int apply_flex_constraint(
  * Returns the constrained cross size for stretching.
  */
 int apply_stretch_constraint(
-    ViewGroup* item,
+    ViewElement* item,
     int container_cross_size,
     FlexContainerLayout* flex_layout
 ) {
@@ -1166,7 +1166,7 @@ int apply_stretch_constraint(
 // NOTE: This is a simplified implementation that synthesizes the baseline
 // from the item's outer margin edge. Proper baseline alignment requires
 // running after all nested content is laid out, which is not yet implemented.
-int calculate_item_baseline(ViewGroup* item) {
+int calculate_item_baseline(ViewElement* item) {
     if (!item) return 0;
 
     // Get top margin
@@ -1181,7 +1181,7 @@ int calculate_item_baseline(ViewGroup* item) {
     // Check if item has laid-out children - use first baseline-participating child
     View* child_view = (View*)item->first_child;
     while (child_view) {
-        ViewGroup* child = (ViewGroup*)child_view->as_element();
+        ViewElement* child = (ViewElement*)child_view->as_element();
         if (child && child->height > 0) {
             // Skip positioned children (absolute/fixed)
             // CRITICAL: Check position->position (PositionProp), NOT in_line->position
@@ -1231,7 +1231,7 @@ int find_max_baseline(FlexLineInfo* line, int container_align_items) {
     bool found = false;
 
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
 
         // Check if this item participates in baseline alignment
@@ -1293,7 +1293,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
         for (int i = 0; i < flex_layout->line_count; i++) {
             FlexLineInfo* line = &flex_layout->lines[i];
             for (int j = 0; j < line->item_count; j++) {
-                ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
+                ViewElement* item = (ViewElement*)line->items[j]->as_element();
                 if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
                     has_baseline_alignment = true;
                     break;
@@ -1328,7 +1328,7 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
 
         // Reposition each baseline-aligned item
         for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+            ViewElement* item = (ViewElement*)line->items[i]->as_element();
             if (!item || !item->fi) continue;
 
             // Check if this item uses baseline alignment
@@ -1419,7 +1419,7 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
 
         // Add items to line until we need to wrap
         while (current_item < item_count) {
-            ViewGroup* item = (ViewGroup*)items[current_item]->as_element();
+            ViewElement* item = (ViewElement*)items[current_item]->as_element();
             if (!item) { current_item++;  continue; }
             int item_basis = calculate_flex_basis(item, flex_layout);
 
@@ -1456,7 +1456,7 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
 
         // Log item order values in this line
         for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item_elmt = (ViewGroup*)line->items[i]->as_element();
+            ViewElement* item_elmt = (ViewElement*)line->items[i]->as_element();
             int order_val = item_elmt && item_elmt->fi ? item_elmt->fi->order : 0;
             log_debug("  Line item[%d] order=%d", i, order_val);
         }
@@ -1465,7 +1465,7 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
         line->total_flex_grow = 0;
         line->total_flex_shrink = 0;
         for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item_elmt = (ViewGroup*)line->items[i]->as_element();
+            ViewElement* item_elmt = (ViewElement*)line->items[i]->as_element();
             if (item_elmt && item_elmt->fi) {
                 line->total_flex_grow += item_elmt->fi->flex_grow;
                 line->total_flex_shrink += item_elmt->fi->flex_shrink;
@@ -1498,7 +1498,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
     int total_basis_size = 0;
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         int basis = calculate_flex_basis(item, flex_layout);
         item_flex_basis[i] = basis;  // Store for scaled shrink calculation
         set_main_axis_size(item, basis, flex_layout);
@@ -1554,7 +1554,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         for (int i = 0; i < line->item_count; i++) {
             if (frozen[i]) continue;
 
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+            ViewElement* item = (ViewElement*)line->items[i]->as_element();
             if (!item || !item->fi) continue;
 
             if (is_growing && item->fi->flex_grow > 0) {
@@ -1587,7 +1587,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         for (int i = 0; i < line->item_count; i++) {
             if (frozen[i]) continue;
 
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+            ViewElement* item = (ViewElement*)line->items[i]->as_element();
             if (!item || !item->fi) continue;
 
             int current_size = get_main_axis_size(item, flex_layout);
@@ -1655,7 +1655,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         // Recalculate remaining free space for next iteration
         int total_current_size = 0;
         for (int i = 0; i < line->item_count; i++) {
-            ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+            ViewElement* item = (ViewElement*)line->items[i]->as_element();
             if (item) {
                 total_current_size += get_main_axis_size(item, flex_layout);
             }
@@ -1686,7 +1686,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     // *** FIX 1: Calculate total item size WITHOUT gaps (gaps handled separately) ***
     int total_item_size = 0;
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
         int item_size = get_main_axis_size(item, flex_layout);
         log_debug("MAIN_AXIS_ALIGN - item %d size: %d", i, item_size);
@@ -1697,7 +1697,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     // Check for auto margins on main axis
     int auto_margin_count = 0;
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
         if (is_main_axis_horizontal(flex_layout)) {
             if (item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO) auto_margin_count++;
@@ -1785,7 +1785,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 
     // *** FIX 4: Simplified positioning loop - gaps handled explicitly ***
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
 
         // Handle auto margins
@@ -1856,7 +1856,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 
     for (int i = 0; i < line->item_count; i++) {
         log_debug("align_items_cross_axis: Processing item %d", i);
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         log_debug("align_items_cross_axis: item=%p, item->as_element()=%p", line->items[i], item);
         // CRITICAL FIX: Use OR (||) not AND (&&) - if item is null, skip without checking fi
         if (!item || !item->fi) {
@@ -2116,7 +2116,7 @@ void align_content(FlexContainerLayout* flex_layout) {
 // CRITICAL FIX: Box model aware utility functions
 // These functions properly handle content vs border-box dimensions like block layout
 
-int get_border_box_width(ViewGroup* item) {
+int get_border_box_width(ViewElement* item) {
     // FIXED: Now that we have proper box-sizing implementation in layout_block.cpp,
     // the item->width already represents the correct dimensions based on box-sizing property.
     // No need to subtract padding again - that would cause double-subtraction!
@@ -2178,7 +2178,7 @@ int get_border_offset_top(ViewBlock* item) {
 }
 
 // Utility functions for axis-agnostic positioning
-int get_main_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout) {
+int get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Use border-box dimensions for flex calculations (like browsers do)
     // This matches browser behavior where flex layout works with border-box sizes
     int base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
@@ -2198,7 +2198,7 @@ int get_main_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout) {
     return base_size;
 }
 
-int get_cross_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout) {
+int get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (is_main_axis_horizontal(flex_layout)) {
         // Cross-axis is height for horizontal flex containers
         // CRITICAL FIX: Check CSS height first
@@ -2218,7 +2218,7 @@ int get_cross_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout) {
     }
 }
 
-int get_cross_axis_position(ViewGroup* item, FlexContainerLayout* flex_layout) {
+int get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Return position relative to container content area, not absolute position
     ViewBlock* container = (ViewBlock*)item->parent;
     int border_offset = 0;
@@ -2239,9 +2239,9 @@ int get_cross_axis_position(ViewGroup* item, FlexContainerLayout* flex_layout) {
     }
 }
 
-void set_main_axis_position(ViewGroup* item, int position, FlexContainerLayout* flex_layout) {
+void set_main_axis_position(ViewElement* item, int position, FlexContainerLayout* flex_layout) {
     // ENHANCED: Account for container border AND padding offset
-    ViewGroup* container = (ViewGroup*)item->parent;
+    ViewElement* container = (ViewElement*)item->parent;
     int offset = 0;  // Combined border + padding offset
 
     if (container && container->bound) {
@@ -2298,9 +2298,9 @@ void set_main_axis_position(ViewGroup* item, int position, FlexContainerLayout* 
     }
 }
 
-void set_cross_axis_position(ViewGroup* item, int position, FlexContainerLayout* flex_layout) {
+void set_cross_axis_position(ViewElement* item, int position, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Account for container border AND padding offset on cross axis
-    ViewGroup* container = (ViewGroup*)item->parent;
+    ViewElement* container = (ViewElement*)item->parent;
     int offset = 0;  // Combined border + padding offset
 
     if (container && container->bound) {
@@ -2329,7 +2329,7 @@ void set_cross_axis_position(ViewGroup* item, int position, FlexContainerLayout*
     }
 }
 
-void set_main_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex_layout) {
+void set_main_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_layout) {
     // CRITICAL FIX: Store the correct border-box size (like browsers do)
     // The flex algorithm works with border-box dimensions (100px)
     // We should store this directly to match browser behavior
@@ -2342,7 +2342,7 @@ void set_main_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex_lay
     }
 }
 
-void set_cross_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex_layout) {
+void set_cross_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_layout) {
     if (is_main_axis_horizontal(flex_layout)) {
         item->height = size;
     } else {
@@ -2370,7 +2370,7 @@ void apply_gaps(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
 
     // Apply gaps by adjusting positions
     for (int i = 1; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
         int current_pos = is_main_axis_horizontal(flex_layout) ? item->x : item->y;
         set_main_axis_position(item, current_pos + (gap * i), flex_layout);
@@ -2389,7 +2389,7 @@ void distribute_free_space(FlexLineInfo* line, bool is_growing) {
 
     // Distribute space proportionally
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         float flex_factor = item && item->fi ? (is_growing ? item->fi->flex_grow : item->fi->flex_shrink) : 0.0f;
 
         if (flex_factor > 0) {
@@ -2415,7 +2415,7 @@ void distribute_free_space(FlexLineInfo* line, bool is_growing) {
 }
 
 // Helper: Check if an item has a definite cross-axis size
-static bool item_has_definite_cross_size(ViewGroup* item, FlexContainerLayout* flex_layout) {
+static bool item_has_definite_cross_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item || !item->blk) return false;
 
     if (is_main_axis_horizontal(flex_layout)) {
@@ -2428,7 +2428,7 @@ static bool item_has_definite_cross_size(ViewGroup* item, FlexContainerLayout* f
 }
 
 // Helper: Check if an item will be stretched in cross-axis
-static bool item_will_stretch(ViewGroup* item, FlexContainerLayout* flex_layout) {
+static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item || !item->fi) return false;
 
     // Get effective align-self (uses align-items if auto)
@@ -2451,7 +2451,7 @@ void calculate_line_cross_sizes(FlexContainerLayout* flex_layout) {
 
         // Find the maximum cross size among items in this line
         for (int j = 0; j < line->item_count; j++) {
-            ViewGroup* item = (ViewGroup*)line->items[j]->as_element();
+            ViewElement* item = (ViewElement*)line->items[j]->as_element();
             if (!item) continue;
 
             bool has_definite = item_has_definite_cross_size(item, flex_layout);

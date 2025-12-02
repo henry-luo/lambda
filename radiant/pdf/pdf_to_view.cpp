@@ -104,7 +104,7 @@ ViewTree* pdf_to_view_tree(Input* input, Item pdf_root) {
 
     // Count children to verify
     int child_count = 0;
-    ViewGroup* group = (ViewGroup*)root_view;
+    ViewElement* group = (ViewElement*)root_view;
     View* child = group->first_child;
     while (child) {
         child_count++;
@@ -185,7 +185,7 @@ ViewTree* pdf_page_to_view_tree(Input* input, Item pdf_root, int page_index) {
 
     // Count children to verify
     int child_count = 0;
-    ViewGroup* group = (ViewGroup*)root_view;
+    ViewElement* group = (ViewElement*)root_view;
     View* child = group->first_child;
     while (child) {
         child_count++;
@@ -921,7 +921,7 @@ static void create_text_array_views(Input* input, ViewBlock* parent,
 static void append_child_view(View* parent, View* child) {
     if (!parent || !child) return;
 
-    ViewGroup* parent_group = (ViewGroup*)parent;
+    ViewElement* parent_group = (ViewElement*)parent;
 
     // Set parent reference
     child->parent = parent_group;

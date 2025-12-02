@@ -500,7 +500,7 @@ typedef struct ViewText : DomText {
     // Color color;     // text color (for PDF text fill color)
 } ViewText;
 
-struct ViewGroup : DomElement {
+struct ViewElement : DomElement {
     // exclude those skipped text nodes
     View* first_placed_child() {
         View* child = (View*)first_child;
@@ -523,7 +523,7 @@ struct ViewGroup : DomElement {
     }
 };
 
-typedef struct ViewSpan : ViewGroup {
+typedef struct ViewSpan : ViewElement {
     // FontProp* font;  // font style
     // BoundaryProp* bound;  // block boundary properties
     // InlineProp* in_line;  // inline specific style properties
