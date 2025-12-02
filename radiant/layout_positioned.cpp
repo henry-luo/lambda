@@ -318,10 +318,17 @@ bool element_has_positioning(ViewBlock* block) {
 
 /**
  * Check if an element has float properties
+ * Per CSS 2.1 section 9.7: float is ignored for absolutely positioned elements
+ * (position: absolute or position: fixed)
  */
 bool element_has_float(ViewBlock* block) {
-    return block && block->position &&
-           (block->position->float_prop == CSS_VALUE_LEFT ||
+    if (!block || !block->position) return false;
+    // Float is ignored for absolutely positioned or fixed elements
+    if (block->position->position == CSS_VALUE_ABSOLUTE ||
+        block->position->position == CSS_VALUE_FIXED) {
+        return false;
+    }
+    return (block->position->float_prop == CSS_VALUE_LEFT ||
             block->position->float_prop == CSS_VALUE_RIGHT);
 }
 
