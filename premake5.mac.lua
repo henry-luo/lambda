@@ -3039,6 +3039,7 @@ project "test_lambda_domnode_gtest"
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
+        "radiant/symbol_resolver.cpp",
     }
     
     includedirs {
@@ -4735,6 +4736,7 @@ project "test_css_dom_integration"
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
+        "radiant/symbol_resolver.cpp",
     }
     
     includedirs {
@@ -4848,6 +4850,7 @@ project "test_css_dom_crud"
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
+        "radiant/symbol_resolver.cpp",
     }
     
     includedirs {
@@ -4961,6 +4964,7 @@ project "test_css_style_application_gtest"
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
+        "radiant/symbol_resolver.cpp",
     }
     
     includedirs {
@@ -5067,6 +5071,7 @@ project "test_html_css_gtest"
         "lambda/input/css/dom_node.cpp",
         "lambda/input/css/dom_element.cpp",
         "lambda/input/css/selector_matcher.cpp",
+        "radiant/symbol_resolver.cpp",
     }
     
     includedirs {
