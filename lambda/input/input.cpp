@@ -126,7 +126,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         *(String**)field_ptr = (String*)value.pointer;
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: 
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
         *(Map**)field_ptr = value.map;
         break;
     case LMD_TYPE_TYPE:
@@ -277,7 +277,7 @@ void map_finalize_shape(TypeMap* type_map, Input* input) {
     if (pooled_shape) {
         // replace the shape chain with pooled version
         type_map->shape = pooled_shape;
-        
+
         // find last entry in pooled chain
         struct ShapeEntry* last = pooled_shape;
         while (last->next) {
@@ -296,7 +296,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
         log_debug("missing element type");
         return;  // safety check
     }
-    
+
     if (!type_elmt->shape || type_elmt->length == 0) {
         return;  // empty element, nothing to finalize
     }
@@ -306,7 +306,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
     log_debug("elmt_finalize_shape: attr_count=%zu", attr_count);
     const char** attr_names = (const char**)pool_alloc(input->pool, attr_count * sizeof(char*));
     TypeId* attr_types = (TypeId*)pool_alloc(input->pool, attr_count * sizeof(TypeId));
-    
+
     if (!attr_names || !attr_types) {
         return;  // allocation failed
     }
@@ -327,7 +327,7 @@ void elmt_finalize_shape(TypeElmt* type_elmt, Input* input) {
     if (pooled_shape) {
         // replace the shape chain with pooled version
         type_elmt->shape = pooled_shape;
-        
+
         // find last entry in pooled chain
         struct ShapeEntry* last = pooled_shape;
         while (last->next) { last = last->next; }
