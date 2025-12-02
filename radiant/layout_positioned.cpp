@@ -642,15 +642,15 @@ void float_context_position_float(FloatContext* ctx, ViewBlock* element, float c
 
 /**
  * Apply float layout to an element
- * Note: The block has already been positioned at its normal flow position by layout_block_content.
+ * Note: The block has already been laid out at its normal flow position by layout_block_content.
  * For floats, we need to:
- * 1. Add the float to the float context for tracking
- * 2. Adjust surrounding content (handled by adjust_line_for_floats and clear)
+ * 1. Reposition float:right elements to the right edge of their containing block
+ * 2. Add the float to the float context for tracking
+ * 3. Adjust surrounding content (handled by adjust_line_for_floats and clear)
  *
- * The actual float positioning is correct as set by layout_block_content because:
- * - block->x = pa_line->left (left edge of parent content area)
- * - block->y = pa_block->advance_y (current vertical position in parent)
- * Plus margins are applied after.
+ * CSS 2.2 Section 9.5.1: Float Positioning Rules
+ * - float:left positions at the left edge of containing block
+ * - float:right positions at the right edge of containing block
  */
 void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     if (!element_has_float(block)) {
@@ -672,8 +672,47 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (float_ctx) {
-        // Add the float to the context at its current position
-        // The block is already positioned correctly by layout_block_content
+        // For float:right, reposition the element to the right edge of the container
+        if (block->position->float_prop == CSS_VALUE_RIGHT && float_ctx->container) {
+            ViewBlock* container = float_ctx->container;
+            float margin_right = block->bound ? block->bound->margin.right : 0;
+
+            // Calculate the right edge of the container's content area
+            // Since block->x is relative to its parent, we need to calculate relative position
+            // container->width gives the width of the content area
+            float container_content_width = container->width;
+            if (container->bound) {
+                // Subtract right padding and border to get content area width
+                container_content_width -= container->bound->padding.right;
+                if (container->bound->border) {
+                    container_content_width -= container->bound->border->width.right;
+                }
+                // Also subtract left padding and border from content width
+                container_content_width -= container->bound->padding.left;
+                if (container->bound->border) {
+                    container_content_width -= container->bound->border->width.left;
+                }
+            }
+
+            // Calculate relative x position: position at right edge of container content area
+            // new_x is relative to container's left edge (after padding/border)
+            float content_area_left_offset = 0;
+            if (container->bound) {
+                content_area_left_offset = container->bound->padding.left;
+                if (container->bound->border) {
+                    content_area_left_offset += container->bound->border->width.left;
+                }
+            }
+
+            // Position float at right edge: content_area_left + content_width - block_width - margin_right
+            float new_x = content_area_left_offset + container_content_width - block->width - margin_right;
+            log_debug("Float:right repositioning: old_x=%.1f, new_x=%.1f (container_content_width=%.1f, width=%.1f, margin_right=%.1f)",
+                      block->x, new_x, container_content_width, block->width, margin_right);
+            block->x = new_x;
+        }
+        // float:left keeps its position (already at left edge from normal flow)
+
+        // Add the float to the context
         float_context_add_float(float_ctx, block);
         log_debug("Float element added to context at (%.1f, %.1f) size (%.1f, %.1f)",
                   block->x, block->y, block->width, block->height);
