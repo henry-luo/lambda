@@ -41,6 +41,9 @@ static CssUnit parse_css_unit(const char* unit_str, size_t length) {
     if (strcmp(unit, "vmin") == 0) return CSS_UNIT_VMIN;
     if (strcmp(unit, "vmax") == 0) return CSS_UNIT_VMAX;
 
+    // Grid fractional units
+    if (strcmp(unit, "fr") == 0) return CSS_UNIT_FR;
+
     return CSS_UNIT_NONE;
 }
 
