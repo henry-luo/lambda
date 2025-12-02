@@ -204,7 +204,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
             print_root_item(output, output_input->root);
             printf("%s", output->str);
             strbuf_free(output);
-            
+
             // Note: Do NOT destroy output_input->pool here!
             // The pool is shared with the Script, which is managed by the Runtime
             // todo: free up output_input;
@@ -262,7 +262,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
         log_debug("%s", output->str);
     }
     strbuf_free(output);
-    
+
     // Note: Do NOT destroy output_input->pool here!
     // The pool is shared with the Script, which is managed by the Runtime
     // Also do NOT delete output_input - it was allocated from the pool
@@ -443,7 +443,6 @@ int exec_convert(int argc, char* argv[]) {
         }
 
         printf("Successfully parsed input file\n");
-        printf("DEBUG: input->root type_id: %d, pointer: %p\n", input->root.type_id(), input->root.pointer);
 
         // Capture the effective type by checking if LaTeX parsing was used
         bool is_latex_input = false;

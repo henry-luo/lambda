@@ -852,8 +852,6 @@ __attribute__((visibility("hidden")))
 void parse_html_impl(Input* input, const char* html_string) {
     const char *html = html_string;
 
-    log_debug("parse_html_impl called with content: '%.50s...'", html_string);
-
     // Create HTML input context with error tracking and HTML5 state management
     HtmlInputContext ctx(input, html_string, strlen(html_string));
 
@@ -864,8 +862,6 @@ void parse_html_impl(Input* input, const char* html_string) {
         root_list->length = 0;
         root_list->capacity = 0;
         root_list->items = NULL;
-        log_debug("Created root_list=%p, type_id=%d (should be %d)",
-                  (void*)root_list, root_list->type_id, LMD_TYPE_LIST);
     }
 
     if (!root_list) {
@@ -879,8 +875,6 @@ void parse_html_impl(Input* input, const char* html_string) {
         html++;
     }
 
-    log_debug("Starting root parse loop");
-
     // Parse root-level items (DOCTYPE, comments, and elements)
     while (*html) {
         // Skip whitespace between root-level items
@@ -890,12 +884,9 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         if (!*html) break;
 
-        log_debug("Root parse loop: position='%.30s...'", html);
-
         // Parse DOCTYPE
         if (strncasecmp(html, "<!doctype", 9) == 0) {
             Item doctype_item = parse_doctype(ctx, &html, html_string);
-            log_debug("After DOCTYPE: position='%.30s...'", html);
             if (doctype_item.item != ITEM_ERROR) {
                 list_push(root_list, doctype_item);
             }
@@ -934,12 +925,9 @@ void parse_html_impl(Input* input, const char* html_string) {
 
         // Parse regular element (should be <html> or similar)
         if (*html == '<' && *(html + 1) != '/' && *(html + 1) != '!') {
-            log_debug("Root parsing: about to parse element starting with: %.20s", html);
             Item element_item = parse_element(ctx, &html, html_string);
-            log_debug("Root parsing: parse_element returned type_id=%d", get_type_id(element_item));
             if (element_item.item != ITEM_ERROR && element_item.item != ITEM_NULL) {
                 list_push(root_list, element_item);
-                log_debug("Root parsing: pushed element to root_list, length=%zu", root_list->length);
             }
             continue;
         }
@@ -1083,19 +1071,13 @@ void parse_html_impl(Input* input, const char* html_string) {
     // If list contains only one item, return that item and free the list
     if (root_list->length == 1) {
         input->root = root_list->items[0];
-        log_debug("Setting input->root to single item, type_id=%d", get_type_id(input->root));
         // Note: We could free the list here, but the pool will handle cleanup
     } else if (root_list->length > 1) {
         // Return the list as the root
         input->root = (Item){.list = root_list};
-        log_debug("Setting input->root to list with %zu items, root_list=%p, root_list->type_id=%d",
-                  root_list->length, (void*)root_list, root_list->type_id);
-        log_debug("Verifying: input->root.item=%llx, input->root.list=%p, type_id=%d",
-                  (unsigned long long)input->root.item, (void*)input->root.list, get_type_id(input->root));
     } else {
         // Empty document - return null
         input->root = (Item){.item = ITEM_NULL};
-        log_debug("Setting input->root to NULL (empty document)");
     }
 
     if (ctx.hasErrors()) {
