@@ -54,6 +54,20 @@ typedef struct SelectorEntry {
 // ============================================================================
 
 /**
+ * Pseudo-element type for match results
+ */
+typedef enum PseudoElementType {
+    PSEUDO_ELEMENT_NONE = 0,      // No pseudo-element
+    PSEUDO_ELEMENT_BEFORE,        // ::before
+    PSEUDO_ELEMENT_AFTER,         // ::after
+    PSEUDO_ELEMENT_FIRST_LINE,    // ::first-line
+    PSEUDO_ELEMENT_FIRST_LETTER,  // ::first-letter
+    PSEUDO_ELEMENT_SELECTION,     // ::selection
+    PSEUDO_ELEMENT_MARKER,        // ::marker
+    PSEUDO_ELEMENT_PLACEHOLDER    // ::placeholder
+} PseudoElementType;
+
+/**
  * MatchResult - Result of selector matching
  *
  * Contains information about whether a selector matches an element
@@ -64,6 +78,7 @@ typedef struct MatchResult {
     CssSpecificity specificity;      // Specificity of the match
     uint32_t pseudo_state_required;  // Required pseudo-class states
     bool matches_with_pseudo;        // Whether match depends on pseudo-state
+    PseudoElementType pseudo_element; // Which pseudo-element is targeted (::before, ::after, etc.)
 } MatchResult;
 
 // ============================================================================
@@ -161,6 +176,13 @@ SelectorEntry* selector_matcher_get_entry(SelectorMatcher* matcher, CssSimpleSel
 // ============================================================================
 // Primary Matching Functions
 // ============================================================================
+
+/**
+ * Get the pseudo-element type from a selector, if any
+ * @param selector Selector to examine
+ * @return Pseudo-element type or PSEUDO_ELEMENT_NONE if no pseudo-element
+ */
+PseudoElementType selector_get_pseudo_element(CssSelector* selector);
 
 /**
  * Check if a selector matches an element

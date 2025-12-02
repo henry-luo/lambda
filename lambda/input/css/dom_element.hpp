@@ -107,6 +107,9 @@ struct DomElement : DomNode {
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
+    // Pseudo-element styles (::before and ::after)
+    StyleTree* before_styles;    // Styles for ::before pseudo-element
+    StyleTree* after_styles;     // Styles for ::after pseudo-element
     // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
@@ -145,6 +148,7 @@ struct DomElement : DomNode {
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
+        before_styles(nullptr), after_styles(nullptr),
         style_version(0), needs_style_recompute(false), styles_resolved(false),
         pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
 };
@@ -350,12 +354,55 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
 int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity);
 
 /**
+ * Apply a CSS rule to a pseudo-element (::before or ::after)
+ * @param element Target element (the originating element)
+ * @param rule CSS rule with declarations
+ * @param specificity Selector specificity for cascade resolution
+ * @param pseudo_element Which pseudo-element (PSEUDO_ELEMENT_BEFORE or PSEUDO_ELEMENT_AFTER)
+ * @return Number of declarations applied
+ */
+int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
+                                          CssSpecificity specificity, int pseudo_element);
+
+/**
  * Get the specified value for a CSS property
  * @param element Target element
  * @param property_id Property to look up
  * @return Specified CSS declaration or NULL if not set
  */
 CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyId property_id);
+
+/**
+ * Get the specified value for a CSS property on a pseudo-element
+ * @param element Target element (the originating element)
+ * @param property_id Property to look up
+ * @param pseudo_element Which pseudo-element (PSEUDO_ELEMENT_BEFORE or PSEUDO_ELEMENT_AFTER)
+ * @return Specified CSS declaration or NULL if not set
+ */
+CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
+                                                     CssPropertyId property_id, int pseudo_element);
+
+/**
+ * Check if element has ::before pseudo-element content
+ * @param element Target element
+ * @return true if element has ::before content, false otherwise
+ */
+bool dom_element_has_before_content(DomElement* element);
+
+/**
+ * Check if element has ::after pseudo-element content
+ * @param element Target element
+ * @return true if element has ::after content, false otherwise
+ */
+bool dom_element_has_after_content(DomElement* element);
+
+/**
+ * Get content string for a pseudo-element
+ * @param element Target element
+ * @param pseudo_element Which pseudo-element (PSEUDO_ELEMENT_BEFORE or PSEUDO_ELEMENT_AFTER)
+ * @return Content string or NULL if none
+ */
+const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element);
 
 /**
  * Remove a CSS property from an element

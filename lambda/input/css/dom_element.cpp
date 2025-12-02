@@ -744,6 +744,180 @@ bool dom_element_remove_property(DomElement* element, CssPropertyId property_id)
 }
 
 // ============================================================================
+// Pseudo-Element Style Management (::before, ::after)
+// ============================================================================
+
+int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
+                                          CssSpecificity specificity, int pseudo_element) {
+    if (!element || !rule || !element->doc) {
+        return 0;
+    }
+
+    // Get the appropriate style tree for the pseudo-element
+    StyleTree** target_style = nullptr;
+    const char* pseudo_name = nullptr;
+
+    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
+        target_style = &element->before_styles;
+        pseudo_name = "::before";
+    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
+        target_style = &element->after_styles;
+        pseudo_name = "::after";
+    } else {
+        log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
+        return 0;
+    }
+
+    // Create style tree if needed
+    if (!*target_style) {
+        *target_style = style_tree_create(element->doc->pool);
+        if (!*target_style) {
+            log_error("[CSS] Failed to create style tree for %s", pseudo_name);
+            return 0;
+        }
+    }
+
+    int applied_count = 0;
+
+    // Apply each declaration from the rule
+    if (rule->type == CSS_RULE_STYLE && rule->data.style_rule.declarations) {
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* decl = rule->data.style_rule.declarations[i];
+            if (decl) {
+                // Update declaration's specificity to match the selector
+                decl->specificity = specificity;
+                decl->origin = rule->origin;
+
+                // Apply to pseudo-element style tree
+                if (style_tree_apply_declaration(*target_style, decl)) {
+                    applied_count++;
+                    log_debug("[CSS] Applied %s property %d to <%s>",
+                              pseudo_name, decl->property_id, element->tag_name);
+                }
+            }
+        }
+    }
+
+    if (applied_count > 0) {
+        element->style_version++;
+        element->needs_style_recompute = true;
+    }
+
+    return applied_count;
+}
+
+CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
+                                                     CssPropertyId property_id, int pseudo_element) {
+    if (!element) {
+        return NULL;
+    }
+
+    StyleTree* style = nullptr;
+
+    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
+        style = element->before_styles;
+    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
+        style = element->after_styles;
+    }
+
+    if (!style) {
+        return NULL;
+    }
+
+    return style_tree_get_declaration(style, property_id);
+}
+
+bool dom_element_has_before_content(DomElement* element) {
+    if (!element || !element->before_styles) {
+        return false;
+    }
+
+    CssDeclaration* content_decl = style_tree_get_declaration(
+        element->before_styles, CSS_PROPERTY_CONTENT);
+
+    if (!content_decl || !content_decl->value) {
+        return false;
+    }
+
+    // Check if content value is not 'none' or 'normal'
+    CssValue* value = content_decl->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->data.keyword == CSS_VALUE_NONE ||
+            value->data.keyword == CSS_VALUE_NORMAL) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool dom_element_has_after_content(DomElement* element) {
+    if (!element || !element->after_styles) {
+        return false;
+    }
+
+    CssDeclaration* content_decl = style_tree_get_declaration(
+        element->after_styles, CSS_PROPERTY_CONTENT);
+
+    if (!content_decl || !content_decl->value) {
+        return false;
+    }
+
+    // Check if content value is not 'none' or 'normal'
+    CssValue* value = content_decl->value;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (value->data.keyword == CSS_VALUE_NONE ||
+            value->data.keyword == CSS_VALUE_NORMAL) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element) {
+    if (!element) {
+        return NULL;
+    }
+
+    StyleTree* style = nullptr;
+
+    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
+        style = element->before_styles;
+    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
+        style = element->after_styles;
+    }
+
+    if (!style) {
+        return NULL;
+    }
+
+    CssDeclaration* content_decl = style_tree_get_declaration(style, CSS_PROPERTY_CONTENT);
+
+    if (!content_decl || !content_decl->value) {
+        return NULL;
+    }
+
+    CssValue* value = content_decl->value;
+
+    // Return the string content
+    if (value->type == CSS_VALUE_TYPE_STRING) {
+        return value->data.string;
+    }
+
+    // Handle list of values (for content with multiple parts)
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+        // For now, return the first string value
+        CssValue* first = value->data.list.values[0];
+        if (first && first->type == CSS_VALUE_TYPE_STRING) {
+            return first->data.string;
+        }
+    }
+
+    return NULL;
+}
+
+// ============================================================================
 // Pseudo-Class State Management
 // ============================================================================
 
