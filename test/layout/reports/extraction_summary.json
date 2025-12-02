@@ -1,7 +1,7 @@
 {
-  "total_files": 87,
+  "total_files": 25,
   "generated": 0,
-  "skipped": 87,
+  "skipped": 25,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -14,699 +14,203 @@
   },
   "results": [
     {
-      "category": "box",
-      "file": "baseline_806_float_left.html",
+      "category": "page",
+      "file": "article-layout.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 22,
+      "node_count": 157,
       "error": null
     },
     {
-      "category": "box",
-      "file": "baseline_813_float_right.html",
+      "category": "page",
+      "file": "blog-homepage.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 23,
+      "node_count": 95,
       "error": null
     },
     {
-      "category": "box",
-      "file": "baseline_814_clear_float.html",
+      "category": "page",
+      "file": "cern.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 21,
+      "node_count": 107,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-011.htm",
+      "category": "page",
+      "file": "cern_servers.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 21,
+      "node_count": 236,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-013.htm",
+      "category": "page",
+      "file": "cnn_lite.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 25,
+      "node_count": 361,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-016.htm",
+      "category": "page",
+      "file": "contact-form.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 25,
+      "node_count": 72,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-017.htm",
+      "category": "page",
+      "file": "css1_test.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 35,
+      "node_count": 50,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-018.htm",
+      "category": "page",
+      "file": "dashboard-simple.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 22,
+      "node_count": 142,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-019.htm",
+      "category": "page",
+      "file": "documentation.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 22,
+      "node_count": 166,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-020.htm",
+      "category": "page",
+      "file": "error-page.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 21,
+      "node_count": 47,
       "error": null
     },
     {
-      "category": "box",
-      "file": "blocks-021.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 21,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "blocks-022.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 21,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "blocks-025.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 33,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_004_borders.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 38,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_005_box_sizing.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 31,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_006_text_align.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 48,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_007_vertical_align.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 53,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_008_centering.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 46,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_009_baseline_alignment.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 91,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_010_line_height.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 70,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_011_display_types.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 97,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_012_overflow.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 76,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "box_013_nested_boxes.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 67,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "float-001.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 11,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-006.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-007.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-017.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-018.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-028.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-029.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-039.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-040.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-050.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-051.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-061.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-062.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-072.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-073.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-083.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-084.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-094.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-095.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-100.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-101.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-102.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-103.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-111.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 20,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-112.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 20,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "height-114.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 21,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-000-ref.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 13,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-000.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 29,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-001.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 24,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-002.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 52,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-003.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 55,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-004.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 58,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-005.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 53,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-height-001-ref.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 18,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-height-001.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 22,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-height-002-ref.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 16,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-height-002.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 20,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-non-replaced-height-001.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 24,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-non-replaced-height-002.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 24,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-non-replaced-width-001.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 22,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-non-replaced-width-002.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-non-replaced-width-003.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 28,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-non-replaced-width-004.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 28,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-height-001.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 22,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-height-002.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-height-003.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-height-004.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-height-005.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-height-007.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-width-001.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-width-006.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-replaced-width-007.htm",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 23,
-      "error": null
-    },
-    {
-      "category": "box",
-      "file": "inline-block-valign-001-ref.htm",
+      "category": "page",
+      "file": "example.html",
       "success": true,
       "was_skipped": true,
       "node_count": 17,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-valign-001.htm",
+      "category": "page",
+      "file": "footer-showcase.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 35,
+      "node_count": 122,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-valign-002-ref.htm",
+      "category": "page",
+      "file": "hn.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 23,
+      "node_count": 1288,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-valign-002.htm",
+      "category": "page",
+      "file": "html2_spec.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 35,
+      "node_count": 1495,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-width-001-ref.htm",
+      "category": "page",
+      "file": "legible.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 22,
+      "node_count": 372,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-width-001a.htm",
+      "category": "page",
+      "file": "newsletter.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 26,
+      "node_count": 42,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-width-001b.htm",
+      "category": "page",
+      "file": "npr.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 26,
+      "node_count": 134,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-width-002-ref.htm",
+      "category": "page",
+      "file": "paulgraham.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 2632,
+      "error": null
+    },
+    {
+      "category": "page",
+      "file": "pricing-table.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 140,
+      "error": null
+    },
+    {
+      "category": "page",
+      "file": "sample2.html",
       "success": true,
       "was_skipped": true,
       "node_count": 19,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-width-002a.htm",
+      "category": "page",
+      "file": "sample3.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 24,
+      "node_count": 45,
       "error": null
     },
     {
-      "category": "box",
-      "file": "inline-block-width-002b.htm",
+      "category": "page",
+      "file": "sample4.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 24,
+      "node_count": 30,
       "error": null
     },
     {
-      "category": "box",
-      "file": "width-083.htm",
+      "category": "page",
+      "file": "sample5.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 24,
+      "node_count": 68,
       "error": null
     },
     {
-      "category": "box",
-      "file": "width-084.htm",
+      "category": "page",
+      "file": "table-comparison.html",
       "success": true,
       "was_skipped": true,
-      "node_count": 24,
+      "node_count": 127,
+      "error": null
+    },
+    {
+      "category": "page",
+      "file": "zengarden.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 311,
       "error": null
     }
   ]
