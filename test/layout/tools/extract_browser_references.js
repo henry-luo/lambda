@@ -94,13 +94,24 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
         // Extract layout data
         console.log('📊 Extracting layout data...');
         const layoutData = await page.evaluate(() => {
+            // Helper to get className as string (handles SVGAnimatedString for SVG elements)
+            const getClassNameString = (element) => {
+                if (!element.className) return '';
+                // SVG elements have className as SVGAnimatedString with baseVal property
+                if (typeof element.className === 'object' && element.className.baseVal !== undefined) {
+                    return element.className.baseVal;
+                }
+                return typeof element.className === 'string' ? element.className : '';
+            };
+
             // Helper to generate enhanced CSS selector
             const generateSelector = (element) => {
                 if (element.id) return `#${element.id}`;
 
                 let selector = element.tagName.toLowerCase();
-                if (element.className) {
-                    selector += '.' + element.className.split(' ').filter(c => c.trim()).join('.');
+                const classNameStr = getClassNameString(element);
+                if (classNameStr) {
+                    selector += '.' + classNameStr.split(' ').filter(c => c.trim()).join('.');
                 }
 
                 // Add index if there are siblings with same tag
@@ -270,12 +281,13 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
                 const selector = generateSelector(element);
                 const key = selector || `${element.tagName.toLowerCase()}_${elementIndex}`;
 
+                const classNameStr = getClassNameString(element);
                 return {
                     nodeType: 'element',
                     selector: key,
                     tag: element.tagName.toLowerCase(),
                     id: element.id || null,
-                    classes: element.className ? element.className.split(' ').filter(c => c.trim()) : [],
+                    classes: classNameStr ? classNameStr.split(' ').filter(c => c.trim()) : [],
 
                     // Layout properties
                     layout: {
