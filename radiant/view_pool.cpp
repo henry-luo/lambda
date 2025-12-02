@@ -3,6 +3,7 @@
 #include "grid.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include <time.h>
+#include <cmath>  // for INFINITY
 
 void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
 
@@ -641,6 +642,211 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
     strbuf_append_format(buf, "\"height\": %.1f\n", css_height);
 }
 
+/**
+ * Print combined consecutive text nodes as a single text node.
+ * Collects all consecutive ViewText siblings starting from 'first_text',
+ * combines their text content, and outputs as a single JSON object.
+ *
+ * @param first_text The first text node in a sequence of consecutive text nodes
+ * @param buf Output string buffer
+ * @param indent Current indentation level
+ * @param pixel_ratio Pixel ratio for coordinate conversion
+ * @return Pointer to the last text node processed (to continue iteration from next sibling)
+ */
+static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent, float pixel_ratio) {
+    // Collect all consecutive text nodes
+    struct TextNodeInfo {
+        ViewText* text;
+        unsigned char* data;
+    };
+
+    // Use a simple array for collecting text nodes (max 64 should be enough)
+    TextNodeInfo text_nodes[64];
+    int text_node_count = 0;
+    View* current = (View*)first_text;
+
+    // Collect consecutive text nodes
+    while (current && current->view_type == RDT_VIEW_TEXT && text_node_count < 64) {
+        ViewText* text = (ViewText*)current;
+        text_nodes[text_node_count].text = text;
+        text_nodes[text_node_count].data = text->text_data();
+        text_node_count++;
+        current = current->next_sibling;
+    }
+
+    // If only one text node, use the regular print function
+    if (text_node_count == 1) {
+        // Output single text node with all its rects
+        ViewText* text = text_nodes[0].text;
+        TextRect* rect = text->rect;
+
+        while (rect) {
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "{\n");
+
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"type\": \"text\",\n");
+
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"tag\": \"text\",\n");
+
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"selector\": \"text\",\n");
+
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"content\": ");
+
+            unsigned char* text_data = text->text_data();
+            if (text_data && rect->length > 0) {
+                char content[2048];
+                int len = min((int)sizeof(content) - 1, rect->length);
+                strncpy(content, (char*)(text_data + rect->start_index), len);
+                content[len] = '\0';
+                append_json_string(buf, content);
+            } else {
+                append_json_string(buf, "[empty]");
+            }
+            strbuf_append_str(buf, ",\n");
+
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"text_info\": {\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"length\": %d\n", rect->length);
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "},\n");
+
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"layout\": {\n");
+            print_bounds_json(text, buf, indent, pixel_ratio, rect);
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "}\n");
+
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "}");
+
+            rect = rect->next;
+            if (rect) {
+                strbuf_append_str(buf, ",\n");
+            }
+        }
+
+        return first_text;  // Return the single text node
+    }
+
+    // Multiple consecutive text nodes - combine them
+    // Build combined content string
+    char combined_content[8192];
+    combined_content[0] = '\0';
+    int combined_len = 0;
+
+    // Calculate combined bounding box
+    // Note: rect->x/y are relative to the parent element, not the ViewText
+    // We use the rect positions directly since they're in the same coordinate space
+    float min_x = INFINITY, min_y = INFINITY;
+    float max_x = -INFINITY, max_y = -INFINITY;
+
+    for (int i = 0; i < text_node_count; i++) {
+        ViewText* text = text_nodes[i].text;
+        unsigned char* text_data = text_nodes[i].data;
+        TextRect* rect = text->rect;
+
+        // Collect text from all rects
+        while (rect) {
+            if (text_data && rect->length > 0) {
+                int copy_len = min((int)(sizeof(combined_content) - combined_len - 1), rect->length);
+                if (copy_len > 0) {
+                    strncpy(combined_content + combined_len, (char*)(text_data + rect->start_index), copy_len);
+                    combined_len += copy_len;
+                    combined_content[combined_len] = '\0';
+                }
+            }
+
+            // Update bounding box using rect coordinates directly
+            // (rect->x/y are already in parent-relative coordinates)
+            float rect_x = rect->x;
+            float rect_y = rect->y;
+            float rect_right = rect_x + rect->width;
+            float rect_bottom = rect_y + rect->height;
+
+            if (rect_x < min_x) min_x = rect_x;
+            if (rect_y < min_y) min_y = rect_y;
+            if (rect_right > max_x) max_x = rect_right;
+            if (rect_bottom > max_y) max_y = rect_bottom;
+
+            rect = rect->next;
+        }
+    }
+
+    // Output combined text node
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": \"text\",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": \"text\",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": \"text\",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"content\": ");
+    append_json_string(buf, combined_content);
+    strbuf_append_str(buf, ",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"text_info\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"combined_from\": %d,\n", text_node_count);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"length\": %d\n", combined_len);
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+
+    // Output combined layout (using absolute coordinates)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+
+    // Calculate absolute position by walking up parent chain (same as print_bounds_json)
+    // Start with the minimum rect position (already in parent-relative coords)
+    float abs_x = min_x;
+    float abs_y = min_y;
+    View* parent = first_text->parent_view();
+    while (parent) {
+        if (parent->is_block()) {
+            abs_x += parent->x;
+            abs_y += parent->y;
+        }
+        parent = parent->parent_view();
+    }
+
+    float css_x = abs_x / pixel_ratio;
+    float css_y = abs_y / pixel_ratio;
+    float css_width = (max_x - min_x) / pixel_ratio;
+    float css_height = (max_y - min_y) / pixel_ratio;
+
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"y\": %.1f,\n", css_y);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"width\": %.1f,\n", css_width);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"height\": %.1f\n", css_height);
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "}\n");
+
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+
+    // Return the last text node processed
+    return (View*)text_nodes[text_node_count - 1].text;
+}
+
 // Recursive JSON generation for view blocks
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio) {
     if (!block) {
@@ -1150,7 +1356,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         }
         else if (child->view_type == RDT_VIEW_TEXT) {
-            print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
+            // Use combined text printing to merge consecutive text nodes
+            View* last_text = print_combined_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
+            child = last_text;  // Skip to the last text node (loop will advance to next)
         }
         else if (child->view_type == RDT_VIEW_BR) {
             print_br_json(child, buf, indent + 4, pixel_ratio);
