@@ -124,6 +124,12 @@ typedef struct GridContainerLayout : GridProp {
 
     // Layout context for intrinsic sizing (set during init_grid_container)
     struct LayoutContext* lycon;
+
+    // Ownership flags - if true, we own these and should free them
+    bool owns_template_rows;
+    bool owns_template_columns;
+    bool owns_auto_rows;
+    bool owns_auto_columns;
 } GridContainerLayout;
 
 // Note: Grid item placement is stored directly in GridItemProp (elem->gi->computed_*)
