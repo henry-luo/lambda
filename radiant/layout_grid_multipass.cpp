@@ -469,9 +469,14 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     lycon->block.content_height = content_height;
     lycon->block.given_width = content_width;
     lycon->block.given_height = -1;  // Auto height
-    lycon->block.advance_y = 0;
+    lycon->block.advance_y = content_y_offset;  // Start after padding/border top
     lycon->block.max_width = 0;
     lycon->elmt = (DomNode*)grid_item;
+
+    // Inherit text alignment from grid item if specified
+    if (grid_item->blk) {
+        lycon->block.text_align = grid_item->blk->text_align;
+    }
 
     // Set up line formatting context
     line_init(lycon, content_x_offset, content_x_offset + content_width);
