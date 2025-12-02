@@ -230,29 +230,106 @@
   min-width: 100%;
 }
 
-/* Scrollbar styles for log, view tree, and html source */
+/* Html Tree Viewer */
+.html-tree-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #ffffff;
+}
+
+.html-tree-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f3f3f3;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.html-tree-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333333;
+  flex-shrink: 0;
+}
+
+.html-tree-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+}
+
+.filter-input {
+  flex: 1;
+  max-width: 300px;
+  padding: 6px 10px;
+  background: #ffffff;
+  border: 1px solid #cccccc;
+  color: #333333;
+  font-size: 13px;
+  border-radius: 3px;
+}
+
+.filter-input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+.line-count {
+  font-size: 11px;
+  color: #666666;
+  white-space: nowrap;
+}
+
+.html-tree-content {
+  flex: 1;
+  overflow: auto;
+  padding: 0;
+}
+
+.html-tree-text {
+  margin: 0;
+  padding: 8px;
+  font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #333333;
+  white-space: pre;
+  display: inline-block;
+  min-width: 100%;
+}
+
+/* Scrollbar styles for log, view tree, html source, and html tree */
 .log-content::-webkit-scrollbar,
 .view-tree-content::-webkit-scrollbar,
-.html-source-content::-webkit-scrollbar {
+.html-source-content::-webkit-scrollbar,
+.html-tree-content::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
 .log-content::-webkit-scrollbar-track,
 .view-tree-content::-webkit-scrollbar-track,
-.html-source-content::-webkit-scrollbar-track {
+.html-source-content::-webkit-scrollbar-track,
+.html-tree-content::-webkit-scrollbar-track {
   background: #f3f3f3;
 }
 
 .log-content::-webkit-scrollbar-thumb,
 .view-tree-content::-webkit-scrollbar-thumb,
-.html-source-content::-webkit-scrollbar-thumb {
+.html-source-content::-webkit-scrollbar-thumb,
+.html-tree-content::-webkit-scrollbar-thumb {
   background: #c1c1c1;
   border-radius: 5px;
 }
 
 .log-content::-webkit-scrollbar-thumb:hover,
 .view-tree-content::-webkit-scrollbar-thumb:hover,
-.html-source-content::-webkit-scrollbar-thumb:hover {
+.html-source-content::-webkit-scrollbar-thumb:hover,
+.html-tree-content::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }

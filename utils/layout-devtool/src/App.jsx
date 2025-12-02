@@ -61,8 +61,9 @@ function App() {
 
       setTestResults(result);
 
-      // Refresh the View Tree panel
+      // Refresh the View Tree panel and HTML Tree panel
       terminalRef.current?.refreshViewTree();
+      terminalRef.current?.refreshHtmlTree();
     } catch (error) {
       console.error('Test execution error:', error);
       terminalRef.current?.writeln(`\x1b[31mError: ${error.message}\x1b[0m`);
