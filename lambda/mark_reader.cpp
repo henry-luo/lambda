@@ -173,7 +173,7 @@ MapReader ItemReader::asMap() const {
 }
 
 ArrayReader ItemReader::asArray() const {
-    if (isArray()) {
+    if (isArray() || isList()) {
         return ArrayReader(item_.array);
     }
     return ArrayReader();  // Invalid array
