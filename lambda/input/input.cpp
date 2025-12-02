@@ -584,7 +584,6 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         else if (strcmp(effective_type, "html") == 0) {
             parse_html_impl(input, source);
-            log_debug("After parse_html_impl: input->root type_id=%d", get_type_id(input->root));
         }
         else if (strcmp(effective_type, "latex") == 0) {
             // Disable string merging for LaTeX parsing to preserve separate elements
