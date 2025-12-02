@@ -428,6 +428,7 @@ project "lambda"
         "radiant/view_pool.cpp",
         "radiant/font.cpp",
         "radiant/font_face.cpp",
+        "radiant/font_lookup_platform.c",
         "radiant/surface.cpp",
         "radiant/render.cpp",
         "radiant/render_svg.cpp",
