@@ -127,10 +127,73 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 // Element Measurement (Recursive)
 // ============================================================================
 
+// Helper to check if an element has inline-level display from CSS
+static bool is_inline_level_element(DomElement* element) {
+    if (!element) return false;
+
+    // First check if the view has been styled
+    ViewBlock* view = (ViewBlock*)element;
+    if (view->display.outer == CSS_VALUE_INLINE) {
+        return true;
+    }
+
+    // Fall back to checking specified CSS style
+    if (element->specified_style) {
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            // Check for inline display values
+            CssEnum display_value = display_decl->value->data.keyword;
+            if (display_value == CSS_VALUE_INLINE ||
+                display_value == CSS_VALUE_INLINE_BLOCK ||
+                display_value == CSS_VALUE_INLINE_FLEX ||
+                display_value == CSS_VALUE_INLINE_GRID ||
+                display_value == CSS_VALUE_INLINE_TABLE) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element) {
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
+
+    // Resolve CSS styles for this element if not already resolved
+    // This is needed during intrinsic measurement to get correct display property
+    if (!element->styles_resolved && element->specified_style) {
+        // Set measuring flag to prevent marking as permanently resolved
+        bool was_measuring = lycon->is_measuring;
+        lycon->is_measuring = true;
+
+        // Resolve CSS display property at minimum
+        // We don't need full style resolution, just display property
+        CssDeclaration* display_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_DISPLAY);
+        if (display_decl && display_decl->value &&
+            display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            ViewBlock* view = (ViewBlock*)element;
+            CssEnum display_value = display_decl->value->data.keyword;
+            // Set outer display
+            if (display_value == CSS_VALUE_INLINE) {
+                view->display.outer = CSS_VALUE_INLINE;
+            } else if (display_value == CSS_VALUE_INLINE_BLOCK) {
+                view->display.outer = CSS_VALUE_INLINE_BLOCK;
+            } else if (display_value == CSS_VALUE_BLOCK) {
+                view->display.outer = CSS_VALUE_BLOCK;
+            } else if (display_value == CSS_VALUE_LIST_ITEM) {
+                view->display.outer = CSS_VALUE_LIST_ITEM;
+            }
+        }
+
+        lycon->is_measuring = was_measuring;
+    }
+
+    log_debug("measure_element_intrinsic: tag=%s, outer=%d", element->node_name(),
+              ((ViewBlock*)element)->display.outer);
 
     // Check for explicit CSS width first
     if (element->specified_style) {
@@ -143,14 +206,21 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             if (explicit_width > 0) {
                 sizes.min_content = explicit_width;
                 sizes.max_content = explicit_width;
+                log_debug("  -> explicit width: %d", explicit_width);
                 return sizes;
             }
         }
     }
 
+    // Track inline-level content separately
+    int inline_min_sum = 0;  // Sum of min-content widths for inline children
+    int inline_max_sum = 0;  // Sum of max-content widths for inline children
+    bool has_inline_content = false;
+
     // Measure children recursively
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         IntrinsicSizes child_sizes = {0, 0};
+        bool is_inline = false;
 
         if (child->is_text()) {
             const char* text = (const char*)child->text_data();
@@ -160,14 +230,49 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
             }
+            is_inline = true;  // Text nodes are always inline
         } else if (child->is_element()) {
-            child_sizes = measure_element_intrinsic_widths(lycon, child->as_element());
+            DomElement* child_elem = child->as_element();
+            child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+            is_inline = is_inline_level_element(child_elem);
+
+            log_debug("  child %s: min=%d, max=%d, is_inline=%d",
+                      child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
+
+            // For inline elements, also add horizontal margins
+            if (is_inline) {
+                ViewBlock* child_view = (ViewBlock*)child_elem;
+                if (child_view->bound) {
+                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO &&
+                        child_view->bound->margin.left >= 0) {
+                        child_sizes.max_content += (int)child_view->bound->margin.left;
+                    }
+                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO &&
+                        child_view->bound->margin.right >= 0) {
+                        child_sizes.max_content += (int)child_view->bound->margin.right;
+                    }
+                }
+            }
         }
 
-        // For block-level children: min = max of children's min, max = max of children's max
-        // (This is simplified; inline children would sum max-content)
-        sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-        sizes.max_content = max(sizes.max_content, child_sizes.max_content);
+        if (is_inline) {
+            // For inline content, sum widths for max-content (no wrapping)
+            // and take max of min-content (can wrap between items)
+            has_inline_content = true;
+            inline_max_sum += child_sizes.max_content;
+            inline_min_sum = max(inline_min_sum, child_sizes.min_content);
+        } else {
+            // For block-level children: take max of each
+            sizes.min_content = max(sizes.min_content, child_sizes.min_content);
+            sizes.max_content = max(sizes.max_content, child_sizes.max_content);
+        }
+    }
+
+    // Merge inline content measurements
+    if (has_inline_content) {
+        sizes.min_content = max(sizes.min_content, inline_min_sum);
+        sizes.max_content = max(sizes.max_content, inline_max_sum);
+        log_debug("  inline_max_sum=%d, inline_min_sum=%d", inline_max_sum, inline_min_sum);
     }
 
     // Add padding and border
