@@ -219,7 +219,7 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         } else {
             ctx.write_text("null");
         }
-    } else if (item.isArray()) {
+    } else if (item.isArray() || item.isList()) {
         ArrayReader arr = item.asArray();
         format_array_reader_with_indent(ctx, arr, indent);
     } else if (item.isMap()) {
