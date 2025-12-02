@@ -512,6 +512,7 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
         // Try matching each selector in the group
         bool any_match = false;
         CssSpecificity best_specificity = {0, 0, 0, 0, false};
+        PseudoElementType pseudo_element = PSEUDO_ELEMENT_NONE;
 
         for (size_t sel_idx = 0; sel_idx < selector_group->selector_count; sel_idx++) {
             CssSelector* group_sel = selector_group->selectors[sel_idx];
@@ -529,12 +530,19 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
             if (selector_matcher_matches(matcher, group_sel, elem, &match_result)) {
                 any_match = true;
                 best_specificity = match_result.specificity;
+                pseudo_element = match_result.pseudo_element;
                 break;
             }
         }
 
         if (any_match && rule->data.style_rule.declaration_count > 0) {
-            dom_element_apply_rule(elem, rule, best_specificity);
+            if (pseudo_element != PSEUDO_ELEMENT_NONE) {
+                // Apply to pseudo-element
+                dom_element_apply_pseudo_element_rule(elem, rule, best_specificity, (int)pseudo_element);
+            } else {
+                // Apply to regular element
+                dom_element_apply_rule(elem, rule, best_specificity);
+            }
         }
         return;
     }
@@ -554,7 +562,14 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
     MatchResult match_result;
     if (selector_matcher_matches(matcher, selector, elem, &match_result)) {
         if (rule->data.style_rule.declaration_count > 0) {
-            dom_element_apply_rule(elem, rule, match_result.specificity);
+            if (match_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
+                // Apply to pseudo-element
+                dom_element_apply_pseudo_element_rule(elem, rule, match_result.specificity,
+                                                      (int)match_result.pseudo_element);
+            } else {
+                // Apply to regular element
+                dom_element_apply_rule(elem, rule, match_result.specificity);
+            }
         }
     }
 }

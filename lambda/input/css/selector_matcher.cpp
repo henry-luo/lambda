@@ -174,8 +174,12 @@ bool selector_matcher_matches(SelectorMatcher* matcher,
         .matches = false,
         .specificity = {0, 0, 0, 0, false},
         .pseudo_state_required = 0,
-        .matches_with_pseudo = false
+        .matches_with_pseudo = false,
+        .pseudo_element = PSEUDO_ELEMENT_NONE
     };
+
+    // Check for pseudo-element in the selector
+    local_result.pseudo_element = selector_get_pseudo_element(selector);
 
     // Check if selector is complex (has combinators)
     if (selector->compound_selector_count == 0) {
@@ -275,7 +279,8 @@ bool selector_matcher_matches_group(SelectorMatcher* matcher,
         .matches = false,
         .specificity = {0, 0, 0, 0, false},
         .pseudo_state_required = 0,
-        .matches_with_pseudo = false
+        .matches_with_pseudo = false,
+        .pseudo_element = PSEUDO_ELEMENT_NONE
     };
 
     // Try each selector in the group
@@ -466,6 +471,21 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                 );
             }
 
+        // Pseudo-elements (::before, ::after, etc.) - always return true
+        // The caller should check for pseudo-elements separately and track them
+        case CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_AFTER:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
+            // Pseudo-elements are matched at a higher level (compound/selector matching)
+            // Here we just return true to not block the match
+            return true;
+
         // Pseudo-classes
         default:
             if (simple_selector->type >= CSS_SELECTOR_PSEUDO_ROOT &&
@@ -479,6 +499,48 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
             }
             return false;
     }
+}
+
+// Helper function to detect pseudo-element in a compound selector
+static PseudoElementType get_pseudo_element_from_compound(CssCompoundSelector* compound) {
+    if (!compound) return PSEUDO_ELEMENT_NONE;
+
+    for (size_t i = 0; i < compound->simple_selector_count; i++) {
+        CssSimpleSelector* simple = compound->simple_selectors[i];
+        if (!simple) continue;
+
+        switch (simple->type) {
+            case CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE:
+                return PSEUDO_ELEMENT_BEFORE;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_AFTER:
+                return PSEUDO_ELEMENT_AFTER;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE:
+                return PSEUDO_ELEMENT_FIRST_LINE;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER:
+                return PSEUDO_ELEMENT_FIRST_LETTER;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION:
+                return PSEUDO_ELEMENT_SELECTION;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
+                return PSEUDO_ELEMENT_MARKER;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
+                return PSEUDO_ELEMENT_PLACEHOLDER;
+            default:
+                break;
+        }
+    }
+
+    return PSEUDO_ELEMENT_NONE;
+}
+
+// Helper function to detect pseudo-element in a selector
+PseudoElementType selector_get_pseudo_element(CssSelector* selector) {
+    if (!selector || selector->compound_selector_count == 0) {
+        return PSEUDO_ELEMENT_NONE;
+    }
+
+    // Pseudo-element should be in the rightmost compound selector
+    CssCompoundSelector* rightmost = selector->compound_selectors[selector->compound_selector_count - 1];
+    return get_pseudo_element_from_compound(rightmost);
 }
 
 bool selector_matcher_matches_compound(SelectorMatcher* matcher,
@@ -497,7 +559,6 @@ bool selector_matcher_matches_compound(SelectorMatcher* matcher,
 
     return true;
 }
-
 bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
                                         const char* attr_name,
                                         const char* attr_value,
