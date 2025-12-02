@@ -4,7 +4,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include <time.h>
 
-void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
+void print_view_group(ViewElement* view_group, StrBuf* buf, int indent);
 
 // Helper function to get view type name for JSON
 const char* View::view_name() {
@@ -95,7 +95,7 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
 void free_view(ViewTree* tree, View* view) {
     log_debug("free view %p, type %s", view, view->node_name());
     if (view->view_type >= RDT_VIEW_INLINE) {
-        View* child = ((ViewGroup*)view)->first_child;
+        View* child = ((ViewElement*)view)->first_child;
         while (child) {
             View* next = child->next();
             free_view(tree, child);
@@ -485,12 +485,12 @@ void print_view_block(ViewBlock* block, StrBuf* buf, int indent) {
         (float)block->x, (float)block->y, (float)block->width, (float)block->height);
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);
-    print_view_group((ViewGroup*)block, buf, indent+2);
+    print_view_group((ViewElement*)block, buf, indent+2);
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "]\n");
 }
 
-void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
+void print_view_group(ViewElement* view_group, StrBuf* buf, int indent) {
     View* view = view_group->first_child;
     if (view) {
         do {
@@ -503,7 +503,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_format(buf, "[view-inline:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
                     span->node_name(), (float)span->x, (float)span->y, (float)span->width, (float)span->height);
                 print_inline_props(span, buf, indent + 2);
-                print_view_group((ViewGroup*)view, buf, indent + 2);
+                print_view_group((ViewElement*)view, buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_str(buf, "]\n");
             }
@@ -567,7 +567,7 @@ void write_string_to_file(const char *filename, const char *text) {
     fclose(file); // Close file
 }
 
-void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio) {
+void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_view_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
@@ -614,7 +614,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, T
     const char* view_tag = view->node_name();
     log_debug("[Coord] %s: initial y=%.2f", view_tag, initial_y);
     // Calculate absolute position by traversing up the parent chain
-    ViewGroup* parent = view->parent_view();
+    ViewElement* parent = view->parent_view();
     while (parent) {
         if (parent->is_block()) {
             const char* parent_tag = parent->node_name();
@@ -1137,7 +1137,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewGroup*)block)->first_child;
+    View* child = ((ViewElement*)block)->first_child;
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {  // skip the view
@@ -1418,7 +1418,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewGroup*)span)->first_child;
+    View* child = ((ViewElement*)span)->first_child;
     bool first_child = true;
     while (child) {
         if (child->view_type == RDT_VIEW_NONE) {
@@ -1463,7 +1463,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 }
 
 // Main JSON generation function
-void print_view_tree_json(ViewGroup* view_root, Url* url, float pixel_ratio) {
+void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio) {
     log_debug("Generating JSON layout data...");
     StrBuf* json_buf = strbuf_new_cap(2048);
 

@@ -266,7 +266,7 @@ static void render_view_block(UiContext* uicon, ViewBlock* block, float offset_x
     // Render children recursively
     // Note: ViewBlock inherits from ViewSpan which inherits from ViewGroup
     // The children are in the 'child' field from ViewGroup, not 'first_child'
-    ViewGroup* group = (ViewGroup*)block;
+    ViewElement* group = (ViewElement*)block;
     View* child = group->first_child;
     int child_count = 0;
     while (child) {

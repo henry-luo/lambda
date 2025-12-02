@@ -28,7 +28,7 @@ DisplayValue resolve_display_value(void* child);
 
 // Intrinsic size calculation
 void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
-void calculate_item_intrinsic_sizes(ViewGroup* item, struct FlexContainerLayout* flex_layout);
+void calculate_item_intrinsic_sizes(ViewElement* item, struct FlexContainerLayout* flex_layout);
 
 // Enhanced measurement functions for accurate intrinsic sizing
 void measure_text_content_accurate(LayoutContext* lycon, DomNode* text_node,

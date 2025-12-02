@@ -191,7 +191,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         DomNode* child = flex_container->first_child;
         while (child) {
             if (child->is_element()) {
-                ViewGroup* item = (ViewGroup*)child->as_element();
+                ViewElement* item = (ViewElement*)child->as_element();
                 if (item && item->fi && item->height > 0) {
                     if ((int)item->height > max_item_height) {
                         max_item_height = (int)item->height;
@@ -220,7 +220,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
         DomNode* child = flex_container->first_child;
         while (child) {
             if (child->is_element()) {
-                ViewGroup* item = (ViewGroup*)child->as_element();
+                ViewElement* item = (ViewElement*)child->as_element();
                 if (item && item->fi && item->height > 0) {
                     total_height += (int)item->height;
                     log_debug("AUTO-HEIGHT: column flex item height = %d, total = %d", (int)item->height, total_height);
@@ -415,7 +415,7 @@ void align_items_main_axis_enhanced(FlexContainerLayout* flex_layout, FlexLineIn
 // Check if any items have main axis auto margins
 bool has_main_axis_auto_margins(FlexLineInfo* line) {
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (item && item->bound && (item->bound->margin.left_type == CSS_VALUE_AUTO || item->bound->margin.right_type == CSS_VALUE_AUTO ||
             item->bound->margin.top_type == CSS_VALUE_AUTO || item->bound->margin.bottom_type == CSS_VALUE_AUTO)) {
             return true;
@@ -430,7 +430,7 @@ void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInf
 
     // For now, implement simple centering for items with auto margins
     for (int i = 0; i < line->item_count; i++) {
-        ViewGroup* item = (ViewGroup*)line->items[i]->as_element();
+        ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
         bool main_start_auto = is_main_axis_horizontal(flex_layout) ?
             item->bound && item->bound->margin.left_type == CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == CSS_VALUE_AUTO;

@@ -225,8 +225,8 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void compute_span_bounding_box(ViewSpan* span);
 
 // View tree printing functions
-void print_view_tree(ViewGroup* view_root, Url* url, float pixel_ratio);
-void print_view_tree_json(ViewGroup* view_root, Url* url, float pixel_ratio);
+void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio);
+void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio);
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio);
 void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio);
 void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio);

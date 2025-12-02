@@ -64,16 +64,16 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout);
 void distribute_free_space(FlexLineInfo* line, bool is_growing);
 
 // Constraint resolution
-void resolve_flex_item_constraints(ViewGroup* item, FlexContainerLayout* flex_layout);
+void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_layout);
 void apply_constraints_to_flex_items(FlexContainerLayout* flex_layout);
 
 // Consolidated constraint application (Task 4)
 // Single source of truth for applying min/max constraints to flex items
-int apply_flex_constraint(ViewGroup* item, int computed_size, bool is_main_axis,
+int apply_flex_constraint(ViewElement* item, int computed_size, bool is_main_axis,
                           FlexContainerLayout* flex_layout, bool* hit_min, bool* hit_max);
-int apply_flex_constraint(ViewGroup* item, int computed_size, bool is_main_axis,
+int apply_flex_constraint(ViewElement* item, int computed_size, bool is_main_axis,
                           FlexContainerLayout* flex_layout);
-int apply_stretch_constraint(ViewGroup* item, int container_cross_size,
+int apply_stretch_constraint(ViewElement* item, int container_cross_size,
                              FlexContainerLayout* flex_layout);
 
 // Alignment functions
@@ -100,20 +100,20 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container);
 
 // Utility functions
 bool is_main_axis_horizontal(FlexProp* flex);
-int get_main_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout);
-int get_cross_axis_size(ViewGroup* item, FlexContainerLayout* flex_layout);
-int get_cross_axis_position(ViewGroup* item, FlexContainerLayout* flex_layout);
-void set_main_axis_position(ViewGroup* item, int position, FlexContainerLayout* flex_layout);
-void set_cross_axis_position(ViewGroup* item, int position, FlexContainerLayout* flex_layout);
-void set_main_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex_layout);
-void set_cross_axis_size(ViewGroup* item, int size, FlexContainerLayout* flex_layout);
+int get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+int get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+int get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout);
+void set_main_axis_position(ViewElement* item, int position, FlexContainerLayout* flex_layout);
+void set_cross_axis_position(ViewElement* item, int position, FlexContainerLayout* flex_layout);
+void set_main_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_layout);
+void set_cross_axis_size(ViewElement* item, int size, FlexContainerLayout* flex_layout);
 
 // Helper functions for constraints and percentages
 float clamp_value(float value, float min_val, float max_val);
 int resolve_percentage(int value, bool is_percent, int container_size);
-void apply_constraints(ViewGroup* item, int container_width, int container_height);
+void apply_constraints(ViewElement* item, int container_width, int container_height);
 int find_max_baseline(FlexLineInfo* line);
-bool is_valid_flex_item(ViewGroup* item);
+bool is_valid_flex_item(ViewElement* item);
 
 // Gap handling
 int calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);

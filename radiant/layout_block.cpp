@@ -702,7 +702,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->node_name(), display.outer, display.inner);
 
     // Check if this block is a flex item
-    ViewGroup* parent_block = (ViewGroup*)elmt->parent;
+    ViewElement* parent_block = (ViewElement*)elmt->parent;
     bool is_flex_item = (parent_block && parent_block->display.inner == CSS_VALUE_FLEX);
 
     if (display.outer != CSS_VALUE_INLINE_BLOCK) {

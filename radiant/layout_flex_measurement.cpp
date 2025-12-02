@@ -102,7 +102,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 
         // Check if this element is a row flex container
         // For row flex containers, we should use MAX of child heights, not SUM
-        ViewGroup* elem_view = (ViewGroup*)child->as_element();
+        ViewElement* elem_view = (ViewElement*)child->as_element();
         bool is_row_flex = false;
         if (elem_view) {
             log_debug("measure_flex_child_content: elem_view=%p, view_type=%d, display.inner=%d (CSS_VALUE_FLEX=%d)",
@@ -242,7 +242,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         // Set measured dimensions
         // CRITICAL FIX: For elements without explicit width, measured_width should be based
         // on content, not container. Only use container_width if the element has explicit width.
-        ViewGroup* elem = (ViewGroup*)child->as_element();
+        ViewElement* elem = (ViewElement*)child->as_element();
         bool has_explicit_width = (elem && elem->blk && elem->blk->given_width > 0);
 
         if (has_explicit_width) {
@@ -480,7 +480,7 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
 // ============================================================================
 
 // Calculate intrinsic sizes for a flex item
-void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_layout) {
+void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout) {
     if (!item || !item->fi) {
         log_debug("calculate_item_intrinsic_sizes: invalid item or no flex properties");
         return;
@@ -614,7 +614,7 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
                 if (c->is_text()) {
                     max_child_height = max(max_child_height, 20);  // Text line height
                 } else if (c->is_element()) {
-                    ViewGroup* child_view = (ViewGroup*)c->as_element();
+                    ViewElement* child_view = (ViewElement*)c->as_element();
                     if (child_view) {
                         int child_h = 0;
                         if (child_view->blk && child_view->blk->given_height > 0) {
@@ -679,7 +679,7 @@ void calculate_item_intrinsic_sizes(ViewGroup* item, FlexContainerLayout* flex_l
                     }
                 } else if (c->is_element()) {
                     // Element children contribute their sizes ONLY if they have explicit dimensions
-                    ViewGroup* child_view = (ViewGroup*)c->as_element();
+                    ViewElement* child_view = (ViewElement*)c->as_element();
                     if (child_view) {
                         // CRITICAL FIX: Only use child's explicit dimensions, not pre-set values
                         // which may be based on container size

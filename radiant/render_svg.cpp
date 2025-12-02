@@ -323,7 +323,7 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y) {
 
     // Recursively check children
     if (view->view_type >= RDT_VIEW_INLINE) {
-        ViewGroup* group = (ViewGroup*)view;
+        ViewElement* group = (ViewElement*)view;
         View* child = group->first_child;
         while (child) {
             calculate_content_bounds(child, max_x, max_y);
