@@ -146,6 +146,15 @@ bool html_is_aria_attribute(const char* attr_name) {
 bool html_tag_closes_parent(const char* current_tag, const char* new_tag) {
     if (!current_tag || !new_tag) return false;
 
+    // HEAD auto-close rules (HTML spec 4.2.1):
+    // - A head element's end tag can be omitted if the head element is
+    //   immediately followed by a body element
+    if (strcasecmp(current_tag, "head") == 0) {
+        if (strcasecmp(new_tag, "body") == 0) {
+            return true;
+        }
+    }
+
     // DT/DD auto-close rules (HTML spec 4.4.10, 4.4.11):
     // - A dt element's end tag can be omitted if followed by another dt or dd element
     // - A dd element's end tag can be omitted if followed by another dd or dt element,
