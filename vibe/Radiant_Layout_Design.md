@@ -1,0 +1,461 @@
+# Radiant Layout Engine - Master Design Document
+
+## Overview
+
+Radiant is Lambda's HTML/CSS rendering engine implementing browser-compatible layout algorithms. It supports Block, Inline, Flex, Grid, and Table layout modes with a unified DOM/View tree architecture.
+
+---
+
+## 1. Core Architecture
+
+### 1.1 Unified DOM/View Tree
+
+Radiant uses a **single inheritance tree** where DOM nodes are their own View representations:
+
+```
+DomNode (base)
+    ├── DomText → ViewText
+    └── DomElement → ViewGroup → ViewSpan → ViewBlock
+                                    │
+                                    ├── ViewTable
+                                    ├── ViewTableRow
+                                    └── ViewTableCell
+```
+
+**Benefits:**
+- Single tree traversal for DOM and layout operations
+- No parallel tree synchronization
+- Parent/sibling pointers serve both DOM and View purposes
+
+### 1.2 Coordinate System
+
+All view positions are **relative to the parent's border box**:
+
+```cpp
+float x, y;       // Position relative to parent border box
+float width, height;  // Border box dimensions
+float content_width, content_height;  // Content area (inside padding)
+```
+
+**Key Property:** Moving a parent automatically moves all descendants visually.
+
+**Absolute Coordinates:** Computed by walking parent chain when needed:
+```cpp
+float abs_x = view->x, abs_y = view->y;
+for (ViewGroup* p = view->parent_view(); p; p = p->parent_view()) {
+    abs_x += p->x;
+    abs_y += p->y;
+}
+```
+
+### 1.3 Pixel Ratio Support
+
+CSS pixel values are converted to physical pixels during style resolution:
+- `UiContext::pixel_ratio` stores the display scaling factor (1.0, 1.5, 2.0, etc.)
+- All dimensional fields store physical pixel values
+- High-DPI displays render correctly without additional scaling
+
+---
+
+## 2. Data Structures
+
+### 2.1 Layout Context (`LayoutContext`)
+
+Central coordinator passed through all layout functions:
+
+```cpp
+struct LayoutContext {
+    DomDocument* doc;        // Document being laid out
+    ViewGroup* view;         // Current view being processed
+    DomElement* elmt;        // Current DOM element
+
+    Blockbox block;          // Block formatting context state
+    Linebox line;            // Inline formatting context state
+    FontBox font;            // Current font state
+
+    FlexContainerLayout* flex_container;  // Active flex container
+    GridContainerLayout* grid_container;  // Active grid container
+
+    AvailableSpace available;  // Available space constraints
+    bool is_measuring;         // True during measurement pass
+};
+```
+
+### 2.2 Blockbox (Block Formatting Context)
+
+Tracks vertical layout state:
+
+```cpp
+struct Blockbox {
+    float content_width;     // Available content width
+    float content_height;    // Current content height
+    float advance_y;         // Current vertical position
+    float max_width;         // Maximum width encountered
+    float line_height;       // Current line height
+    CssEnum text_align;      // Text alignment
+    float given_width;       // CSS specified width (-1 if auto)
+    float given_height;      // CSS specified height (-1 if auto)
+};
+```
+
+### 2.3 Linebox (Inline Formatting Context)
+
+Tracks horizontal layout state:
+
+```cpp
+struct Linebox {
+    float left, right;       // Line boundaries
+    float advance_x;         // Current horizontal position
+    float ascender;          // Maximum ascender in line
+    float descender;         // Maximum descender in line
+    CssEnum vertical_align;  // Vertical alignment mode
+};
+```
+
+### 2.4 Property Structures
+
+| Structure | Purpose |
+|-----------|---------|
+| `BlockProp` | Block-level CSS (text-align, line-height, box-sizing, given dimensions) |
+| `BoundaryProp` | Box model (margin, padding, border, background) |
+| `InlineProp` | Inline CSS (color, vertical-align, opacity) |
+| `FontProp` | Font metrics (family, size, weight, ascender, descender) |
+| `PositionProp` | CSS positioning (position, top/right/bottom/left, z-index) |
+| `FlexProp` | Flex container CSS (direction, wrap, justify, align-items) |
+| `FlexItemProp` | Flex item CSS (grow, shrink, basis, align-self) |
+| `GridProp` | Grid container CSS (template-rows/columns, gaps, alignment) |
+| `GridItemProp` | Grid item CSS (row/column start/end, grid-area) |
+| `TableProp` | Table CSS (border-collapse, border-spacing, layout mode) |
+
+---
+
+## 3. Layout Pipeline
+
+### 3.1 High-Level Flow
+
+```
+HTML/CSS Input
+      │
+      ▼
+┌─────────────────┐
+│   DOM Parsing   │  (Lambda CSS parser)
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ Style Resolution│  (resolve_css_style.cpp)
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ Layout Dispatch │  (layout_block.cpp)
+└────────┬────────┘
+         │
+    ┌────┼────┬────┬────┐
+    ▼    ▼    ▼    ▼    ▼
+  Block Inline Flex Grid Table
+    │    │    │    │    │
+    └────┴────┴────┴────┘
+         │
+         ▼
+┌─────────────────┐
+│   View Tree     │
+└─────────────────┘
+```
+
+### 3.2 Layout Mode Dispatch
+
+From `layout_block()` in `layout_block.cpp`:
+
+```cpp
+switch (display.inner) {
+    case CSS_VALUE_FLOW:
+    case CSS_VALUE_FLOW_ROOT:
+        layout_block_content(lycon, block);  // Block/inline flow
+        break;
+    case CSS_VALUE_FLEX:
+        layout_flex_content(lycon, block);   // Flexbox
+        break;
+    case CSS_VALUE_GRID:
+        layout_grid_content(lycon, block);   // CSS Grid
+        break;
+    case CSS_VALUE_TABLE:
+        layout_table(lycon, elmt, display);  // Table
+        break;
+}
+```
+
+---
+
+## 4. Layout Modes
+
+### 4.1 Block Layout
+
+**Entry:** `layout_block_content()` in `layout_block.cpp`
+
+**Algorithm:**
+1. Initialize Blockbox with container width
+2. For each child:
+   - If block-level: stack vertically, advance `advance_y`
+   - If inline-level: delegate to inline layout
+3. Handle margin collapsing
+4. Finalize block dimensions
+
+**Key Functions:**
+- `finalize_block_flow()` - Compute final block size
+- `setup_line_height()` - Establish line height context
+
+### 4.2 Inline Layout
+
+**Entry:** `layout_inline()` in `layout_inline.cpp`
+
+**Algorithm:**
+1. Initialize Linebox with available width
+2. Process text and inline elements
+3. Break lines when `advance_x` exceeds right boundary
+4. Apply vertical alignment within each line
+5. Track ascender/descender for line height
+
+**Key Functions:**
+- `layout_text()` - Text node layout with word wrapping
+- `line_break()` - Force line break
+- `line_align()` - Apply text-align to completed line
+
+### 4.3 Flex Layout
+
+**Entry:** `layout_flex_content()` in `layout_flex_multipass.cpp`
+
+**Multi-Pass Algorithm:**
+
+```
+Pass 1: Measurement + View Initialization
+    - Collect flex items
+    - Measure intrinsic content sizes
+    - Cache measurements
+
+Pass 2: 9-Phase Flex Algorithm
+    Phase 1: Collect flex items
+    Phase 2: Sort by order
+    Phase 2.5: Apply min/max constraints
+    Phase 3: Create flex lines (wrap handling)
+    Phase 4: Resolve flexible lengths (grow/shrink)
+    Phase 5: Calculate cross sizes
+    Phase 6: Main axis alignment (justify-content)
+    Phase 7: Cross axis alignment (align-items/self)
+    Phase 8: Align content (multi-line)
+    Phase 9: Wrap-reverse handling
+
+    Sub-pass 2a: Layout nested content
+    Sub-pass 2b: Baseline repositioning
+```
+
+**Data Structures:**
+- `FlexContainerLayout` - Container state and item array
+- `FlexLineInfo` - Per-line items, sizes, free space
+
+### 4.4 Grid Layout
+
+**Entry:** `layout_grid_content()` in `layout_grid_multipass.cpp`
+
+**Multi-Pass Algorithm:**
+
+```
+Pass 1: Grid Definition
+    - Parse grid-template-rows/columns
+    - Resolve explicit track sizes
+    - Expand repeat() functions
+
+Pass 2: Item Placement
+    - Place explicitly positioned items
+    - Auto-place remaining items
+    - Resolve grid areas
+
+Pass 3: Track Sizing
+    - Size tracks to fit content
+    - Distribute fr units
+    - Apply min/max constraints
+
+Pass 4: Item Layout
+    - Position items in cells
+    - Apply alignment (justify/align-items)
+    - Layout nested content
+```
+
+**Data Structures:**
+- `GridContainerLayout` - Container state, track lists
+- `GridTrackList` - Track definitions (length, fr, minmax, auto)
+- `GridItemProp` - Item placement (row/column start/end)
+
+### 4.5 Table Layout
+
+**Entry:** `layout_table()` in `layout_table.cpp`
+
+**Algorithm:**
+1. Build table structure (rows, columns, cells)
+2. Calculate column widths (auto or fixed layout)
+3. Handle colspan/rowspan spanning
+4. Position cells and apply border-spacing
+5. Handle border-collapse mode
+
+**View Types:**
+- `ViewTable` - Table container
+- `ViewTableRowGroup` - thead/tbody/tfoot
+- `ViewTableRow` - tr element
+- `ViewTableCell` - td/th elements
+
+---
+
+## 5. CSS Property Resolution
+
+### 5.1 Style Cascade
+
+**Entry:** `resolve_lambda_css_styles()` in `resolve_css_style.cpp`
+
+**Process:**
+1. Inherit values from parent
+2. Apply element default styles
+3. Process CSS declarations by specificity
+4. Resolve length values to pixels
+
+### 5.2 Length Resolution
+
+**Function:** `resolve_length_value()`
+
+Converts CSS values to pixels:
+- Absolute units: px, pt, cm, mm, in
+- Relative units: em, rem, ex, ch
+- Viewport units: vw, vh, vmin, vmax
+- Percentages: resolved against containing block
+
+### 5.3 Display Value
+
+Two-component display model:
+```cpp
+struct DisplayValue {
+    CssEnum outer;  // block, inline, inline-block
+    CssEnum inner;  // flow, flex, grid, table
+};
+```
+
+---
+
+## 6. Memory Management
+
+### 6.1 Pool Allocation
+
+All layout structures allocated from memory pool:
+
+```cpp
+BlockProp* alloc_block_prop(LayoutContext* lycon);
+BoundaryProp* alloc_boundary_prop(LayoutContext* lycon);
+FlexProp* alloc_flex_prop(LayoutContext* lycon);
+GridProp* alloc_grid_prop(LayoutContext* lycon);
+```
+
+**Benefits:**
+- Fast allocation (bump pointer)
+- Bulk deallocation on document close
+- No individual free() calls needed
+
+### 6.2 View Pool
+
+`view_pool_init()` / `view_pool_destroy()` manage view tree memory.
+
+---
+
+## 7. File Organization
+
+| File | Purpose |
+|------|---------|
+| `layout.hpp` | Core structures (LayoutContext, Blockbox, Linebox) |
+| `view.hpp` | View hierarchy, property structures, type enums |
+| `layout.cpp` | Common layout utilities (line height, style resolution) |
+| `layout_block.cpp` | Block layout algorithm, layout dispatch |
+| `layout_inline.cpp` | Inline layout and line box management |
+| `layout_text.cpp` | Text measurement and word wrapping |
+| `layout_flex.cpp` | Core 9-phase flex algorithm |
+| `layout_flex_multipass.cpp` | Flex entry point, pass orchestration |
+| `layout_flex_measurement.cpp` | Intrinsic size measurement |
+| `layout_grid.cpp` | Grid track sizing and item placement |
+| `layout_grid_multipass.cpp` | Grid entry point, pass orchestration |
+| `layout_table.cpp` | Table layout algorithm |
+| `layout_positioned.cpp` | CSS absolute/fixed positioning |
+| `resolve_css_style.cpp` | CSS property resolution |
+| `intrinsic_sizing.cpp` | Min/max content size calculation |
+
+---
+
+## 8. Testing Infrastructure
+
+### 8.1 Test Architecture
+
+- **HTML Test Files:** `test/layout/data/basic/`
+- **Reference Data:** Browser-rendered JSON from Puppeteer
+- **Comparison:** Element-by-element position/size matching
+- **Tolerance:** 1-2px for floating-point variations
+
+### 8.2 Commands
+
+```bash
+make build                # Build layout engine
+make layout suite=baseline      # Run layout regression test
+make layout test=file_name      # Run specific layout and compare against browser
+./lambda.exe layout file.html   # Debug single file
+./lambda.exe render file.html -o output.png  # Render to PNG image
+```
+
+### 8.3 Debug Output
+
+View tree JSON output shows:
+- Position: `x`, `y` (relative to parent)
+- Dimensions: `width`, `height` (border box)
+- Box model: margin, padding, border values
+- Layout mode: flex/grid properties
+
+---
+
+## 9. Design Principles
+
+1. **Extend, Don't Replace:** New features extend existing infrastructure
+2. **CSS Conformance:** Follow W3C specifications
+3. **High-DPI Support:** pixel_ratio scaling throughout
+4. **Pool Allocation:** Use memory pools, avoid individual mallocs
+5. **Structured Logging:** Use `log.h` for debug output
+6. **Relative Coordinates:** All positions relative to parent
+7. **Unified Tree:** DOM nodes are their own views
+
+---
+
+## 10. Current Status
+
+| Layout Mode | Status | Notes |
+|-------------|--------|-------|
+| Block | ✅ Complete | Full CSS2.1 conformance |
+| Inline | ✅ Complete | Text wrapping, vertical-align |
+| Flex | ✅ Complete | Full flexbox spec, nested support |
+| Grid | 🔄 In Progress | Basic grid, track sizing, CSS integration |
+| Table | ✅ Complete | Auto/fixed layout, spanning cells |
+| Positioned | ✅ Complete | absolute, relative, fixed |
+
+---
+
+## 11. Future Enhancements
+
+### Near-term
+- Grid: subgrid, named lines, auto-fill/auto-fit
+- Grid: advanced alignment (place-items, place-self)
+- Performance: layout caching, incremental updates
+
+### Long-term
+- CSS transforms and animations
+- Container queries
+- Multi-column layout
+- Writing modes (vertical text)
+
+---
+
+## References
+
+- [CSS Box Model](https://www.w3.org/TR/css-box-3/)
+- [CSS Display Level 3](https://www.w3.org/TR/css-display-3/)
+- [CSS Flexbox Level 1](https://www.w3.org/TR/css-flexbox-1/)
+- [CSS Grid Level 1](https://www.w3.org/TR/css-grid-1/)
+- [CSS Table Level 3](https://www.w3.org/TR/css-tables-3/)
