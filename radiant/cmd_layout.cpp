@@ -5,15 +5,15 @@
  * This is separate from the Lexbor-based CSS system.
  *
  * Usage:
- *   lambda layout input.html [-o output.json] [-c styles.css] [-w 1200] [-h 800]
+ *   lambda layout input.html [-o output.json] [-c styles.css] [-vw 1200] [-vh 800]
  *
  * Options:
- *   -o, --output FILE    Output file for layout results (default: stdout)
- *   -c, --css FILE       External CSS file to apply
- *   -w, --width WIDTH    Viewport width in pixels (default: 1200)
- *   -h, --height HEIGHT  Viewport height in pixels (default: 800)
- *   --format FORMAT      Output format: json, text (default: text)
- *   --debug              Enable debug output
+ *   -o, --output FILE              Output file for layout results (default: stdout)
+ *   -c, --css FILE                 External CSS file to apply
+ *   -vw, --viewport-width WIDTH    Viewport width in pixels (default: 1200)
+ *   -vh, --viewport-height HEIGHT  Viewport height in pixels (default: 800)
+ *   --format FORMAT                Output format: json, text (default: text)
+ *   --debug                        Enable debug output
  */
 
 #include <stdio.h>
@@ -858,19 +858,19 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                 return false;
             }
         }
-        else if (strcmp(argv[i], "-w") == 0 || strcmp(argv[i], "--width") == 0) {
+        else if (strcmp(argv[i], "-vw") == 0 || strcmp(argv[i], "--viewport-width") == 0) {
             if (i + 1 < argc) {
                 opts->viewport_width = atoi(argv[++i]);
             } else {
-                log_error("Error: -w requires an argument");
+                log_error("Error: -vw/--viewport-width requires an argument");
                 return false;
             }
         }
-        else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--height") == 0) {
+        else if (strcmp(argv[i], "-vh") == 0 || strcmp(argv[i], "--viewport-height") == 0) {
             if (i + 1 < argc) {
                 opts->viewport_height = atoi(argv[++i]);
             } else {
-                log_error("Error: -h requires an argument");
+                log_error("Error: -vh/--viewport-height requires an argument");
                 return false;
             }
         }

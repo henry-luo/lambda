@@ -348,8 +348,9 @@ bool save_pdf_to_file(HPDF_Doc pdf_doc, const char* filename) {
 }
 
 // Main function to layout HTML and render to PDF
-int render_html_to_pdf(const char* html_file, const char* pdf_file) {
-    log_debug("render_html_to_pdf called with html_file='%s', pdf_file='%s'", html_file, pdf_file);
+int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport_width, int viewport_height) {
+    log_debug("render_html_to_pdf called with html_file='%s', pdf_file='%s', viewport=%dx%d",
+              html_file, pdf_file, viewport_width, viewport_height);
 
     // Initialize UI context in headless mode
     UiContext ui_context;
@@ -358,10 +359,8 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
         return 1;
     }
 
-    // Create a surface for layout calculations (no actual rendering needed)
-    int default_width = 800;   // A4 width in points (approximately)
-    int default_height = 1200; // A4 height in points (approximately)
-    ui_context_create_surface(&ui_context, default_width, default_height);
+    // Create a surface for layout calculations with specified viewport dimensions
+    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -396,8 +395,8 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file) {
         content_max_y += 50;
 
         // Use minimum dimensions to ensure reasonable PDF size
-        if (content_max_x < default_width) content_max_x = default_width;
-        if (content_max_y < default_height) content_max_y = default_height;
+        if (content_max_x < viewport_width) content_max_x = viewport_width;
+        if (content_max_y < viewport_height) content_max_y = viewport_height;
 
         log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
     }

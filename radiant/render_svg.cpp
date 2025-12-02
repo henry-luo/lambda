@@ -410,8 +410,9 @@ bool save_svg_to_file(const char* svg_content, const char* filename) {
 }
 
 // Main function to layout HTML and render to SVG
-int render_html_to_svg(const char* html_file, const char* svg_file) {
-    log_debug("render_html_to_svg called with html_file='%s', svg_file='%s'", html_file, svg_file);
+int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width, int viewport_height) {
+    log_debug("render_html_to_svg called with html_file='%s', svg_file='%s', viewport=%dx%d",
+              html_file, svg_file, viewport_width, viewport_height);
 
     // Initialize UI context in headless mode
     UiContext ui_context;
@@ -420,10 +421,8 @@ int render_html_to_svg(const char* html_file, const char* svg_file) {
         return 1;
     }
 
-    // Create a surface for layout calculations (no actual rendering needed)
-    int default_width = 1200;  // Default viewport width
-    int default_height = 800;  // Default viewport height
-    ui_context_create_surface(&ui_context, default_width, default_height);
+    // Create a surface for layout calculations with specified viewport dimensions
+    ui_context_create_surface(&ui_context, viewport_width, viewport_height);
 
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
@@ -458,8 +457,8 @@ int render_html_to_svg(const char* html_file, const char* svg_file) {
         content_max_y += 50;
 
         // Use minimum dimensions to ensure reasonable viewport
-        if (content_max_x < default_width) content_max_x = default_width;
-        if (content_max_y < default_height) content_max_y = default_height;
+        if (content_max_x < viewport_width) content_max_x = viewport_width;
+        if (content_max_y < viewport_height) content_max_y = viewport_height;
 
         log_debug("Calculated content bounds: %dx%d", content_max_x, content_max_y);
     }

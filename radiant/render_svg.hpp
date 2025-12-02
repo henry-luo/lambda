@@ -7,7 +7,7 @@ extern "C" {
 #endif
 
 // Main function to layout HTML and render to SVG
-int render_html_to_svg(const char* html_file, const char* svg_file);
+int render_html_to_svg(const char* html_file, const char* svg_file, int viewport_width, int viewport_height);
 
 // Function to render a view tree to SVG string
 char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height);
