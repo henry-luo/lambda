@@ -14,6 +14,7 @@ char* load_font_path(FontDatabase *font_db, const char* font_name);
 void scroll_config_init(int pixel_ratio);
 
 char *fallback_fonts[] = {
+    "Apple Color Emoji", // Emoji - macOS native (must be first for color emoji support)
     "PingFang SC", // Chinese (Simplified), partial Japanese and Korean - macOS native
     "Heiti SC", // Chinese (Simplified) additional fallback
     "Helvetica Neue", // Latin, Cyrillic, Greek, Vietnamese, Turkish
