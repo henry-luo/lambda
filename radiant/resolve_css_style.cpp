@@ -2931,21 +2931,27 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            // Allocate FlexProp if needed
-            alloc_flex_prop(lycon, block);
-
+            float gap_value = 0;
+            bool is_percent = false;
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-                float gap_value = resolve_length_value(lycon, prop_id, value);
-                block->embed->flex->row_gap = gap_value;
-                block->embed->flex->row_gap_is_percent = false;
+                gap_value = resolve_length_value(lycon, prop_id, value);
                 log_debug("[CSS] row-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // row-gap percentage is relative to the container's width
-                float gap_value = value->data.percentage.value;
-                block->embed->flex->row_gap = gap_value;  // Store percentage value (0-100)
-                block->embed->flex->row_gap_is_percent = true;
+                gap_value = value->data.percentage.value;
+                is_percent = true;
                 log_debug("[CSS] row-gap: %.2f%% (percentage)", gap_value);
             }
+
+            // Always apply to flex (for flexbox containers)
+            alloc_flex_prop(lycon, block);
+            block->embed->flex->row_gap = gap_value;
+            block->embed->flex->row_gap_is_percent = is_percent;
+
+            // Always apply to grid (for grid containers)
+            // Display may not be resolved yet, so we store it in both places
+            alloc_grid_prop(lycon, block);
+            block->embed->grid->row_gap = gap_value;
+            log_debug("[CSS] row-gap applied: %.2f (stored in both flex and grid)", gap_value);
             break;
         }
 
@@ -2956,21 +2962,26 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            // Allocate FlexProp if needed
-            alloc_flex_prop(lycon, block);
-
+            float gap_value = 0;
+            bool is_percent = false;
             if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
-                float gap_value = resolve_length_value(lycon, prop_id, value);
-                block->embed->flex->column_gap = gap_value;
-                block->embed->flex->column_gap_is_percent = false;
+                gap_value = resolve_length_value(lycon, prop_id, value);
                 log_debug("[CSS] column-gap: %.2fpx", gap_value);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // column-gap percentage is relative to the container's width
-                float gap_value = value->data.percentage.value;
-                block->embed->flex->column_gap = gap_value;  // Store percentage value (0-100)
-                block->embed->flex->column_gap_is_percent = true;
+                gap_value = value->data.percentage.value;
+                is_percent = true;
                 log_debug("[CSS] column-gap: %.2f%% (percentage)", gap_value);
             }
+
+            // Always apply to flex (for flexbox containers)
+            alloc_flex_prop(lycon, block);
+            block->embed->flex->column_gap = gap_value;
+            block->embed->flex->column_gap_is_percent = is_percent;
+
+            // Always apply to grid (for grid containers)
+            alloc_grid_prop(lycon, block);
+            block->embed->grid->column_gap = gap_value;
+            log_debug("[CSS] column-gap applied: %.2f (stored in both flex and grid)", gap_value);
             break;
         }
 

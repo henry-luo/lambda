@@ -79,6 +79,38 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_info("=== GRID PASS 3 COMPLETE ===");
 
     // ========================================================================
+    // Update container height based on grid content
+    // ========================================================================
+    GridContainerLayout* grid_layout = lycon->grid_container;
+    if (grid_layout && grid_layout->computed_row_count > 0) {
+        // Calculate total height from row sizes plus gaps
+        float total_row_height = 0;
+        for (int i = 0; i < grid_layout->computed_row_count; i++) {
+            total_row_height += grid_layout->computed_rows[i].base_size;
+        }
+        // Add gaps between rows
+        total_row_height += grid_layout->row_gap * (grid_layout->computed_row_count - 1);
+
+        // Add padding and border
+        float container_height = total_row_height;
+        if (grid_container->bound) {
+            container_height += grid_container->bound->padding.top + grid_container->bound->padding.bottom;
+            if (grid_container->bound->border) {
+                container_height += grid_container->bound->border->width.top +
+                                   grid_container->bound->border->width.bottom;
+            }
+        }
+
+        // Only update if container height is auto (not explicitly set)
+        if (grid_container->height < container_height) {
+            log_info("GRID: Updating container height from %.1f to %.1f (rows=%.1f, gaps=%.1f)",
+                     grid_container->height, container_height, total_row_height,
+                     grid_layout->row_gap * (grid_layout->computed_row_count - 1));
+            grid_container->height = container_height;
+        }
+    }
+
+    // ========================================================================
     // PASS 4: Absolute Positioned Children
     // ========================================================================
     log_info("=== GRID PASS 4: Absolute positioned children ===");
@@ -137,23 +169,21 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
 
     DomElement* elem = child->as_element();
 
-    // Resolve styles for this element (CSS cascade, inheritance, etc.)
-    dom_node_resolve_style(child, lycon);
-
     // Set up the view type based on display
-    if (elem->display.outer == CSS_VALUE_BLOCK ||
-        elem->display.outer == CSS_VALUE_INLINE_BLOCK) {
-        elem->view_type = RDT_VIEW_BLOCK;
-    } else {
-        // Grid items are blockified - treat as block
-        elem->view_type = RDT_VIEW_BLOCK;
-    }
+    // Grid items are blockified - treat as block
+    elem->view_type = RDT_VIEW_BLOCK;
 
     // Initialize dimensions (will be set by grid algorithm)
     elem->x = 0;
     elem->y = 0;
     elem->width = 0;
     elem->height = 0;
+
+    // Force boundary properties allocation for proper measurement
+    if (!elem->bound) {
+        Pool* pool = lycon->doc->view_tree->pool;
+        elem->bound = (BoundaryProp*)pool_calloc(pool, sizeof(BoundaryProp));
+    }
 
     // Ensure grid item properties are allocated
     if (!elem->gi) {
@@ -167,8 +197,20 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
         }
     }
 
-    log_debug("Grid item view initialized: %s (view_type=%d)",
-              child->node_name(), elem->view_type);
+    // CRITICAL: Set lycon->view to this element so style resolution
+    // applies properties to this element, not some other view
+    View* saved_view = lycon->view;
+    lycon->view = (View*)elem;
+
+    // Resolve styles for this element (CSS cascade, inheritance, etc.)
+    // This will now correctly apply padding/margin/border to elem->bound
+    dom_node_resolve_style(child, lycon);
+
+    // Restore previous view
+    lycon->view = saved_view;
+
+    log_debug("Grid item view initialized: %s (view_type=%d, bound=%p)",
+              child->node_name(), elem->view_type, (void*)elem->bound);
 }
 
 // ============================================================================
@@ -314,6 +356,28 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
     if (*min_height == 0) *min_height = total_height > 0 ? total_height : 20;
     if (*max_height == 0) *max_height = total_height > 0 ? total_height : 50;
 
+    // Add padding and border to the measurements (grid items use border-box sizing)
+    if (item->bound) {
+        int padding_h = (int)(item->bound->padding.left + item->bound->padding.right);
+        int padding_v = (int)(item->bound->padding.top + item->bound->padding.bottom);
+        log_debug("Adding padding to measurements: h=%d, v=%d", padding_h, padding_v);
+        *min_width += padding_h;
+        *max_width += padding_h;
+        *min_height += padding_v;
+        *max_height += padding_v;
+
+        if (item->bound->border) {
+            int border_h = (int)(item->bound->border->width.left + item->bound->border->width.right);
+            int border_v = (int)(item->bound->border->width.top + item->bound->border->width.bottom);
+            *min_width += border_h;
+            *max_width += border_h;
+            *min_height += border_v;
+            *max_height += border_v;
+        }
+    } else {
+        log_debug("item->bound is NULL, no padding added");
+    }
+
     // Store in cache
     store_in_measurement_cache((DomNode*)item, *max_width, *max_height,
                                *min_width, *min_height);
@@ -331,6 +395,16 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
 
     log_enter();
     log_info("FINAL GRID CONTENT LAYOUT START");
+    log_debug("grid_layout=%p, item_count=%d, grid_items=%p",
+              grid_layout, grid_layout->item_count, grid_layout->grid_items);
+
+    // DEBUG: Print item pointers for comparison
+    for (int i = 0; i < grid_layout->item_count; i++) {
+        ViewBlock* item = grid_layout->grid_items[i];
+        printf("DEBUG Pass3: grid_items[%d]=%p, x=%.1f, y=%.1f, w=%.1f, h=%.1f\n",
+               i, (void*)item, item ? item->x : -1, item ? item->y : -1,
+               item ? item->width : -1, item ? item->height : -1);
+    }
 
     // Layout content within each grid item with their final sizes
     for (int i = 0; i < grid_layout->item_count; i++) {

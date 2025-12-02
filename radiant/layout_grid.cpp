@@ -17,9 +17,22 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     GridContainerLayout* grid = (GridContainerLayout*)calloc(1, sizeof(GridContainerLayout));
     lycon->grid_container = grid;
     grid->lycon = lycon;  // Store layout context for intrinsic sizing
-    if (container->embed->grid) {
+
+    // Debug: check what's available
+    log_debug("container->embed=%p", (void*)container->embed);
+    if (container->embed) {
+        log_debug("container->embed->grid=%p", (void*)container->embed->grid);
+        if (container->embed->grid) {
+            log_debug("embed->grid values: row_gap=%.1f, column_gap=%.1f",
+                      container->embed->grid->row_gap, container->embed->grid->column_gap);
+        }
+    }
+
+    if (container->embed && container->embed->grid) {
         memcpy(grid, container->embed->grid, sizeof(GridProp));
         grid->lycon = lycon;  // Restore after memcpy
+        log_debug("Copied grid props: row_gap=%.1f, column_gap=%.1f",
+                  grid->row_gap, grid->column_gap);
     } else {
         // Set default values using enum names that align with Lexbor constants
         grid->justify_content = CSS_VALUE_START;
@@ -102,8 +115,16 @@ void cleanup_grid_container(LayoutContext* lycon) {
 // Main grid layout algorithm entry point
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("layout_grid_container called with container=%p", container);
-    if (!container || !container->embed || !container->embed->grid) {
-        log_debug("Early return - missing container or grid properties\n");
+    if (!container) {
+        log_debug("Early return - container is NULL\n");
+        return;
+    }
+
+    // Check if this is actually a grid container by display type
+    // Note: embed->grid may be NULL if grid-template-* properties weren't resolved,
+    // but we can still run grid layout with auto-placement
+    if (container->display.inner != CSS_VALUE_GRID) {
+        log_debug("Early return - not a grid container (display.inner=%d)\n", container->display.inner);
         return;
     }
 
@@ -207,24 +228,30 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
 // Collect grid items from container children
 int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ViewBlock*** items) {
-    printf("DEBUG: collect_grid_items called with container=%p, items=%p\n", container, items);
+    log_debug("collect_grid_items called with container=%p, items=%p", container, items);
     if (!container || !items) {
-        printf("DEBUG: Early return - container=%p, items=%p\n", container, items);
+        log_debug("Early return - container=%p, items=%p", container, items);
         return 0;
     }
-    printf("DEBUG: grid=%p\n", grid_layout);
+    log_debug("grid=%p", grid_layout);
     if (!grid_layout) {
-        printf("DEBUG: Early return - grid is NULL\n");
+        log_debug("Early return - grid is NULL");
         return 0;
     }
 
     int count = 0;
 
-    // Count children first - use DomNode hierarchy, cast to ViewBlock as needed
-    printf("DEBUG: About to access container->first_child\n");
+    // Count element children first - ONLY count element nodes, skip text nodes
+    log_debug("About to access container->first_child");
     DomNode* child_node = container->first_child;
-    printf("DEBUG: first_child=%p\n", child_node);
+    log_debug("first_child=%p", child_node);
     while (child_node) {
+        // CRITICAL FIX: Only process element nodes, skip text nodes
+        if (!child_node->is_element()) {
+            child_node = child_node->next_sibling;
+            continue;
+        }
+
         ViewBlock* child = (ViewBlock*)child_node;
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
@@ -236,6 +263,8 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         }
         child_node = child_node->next_sibling;
     }
+
+    log_debug("collect_grid_items: found %d element children", count);
 
     if (count == 0) {
         *items = nullptr;
@@ -249,10 +278,16 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
             grid_layout->grid_items, grid_layout->allocated_items * sizeof(ViewBlock*));
     }
 
-    // Collect items - use DomNode hierarchy, cast to ViewBlock as needed
+    // Collect items - ONLY collect element nodes, skip text nodes
     count = 0;
     child_node = container->first_child;
     while (child_node) {
+        // CRITICAL FIX: Only process element nodes, skip text nodes
+        if (!child_node->is_element()) {
+            child_node = child_node->next_sibling;
+            continue;
+        }
+
         ViewBlock* child = (ViewBlock*)child_node;
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
@@ -365,7 +400,7 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
 void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, GridItemPlacement* placement) {
     if (!grid_layout || !item || !placement) return;
 
-    printf("DEBUG: auto_place_grid_item called for item %p\n", item);
+    log_debug(" auto_place_grid_item called for item %p\n", item);
 
     // Enhanced auto-placement algorithm that respects grid dimensions
     static int current_row = 1;
@@ -378,23 +413,17 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
         current_column = 1;
     }
 
-    // Determine grid dimensions from template or use defaults
+    // Determine grid dimensions from template
     int max_columns = grid_layout->explicit_column_count;
     int max_rows = grid_layout->explicit_row_count;
 
-    // If no explicit template, try to infer from computed dimensions
-    if (max_columns <= 0) {
-        max_columns = grid_layout->computed_column_count;
-    }
-    if (max_rows <= 0) {
-        max_rows = grid_layout->computed_row_count;
-    }
+    // CSS Grid spec: Without explicit grid-template-columns, there's 1 implicit column
+    // Items are placed in a single column and stack vertically (for row flow)
+    // Without explicit grid-template-rows, rows are created implicitly as needed
+    if (max_columns <= 0) max_columns = 1;  // Single column when no template
+    // max_rows can remain 0 - rows are created implicitly
 
-    // Fallback to reasonable defaults for 2x2 grid
-    if (max_columns <= 0) max_columns = 2;
-    if (max_rows <= 0) max_rows = 2;
-
-    printf("DEBUG: Grid dimensions for auto-placement: %dx%d (cols x rows)\n", max_columns, max_rows);
+    log_debug(" Grid dimensions for auto-placement: %dx%d (cols x rows)\n", max_columns, max_rows);
 
     if (grid_layout->grid_auto_flow == CSS_VALUE_ROW) {
         // Place items row by row (default behavior)
@@ -403,7 +432,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
         placement->column_start = current_column;
         placement->column_end = current_column + 1;
 
-        printf("DEBUG: Placing item %d at row %d, col %d\n", item_counter, current_row, current_column);
+        log_debug(" Placing item %d at row %d, col %d\n", item_counter, current_row, current_column);
 
         // Advance to next position
         current_column++;
@@ -412,13 +441,16 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
             current_row++;
         }
     } else {
-        // Place items column by column
+        // Place items column by column (grid-auto-flow: column)
+        // Without explicit template, there's 1 implicit row
+        if (max_rows <= 0) max_rows = 1;
+
         placement->column_start = current_column;
         placement->column_end = current_column + 1;
         placement->row_start = current_row;
         placement->row_end = current_row + 1;
 
-        printf("DEBUG: Placing item %d at row %d, col %d (column-first)\n", item_counter, current_row, current_column);
+        log_debug(" Placing item %d at row %d, col %d (column-first)\n", item_counter, current_row, current_column);
 
         // Advance to next position
         current_row++;
@@ -435,7 +467,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
         item_counter = 0;
     }
 
-    printf("DEBUG: Auto-placed item at row %d-%d, col %d-%d\n",
+    log_debug(" Auto-placed item at row %d-%d, col %d-%d\n",
            placement->row_start, placement->row_end,
            placement->column_start, placement->column_end);
     log_debug("Auto-placed item at row %d-%d, col %d-%d\n",
@@ -447,7 +479,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
 void determine_grid_size(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
 
-    printf("DEBUG: Determining grid size\n");
+    log_debug(" Determining grid size\n");
     log_debug("Determining grid size\n");
 
     // Count explicit tracks from template
@@ -456,18 +488,18 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     grid_layout->explicit_column_count = grid_layout->grid_template_columns ?
                                         grid_layout->grid_template_columns->track_count : 0;
 
-    printf("DEBUG: Explicit tracks - rows: %d, columns: %d\n",
+    log_debug(" Explicit tracks - rows: %d, columns: %d\n",
            grid_layout->explicit_row_count, grid_layout->explicit_column_count);
 
     // Find maximum implicit tracks needed based on item placement
     int max_row = grid_layout->explicit_row_count;
     int max_column = grid_layout->explicit_column_count;
 
-    printf("DEBUG: Checking %d items for grid size requirements\n", grid_layout->item_count);
+    log_debug(" Checking %d items for grid size requirements\n", grid_layout->item_count);
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
         if (!item->gi) continue;  // Skip items without grid item properties
-        printf("DEBUG: Item %d placement - row: %d-%d, col: %d-%d\n",
+        log_debug(" Item %d placement - row: %d-%d, col: %d-%d\n",
                i, item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
                item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
 
@@ -491,7 +523,7 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     grid_layout->computed_row_count = max_row;
     grid_layout->computed_column_count = max_column;
 
-    printf("DEBUG: Final grid size - rows: %d (%d explicit + %d implicit), cols: %d (%d explicit + %d implicit)\n",
+    log_debug(" Final grid size - rows: %d (%d explicit + %d implicit), cols: %d (%d explicit + %d implicit)\n",
            grid_layout->computed_row_count, grid_layout->explicit_row_count, grid_layout->implicit_row_count,
            grid_layout->computed_column_count, grid_layout->explicit_column_count, grid_layout->implicit_column_count);
 
