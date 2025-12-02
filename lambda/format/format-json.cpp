@@ -219,6 +219,14 @@ static void format_item_reader_with_indent(JsonContext& ctx, const ItemReader& i
         } else {
             ctx.write_text("null");
         }
+    } else if (item.isSymbol()) {
+        // Format symbols as strings (they represent identifiers/keywords in CSS)
+        String* str = item.asSymbol();
+        if (str) {
+            format_string(ctx, str);
+        } else {
+            ctx.write_text("null");
+        }
     } else if (item.isArray() || item.isList()) {
         ArrayReader arr = item.asArray();
         format_array_reader_with_indent(ctx, arr, indent);

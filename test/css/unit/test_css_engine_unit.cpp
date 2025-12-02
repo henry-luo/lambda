@@ -976,5 +976,360 @@ TEST_F(CssEngineTest, Feature_VendorPrefixes) {
 }
 
 // ============================================================================
+// Category 6: Media Query Evaluation (15 tests)
+// ============================================================================
+
+// Test 6.1: Basic min-width media query - match
+TEST_F(CssEngineTest, MediaQuery_MinWidthMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    // Default viewport is 1920x1080
+    bool result = css_evaluate_media_query(engine, "(min-width: 1024px)");
+    EXPECT_TRUE(result) << "1920px >= 1024px should match";
+}
+
+// Test 6.2: Basic min-width media query - no match
+TEST_F(CssEngineTest, MediaQuery_MinWidthNoMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 800, 600);
+    bool result = css_evaluate_media_query(engine, "(min-width: 1024px)");
+    EXPECT_FALSE(result) << "800px < 1024px should not match";
+}
+
+// Test 6.3: Basic max-width media query - match
+TEST_F(CssEngineTest, MediaQuery_MaxWidthMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 800, 600);
+    bool result = css_evaluate_media_query(engine, "(max-width: 1024px)");
+    EXPECT_TRUE(result) << "800px <= 1024px should match";
+}
+
+// Test 6.4: Basic max-width media query - no match
+TEST_F(CssEngineTest, MediaQuery_MaxWidthNoMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 1200, 800);
+    bool result = css_evaluate_media_query(engine, "(max-width: 1024px)");
+    EXPECT_FALSE(result) << "1200px > 1024px should not match";
+}
+
+// Test 6.5: Basic min-height media query - match
+TEST_F(CssEngineTest, MediaQuery_MinHeightMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 1200, 800);
+    bool result = css_evaluate_media_query(engine, "(min-height: 600px)");
+    EXPECT_TRUE(result) << "800px >= 600px should match";
+}
+
+// Test 6.6: Basic max-height media query - match
+TEST_F(CssEngineTest, MediaQuery_MaxHeightMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 1200, 400);
+    bool result = css_evaluate_media_query(engine, "(max-height: 600px)");
+    EXPECT_TRUE(result) << "400px <= 600px should match";
+}
+
+// Test 6.7: Media query with screen type - match
+TEST_F(CssEngineTest, MediaQuery_ScreenTypeMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    bool result = css_evaluate_media_query(engine, "screen");
+    EXPECT_TRUE(result) << "screen media type should match by default";
+}
+
+// Test 6.8: Media query with print type - no match
+TEST_F(CssEngineTest, MediaQuery_PrintTypeNoMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    bool result = css_evaluate_media_query(engine, "print");
+    EXPECT_FALSE(result) << "print media type should not match by default";
+}
+
+// Test 6.9: Media query with 'all' type - match
+TEST_F(CssEngineTest, MediaQuery_AllTypeMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    bool result = css_evaluate_media_query(engine, "all");
+    EXPECT_TRUE(result) << "'all' media type should always match";
+}
+
+// Test 6.10: Combined screen and min-width - match
+TEST_F(CssEngineTest, MediaQuery_ScreenAndMinWidthMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 1200, 800);
+    bool result = css_evaluate_media_query(engine, "screen and (min-width: 768px)");
+    EXPECT_TRUE(result) << "screen + 1200px >= 768px should match";
+}
+
+// Test 6.11: Combined screen and min-width - no match
+TEST_F(CssEngineTest, MediaQuery_ScreenAndMinWidthNoMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 500, 400);
+    bool result = css_evaluate_media_query(engine, "screen and (min-width: 768px)");
+    EXPECT_FALSE(result) << "screen + 500px < 768px should not match";
+}
+
+// Test 6.12: Orientation landscape - match
+TEST_F(CssEngineTest, MediaQuery_OrientationLandscapeMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 1200, 800);
+    bool result = css_evaluate_media_query(engine, "(orientation: landscape)");
+    EXPECT_TRUE(result) << "1200x800 (width > height) should be landscape";
+}
+
+// Test 6.13: Orientation portrait - match
+TEST_F(CssEngineTest, MediaQuery_OrientationPortraitMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 600, 1024);
+    bool result = css_evaluate_media_query(engine, "(orientation: portrait)");
+    EXPECT_TRUE(result) << "600x1024 (height > width) should be portrait";
+}
+
+// Test 6.14: Orientation landscape - no match for portrait viewport
+TEST_F(CssEngineTest, MediaQuery_OrientationLandscapeNoMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 600, 1024);
+    bool result = css_evaluate_media_query(engine, "(orientation: landscape)");
+    EXPECT_FALSE(result) << "600x1024 should not be landscape";
+}
+
+// Test 6.15: Edge case - exact boundary match for min-width
+TEST_F(CssEngineTest, MediaQuery_ExactBoundaryMatch) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    css_engine_set_viewport(engine, 768, 600);
+    bool result = css_evaluate_media_query(engine, "(min-width: 768px)");
+    EXPECT_TRUE(result) << "768px >= 768px should match exactly";
+}
+
+// ============================================================================
+// Category 7: Media Rule in Stylesheet (10 tests)
+// ============================================================================
+
+// Test 7.1: Parse stylesheet with basic @media rule
+TEST_F(CssEngineTest, MediaRule_BasicParse) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media screen and (min-width: 768px) {\n"
+        "  .container { width: 750px; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+
+    if (sheet->rule_count > 0) {
+        EXPECT_EQ(sheet->rules[0]->type, CSS_RULE_MEDIA);
+    }
+}
+
+// Test 7.2: Parse stylesheet with multiple @media rules
+TEST_F(CssEngineTest, MediaRule_MultipleParse) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media (min-width: 768px) {\n"
+        "  .tablet { display: block; }\n"
+        "}\n"
+        "@media (min-width: 1024px) {\n"
+        "  .desktop { display: block; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 2);
+}
+
+// Test 7.3: Parse @media with nested rules
+TEST_F(CssEngineTest, MediaRule_NestedRules) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media screen {\n"
+        "  body { background: white; }\n"
+        "  .content { max-width: 1200px; }\n"
+        "  .sidebar { width: 300px; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+
+    if (sheet->rule_count > 0 && sheet->rules[0]->type == CSS_RULE_MEDIA) {
+        // Check that nested rules exist in conditional_rule
+        CssRule* media_rule = sheet->rules[0];
+        EXPECT_GE(media_rule->data.conditional_rule.rule_count, 3);
+    }
+}
+
+// Test 7.4: @media rule with print media type
+TEST_F(CssEngineTest, MediaRule_PrintType) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media print {\n"
+        "  .no-print { display: none; }\n"
+        "  body { font-size: 12pt; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 7.5: Mixed regular rules and @media rules
+TEST_F(CssEngineTest, MediaRule_MixedWithRegular) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "body { margin: 0; }\n"
+        "@media (min-width: 768px) {\n"
+        "  .container { width: 750px; }\n"
+        "}\n"
+        ".footer { padding: 20px; }";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 3);
+}
+
+// Test 7.6: @media rule with complex condition
+TEST_F(CssEngineTest, MediaRule_ComplexCondition) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media screen and (min-width: 768px) and (max-width: 1024px) {\n"
+        "  .tablet-only { display: block; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 7.7: @media rule with orientation
+TEST_F(CssEngineTest, MediaRule_Orientation) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media (orientation: landscape) {\n"
+        "  .landscape-layout { flex-direction: row; }\n"
+        "}\n"
+        "@media (orientation: portrait) {\n"
+        "  .portrait-layout { flex-direction: column; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 2);
+}
+
+// Test 7.8: @media rule with only keyword
+TEST_F(CssEngineTest, MediaRule_OnlyKeyword) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media only screen and (min-width: 768px) {\n"
+        "  .modern-browser { display: flex; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// Test 7.9: Bootstrap-style responsive breakpoints
+TEST_F(CssEngineTest, MediaRule_BootstrapBreakpoints) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "/* Extra small devices (portrait phones, less than 576px) */\n"
+        ".col-xs { width: 100%; }\n"
+        "\n"
+        "/* Small devices (landscape phones, 576px and up) */\n"
+        "@media (min-width: 576px) {\n"
+        "  .col-sm { width: 50%; }\n"
+        "}\n"
+        "\n"
+        "/* Medium devices (tablets, 768px and up) */\n"
+        "@media (min-width: 768px) {\n"
+        "  .col-md { width: 33.333%; }\n"
+        "}\n"
+        "\n"
+        "/* Large devices (desktops, 992px and up) */\n"
+        "@media (min-width: 992px) {\n"
+        "  .col-lg { width: 25%; }\n"
+        "}\n"
+        "\n"
+        "/* Extra large devices (large desktops, 1200px and up) */\n"
+        "@media (min-width: 1200px) {\n"
+        "  .col-xl { width: 20%; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 5);  // 1 regular + 4 @media rules
+}
+
+// Test 7.10: @media rule with em/rem units in condition
+TEST_F(CssEngineTest, MediaRule_RelativeUnits) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    const char* css =
+        "@media (min-width: 48em) {\n"
+        "  .responsive { font-size: 1.2rem; }\n"
+        "}";
+
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_GE(sheet->rule_count, 1);
+}
+
+// ============================================================================
 // Main Entry Point - Using GTest default main
 // ============================================================================
