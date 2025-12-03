@@ -251,6 +251,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // Update scroller clip if height changed and scroller has clipping enabled
     // This ensures the clip region is correct after auto-height is calculated
     if (block->scroller && block->scroller->has_clip) {
+        block->scroller->clip.left = 0;
+        block->scroller->clip.top = 0;
         block->scroller->clip.right = block->width;
         block->scroller->clip.bottom = block->height;
     }
@@ -1124,15 +1126,21 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
                 }
             }
 
-            // Convert from absolute coordinates to relative height
-            float content_bottom = block->y + block->height;
-            log_debug("BFC %s: max_float_bottom=%.1f, content_bottom=%.1f (block->y=%.1f, block->height=%.1f)",
-                      elmt->node_name(), max_float_bottom, content_bottom, block->y, block->height);
-            if (max_float_bottom > content_bottom) {
+            // Float margin_box coordinates are relative to container's content area
+            // Compare to block->height which is also relative/local
+            log_debug("BFC %s: max_float_bottom=%.1f, block->height=%.1f",
+                      elmt->node_name(), max_float_bottom, block->height);
+            if (max_float_bottom > block->height) {
                 float old_height = block->height;
-                block->height = max_float_bottom - block->y;
-                log_debug("BFC height expansion: old=%.1f, new=%.1f (float_bottom=%.1f, block_y=%.1f)",
-                          old_height, block->height, max_float_bottom, block->y);
+                block->height = max_float_bottom;
+                log_debug("BFC height expansion: old=%.1f, new=%.1f (float_bottom=%.1f)",
+                          old_height, block->height, max_float_bottom);
+                
+                // Update scroller clip to match new height (for overflow:hidden rendering)
+                if (block->scroller && block->scroller->has_clip) {
+                    block->scroller->clip.bottom = block->height;
+                    log_debug("BFC updated clip.bottom to %.1f", block->height);
+                }
             }
         }
     }
