@@ -523,7 +523,7 @@ build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	$(call mingw64_dll_check)
 
 # Force rebuild (clean + build)
-rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+rebuild: clean-all
 	@echo "Force rebuilding $(PROJECT_NAME) using Premake build system..."
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
@@ -583,32 +583,13 @@ clean:
 clean-test:
 	@echo "Cleaning test build outputs..."
 	@rm -rf test_output/ 2>/dev/null || true
-	@rm -f test/*.exe 2>/dev/null || true
+	@find test/ -name "*.exe" -type f -delete 2>/dev/null || true
 	@rm -f test_*.exe 2>/dev/null || true
 	@rm -f *.exe.tmp 2>/dev/null || true
 	@rm -f build_test_*.json 2>/dev/null || true
 	@rm -f build_test_*.json.tmp 2>/dev/null || true
 	@find test/ -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find test/ -name "*.o" -type f -delete 2>/dev/null || true
-	@echo "Cleaning Radiant test outputs..."
-	@rm -f test/test_radiant_flex_gtest.exe 2>/dev/null || true
-	@rm -f test/test_radiant_flex_algorithm_gtest.exe 2>/dev/null || true
-	@rm -f test/test_radiant_flex_integration_gtest.exe 2>/dev/null || true
-	@rm -f test/test_radiant_text_flow_gtest.exe 2>/dev/null || true
-	@rm -f test/test_radiant_font_face_gtest.exe 2>/dev/null || true
-	@rm -f test/test_radiant_layout_gtest.exe 2>/dev/null || true
-	@rm -f test/test_js_gtest.exe 2>/dev/null || true
-	@rm -f test/test_flex_core_validation.exe 2>/dev/null || true
-	@rm -f test/test_flex_simple.exe 2>/dev/null || true
-	@rm -f test/test_flex_minimal.exe 2>/dev/null || true
-	@rm -f test/test_flex_layout_gtest.exe 2>/dev/null || true
-	@rm -f test/test_flex_standalone.exe 2>/dev/null || true
-	@rm -f test/test_flex_new_features.exe 2>/dev/null || true
-	@find test/ -name "*radiant*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
-	@find test/ -name "*flex*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
-	@find test/ -name "*text_flow*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
-	@find test/ -name "*font_face*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
-	@find test/ -name "*layout*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@echo "Test build outputs cleaned."
 
 clean-grammar:
