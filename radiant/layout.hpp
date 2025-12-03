@@ -6,8 +6,11 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 
-// Forward declaration for FloatContext
+// Forward declaration for FloatContext (legacy, being replaced by BFC)
 struct FloatContext;
+
+// Forward declaration for Block Formatting Context
+struct BlockFormattingContext;
 
 typedef struct StyleContext {
     struct StyleElement* parent;
@@ -31,6 +34,8 @@ typedef struct Blockbox {
 
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
+    float effective_left;             // float-adjusted left bound
+    float effective_right;            // float-adjusted right bound
     float advance_x;
     float max_ascender;
     float max_descender;
@@ -40,6 +45,7 @@ typedef struct Linebox {
     CssEnum vertical_align;
     bool is_line_start;
     bool has_space;                 // whether last layout character is a space
+    bool has_float_intrusion;       // true if floats affect this line
     FontBox line_start_font;
     FT_UInt prev_glyph_index = 0;   // for kerning
 
@@ -93,7 +99,9 @@ typedef struct LayoutContext {
     FontBox font;  // current font style
     float root_font_size;
     // StackingBox* stacking;  // current stacking context for positioned elements
-    struct FloatContext* current_float_context;  // Current float context for this layout
+    struct FloatContext* current_float_context;  // Current float context for this layout (legacy)
+    struct BlockFormattingContext* bfc;  // Current Block Formatting Context
+    bool owns_bfc;  // True if this layout created the BFC
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
 
@@ -213,6 +221,7 @@ bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 
 void line_init(LayoutContext* lycon, float left, float right);
+void line_reset(LayoutContext* lycon);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);
 

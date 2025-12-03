@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
+#include "layout_bfc.hpp"
 #include "font_face.h"
 
 #include <ft2build.h>
@@ -295,9 +296,40 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
 
     if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        
+        // Skip floats that were pre-laid in the float pre-pass
+        if (elem->float_prelaid) {
+            log_debug("skipping pre-laid float: %s", node->node_name());
+            return;
+        }
+        
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
         log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
+        
+        // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
+        // (or 'table' for inline-table). This applies before layout decisions.
+        if (elem->position && 
+            (elem->position->float_prop == CSS_VALUE_LEFT || elem->position->float_prop == CSS_VALUE_RIGHT)) {
+            // Float transforms most display values to block
+            if (display.outer != CSS_VALUE_NONE) {
+                log_debug("Float on %s: transforming display from outer=%d to BLOCK", 
+                          node->node_name(), display.outer);
+                display.outer = CSS_VALUE_BLOCK;
+                // Keep inner display but treat as flow for layout purposes if it's a table type
+                if (display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
+                    display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
+                    display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
+                    display.inner == CSS_VALUE_TABLE_ROW ||
+                    display.inner == CSS_VALUE_TABLE_COLUMN ||
+                    display.inner == CSS_VALUE_TABLE_COLUMN_GROUP ||
+                    display.inner == CSS_VALUE_TABLE_CAPTION) {
+                    display.inner = CSS_VALUE_FLOW;
+                }
+            }
+        }
+        
         if (strcmp(node->node_name(), "table") == 0) {
             log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
                    display.outer, display.inner, CSS_VALUE_TABLE);
@@ -376,6 +408,23 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.given_width = lycon->ui_context->window_width;
     lycon->block.given_height = -1;  // -1 means auto-size to content, instead of setting to viewport height
     html->position = alloc_position_prop(lycon);
+
+    // Create the initial Block Formatting Context for the root element
+    // CSS 2.2: The root element establishes the initial BFC
+    // We create it directly here since the HTML element is the root
+    html->content_width = lycon->ui_context->window_width;
+    Pool* layout_pool = lycon->doc->view_tree->pool;
+    log_debug("[BFC] About to create root BFC, pool=%p, html=%p", (void*)layout_pool, (void*)html);
+    BlockFormattingContext* root_bfc = (BlockFormattingContext*)pool_calloc(layout_pool, sizeof(BlockFormattingContext));
+    log_debug("[BFC] pool_calloc returned: %p", (void*)root_bfc);
+    if (root_bfc) {
+        root_bfc->init(html, layout_pool);
+        lycon->bfc = root_bfc;
+        lycon->owns_bfc = true;
+        log_debug("[BFC] Created root BFC for HTML element (width=%.1f)", html->content_width);
+    } else {
+        log_error("[BFC] Failed to allocate root BFC!");
+    }
 
     // resolve CSS style
     log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->node_name());
