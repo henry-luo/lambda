@@ -2,15 +2,17 @@
 
 ## Project Overview
 
-Lambda Script is a **general-purpose, cross-platform, pure functional scripting language** designed for data processing and document presentation. Built from scratch in C/C++ with JIT compilation using MIR (Medium Internal Representation) and reference counting memory management.
+Lambda Script is a **general-purpose, cross-platform, pure functional scripting language** designed for data processing and document presentation, built from scratch in C/C++ with JIT compilation.
 
 ### Key Characteristics
 - **Language Type**: Pure functional scripting language with modern syntax
 - **Implementation**: Custom C/C++ runtime with Tree-sitter based parsing
 - **Compilation**: JIT compilation via MIR for near-native performance
-- **Memory Management**: Reference counting with three-tier string allocation (NamePool, arena, heap)
-- **Target Use Cases**: Data processing, document transformation, mathematical computation, CSS layout
-- **Platforms**: macOS, Linux, Windows (MINGW64 preferred for avoiding Universal CRT)
+- **Memory Management**: Reference counting with three-tier string allocation (namepool, arena, heap)
+- **Target Use Cases**: Data processing, document transformation, mathematical computation, CSS layout and rendering
+- **Input Formats**: JSON, XML, HTML, CSS, Markdown, PDF, YAML, LaTeX, CSV, TOML, etc.
+- **Output Formats**: JSON, HTML, Markdown, YAML, PDF, SVG, PNG, etc.
+- **Platforms**: macOS, Linux, Windows
 
 ## Architecture & Core Data Model
 
@@ -27,28 +29,6 @@ Lambda uses **tagged pointers/values** in 64-bit `Item` type:
 - **Elements**: Extend lists and act as maps simultaneously (dual nature)
 
 Access type with `get_type_id(Item)` - handles all variants uniformly.
-
-### Memory Management Strategy (`lambda/Lamdba_Runtime.md`, `lambda/lambda-mem.cpp`)
-
-**Three-tier string allocation** - choose the right function:
-
-1. **Names (structural identifiers)** - `heap_create_name()` or `builder.createName()`
-   - **Always pooled** in NamePool (string interning)
-   - Use for: map keys, element tags, attribute names, function names, variable names
-   - Benefit: same string → same pointer (identity comparison, memory sharing)
-   - Supports parent-child hierarchy for schema inheritance
-
-2. **Symbols (short identifiers)** - `heap_create_symbol()`
-   - **Conditionally pooled** (only if ≤32 chars)
-   - Use for: symbol literals (`'mySymbol`), enum-like values
-   - Long symbols fall back to arena allocation
-
-3. **Strings (content data)** - `heap_strcpy()` or `builder.createString()`
-   - **Never pooled** (arena allocated)
-   - Use for: user content, text data, free-form strings
-   - Fastest allocation, no hash lookup overhead
-
-**Rule of thumb**: Structural names → `createName()`, content data → `createString()`
 
 ### Core System Architecture
 - **Parser**: Tree-sitter grammar (`lambda/tree-sitter-lambda/grammar.js` → auto-generates `parser.c`)
@@ -69,8 +49,9 @@ Access type with `get_type_id(Item)` - handles all variants uniformly.
 ### Radiant Subsystems
 
 Radiant is the CSS layout and rendering engine integrated with Lambda for document presentation.
-- **Unified DOM and View Tree**: `DomNode`, `DomText`, `DomElement` represents both DOM nodes and layout views
-- **Relative View Coordinates**: Each view has position/size relative to immediate containing block
+- **Unified DOM and View Tree**: A unified DOM tree and view-tree, with `DomNode`, `DomText`, `DomElement` represents both DOM nodes and layout views
+- **Relative View Coordinates**: Each view has position (x, y) relative to immediate containing block
+- **Pixel Ratio Support**: CSS pixel values are converted to physical pixels during style resolution
 
 ## Lambda CLI Commands
 
@@ -78,17 +59,8 @@ Radiant is the CSS layout and rendering engine integrated with Lambda for docume
 ```bash
 ./lambda.exe                          # Start interactive REPL (default)
 ./lambda.exe script.ls                # Run a functional Lambda script (JIT with C2MIR)
-./lambda.exe --mir script.ls          # Run with MIR JIT compilation (only prototyping)
-./lambda.exe --transpile-only script.ls  # Transpile to C only (no execution)
 ./lambda.exe --help                   # Show help message for Lambda CLI
 ./lambda.exe run script.ls            # Run a procedural Lambda script with main() procedure
-```
-
-### REPL Commands (Interactive Mode)
-```
-.quit, .q, .exit    # Exit REPL
-.help, .h           # Show help
-.clear              # Clear REPL history
 ```
 
 ### Document Validation
@@ -102,7 +74,6 @@ Radiant is the CSS layout and rendering engine integrated with Lambda for docume
 ./lambda.exe convert input.json -t yaml -o output.yaml      # Auto-detect input format
 ./lambda.exe convert input.md -f markdown -t html -o out.html  # Explicit formats
 ```
-**Supported formats**: json, xml, html, markdown, yaml, toml, csv, latex, pdf, and 15+ more
 
 ### Layout Analysis & Rendering
 ```bash
@@ -120,30 +91,12 @@ Radiant is the CSS layout and rendering engine integrated with Lambda for docume
 ./lambda.exe view page.html           # Open HTML in browser window
 ```
 
-### Common CLI Patterns
-```bash
-# Development: test script with JIT
-./lambda.exe script.ls
-
-# Production: transpile first, inspect C code
-./lambda.exe --transpile-only script.ls > _transpiled.c
-cat _transpiled.c
-
-# Pipeline: convert and validate
-./lambda.exe convert data.csv -t json -o data.json
-./lambda.exe validate data.json -s my_schema.ls
-
-# CSS debugging: analyze layout
-./lambda.exe layout problematic.html
-```
-
 ## Build System & Development Workflow
 
 ### Build Commands
 ```bash
 make build              # Incremental build (Premake5-based, fastest)
 make debug              # Debug build with AddressSanitizer
-make release            # Optimized release build (-O3 + LTO)
 make rebuild            # Force complete rebuild
 make clean-all          # Clean all build artifacts
 ```
@@ -161,7 +114,7 @@ make test-baseline      # Core functionalities (must pass 100%)
 make test-extended      # HTTP/HTTPS, ongoing features
 ```
 
-**Running single test**: `./test/test_lambda_gtest.exe --gtest_filter=TestSuite.TestCase`
+**Running single test**: e.g. `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`
 
 ### Grammar & Parser Development
 ```bash
@@ -180,9 +133,7 @@ make clean-grammar      # Remove generated files (parser.c, ts-enum.h)
 
 ### Memory Safety Rules
 1. **Always use pool allocation** for Lambda objects: `pool_calloc()`, `arena_alloc()`
-2. **Reference counting**: Increment refs when storing, decrement when releasing
-3. **Validate pointers** before dereferencing: `if (!ptr) return ItemNull;`
-4. **Use MarkBuilder** for constructing complex structures (handles memory correctly)
+2. **Use MarkBuilder and MarkReader** for constructing complex Lambda/Mark structures and reading them (handles memory correctly)
 
 ### Debugging & Logging
 ```cpp
@@ -198,7 +149,6 @@ log_error("Parse failed at line %d: %s", line, msg);
 - **Comments**: Start inline comments in lowercase: `// process the next token`
 - **Naming**: `snake_case` for C and C++ methods, `PascalCase` for classes
 - **Error handling**: Return `ItemNull` or `ItemError`, log errors with `log_error()`
-- **Defensive coding**: Check all allocations, validate inputs, handle edge cases
 
 ### Common Patterns
 
@@ -340,7 +290,6 @@ if (type == LMD_TYPE_STRING) {
 
 ### External Libraries
 - **FreeType**: Font rasterization (Radiant engine)
-- **FontConfig**: System font discovery (macOS/Linux)
 - **GLFW**: Window management (Radiant engine)
 - **ThorVG**: Vector graphics rendering (Radiant engine)
 - **GTest**: Unit testing framework (dev dependency)

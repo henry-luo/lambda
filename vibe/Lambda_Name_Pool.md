@@ -4,8 +4,8 @@
 
 This document outlines a comprehensive plan to enhance Lambda's name and symbol management system by centralizing all names (element names, map keys, attribute names, function names, variable names) and short symbols (≤32 chars) in a hierarchical name pool with parent inheritance support.
 
-**Date**: November 20, 2025  
-**Status**: ✅ **Phase 1-2 COMPLETED**, Phase 3-6 In Progress  
+**Date**: November 20, 2025
+**Status**: ✅ **Phase 1-2 COMPLETED**, Phase 3-6 In Progress
 **Priority**: High (Performance & Memory Optimization)
 
 ## Implementation Status
@@ -100,7 +100,7 @@ struct Script {
     // Memory Management - UNIFIED WITH INPUT
     Pool* ast_pool;             // REMOVE: Should use Input's pool
     NamePool* name_pool;        // UNIFIED: Shares Input's name_pool
-    
+
     // AST
     AstNode *ast_root;
     NameScope* current_scope;
@@ -142,6 +142,28 @@ typedef struct String {
 ---
 
 ## 2. Enhancement Requirements
+
+### 2.0 Memory Management Strategy (`lambda/Lamdba_Runtime.md`, `lambda/lambda-mem.cpp`)
+
+**Three-tier string allocation** - choose the right function:
+
+1. **Names (structural identifiers)** - `heap_create_name()` or `builder.createName()`
+   - **Always pooled** in NamePool (string interning)
+   - Use for: map keys, element tags, attribute names, function names, variable names
+   - Benefit: same string → same pointer (identity comparison, memory sharing)
+   - Supports parent-child hierarchy for schema inheritance
+
+2. **Symbols (short identifiers)** - `heap_create_symbol()`
+   - **Conditionally pooled** (only if ≤32 chars)
+   - Use for: symbol literals (`'mySymbol`), enum-like values
+   - Long symbols fall back to arena allocation
+
+3. **Strings (content data)** - `heap_strcpy()` or `builder.createString()`
+   - **Never pooled** (arena allocated)
+   - Use for: user content, text data, free-form strings
+   - Fastest allocation, no hash lookup overhead
+
+**Rule of thumb**: Structural names → `createName()`, content data → `createString()`
 
 ### 2.1 Core Requirements
 
@@ -214,7 +236,7 @@ struct Script {
     // REMOVED: Pool* ast_pool;       // Use input->pool instead
     // REMOVED: NamePool* name_pool;  // Use input->name_pool instead
     // REMOVED: ArrayList* type_list; // Use input->type_list instead
-    
+
     // AST
     AstNode *ast_root;
     NameScope* current_scope;
@@ -224,7 +246,7 @@ struct Script {
     MIR_context_t jit_context;
     main_func_t main_func;
     mpd_context_t* decimal_ctx;
-    
+
     // Accessors for unified memory management
     inline Pool* pool() const { return input->pool; }
     inline NamePool* name_pool() const { return input->name_pool; }
@@ -342,13 +364,13 @@ bool name_pool_is_poolable_symbol(size_t length) {
 
 String* name_pool_create_symbol_len(NamePool* pool, const char* symbol, size_t len) {
     if (!pool || !symbol || len == 0) return nullptr;
-    
+
     // Only pool symbols within size limit
     if (name_pool_is_poolable_symbol(len)) {
         StrView sv = {.str = symbol, .length = len};
         return name_pool_create_strview(pool, sv);
     }
-    
+
     // Symbol too long - allocate normally from pool
     String* str = string_from_strview({.str = symbol, .length = len}, pool->pool);
     if (str) str->ref_cnt = 1;
@@ -373,7 +395,7 @@ String* name_pool_create_symbol_strview(NamePool* pool, StrView symbol) {
 
 ```cpp
 // Add parent_input parameter to creation functions
-Input* input_from_source(const char* source, Url* url, String* type, 
+Input* input_from_source(const char* source, Url* url, String* type,
                         String* flavor, Input* parent_input = nullptr);
 ```
 
@@ -386,11 +408,11 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent_input) {
     Input* input = (Input*)pool_alloc(pool, sizeof(Input));
     input->pool = pool;
     input->arena = arena_create_default(pool);
-    
+
     // Create name_pool with parent linkage
     NamePool* parent_pool = parent_input ? parent_input->name_pool : nullptr;
     input->name_pool = name_pool_create(pool, parent_pool);
-    
+
     input->type_list = arraylist_new(16);
     input->url = abs_url;
     input->path = nullptr;
@@ -401,10 +423,10 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent_input) {
 // Update InputManager::create_input_instance
 Input* InputManager::create_input_instance(Url* abs_url, Input* parent_input) {
     if (!global_pool) return nullptr;
-    
+
     Input* input = Input::create(global_pool, abs_url, parent_input);
     if (!input) return nullptr;
-    
+
     arraylist_append(inputs, input);
     return input;
 }
@@ -426,7 +448,7 @@ private:
     Arena* arena_;
     NamePool* name_pool_;
     ArrayList* type_list_;
-    
+
     bool auto_string_merge_;    // keep this
     // REMOVE: bool intern_strings_;  // no longer needed
 
@@ -435,17 +457,17 @@ public:
     String* createName(const char* name);
     String* createName(const char* name, size_t len);
     String* createNameFromStrView(StrView name);
-    
+
     // Symbol creation (uses name_pool for short symbols ≤32 chars)
     String* createSymbol(const char* symbol);
     String* createSymbol(const char* symbol, size_t len);
     String* createSymbolFromStrView(StrView symbol);
-    
+
     // String creation (arena allocation, NO pooling)
     String* createString(const char* str);
     String* createString(const char* str, size_t len);
     String* createStringFromBuf(StringBuf* sb);
-    
+
     // Item creation helpers
     Item createNameItem(const char* name);
     Item createSymbolItem(const char* symbol);
@@ -505,7 +527,7 @@ String* MarkBuilder::createSymbolFromStrView(StrView symbol) {
 // String creation - arena allocation (unchanged)
 String* MarkBuilder::createString(const char* str, size_t len) {
     if (!str || len == 0) return &EMPTY_STRING;
-    
+
     // Allocate from arena (fast sequential allocation, no deduplication)
     String* s = (String*)arena_alloc(arena_, sizeof(String) + len + 1);
     s->ref_cnt = 1;
@@ -651,7 +673,7 @@ context->name_pool = name_pool_create(context->ast_pool, nullptr);
 
 #### 3.9 Update Input Parsers to Use MarkBuilder Consistently ✅ COMPLETED
 
-**Status**: 
+**Status**:
 - ✅ JSON parser (`input-json.cpp`) - uses `createName()` for map keys ✓
 - ✅ YAML parser (`input-yaml.cpp`) - uses `createName()` for map keys ✓
 - ✅ TOML parser (`input-toml.cpp`) - refactored to use `createName()` for keys ✓
@@ -672,7 +694,7 @@ context->name_pool = name_pool_create(context->ast_pool, nullptr);
 
 **Strategy**: For each input parser, ensure:
 1. **Map keys** use `createName()` (not `createString()`)
-2. **Element names** use `createName()` 
+2. **Element names** use `createName()`
 3. **Symbols** use `createSymbol()` (for identifiers ≤32 chars)
 4. **String content** uses `createString()`
 
@@ -765,7 +787,7 @@ String* day_key = builder.createName("day");
 
 **High Priority Parsers** (structured data, many repeated keys):
 1. ✅ `input-json.cpp` - DONE
-2. ✅ `input-yaml.cpp` - DONE  
+2. ✅ `input-yaml.cpp` - DONE
 3. ✅ `input-toml.cpp` - DONE (Nov 20, 2025)
 4. ✅ `input-eml.cpp` - DONE (Nov 20, 2025)
 5. ✅ `input-vcf.cpp` - DONE (Nov 20, 2025)
@@ -795,16 +817,16 @@ String* day_key = builder.createName("day");
 void parse_json_object(JsonContext& ctx) {
     MarkBuilder builder(ctx.input());
     MapBuilder map = builder.map();
-    
+
     while (has_more_fields()) {
         const char* key = parse_key();
         // Map keys are names - use createName
         String* key_name = builder.createName(key);
-        
+
         Item value = parse_value();
         map.put(key_name, value);
     }
-    
+
     return map.final();
 }
 
@@ -846,14 +868,14 @@ Input* load_document_with_schema(const char* doc_file, Input* schema_input) {
 TEST(NamePool, BasicNameCreation) {
     Pool* pool = pool_create();
     NamePool* name_pool = name_pool_create(pool, nullptr);
-    
+
     String* name1 = name_pool_create_name(name_pool, "element");
     String* name2 = name_pool_create_name(name_pool, "element");
-    
+
     // Should return same pointer (interned)
     EXPECT_EQ(name1, name2);
     EXPECT_EQ(name1->ref_cnt, 2);
-    
+
     name_pool_release(name_pool);
     pool_destroy(pool);
 }
@@ -862,18 +884,18 @@ TEST(NamePool, BasicNameCreation) {
 TEST(NamePool, SymbolSizeLimit) {
     Pool* pool = pool_create();
     NamePool* name_pool = name_pool_create(pool, nullptr);
-    
+
     // Short symbol - should be pooled
     String* short_sym = name_pool_create_symbol(name_pool, "x");
     String* short_sym2 = name_pool_create_symbol(name_pool, "x");
     EXPECT_EQ(short_sym, short_sym2);
-    
+
     // Long symbol (>32 chars) - should NOT be pooled
     const char* long_sym_text = "this_is_a_very_long_symbol_name_exceeding_limit";
     String* long_sym1 = name_pool_create_symbol(name_pool, long_sym_text);
     String* long_sym2 = name_pool_create_symbol(name_pool, long_sym_text);
     EXPECT_NE(long_sym1, long_sym2);  // Different pointers
-    
+
     name_pool_release(name_pool);
     pool_destroy(pool);
 }
@@ -881,18 +903,18 @@ TEST(NamePool, SymbolSizeLimit) {
 // ✅ IMPLEMENTED AND PASSING
 TEST(NamePool, ParentInheritance) {
     Pool* pool = pool_create();
-    
+
     // Create parent pool with schema names
     NamePool* schema_pool = name_pool_create(pool, nullptr);
     String* schema_name = name_pool_create_name(schema_pool, "Person");
-    
+
     // Create child pool inheriting from schema
     NamePool* doc_pool = name_pool_create(pool, schema_pool);
-    
+
     // Should find name in parent
     String* found_name = name_pool_lookup(doc_pool, "Person");
     EXPECT_EQ(found_name, schema_name);
-    
+
     name_pool_release(doc_pool);
     name_pool_release(schema_pool);
     pool_destroy(pool);
@@ -901,7 +923,7 @@ TEST(NamePool, ParentInheritance) {
 
 **Status**: ✅ All unit tests implemented and passing:
 - ✅ BasicNameCreation
-- ✅ DifferentNames  
+- ✅ DifferentNames
 - ✅ SymbolSizeLimit
 - ✅ ParentInheritance
 - ✅ ChildIndependentNames
@@ -928,14 +950,14 @@ TEST(InputWithSchema, NamePoolInheritance) {
     // Load schema
     Input* schema = input_from_source(schema_content, schema_url, "lambda", nullptr);
     ASSERT_NE(schema, nullptr);
-    
+
     // Load document with schema as parent
     Input* doc = input_from_source(doc_content, doc_url, "json", nullptr, schema);
     ASSERT_NE(doc, nullptr);
-    
+
     // Verify name pool parent linkage
     EXPECT_EQ(doc->name_pool->parent, schema->name_pool);
-    
+
     // Verify schema names available in document
     String* schema_name = name_pool_lookup(schema->name_pool, "Person");
     String* doc_name = name_pool_lookup(doc->name_pool, "Person");
@@ -999,8 +1021,8 @@ Create `doc/Name_Pool_Migration.md`:
 | 3 | Phase 5 | Integration tests, performance benchmarking | 🚧 Planned |
 | 4 | Phase 6 | Documentation & cleanup | 🔄 In Progress |
 
-**Progress**: Phase 1-2 and Phase 4 fully completed with comprehensive test coverage  
-**Achievement**: All 60+ parser locations refactored, 1571/1571 tests passing  
+**Progress**: Phase 1-2 and Phase 4 fully completed with comprehensive test coverage
+**Achievement**: All 60+ parser locations refactored, 1571/1571 tests passing
 **Next Steps**: Phase 3 runtime integration, performance benchmarking
 
 ---
@@ -1068,7 +1090,7 @@ Create `doc/Name_Pool_Migration.md`:
 
 **Critical Rule**: Each change must pass `make test-baseline` before proceeding to the next step.
 
-**Results**: All changes made incrementally with continuous test validation.  
+**Results**: All changes made incrementally with continuous test validation.
 **Test Status**: All baseline tests passing with new functionality.
 
 **Step-by-Step Process**:
