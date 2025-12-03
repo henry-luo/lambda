@@ -242,7 +242,14 @@ std::vector<LatexHtmlFixture> load_baseline_fixtures() {
         "basic_test.tex",
         "text.tex",
         "environments.tex",
-        "sectioning.tex"
+        "sectioning.tex",
+        // New baseline files (moved from extended)
+        "counters.tex",
+        "formatting.tex",
+        "preamble.tex",
+        "basic_text.tex",
+        "spacing.tex",
+        "symbols.tex"
     };
 
     // Tests to exclude from baseline (moved to extended tests)
@@ -258,7 +265,23 @@ std::vector<LatexHtmlFixture> load_baseline_fixtures() {
         }},
         {"text.tex", {
             "alignment",              // alignment commands inside groups affecting paragraph class
-        }}
+        }},
+        // New excluded tests from added baseline files
+        {"basic_text.tex", {
+            "special characters",     // special character rendering issues
+            "dashes and dots",        // dash/dot rendering issues
+            "verbatim text",          // verbatim parsing issues
+        }},
+        {"spacing.tex", {
+            "different horizontal spaces",   // complex spacing commands
+            "\\smallskip etc. and \\smallbreak etc.: paragraph breaks with vertical space",  // complex spacing
+            "\\vspace{} in horizontal and vertical mode",  // vspace handling
+        }},
+        {"symbols.tex", {
+            "TeX \\char",             // \char command
+            "TeX ^^ and ^^^^",        // ^^ syntax
+            "LaTeX \\symbol{}",       // \symbol command
+        }},
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {

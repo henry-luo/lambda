@@ -130,45 +130,7 @@ protected:
     HtmlComparator comparator;
 };
 
-// Test fixture loading functionality
-TEST_F(LatexHtmlFixtureTest, FixtureLoaderBasic) {
-    FixtureLoader loader;
-
-    // Test with a simple fixture string
-    std::string test_content = R"(
-** simple test
-.
-Hello world
-.
-<div class="latex-document"><p>Hello world</p></div>
-.
-)";
-
-    std::vector<LatexHtmlFixture> fixtures = loader.parse_fixtures(test_content, "test.tex");
-
-    ASSERT_EQ(fixtures.size(), 1);
-    EXPECT_EQ(fixtures[0].header, "simple test");
-    EXPECT_EQ(fixtures[0].latex_source, "Hello world");
-    EXPECT_TRUE(fixtures[0].expected_html.find("<p>Hello world</p>") != std::string::npos);
-}
-
-// Test HTML comparison functionality
-TEST_F(LatexHtmlFixtureTest, HtmlComparatorBasic) {
-    HtmlComparator comp;
-
-    // Test exact match
-    EXPECT_TRUE(comp.compare_html("<p>Hello</p>", "<p>Hello</p>"));
-
-    // Test whitespace normalization
-    EXPECT_TRUE(comp.compare_html("<p>Hello</p>", "<p> Hello </p>"));
-    EXPECT_TRUE(comp.compare_html("<p>Hello</p>", "<p>\n  Hello\n</p>"));
-
-    // Test case insensitivity
-    EXPECT_TRUE(comp.compare_html("<P>Hello</P>", "<p>hello</p>"));
-
-    // Test mismatch
-    EXPECT_FALSE(comp.compare_html("<p>Hello</p>", "<p>World</p>"));
-}
+// Note: FixtureLoaderBasic and HtmlComparatorBasic unit tests are in baseline only
 
 // Parameterized test for running all fixtures from a directory
 class LatexHtmlFixtureParameterizedTest : public LatexHtmlFixtureTest,
@@ -280,7 +242,14 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         "basic_test.tex",
         "text.tex",
         "environments.tex",
-        "sectioning.tex"
+        "sectioning.tex",
+        // New baseline files (now passing)
+        "counters.tex",
+        "formatting.tex",
+        "preamble.tex",
+        "basic_text.tex",
+        "spacing.tex",
+        "symbols.tex"
     };
 
     // Tests moved from baseline to extended
@@ -296,7 +265,23 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         }},
         {"text.tex", {
             "alignment",              // alignment commands inside groups affecting paragraph class
-        }}
+        }},
+        // Failing tests from new baseline files
+        {"basic_text.tex", {
+            "special characters",     // special character rendering issues
+            "dashes and dots",        // dash/dot rendering issues
+            "verbatim text",          // verbatim parsing issues
+        }},
+        {"spacing.tex", {
+            "different horizontal spaces",   // complex spacing commands
+            "\\smallskip etc. and \\smallbreak etc.: paragraph breaks with vertical space",  // complex spacing
+            "\\vspace{} in horizontal and vertical mode",  // vspace handling
+        }},
+        {"symbols.tex", {
+            "TeX \\char",             // \char command
+            "TeX ^^ and ^^^^",        // ^^ syntax
+            "LaTeX \\symbol{}",       // \symbol command
+        }},
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
