@@ -17,27 +17,46 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case HTM_TAG_H1:
-        em_size = 2;  // 2em
+        em_size = 2;  // 2em font-size
         goto HEADING_PROP;
     case HTM_TAG_H2:
-        em_size = 1.5;  // 1.5em
+        em_size = 1.5;  // 1.5em font-size
         goto HEADING_PROP;
     case HTM_TAG_H3:
-        em_size = 1.17;  // 1.17em
+        em_size = 1.17;  // 1.17em font-size
         goto HEADING_PROP;
     case HTM_TAG_H4:
-        em_size = 1;  // 1em
+        em_size = 1;  // 1em font-size
         goto HEADING_PROP;
     case HTM_TAG_H5:
-        em_size = 0.83;  // 0.83em
+        em_size = 0.83;  // 0.83em font-size
         goto HEADING_PROP;
     case HTM_TAG_H6:
-        em_size = 0.67;  // 0.67em
-        HEADING_PROP:
+        em_size = 0.67;  // 0.67em font-size
+        HEADING_PROP: {
+        // Font styles
         if (!block->font) { block->font = alloc_font_prop(lycon); }
-        block->font->font_size = lycon->font.style->font_size * em_size;
+        float heading_font_size = lycon->font.style->font_size * em_size;
+        block->font->font_size = heading_font_size;
         block->font->font_weight = CSS_VALUE_BOLD;
+        // Default margins for headings (browser UA stylesheet)
+        // margin: 0.67em 0 for h1, varying for other levels
+        // The margin is relative to the heading's computed font-size
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        float margin_em;
+        switch (elmt_name) {
+            case HTM_TAG_H1: margin_em = 0.67; break;
+            case HTM_TAG_H2: margin_em = 0.83; break;
+            case HTM_TAG_H3: margin_em = 1.00; break;
+            case HTM_TAG_H4: margin_em = 1.33; break;
+            case HTM_TAG_H5: margin_em = 1.67; break;
+            case HTM_TAG_H6: margin_em = 2.33; break;
+            default: margin_em = 0.67; break;
+        }
+        block->bound->margin.top = block->bound->margin.bottom = heading_font_size * margin_em;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
+    }
     case HTM_TAG_P:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         // margin: 1em 0;
