@@ -2,35 +2,63 @@
 
 ## Summary
 
-**Current Status**: Baseline tests 100% passing (28/28), Extended tests need work
-- Baseline: 28 passed, 0 skipped
-- Extended: 81 fixtures loaded, 68 failing, 4 skipped, 9 passing
+**Current Status**: Baseline tests 100% passing (42/42), Extended tests ongoing
+- Baseline: 42 passed (37 fixtures + 5 unit tests)
+- Extended: 67 fixtures loaded, 67 failing, 0 skipped
 
-This document analyzes all 68 failing extended tests and provides a structured plan to resolve them, including necessary parser improvements.
+### Progress Update (December 3, 2025)
+
+#### Completed Work
+1. **Counter System** ✅ - Full implementation with:
+   - Expression evaluation (`3 * -(2+1)` → `-9`)
+   - `\real{}`, `\value{}`, `\the\value{}` commands
+   - Parent-child-grandchild counter reset
+   - All counter formatters (`\arabic`, `\roman`, `\Roman`, `\alph`, `\Alph`, `\fnsymbol`)
+
+2. **Parser Improvements** ✅:
+   - Single newline → space node conversion
+   - Whitespace handling around comment environments
+   - Silent command detection (no paragraph for `\newcounter`, `\setcounter`, etc.)
+   - Empty paragraph `<p></p>` removal
+
+3. **Tests Moved to Baseline** ✅ (14 new tests):
+   - `counters.tex` - 2 tests (all passing)
+   - `formatting.tex` - 6 tests (all passing)
+   - `preamble.tex` - 1 test (all passing)
+   - `basic_text.tex` - 3 tests (tests 1-3 passing, 4-6 in extended)
+   - `spacing.tex` - 1 test (test 2 passing, others in extended)
+   - `symbols.tex` - 1 test (test 4 passing, others in extended)
+
+4. **Code Cleanup** ✅:
+   - Removed duplicate unit tests from extended
+   - Commented out DEBUG printf statements
+   - Enabled previously skipped whitespace tests
+
+This document analyzes all 67 failing extended tests and provides a structured plan to resolve them, including necessary parser improvements.
 
 ---
 
 ## Failing Test Analysis
 
-### Test Breakdown by Category
+### Test Breakdown by Category (Updated)
 
-| Category | Failing Tests | Root Cause |
-|----------|---------------|------------|
-| **Whitespace** | 17 tests | Parser: escaped newlines, `\empty`, control space handling |
-| **Macros** | 6 tests | Parser: custom macro definitions, `\newcommand` expansion |
-| **Labels/Refs** | 7 tests | Formatter: label/reference system not implemented |
-| **Counters** | 2 tests | Formatter: counter system not implemented |
-| **Fonts** | 8 tests | Formatter: font declaration scope, `\em` toggling |
-| **Symbols** | 3 tests | Parser: `\char`, `^^`, `^^^^`, `\symbol{}` not implemented |
-| **Boxes** | 4 tests | Formatter: `\parbox`, `\fbox` not implemented |
-| **Groups** | 3 tests | Formatter: groups spanning paragraph breaks |
-| **Spacing** | 3 tests | Formatter: control space `\ `, vertical breaks |
-| **Environments** | 4 tests | Parser + Formatter: font environments, alignment, abstract |
-| **Preamble** | 1 test | Formatter: preamble commands outputting content |
-| **Layout/Marginpar** | 3 tests | Formatter: marginpar, layout commands not implemented |
-| **Basic Text** | 4 tests | Formatter: HTML entity escaping (quotes) |
-| **Formatting** | 1 test | Formatter: alignment environment class names |
-| **Text** | 1 test | Formatter: alignment commands affecting paragraph class |
+| Category | Failing Tests | Root Cause | Status |
+|----------|---------------|------------|--------|
+| **Counters** | 0 tests | ~~Counter system not implemented~~ | ✅ Complete |
+| **Formatting** | 0 tests | ~~Basic formatting issues~~ | ✅ Complete |
+| **Preamble** | 0 tests | ~~Preamble commands outputting content~~ | ✅ Complete |
+| **Whitespace** | 17 tests | Parser: escaped newlines, `\empty`, control space handling | 🔄 In Progress |
+| **Macros** | 6 tests | Parser: custom macro definitions, `\newcommand` expansion | ⏳ Pending |
+| **Labels/Refs** | 7 tests | Formatter: label/reference system not implemented | ⏳ Pending |
+| **Fonts** | 8 tests | Formatter: font declaration scope, `\em` toggling | ⏳ Pending |
+| **Symbols** | 3 tests | Parser: `\char`, `^^`, `^^^^`, `\symbol{}` not implemented | ⏳ Pending |
+| **Boxes** | 4 tests | Formatter: `\parbox`, `\fbox` not implemented | ⏳ Pending |
+| **Groups** | 3 tests | Formatter: groups spanning paragraph breaks | ⏳ Pending |
+| **Spacing** | 3 tests | Formatter: control space `\ `, vertical breaks | ⏳ Pending |
+| **Environments** | 5 tests | Parser + Formatter: font environments, alignment, abstract | ⏳ Pending |
+| **Layout/Marginpar** | 3 tests | Formatter: marginpar, layout commands not implemented | ⏳ Pending |
+| **Basic Text** | 3 tests | Formatter: special chars, dashes, verbatim | ⏳ Pending |
+| **Text** | 1 test | Formatter: alignment commands affecting paragraph class | ⏳ Pending |
 
 ---
 
@@ -589,54 +617,60 @@ Until group ends.
 
 ## Implementation Phases
 
-### Phase 1: Quick Wins (1 week)
-**Target**: +15 tests passing
+### Phase 1: Quick Wins ✅ COMPLETE
+**Target**: +15 tests passing → **Achieved: +14 tests**
 
-| Priority | Category | Tests | Effort |
+| Priority | Category | Tests | Status |
 |----------|----------|-------|--------|
-| HIGH | Basic Text | 4 | 1 day |
-| HIGH | Formatting | 1 | 0.5 day |
-| HIGH | Preamble | 1 | 0.5 day |
-| MED | Spacing | 3 | 1 day |
-| MED | Font Scoping | 3 | 2 days |
+| HIGH | Counters | 2 | ✅ Complete |
+| HIGH | Formatting | 6 | ✅ Complete |
+| HIGH | Preamble | 1 | ✅ Complete |
+| HIGH | Basic Text | 3 | ✅ Complete (3/6) |
+| MED | Spacing | 1 | ✅ Complete (1/4) |
+| MED | Symbols | 1 | ✅ Complete (1/4) |
 
-**Focus**: Simple formatter changes, no parser work.
+**Completed Work**:
+- Full counter system with expression evaluation
+- Silent command detection for paragraph management
+- Empty paragraph removal
+- Single newline → space conversion in parser
+- Whitespace handling around comment environments
 
-### Phase 2: Parser Improvements (2 weeks)
+### Phase 2: Parser Improvements (Current)
 **Target**: +12 tests passing
 
 | Priority | Category | Tests | Effort |
 |----------|----------|-------|--------|
-| HIGH | Whitespace | 10 | 3 days |
+| HIGH | Whitespace | 17 | 3 days |
 | HIGH | Symbols | 3 | 2 days |
 | MED | Macros (basic) | 2 | 3 days |
 
 **Focus**: Parser-level changes for whitespace, symbols, basic macros.
 
-### Phase 3: Counter & Reference System (1 week)
-**Target**: +9 tests passing
+### Phase 3: Reference System
+**Target**: +7 tests passing
 
 | Priority | Category | Tests | Effort |
 |----------|----------|-------|--------|
-| HIGH | Counters | 2 | 3 days |
 | HIGH | Labels/Refs | 7 | 4 days |
 
-**Focus**: Implement counter registry and label/reference resolution.
+**Focus**: Label/reference resolution (counters already complete).
 
-### Phase 4: Complex Features (2 weeks)
-**Target**: +15 tests passing
+### Phase 4: Complex Features
+**Target**: +20 tests passing
 
 | Priority | Category | Tests | Effort |
 |----------|----------|-------|--------|
 | MED | Macros (full) | 4 | 4 days |
 | MED | Boxes | 4 | 3 days |
 | MED | Groups | 3 | 2 days |
-| LOW | Environments | 4 | 3 days |
+| MED | Fonts | 8 | 3 days |
+| LOW | Environments | 5 | 3 days |
 
-**Focus**: Advanced macro expansion, box layouts, group spanning.
+**Focus**: Advanced macro expansion, box layouts, group spanning, font scoping.
 
-### Phase 5: Layout & Polish (1 week)
-**Target**: +7 tests passing
+### Phase 5: Layout & Polish
+**Target**: +10 tests passing
 
 | Priority | Category | Tests | Effort |
 |----------|----------|-------|--------|
@@ -649,7 +683,13 @@ Until group ends.
 
 ## Parser Improvements Summary
 
-### Required Parser Changes (`input-latex.cpp`)
+### Completed Parser Changes ✅
+
+1. **Single Newline Handling**: Single newlines between elements produce space nodes
+2. **Whitespace Around Comments**: Proper space handling after comment environments
+3. **Trailing Newline Normalization**: Only trim trailing newlines, preserve spaces
+
+### Remaining Parser Changes (`input-latex.cpp`)
 
 1. **Escaped Newline**: `\<newline>` → ZWSP element
 2. **Control Space**: `\ ` → explicit space character preservation
@@ -741,33 +781,31 @@ class MarginparCollector {
 
 ## Success Metrics
 
-| Phase | Target Pass Rate | Tests Passing | Timeline |
-|-------|-----------------|---------------|----------|
-| Baseline | 100% | 28/28 | ✅ Complete |
-| Phase 1 | +15 | ~24/81 | Week 1 |
-| Phase 2 | +12 | ~36/81 | Week 2-3 |
-| Phase 3 | +9 | ~45/81 | Week 4 |
-| Phase 4 | +15 | ~60/81 | Week 5-6 |
-| Phase 5 | +7 | ~67/81 | Week 7 |
+| Phase | Target | Tests Passing | Status |
+|-------|--------|---------------|--------|
+| Baseline | 100% | 42/42 | ✅ Complete |
+| Phase 1 | +14 | 42 baseline | ✅ Complete |
+| Phase 2 | +22 | ~22/67 extended | 🔄 Current |
+| Phase 3 | +7 | ~29/67 extended | ⏳ Pending |
+| Phase 4 | +20 | ~49/67 extended | ⏳ Pending |
+| Phase 5 | +10 | ~59/67 extended | ⏳ Pending |
 
-**Final Target**: 80%+ extended test pass rate (65+/81)
+**Final Target**: 85%+ extended test pass rate (57+/67)
 
 ---
 
-## Files to Modify
+## Files Modified
 
 ### Parser
-- `lambda/input/input-latex.cpp` - Core parser changes
-- `lambda/input/latex-macros.hpp` (new) - Macro registry
+- `lambda/input/input-latex.cpp` - Single newline handling, whitespace fixes ✅
 
 ### Formatter
-- `lambda/format/format-latex-html.cpp` - Main formatter
-- `lambda/format/format-latex-html.h` - Add state structures
-- `lambda/format/latex-counters.hpp` (new) - Counter registry
-- `lambda/format/latex-labels.hpp` (new) - Label registry
+- `lambda/format/format-latex-html.cpp` - Counter system, silent commands, paragraph management ✅
 
 ### Tests
-- `test/latex/test_latex_html_extended.cpp` - Update as tests pass
+- `test/latex/test_latex_html_baseline.cpp` - Added 6 new baseline files ✅
+- `test/latex/test_latex_html_extended.cpp` - Removed duplicate unit tests ✅
+- `test/latex/fixtures/whitespace.tex` - Enabled skipped tests ✅
 - `test/latex/test_latex_html_baseline.cpp` - Potentially move passing extended tests
 
 ---
