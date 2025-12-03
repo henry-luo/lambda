@@ -4,6 +4,7 @@
 #include "layout_flex_multipass.hpp"
 #include "layout_grid_multipass.hpp"
 #include "layout_positioned.hpp"
+#include "layout_bfc.hpp"
 #include "intrinsic_sizing.hpp"
 #include "grid.hpp"
 
@@ -500,6 +501,17 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d",
         elmt->node_name(), block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
 
+    // Check if this block establishes a new BFC
+    BlockFormattingContext* parent_bfc = lycon->bfc;
+    BlockFormattingContext* new_bfc = create_bfc_if_needed(block, lycon->pool, parent_bfc);
+    if (new_bfc) {
+        lycon->bfc = new_bfc;
+        lycon->owns_bfc = true;
+        log_debug("[BFC] Block %s establishes new BFC", elmt->node_name());
+    } else {
+        lycon->owns_bfc = false;
+    }
+
     uintptr_t elmt_name = elmt->tag();
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
         const char *value;
@@ -769,6 +781,20 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
               block->scroller ? block->scroller->overflow_x : -1);
 
     if (creates_bfc) {
+        // Try new BFC system first
+        if (lycon->bfc && lycon->bfc->establishing_element == block) {
+            float max_float_bottom = lycon->bfc->lowest_float_bottom;
+            float content_bottom = block->y + block->height;
+            log_debug("[BFC] Height expansion check: max_float_bottom=%.1f, content_bottom=%.1f",
+                      max_float_bottom, content_bottom);
+            if (max_float_bottom > content_bottom - block->y) {
+                float old_height = block->height;
+                block->height = max_float_bottom;
+                log_debug("[BFC] Height expanded: old=%.1f, new=%.1f", old_height, block->height);
+            }
+        }
+        
+        // Also check legacy FloatContext
         FloatContext* float_ctx = get_current_float_context(lycon);
         log_debug("BFC %s: float_ctx=%p, container=%p, this_block=%p",
                   elmt->node_name(), float_ctx, float_ctx ? float_ctx->container : nullptr, block);
@@ -803,11 +829,25 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         }
     }
 
-    // Apply CSS float layout
-    // This adds the element to the float context for affecting later content
+    // Apply CSS float layout using BFC or legacy FloatContext
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
+        
+        // For now, always use legacy FloatContext to maintain backward compatibility
+        // BFC float positioning will be enabled later after further testing
         layout_float_element(lycon, block);
+        
+        // Also add to BFC for future line adjustments (parallel tracking)
+        if (lycon->bfc) {
+            lycon->bfc->add_float(block);
+            log_debug("[BFC] Float added to BFC (legacy positioned)");
+        }
+    }
+    
+    // Restore parent BFC if we created a new one
+    if (lycon->owns_bfc && lycon->bfc && lycon->bfc->parent_bfc) {
+        lycon->bfc = lycon->bfc->parent_bfc;
+        lycon->owns_bfc = false;
     }
 }
 

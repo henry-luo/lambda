@@ -116,6 +116,7 @@ struct DomElement : DomNode {
     uint32_t style_version;      // Incremented when specified styles change
     bool needs_style_recompute;  // Flag indicating computed values are stale
     bool styles_resolved;        // Flag to track if styles resolved in current layout pass
+    bool float_prelaid;          // Flag to skip float during normal flow (pre-laid in float pass)
     // pseudo-class state (for :hover, :focus, etc.)
     uint32_t pseudo_state;       // Bitmask of pseudo-class states
 
@@ -152,7 +153,7 @@ struct DomElement : DomNode {
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr),
-        style_version(0), needs_style_recompute(false), styles_resolved(false),
+        style_version(0), needs_style_recompute(false), styles_resolved(false), float_prelaid(false),
         pseudo_state(0), doc(nullptr), display{CSS_VALUE_NONE, CSS_VALUE_NONE} {}
 };
 
