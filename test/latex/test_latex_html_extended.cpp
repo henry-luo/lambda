@@ -311,7 +311,7 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         for (const auto& fixture : file.fixtures) {
             // Include if NOT in baseline files OR if it's an extended test from baseline
             bool include = false;
-            
+
             if (baseline_files.find(fixture.filename) == baseline_files.end()) {
                 // Not a baseline file, include all
                 include = true;
@@ -324,7 +324,7 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
                     include = true;
                 }
             }
-            
+
             if (include) {
                 ongoing_fixtures.push_back(fixture);
             }
