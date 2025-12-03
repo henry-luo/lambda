@@ -251,6 +251,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     // Update scroller clip if height changed and scroller has clipping enabled
     // This ensures the clip region is correct after auto-height is calculated
     if (block->scroller && block->scroller->has_clip) {
+        block->scroller->clip.left = 0;
+        block->scroller->clip.top = 0;
         block->scroller->clip.right = block->width;
         block->scroller->clip.bottom = block->height;
     }
@@ -1124,15 +1126,21 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
                 }
             }
 
-            // Convert from absolute coordinates to relative height
-            float content_bottom = block->y + block->height;
-            log_debug("BFC %s: max_float_bottom=%.1f, content_bottom=%.1f (block->y=%.1f, block->height=%.1f)",
-                      elmt->node_name(), max_float_bottom, content_bottom, block->y, block->height);
-            if (max_float_bottom > content_bottom) {
+            // Float margin_box coordinates are relative to container's content area
+            // Compare to block->height which is also relative/local
+            log_debug("BFC %s: max_float_bottom=%.1f, block->height=%.1f",
+                      elmt->node_name(), max_float_bottom, block->height);
+            if (max_float_bottom > block->height) {
                 float old_height = block->height;
-                block->height = max_float_bottom - block->y;
-                log_debug("BFC height expansion: old=%.1f, new=%.1f (float_bottom=%.1f, block_y=%.1f)",
-                          old_height, block->height, max_float_bottom, block->y);
+                block->height = max_float_bottom;
+                log_debug("BFC height expansion: old=%.1f, new=%.1f (float_bottom=%.1f)",
+                          old_height, block->height, max_float_bottom);
+                
+                // Update scroller clip to match new height (for overflow:hidden rendering)
+                if (block->scroller && block->scroller->has_clip) {
+                    block->scroller->clip.bottom = block->height;
+                    log_debug("BFC updated clip.bottom to %.1f", block->height);
+                }
             }
         }
     }
@@ -1306,7 +1314,25 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             } else if (block->bound) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
-                if (block->parent_view()->first_placed_child() == block) {  // first child
+                
+                // Find first in-flow child (skip floats for margin collapsing purposes)
+                View* first_in_flow_child = block->parent_view()->first_placed_child();
+                while (first_in_flow_child) {
+                    if (!first_in_flow_child->is_block()) break;
+                    ViewBlock* vb = (ViewBlock*)first_in_flow_child;
+                    if (vb->position && element_has_float(vb)) {
+                        // Skip to next placed sibling
+                        View* next = (View*)first_in_flow_child->next_sibling;
+                        while (next && !next->view_type) {
+                            next = (View*)next->next_sibling;
+                        }
+                        first_in_flow_child = next;
+                        continue;
+                    }
+                    break;
+                }
+                
+                if (first_in_flow_child == block) {  // first in-flow child
                     if (block->bound->margin.top > 0) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                         // Check if parent creates a BFC - BFC prevents margin collapsing
@@ -1345,7 +1371,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     
                     if (!has_clearance) {
                         float collapse = 0;
+                        // Find previous in-flow sibling (skip floats)
                         View* prev_view = block->prev_placed_view();
+                        while (prev_view && prev_view->is_block()) {
+                            ViewBlock* vb = (ViewBlock*)prev_view;
+                            // Skip floats - they're out of normal flow and don't participate in margin collapsing
+                            if (vb->position && element_has_float(vb)) {
+                                prev_view = prev_view->prev_placed_view();
+                                continue;
+                            }
+                            break;
+                        }
                         if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
                             ViewBlock* prev_block = (ViewBlock*)prev_view;
                             if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
