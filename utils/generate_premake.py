@@ -754,15 +754,14 @@ class PremakeGenerator:
         c_files = [f for f in source_files if f.endswith('.c')]
         cpp_files = [f for f in source_files if f.endswith('.cpp')]
 
-        # If we have both C and C++ files, create separate projects
+        # If we have both C and C++ files, create a single C++ project that includes all files
+        # No need for separate -c project since C++ project already includes C files for proper linking
         if c_files and cpp_files:
-            # Create C project
-            self._create_language_project(lib, c_files, [], dependencies, "C", f"{lib_name}-c")
             # Create C++ project - include ALL C files for proper linking
-            cpp_files_with_c = cpp_files + c_files
-            self._create_language_project(lib, cpp_files_with_c, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
-            # Create main project that links both
-            self._create_wrapper_project(lib_name, [f"{lib_name}-c", f"{lib_name}-cpp"], lib)
+            all_files = cpp_files + c_files
+            self._create_language_project(lib, all_files, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
+            # Create main project that links to the cpp project
+            self._create_wrapper_project(lib_name, [f"{lib_name}-cpp"], lib)
         else:
             # Single language project
             language = "C++" if cpp_files or any('*.cpp' in pattern for pattern in source_patterns) else "C"
@@ -2093,25 +2092,12 @@ class PremakeGenerator:
                 elif dep in ['lambda-runtime-full', 'lambda-input-full']:
                     # Special handling for MIR, Lambda, Math, and Markup tests
                     if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
-                        if language == "C":
-                            # C tests need both C and C++ runtime libraries
-                            self.premake_content.append('        "lambda-runtime-full-cpp",')
-                            self.premake_content.append('        "lambda-runtime-full-c",')
-                            self.premake_content.append('        "lambda-input-full-cpp",')
-                            self.premake_content.append('        "lambda-input-full-c",')
-                        else:
-                            # C++ tests need both C and C++ versions
-                            self.premake_content.append('        "lambda-runtime-full-cpp",')
-                            self.premake_content.append('        "lambda-runtime-full-c",')
-                            self.premake_content.append('        "lambda-input-full-cpp",')
-                            self.premake_content.append('        "lambda-input-full-c",')
+                        # All tests only need the -cpp versions (C++ project includes all C files)
+                        self.premake_content.append('        "lambda-runtime-full-cpp",')
+                        self.premake_content.append('        "lambda-input-full-cpp",')
                     else:
-                        # Regular tests: For C++ tests, link both C++ and C versions (C++ depends on C for core utilities)
-                        if language == "C++":
-                            self.premake_content.append(f'        "{dep}-cpp",')
-                            self.premake_content.append(f'        "{dep}-c",')
-                        else:
-                            self.premake_content.append(f'        "{dep}-c",')
+                        # Regular tests: only need -cpp version (C++ project includes all C files)
+                        self.premake_content.append(f'        "{dep}-cpp",')
 
                     # Add lambda-lib which now contains all core dependencies
                     self.premake_content.append('        "lambda-lib",')
