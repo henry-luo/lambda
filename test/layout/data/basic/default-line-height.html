@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Default Line Height Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 0;
+        }
+        .test-row {
+            margin: 10px 0;
+            display: flex;
+            align-items: baseline;
+        }
+        .label {
+            width: 120px;
+            font-size: 12px;
+            color: #666;
+        }
+        .test-text {
+            border: 1px solid #ccc;
+            padding: 0;
+            margin: 0;
+            display: inline-block;
+        }
+        /* Font families */
+        .serif { font-family: Times, "Times New Roman", serif; }
+        .sans-serif { font-family: Arial, Helvetica, sans-serif; }
+        .monospace { font-family: "Courier New", Courier, monospace; }
+    </style>
+</head>
+<body>
+    <h1>Default Line Height Test</h1>
+    <p>Testing line-height: normal for different font sizes and font families.</p>
+
+    <!-- Sans-serif tests (Arial/Helvetica) -->
+    <h2>Sans-Serif (Arial)</h2>
+
+    <div class="test-row">
+        <span class="label">10px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 10px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">12px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 12px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">14px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 14px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">16px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 16px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">18px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 18px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">20px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 20px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">24px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 24px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">32px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 32px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">48px sans-serif:</span>
+        <span class="test-text sans-serif" style="font-size: 48px;">Mg Sample Text</span>
+    </div>
+
+    <!-- Serif tests (Times) -->
+    <h2>Serif (Times)</h2>
+
+    <div class="test-row">
+        <span class="label">10px serif:</span>
+        <span class="test-text serif" style="font-size: 10px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">12px serif:</span>
+        <span class="test-text serif" style="font-size: 12px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">14px serif:</span>
+        <span class="test-text serif" style="font-size: 14px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">16px serif:</span>
+        <span class="test-text serif" style="font-size: 16px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">18px serif:</span>
+        <span class="test-text serif" style="font-size: 18px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">20px serif:</span>
+        <span class="test-text serif" style="font-size: 20px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">24px serif:</span>
+        <span class="test-text serif" style="font-size: 24px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">32px serif:</span>
+        <span class="test-text serif" style="font-size: 32px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">48px serif:</span>
+        <span class="test-text serif" style="font-size: 48px;">Mg Sample Text</span>
+    </div>
+
+    <!-- Monospace tests (Courier) -->
+    <h2>Monospace (Courier)</h2>
+
+    <div class="test-row">
+        <span class="label">10px monospace:</span>
+        <span class="test-text monospace" style="font-size: 10px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">12px monospace:</span>
+        <span class="test-text monospace" style="font-size: 12px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">14px monospace:</span>
+        <span class="test-text monospace" style="font-size: 14px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">16px monospace:</span>
+        <span class="test-text monospace" style="font-size: 16px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">18px monospace:</span>
+        <span class="test-text monospace" style="font-size: 18px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">20px monospace:</span>
+        <span class="test-text monospace" style="font-size: 20px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">24px monospace:</span>
+        <span class="test-text monospace" style="font-size: 24px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">32px monospace:</span>
+        <span class="test-text monospace" style="font-size: 32px;">Mg Sample Text</span>
+    </div>
+
+    <div class="test-row">
+        <span class="label">48px monospace:</span>
+        <span class="test-text monospace" style="font-size: 48px;">Mg Sample Text</span>
+    </div>
+
+    <!-- Multi-line test -->
+    <h2>Multi-line Text</h2>
+
+    <div class="test-row">
+        <span class="label">16px multi-line:</span>
+        <div class="test-text sans-serif" style="font-size: 16px; width: 300px;">
+            This is a longer text that should wrap to multiple lines to test the line height behavior across multiple lines of text.
+        </div>
+    </div>
+
+</body>
+</html>
