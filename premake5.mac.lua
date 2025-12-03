@@ -327,6 +327,7 @@ project "lambda"
         "radiant/layout_inline.cpp",
         "radiant/layout_text.cpp",
         "radiant/layout_positioned.cpp",
+        "radiant/layout_bfc.cpp",
         "radiant/layout_table.cpp",
         "radiant/layout_flex.cpp",
         "radiant/layout_flex_measurement.cpp",
