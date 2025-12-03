@@ -732,9 +732,74 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
     if (strcmp(cmd_name->chars, "item") == 0) {
         // \item commands don't take arguments in braces
         // Their content is everything until the next \item or \end{environment}
+        // But they can have an optional label: \item[custom label] content
 
         MarkBuilder& builder = ctx.builder;
         skip_whitespace(latex);
+
+        // Check for optional label in brackets [...]
+        if (**latex == '[') {
+            (*latex)++;  // skip '['
+
+            // Create a label element to hold the optional label content
+            Element* label_element = create_latex_element(input, "label");
+            if (!label_element) {
+                return ItemError;
+            }
+
+            // Parse content until closing bracket, handling nested brackets
+            int bracket_depth = 1;
+            while (**latex && bracket_depth > 0) {
+                if (**latex == '[') {
+                    bracket_depth++;
+                    // Parse the bracket as text
+                    String* s = builder.createString("[", 1);
+                    list_push((List*)label_element, Item{.item = s2it(s)});
+                    (*latex)++;
+                } else if (**latex == ']') {
+                    bracket_depth--;
+                    if (bracket_depth > 0) {
+                        // Parse the bracket as text (nested bracket)
+                        String* s = builder.createString("]", 1);
+                        list_push((List*)label_element, Item{.item = s2it(s)});
+                        (*latex)++;
+                    } else {
+                        (*latex)++;  // skip final ']'
+                    }
+                } else if (**latex == '\\') {
+                    // Parse LaTeX command inside the label
+                    Item child = parse_latex_element(ctx, latex);
+                    if (child.item != ITEM_ERROR && child.item != ITEM_NULL) {
+                        list_push((List*)label_element, child);
+                    }
+                } else if (**latex == '{') {
+                    // Parse group inside the label
+                    Item child = parse_latex_element(ctx, latex);
+                    if (child.item != ITEM_ERROR && child.item != ITEM_NULL) {
+                        list_push((List*)label_element, child);
+                    }
+                } else {
+                    // Collect text until special character
+                    const char* text_start = *latex;
+                    while (**latex && **latex != '[' && **latex != ']' &&
+                           **latex != '\\' && **latex != '{') {
+                        (*latex)++;
+                    }
+                    if (*latex > text_start) {
+                        String* s = builder.createString(text_start, *latex - text_start);
+                        list_push((List*)label_element, Item{.item = s2it(s)});
+                    }
+                }
+            }
+
+            // Set content length for label element
+            ((TypeElmt*)label_element->type)->content_length = ((List*)label_element)->length;
+
+            // Add the label element as the first child of the item
+            list_push((List*)element, Item{.item = (uint64_t)label_element});
+
+            skip_whitespace(latex);
+        }
 
         // Parse content until next \item or \end - but parse it properly as LaTeX
         while (**latex) {

@@ -51,20 +51,24 @@ static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int de
 static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth);
+static void process_chapter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_section_h2(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
 static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx);
 static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
-static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
-static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
-static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, int list_depth);
+static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, int list_depth, int& item_counter);
+static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, const char* env_type);
 static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx);
 static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag, FontContext* font_ctx);
 static void process_font_scoped_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, FontSeries series, FontShape shape, FontFamily family);
 static void process_emph_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
-static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
+static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, int list_depth, bool is_enumerate, int item_number);
 static void append_escaped_text(StringBuf* html_buf, const char* text);
 static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* text, bool is_tt);
 static void append_indent(StringBuf* html_buf, int depth);
+static void close_paragraph(StringBuf* html_buf, bool add_newline);
 
 // reader-based forward declarations
 static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx);
@@ -73,6 +77,9 @@ static void process_element_content_simple_reader(StringBuf* html_buf, const Ele
 
 static DocumentState doc_state = {0};
 static FontContext font_context = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, false};
+static int chapter_counter = 0;         // Counter for chapter numbering within document
+static int section_counter = 0;         // Counter for section numbering within chapter (resets on new chapter)
+static int global_section_id = 0;       // Global counter for id="sec-N" attribute
 
 // Helper functions for font context
 static const char* get_font_css_class(FontContext* ctx) {
@@ -402,6 +409,11 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     font_context.family = FONT_FAMILY_ROMAN;
     font_context.em_active = false;
 
+    // Reset counters
+    chapter_counter = 0;
+    section_counter = 0;
+    global_section_id = 0;
+
     // Start HTML document container (using "body" class for LaTeX.js compatibility)
     stringbuf_append_str(html_buf, "<div class=\"body\">\n");
     printf("DEBUG: Added HTML container to html_buf\n");
@@ -543,17 +555,17 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     stringbuf_append_str(css_buf, "}\n");
 
     // Alignment environment styles
-    stringbuf_append_str(css_buf, ".latex-center {\n");
+    stringbuf_append_str(css_buf, ".list.center {\n");
     stringbuf_append_str(css_buf, "  text-align: center;\n");
     stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
     stringbuf_append_str(css_buf, "}\n");
 
-    stringbuf_append_str(css_buf, ".latex-flushleft {\n");
+    stringbuf_append_str(css_buf, ".list.flushleft {\n");
     stringbuf_append_str(css_buf, "  text-align: left;\n");
     stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
     stringbuf_append_str(css_buf, "}\n");
 
-    stringbuf_append_str(css_buf, ".latex-flushright {\n");
+    stringbuf_append_str(css_buf, ".list.flushright {\n");
     stringbuf_append_str(css_buf, "  text-align: right;\n");
     stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
     stringbuf_append_str(css_buf, "}\n");
@@ -746,8 +758,13 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             process_maketitle(html_buf, pool, depth);
             return;
         }
+        else if (strcmp(cmd_name, "chapter") == 0) {
+            process_chapter(html_buf, elem, pool, depth, font_ctx);
+            return;
+        }
         else if (strcmp(cmd_name, "section") == 0) {
-            process_section(html_buf, elem, pool, depth, "latex-section", font_ctx);
+            // Always use h2 with numbering for sections
+            process_section_h2(html_buf, elem, pool, depth, font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "subsection") == 0) {
@@ -763,19 +780,27 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "center") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
+            process_alignment_environment(html_buf, elem, pool, depth, "list center", font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "flushleft") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
+            process_alignment_environment(html_buf, elem, pool, depth, "list flushleft", font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "flushright") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
+            process_alignment_environment(html_buf, elem, pool, depth, "list flushright", font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "quote") == 0) {
-            process_quote(html_buf, elem, pool, depth, font_ctx);
+            process_quote(html_buf, elem, pool, depth, font_ctx, "quote");
+            return;
+        }
+        else if (strcmp(cmd_name, "quotation") == 0) {
+            process_quote(html_buf, elem, pool, depth, font_ctx, "quotation");
+            return;
+        }
+        else if (strcmp(cmd_name, "verse") == 0) {
+            process_quote(html_buf, elem, pool, depth, font_ctx, "verse");
             return;
         }
         else if (strcmp(cmd_name, "verbatim") == 0) {
@@ -890,15 +915,22 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "item") == 0) {
-            process_item(html_buf, elem, pool, depth, font_ctx);
+            // Item should be processed within itemize/enumerate context
+            // If we get here directly, use default formatting
+            process_item(html_buf, elem, pool, depth, font_ctx, 0, false, 0);
         }
         else if (strcmp(cmd_name, "itemize") == 0) {
             printf("DEBUG: Processing itemize environment directly\n");
-            process_itemize(html_buf, elem, pool, depth, font_ctx);
+            process_itemize(html_buf, elem, pool, depth, font_ctx, 0);
         }
         else if (strcmp(cmd_name, "enumerate") == 0) {
             printf("DEBUG: Processing enumerate environment directly\n");
-            process_enumerate(html_buf, elem, pool, depth, font_ctx);
+            int counter = 0;
+            process_enumerate(html_buf, elem, pool, depth, font_ctx, 0, counter);
+        }
+        else if (strcmp(cmd_name, "description") == 0) {
+            printf("DEBUG: Processing description environment directly\n");
+            process_description(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "quad") == 0) {
             // \quad - em space (U+2003)
@@ -1131,12 +1163,16 @@ static bool is_block_element(Item item) {
     cmd_name[name_len] = '\0';
 
     // Block-level elements that should not be wrapped in paragraphs
-    return (strcmp(cmd_name, "section") == 0 ||
+    return (strcmp(cmd_name, "chapter") == 0 ||
+            strcmp(cmd_name, "section") == 0 ||
             strcmp(cmd_name, "subsection") == 0 ||
             strcmp(cmd_name, "subsubsection") == 0 ||
             strcmp(cmd_name, "itemize") == 0 ||
             strcmp(cmd_name, "enumerate") == 0 ||
+            strcmp(cmd_name, "description") == 0 ||
             strcmp(cmd_name, "quote") == 0 ||
+            strcmp(cmd_name, "quotation") == 0 ||
+            strcmp(cmd_name, "verse") == 0 ||
             strcmp(cmd_name, "verbatim") == 0 ||
             strcmp(cmd_name, "center") == 0 ||
             strcmp(cmd_name, "flushleft") == 0 ||
@@ -1145,6 +1181,8 @@ static bool is_block_element(Item item) {
             strcmp(cmd_name, "author") == 0 ||
             strcmp(cmd_name, "date") == 0 ||
             strcmp(cmd_name, "maketitle") == 0 ||
+            strcmp(cmd_name, "document") == 0 ||
+            strcmp(cmd_name, "documentclass") == 0 ||
             strcmp(cmd_name, "medskip") == 0 ||
             strcmp(cmd_name, "bigskip") == 0 ||
             strcmp(cmd_name, "medbreak") == 0 ||
@@ -1207,6 +1245,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
         bool need_new_paragraph = false;
         bool font_span_open = false;
         bool next_paragraph_noindent = false;  // Track if next paragraph should have noindent class
+        bool next_paragraph_continue = false;  // Track if next paragraph should have continue class (after lists)
 
         for (int i = 0; i < elem->length; i++) {
             printf("DEBUG: Processing element content item %d\n", i);
@@ -1293,7 +1332,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                         // Process as element instead
                         if (!in_paragraph || need_new_paragraph) {
                             if (need_new_paragraph && in_paragraph) {
-                                stringbuf_append_str(html_buf, "</p>\n");
+                                close_paragraph(html_buf, true);
                             }
                             if (next_paragraph_noindent) {
                                 stringbuf_append_str(html_buf, "<p class=\"noindent\">");
@@ -1316,7 +1355,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                                     stringbuf_append_str(html_buf, "</span>");
                                     font_span_open = false;
                                 }
-                                stringbuf_append_str(html_buf, "</p>\n");
+                                close_paragraph(html_buf, true);
                             }
                             if (next_paragraph_noindent) {
                                 stringbuf_append_str(html_buf, "<p class=\"noindent\">");
@@ -1361,12 +1400,13 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                                     }
                                     // Close current paragraph and force new paragraph for next content
                                     if (in_paragraph) {
-                                        stringbuf_append_str(html_buf, "</p>\n");
+                                        close_paragraph(html_buf, true);
                                         in_paragraph = false;
                                     }
                                     need_new_paragraph = true;
-                                    // Clear noindent flag - a parbreak consumes any pending noindent
+                                    // Clear noindent and continue flags - a parbreak consumes any pending modifiers
                                     next_paragraph_noindent = false;
+                                    next_paragraph_continue = false;
                                 }
                             }
                         }
@@ -1380,12 +1420,13 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 }
                 // Close current paragraph and force new paragraph for next content
                 if (in_paragraph) {
-                    stringbuf_append_str(html_buf, "</p>\n");
+                    close_paragraph(html_buf, true);
                     in_paragraph = false;
                 }
                 need_new_paragraph = true;
-                // Clear noindent flag - a parbreak consumes any pending noindent
+                // Clear noindent and continue flags - a parbreak consumes any pending modifiers
                 next_paragraph_noindent = false;
+                next_paragraph_continue = false;
                 // Don't process the par element itself, just use it as a break marker
             } else if (is_block) {
                 // Close font span before block element
@@ -1395,11 +1436,37 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 }
                 // Close any open paragraph before block element
                 if (in_paragraph) {
-                    stringbuf_append_str(html_buf, "</p>\n");
+                    close_paragraph(html_buf, true);
                     in_paragraph = false;
                 }
+
+                // Check if this is a list environment or alignment environment - set continue flag after processing
+                bool is_list_env = false;
+                if (item_type == LMD_TYPE_ELEMENT) {
+                    Element* block_elem = (Element*)content_item.pointer;
+                    if (block_elem && block_elem->type) {
+                        StrView bname = ((TypeElmt*)block_elem->type)->name;
+                        if ((bname.length == 7 && strncmp(bname.str, "itemize", 7) == 0) ||
+                            (bname.length == 9 && strncmp(bname.str, "enumerate", 9) == 0) ||
+                            (bname.length == 11 && strncmp(bname.str, "description", 11) == 0) ||
+                            (bname.length == 5 && strncmp(bname.str, "quote", 5) == 0) ||
+                            (bname.length == 9 && strncmp(bname.str, "quotation", 9) == 0) ||
+                            (bname.length == 5 && strncmp(bname.str, "verse", 5) == 0) ||
+                            (bname.length == 6 && strncmp(bname.str, "center", 6) == 0) ||
+                            (bname.length == 9 && strncmp(bname.str, "flushleft", 9) == 0) ||
+                            (bname.length == 10 && strncmp(bname.str, "flushright", 10) == 0)) {
+                            is_list_env = true;
+                        }
+                    }
+                }
+
                 // Process block element directly
                 process_latex_element(html_buf, content_item, pool, depth, font_ctx);
+
+                // Set continue flag after processing list/alignment environments
+                if (is_list_env) {
+                    next_paragraph_continue = true;
+                }
             } else if (is_text || is_inline) {
                 // Handle paragraph creation based on context
                 if (!in_paragraph || need_new_paragraph) {
@@ -1410,9 +1477,12 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                             font_span_open = false;
                         }
                         // This shouldn't happen since par breaks close paragraphs
-                        stringbuf_append_str(html_buf, "</p>\n");
+                        close_paragraph(html_buf, true);
                     }
-                    if (next_paragraph_noindent) {
+                    if (next_paragraph_continue) {
+                        stringbuf_append_str(html_buf, "<p class=\"continue\">");
+                        next_paragraph_continue = false;
+                    } else if (next_paragraph_noindent) {
                         stringbuf_append_str(html_buf, "<p class=\"noindent\">");
                         next_paragraph_noindent = false;
                     } else {
@@ -1442,7 +1512,10 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             } else {
                 // Unknown content type - treat as inline if we're in a paragraph context
                 if (!in_paragraph) {
-                    if (next_paragraph_noindent) {
+                    if (next_paragraph_continue) {
+                        stringbuf_append_str(html_buf, "<p class=\"continue\">");
+                        next_paragraph_continue = false;
+                    } else if (next_paragraph_noindent) {
                         stringbuf_append_str(html_buf, "<p class=\"noindent\">");
                         next_paragraph_noindent = false;
                     } else {
@@ -1463,7 +1536,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
 
         // Close any remaining open paragraph
         if (in_paragraph) {
-            stringbuf_append_str(html_buf, "</p>\n");
+            close_paragraph(html_buf, true);
         }
     }
     printf("DEBUG: process_element_content completed\n");
@@ -1558,7 +1631,64 @@ static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth) {
     }
 }
 
+// Process chapter command
+// Output: <h1 id="sec-N"><div>Chapter N</div>Title</h1>
+static void process_chapter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
+    if (!elem) return;
+
+    chapter_counter++;
+    section_counter = 0;  // Reset section counter for new chapter
+    global_section_id++;
+
+    // Start h1 with id
+    char id_buf[64];
+    snprintf(id_buf, sizeof(id_buf), "<h1 id=\"sec-%d\">", global_section_id);
+    stringbuf_append_str(html_buf, id_buf);
+
+    // Add chapter label div
+    char chapter_label[64];
+    snprintf(chapter_label, sizeof(chapter_label), "<div>Chapter %d</div>", chapter_counter);
+    stringbuf_append_str(html_buf, chapter_label);
+
+    // Process chapter title without paragraph wrapping
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+
+    stringbuf_append_str(html_buf, "</h1>\n");
+}
+
 // Process section commands
+// In book mode (has chapters): <h2 id="sec-N">X.Y Title</h2>
+// In article mode (no chapters): <h2 id="sec-N">Y Title</h2>
+static void process_section_h2(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
+    if (!elem) return;
+
+    section_counter++;
+    global_section_id++;
+
+    // Start h2 with id
+    char id_buf[64];
+    snprintf(id_buf, sizeof(id_buf), "<h2 id=\"sec-%d\">", global_section_id);
+    stringbuf_append_str(html_buf, id_buf);
+
+    // Add section number prefix followed by em space (U+2003)
+    // In book mode: chapter.section (e.g., "1.1")
+    // In article mode: just section (e.g., "1")
+    char section_num[32];
+    if (chapter_counter > 0) {
+        snprintf(section_num, sizeof(section_num), "%d.%d", chapter_counter, section_counter);
+    } else {
+        snprintf(section_num, sizeof(section_num), "%d", section_counter);
+    }
+    stringbuf_append_str(html_buf, section_num);
+    stringbuf_append_str(html_buf, "\xE2\x80\x83");  // UTF-8 encoded EM SPACE (U+2003)
+
+    // Process section title without paragraph wrapping
+    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+
+    stringbuf_append_str(html_buf, "</h2>\n");
+}
+
+// Process section commands (legacy - uses div)
 static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx) {
     if (!elem) return;
 
@@ -1590,63 +1720,320 @@ static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, 
                     return;
                 }
                 else if (strcmp(env_name->chars, "itemize") == 0) {
-                    process_itemize(html_buf, elem, pool, depth, font_ctx);
+                    process_itemize(html_buf, elem, pool, depth, font_ctx, 0);
                 }
                 else if (strcmp(env_name->chars, "enumerate") == 0) {
-                    process_enumerate(html_buf, elem, pool, depth, font_ctx);
+                    int counter = 0;
+                    process_enumerate(html_buf, elem, pool, depth, font_ctx, 0, counter);
                 }
                 else if (strcmp(env_name->chars, "quote") == 0) {
-                    process_quote(html_buf, elem, pool, depth, font_ctx);
+                    process_quote(html_buf, elem, pool, depth, font_ctx, "quote");
+                }
+                else if (strcmp(env_name->chars, "quotation") == 0) {
+                    process_quote(html_buf, elem, pool, depth, font_ctx, "quotation");
+                }
+                else if (strcmp(env_name->chars, "verse") == 0) {
+                    process_quote(html_buf, elem, pool, depth, font_ctx, "verse");
                 }
                 else if (strcmp(env_name->chars, "verbatim") == 0) {
                     process_verbatim(html_buf, elem, pool, depth);
                 }
                 else if (strcmp(env_name->chars, "center") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
+                    process_alignment_environment(html_buf, elem, pool, depth, "list center", font_ctx);
                 }
                 else if (strcmp(env_name->chars, "flushleft") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
+                    process_alignment_environment(html_buf, elem, pool, depth, "list flushleft", font_ctx);
                 }
                 else if (strcmp(env_name->chars, "flushright") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
+                    process_alignment_environment(html_buf, elem, pool, depth, "list flushright", font_ctx);
+                }
+                // Font environments - wrap content in appropriate span
+                else if (strcmp(env_name->chars, "small") == 0 ||
+                         strcmp(env_name->chars, "footnotesize") == 0 ||
+                         strcmp(env_name->chars, "scriptsize") == 0 ||
+                         strcmp(env_name->chars, "tiny") == 0 ||
+                         strcmp(env_name->chars, "large") == 0 ||
+                         strcmp(env_name->chars, "Large") == 0 ||
+                         strcmp(env_name->chars, "LARGE") == 0 ||
+                         strcmp(env_name->chars, "huge") == 0 ||
+                         strcmp(env_name->chars, "Huge") == 0) {
+                    // Font size environment - output span with class
+                    stringbuf_append_str(html_buf, "<span class=\"");
+                    stringbuf_append_str(html_buf, env_name->chars);
+                    stringbuf_append_str(html_buf, "\">");
+                    // Process environment content
+                    for (int64_t i = 1; i < elem->length; i++) {
+                        process_latex_element(html_buf, elem->items[i], pool, depth, font_ctx);
+                    }
+                    stringbuf_append_str(html_buf, "</span>");
+                }
+                else if (strcmp(env_name->chars, "bfseries") == 0 ||
+                         strcmp(env_name->chars, "mdseries") == 0) {
+                    // Font series environment - output span with class "bf" or "md"
+                    const char* css_class = (strcmp(env_name->chars, "bfseries") == 0) ? "bf" : "md";
+                    stringbuf_append_str(html_buf, "<span class=\"");
+                    stringbuf_append_str(html_buf, css_class);
+                    stringbuf_append_str(html_buf, "\">");
+                    // Process environment content
+                    for (int64_t i = 1; i < elem->length; i++) {
+                        process_latex_element(html_buf, elem->items[i], pool, depth, font_ctx);
+                    }
+                    stringbuf_append_str(html_buf, "</span>");
+                }
+                else if (strcmp(env_name->chars, "itshape") == 0 ||
+                         strcmp(env_name->chars, "slshape") == 0 ||
+                         strcmp(env_name->chars, "upshape") == 0 ||
+                         strcmp(env_name->chars, "scshape") == 0) {
+                    // Font shape environment - output span with appropriate class
+                    const char* css_class;
+                    if (strcmp(env_name->chars, "itshape") == 0) css_class = "it";
+                    else if (strcmp(env_name->chars, "slshape") == 0) css_class = "sl";
+                    else if (strcmp(env_name->chars, "scshape") == 0) css_class = "sc";
+                    else css_class = "up";
+                    stringbuf_append_str(html_buf, "<span class=\"");
+                    stringbuf_append_str(html_buf, css_class);
+                    stringbuf_append_str(html_buf, "\">");
+                    // Process environment content
+                    for (int64_t i = 1; i < elem->length; i++) {
+                        process_latex_element(html_buf, elem->items[i], pool, depth, font_ctx);
+                    }
+                    stringbuf_append_str(html_buf, "</span>");
                 }
             }
         }
     }
 }
 
-// Process itemize environment
-static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
-    append_indent(html_buf, depth);
-    stringbuf_append_str(html_buf, "<ul class=\"latex-itemize\">\n");
+// Get the bullet marker for a given itemize depth (0-indexed)
+static const char* get_itemize_marker(int list_depth) {
+    // LaTeX.js uses: •, –, *, · for levels 0-3
+    switch (list_depth % 4) {
+        case 0: return "•";      // U+2022 bullet
+        case 1: return "–";      // U+2013 en-dash (with bold)
+        case 2: return "*";      // asterisk
+        default: return "·";     // U+00B7 middle dot
+    }
+}
 
-    // Process items without paragraph wrapping
-    process_element_content_simple(html_buf, elem, pool, depth + 1, font_ctx);
+// Check if itemize marker at this depth needs font wrapping
+static bool itemize_marker_needs_font(int list_depth) {
+    // Level 1 (depth=1) needs <span class="rm bf up">–</span>
+    return (list_depth % 4) == 1;
+}
 
-    append_indent(html_buf, depth);
+// Process itemize environment with proper LaTeX.js structure
+static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, int list_depth) {
+    stringbuf_append_str(html_buf, "<ul class=\"list\">\n");
+
+    // Iterate through children to find item elements
+    if (elem && elem->items && elem->length > 0) {
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            TypeId child_type = get_type_id(child);
+
+            if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView child_name = ((TypeElmt*)child_elem->type)->name;
+                    if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
+                        process_item(html_buf, child_elem, pool, depth + 1, font_ctx, list_depth, false, 0);
+                    }
+                }
+            }
+        }
+    }
+
     stringbuf_append_str(html_buf, "</ul>\n");
 }
 
-// Process enumerate environment
-static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
-    append_indent(html_buf, depth);
-    stringbuf_append_str(html_buf, "<ol class=\"latex-enumerate\">\n");
+// Process enumerate environment with proper LaTeX.js structure
+static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, int list_depth, int& item_counter) {
+    stringbuf_append_str(html_buf, "<ol class=\"list\">\n");
 
-    // Process items without paragraph wrapping
-    process_element_content_simple(html_buf, elem, pool, depth + 1, font_ctx);
+    int local_counter = 1;
 
-    append_indent(html_buf, depth);
+    // Iterate through children to find item elements
+    if (elem && elem->items && elem->length > 0) {
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            TypeId child_type = get_type_id(child);
+
+            if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView child_name = ((TypeElmt*)child_elem->type)->name;
+                    if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
+                        bool has_custom_label = process_item(html_buf, child_elem, pool, depth + 1, font_ctx, list_depth, true, local_counter);
+                        // Only increment counter if this item doesn't have a custom label
+                        if (!has_custom_label) {
+                            local_counter++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    item_counter = local_counter;
     stringbuf_append_str(html_buf, "</ol>\n");
 }
 
-// Process quote environment
-static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
-    append_indent(html_buf, depth);
-    stringbuf_append_str(html_buf, "<div class=\"latex-quote\">\n");
+// Process description environment - uses <dl>/<dt>/<dd> structure
+static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
+    stringbuf_append_str(html_buf, "<dl class=\"list\">\n");
+
+    // Iterate through children to find item elements
+    if (elem && elem->items && elem->length > 0) {
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            TypeId child_type = get_type_id(child);
+
+            if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView child_name = ((TypeElmt*)child_elem->type)->name;
+                    if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
+                        // Check for label element (term)
+                        Element* label_elem = nullptr;
+                        int64_t content_start = 0;
+
+                        if (child_elem->items && child_elem->length > 0) {
+                            Item first = child_elem->items[0];
+                            if (get_type_id(first) == LMD_TYPE_ELEMENT) {
+                                Element* first_elem = (Element*)first.pointer;
+                                if (first_elem && first_elem->type) {
+                                    StrView name = ((TypeElmt*)first_elem->type)->name;
+                                    if (name.length == 5 && strncmp(name.str, "label", 5) == 0) {
+                                        label_elem = first_elem;
+                                        content_start = 1;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Output <dt>term</dt>
+                        stringbuf_append_str(html_buf, "<dt>");
+                        if (label_elem) {
+                            // Process label content
+                            for (int64_t j = 0; j < label_elem->length; j++) {
+                                Item lbl_child = label_elem->items[j];
+                                TypeId lbl_type = get_type_id(lbl_child);
+                                if (lbl_type == LMD_TYPE_STRING) {
+                                    String* str = (String*)lbl_child.pointer;
+                                    if (str && str->len > 0) {
+                                        append_escaped_text(html_buf, str->chars);
+                                    }
+                                } else if (lbl_type == LMD_TYPE_ELEMENT) {
+                                    process_latex_element(html_buf, lbl_child, pool, depth, font_ctx);
+                                }
+                            }
+                        }
+                        stringbuf_append_str(html_buf, "</dt>\n");
+
+                        // Output <dd>content</dd> with paragraphs
+                        stringbuf_append_str(html_buf, "<dd>");
+
+                        // Process item content with paragraph wrapping
+                        bool in_paragraph = false;
+                        for (int64_t j = content_start; j < child_elem->length; j++) {
+                            Item content = child_elem->items[j];
+                            TypeId content_type = get_type_id(content);
+
+                            if (content_type == LMD_TYPE_STRING) {
+                                String* str = (String*)content.pointer;
+                                if (str && str->len > 0) {
+                                    if (!in_paragraph) {
+                                        stringbuf_append_str(html_buf, "<p>");
+                                        in_paragraph = true;
+                                    }
+                                    bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
+                                    append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+                                }
+                            } else if (content_type == LMD_TYPE_ELEMENT) {
+                                Element* content_elem = (Element*)content.pointer;
+                                if (content_elem && content_elem->type) {
+                                    StrView name = ((TypeElmt*)content_elem->type)->name;
+
+                                    // Check for paragraph break
+                                    if ((name.length == 8 && strncmp(name.str, "parbreak", 8) == 0) ||
+                                        (name.length == 3 && strncmp(name.str, "par", 3) == 0)) {
+                                        if (in_paragraph) {
+                                            close_paragraph(html_buf, false);
+                                            in_paragraph = false;
+                                        }
+                                        continue;
+                                    }
+
+                                    // Check for textblock
+                                    if (name.length == 9 && strncmp(name.str, "textblock", 9) == 0) {
+                                        for (int64_t k = 0; k < content_elem->length; k++) {
+                                            Item tb_child = content_elem->items[k];
+                                            TypeId tb_type = get_type_id(tb_child);
+
+                                            if (tb_type == LMD_TYPE_STRING) {
+                                                String* str = (String*)tb_child.pointer;
+                                                if (str && str->len > 0) {
+                                                    if (!in_paragraph) {
+                                                        stringbuf_append_str(html_buf, "<p>");
+                                                        in_paragraph = true;
+                                                    }
+                                                    bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
+                                                    append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+                                                }
+                                            } else if (tb_type == LMD_TYPE_ELEMENT) {
+                                                Element* tb_elem = (Element*)tb_child.pointer;
+                                                if (tb_elem && tb_elem->type) {
+                                                    StrView tb_name = ((TypeElmt*)tb_elem->type)->name;
+                                                    if ((tb_name.length == 8 && strncmp(tb_name.str, "parbreak", 8) == 0) ||
+                                                        (tb_name.length == 3 && strncmp(tb_name.str, "par", 3) == 0)) {
+                                                        if (in_paragraph) {
+                                                            close_paragraph(html_buf, false);
+                                                            in_paragraph = false;
+                                                        }
+                                                    } else {
+                                                        if (!in_paragraph) {
+                                                            stringbuf_append_str(html_buf, "<p>");
+                                                            in_paragraph = true;
+                                                        }
+                                                        process_latex_element(html_buf, tb_child, pool, depth, font_ctx);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        continue;
+                                    }
+
+                                    // Other elements
+                                    if (!in_paragraph) {
+                                        stringbuf_append_str(html_buf, "<p>");
+                                        in_paragraph = true;
+                                    }
+                                    process_latex_element(html_buf, content, pool, depth, font_ctx);
+                                }
+                            }
+                        }
+
+                        if (in_paragraph) {
+                            close_paragraph(html_buf, false);
+                        }
+                        stringbuf_append_str(html_buf, "</dd>\n");
+                    }
+                }
+            }
+        }
+    }
+
+    stringbuf_append_str(html_buf, "</dl>\n");
+}
+
+// Process quote/quotation/verse environments
+static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, const char* env_type) {
+    stringbuf_append_str(html_buf, "<div class=\"list ");
+    stringbuf_append_str(html_buf, env_type);
+    stringbuf_append_str(html_buf, "\">\n");
 
     process_element_content(html_buf, elem, pool, depth + 1, font_ctx);
 
-    append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</div>\n");
 }
 
@@ -1665,14 +2052,12 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int
 
 // Process alignment environments (center, flushleft, flushright)
 static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, FontContext* font_ctx) {
-    append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<div class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">\n");
 
     process_element_content(html_buf, elem, pool, depth + 1, font_ctx);
 
-    append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</div>\n");
 }
 
@@ -1757,16 +2142,291 @@ static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool,
     stringbuf_append_str(html_buf, ">");
 }
 
-// Process item command
-static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
-    append_indent(html_buf, depth);
+// Process item command with proper LaTeX.js structure
+// list_depth: 0 = first level, 1 = nested, etc.
+// is_enumerate: true for ordered list, false for unordered
+// item_number: counter for enumerate items
+// Returns true if item has a custom label (for enumerate counter tracking)
+static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx, int list_depth, bool is_enumerate, int item_number) {
     stringbuf_append_str(html_buf, "<li>");
 
-    // Process content - this may include nested lists or other block elements
-    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+    // Check if the first child is a custom label element
+    bool has_custom_label = false;
+    Element* label_elem = nullptr;
+    int64_t content_start_index = 0;
 
-    // Close the list item - nested elements are already processed above
+    if (elem && elem->items && elem->length > 0) {
+        Item first_child = elem->items[0];
+        TypeId first_type = get_type_id(first_child);
+        if (first_type == LMD_TYPE_ELEMENT) {
+            Element* first_elem = (Element*)first_child.pointer;
+            if (first_elem && first_elem->type) {
+                StrView name = ((TypeElmt*)first_elem->type)->name;
+                if (name.length == 5 && strncmp(name.str, "label", 5) == 0) {
+                    has_custom_label = true;
+                    label_elem = first_elem;
+                    content_start_index = 1;  // Skip the label element in content processing
+                }
+            }
+        }
+    }
+
+    // Add item label
+    stringbuf_append_str(html_buf, "<span class=\"itemlabel\"><span class=\"hbox llap\">");
+
+    if (has_custom_label && label_elem) {
+        // Custom label: check if it needs font wrapping
+        // First scan to see if there are font-changing commands
+        bool has_font_commands = false;
+        for (int64_t i = 0; i < label_elem->length; i++) {
+            Item label_child = label_elem->items[i];
+            TypeId child_type = get_type_id(label_child);
+            if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)label_child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView name = ((TypeElmt*)child_elem->type)->name;
+                    if ((name.length == 7 && strncmp(name.str, "itshape", 7) == 0) ||
+                        (name.length == 8 && strncmp(name.str, "bfseries", 8) == 0) ||
+                        (name.length == 7 && strncmp(name.str, "scshape", 7) == 0) ||
+                        (name.length == 8 && strncmp(name.str, "mdseries", 8) == 0) ||
+                        (name.length == 7 && strncmp(name.str, "upshape", 7) == 0)) {
+                        has_font_commands = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If font commands present, wrap in span
+        if (has_font_commands) {
+            stringbuf_append_str(html_buf, "<span>");
+        }
+
+        // Process label contents, tracking font changes
+        FontContext label_font = *font_ctx;  // Copy initial font context
+        bool font_span_open = false;
+
+        for (int64_t i = 0; i < label_elem->length; i++) {
+            Item label_child = label_elem->items[i];
+            TypeId child_type = get_type_id(label_child);
+
+            if (child_type == LMD_TYPE_STRING) {
+                String* str = (String*)label_child.pointer;
+                if (str && str->len > 0) {
+                    // Check if we need to open a font span
+                    if (has_font_commands && !font_span_open) {
+                        if (label_font.shape == FONT_SHAPE_ITALIC) {
+                            stringbuf_append_str(html_buf, "<span class=\"it\">");
+                            font_span_open = true;
+                        } else if (label_font.series == FONT_SERIES_BOLD) {
+                            stringbuf_append_str(html_buf, "<span class=\"bf\">");
+                            font_span_open = true;
+                        } else if (label_font.shape == FONT_SHAPE_SMALL_CAPS) {
+                            stringbuf_append_str(html_buf, "<span class=\"sc\">");
+                            font_span_open = true;
+                        }
+                    }
+
+                    // Escape and output text
+                    for (size_t j = 0; j < str->len; j++) {
+                        char c = str->chars[j];
+                        if (c == '<') stringbuf_append_str(html_buf, "&lt;");
+                        else if (c == '>') stringbuf_append_str(html_buf, "&gt;");
+                        else if (c == '&') stringbuf_append_str(html_buf, "&amp;");
+                        else stringbuf_append_char(html_buf, c);
+                    }
+                }
+            } else if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)label_child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView name = ((TypeElmt*)child_elem->type)->name;
+
+                    // Check for font-changing declarations
+                    if (name.length == 7 && strncmp(name.str, "itshape", 7) == 0) {
+                        label_font.shape = FONT_SHAPE_ITALIC;
+                    } else if (name.length == 8 && strncmp(name.str, "bfseries", 8) == 0) {
+                        label_font.series = FONT_SERIES_BOLD;
+                    } else if (name.length == 7 && strncmp(name.str, "scshape", 7) == 0) {
+                        label_font.shape = FONT_SHAPE_SMALL_CAPS;
+                    } else {
+                        // Other inline element - process normally (e.g., \textendash)
+                        process_latex_element(html_buf, label_child, pool, depth, &label_font);
+                    }
+                }
+            }
+        }
+
+        // Close any open font span
+        if (font_span_open) {
+            stringbuf_append_str(html_buf, "</span>");
+        }
+
+        // Close outer span if we added it
+        if (has_font_commands) {
+            stringbuf_append_str(html_buf, "</span>");
+        }
+    } else if (is_enumerate) {
+        // Enumerate: numbered label with id
+        char id_buf[32];
+        char num_buf[32];
+        snprintf(id_buf, sizeof(id_buf), "<span id=\"item-%d\">", item_number);
+        snprintf(num_buf, sizeof(num_buf), "%d.", item_number);
+        stringbuf_append_str(html_buf, id_buf);
+        stringbuf_append_str(html_buf, num_buf);
+        stringbuf_append_str(html_buf, "</span>");
+    } else {
+        // Itemize: bullet marker based on depth
+        const char* marker = get_itemize_marker(list_depth);
+        if (itemize_marker_needs_font(list_depth)) {
+            stringbuf_append_str(html_buf, "<span class=\"rm bf up\">");
+            stringbuf_append_str(html_buf, marker);
+            stringbuf_append_str(html_buf, "</span>");
+        } else {
+            stringbuf_append_str(html_buf, marker);
+        }
+    }
+
+    stringbuf_append_str(html_buf, "</span></span>");
+
+    // Process content - collect text into paragraphs
+    // First, gather all content and check for paragraph breaks
+    bool has_parbreak = false;
+    bool has_nested_list = false;
+
+    if (elem && elem->items && elem->length > content_start_index) {
+        // Check for paragraph breaks or nested lists
+        for (int64_t i = content_start_index; i < elem->length; i++) {
+            Item child = elem->items[i];
+            TypeId child_type = get_type_id(child);
+            if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView name = ((TypeElmt*)child_elem->type)->name;
+                    if ((name.length == 8 && strncmp(name.str, "parbreak", 8) == 0) ||
+                        (name.length == 3 && strncmp(name.str, "par", 3) == 0)) {
+                        has_parbreak = true;
+                    }
+                    if ((name.length == 7 && strncmp(name.str, "itemize", 7) == 0) ||
+                        (name.length == 9 && strncmp(name.str, "enumerate", 9) == 0)) {
+                        has_nested_list = true;
+                    }
+                }
+            }
+        }
+
+        // Process content with paragraph wrapping
+        bool in_paragraph = false;
+        for (int64_t i = content_start_index; i < elem->length; i++) {
+            Item child = elem->items[i];
+            TypeId child_type = get_type_id(child);
+
+            if (child_type == LMD_TYPE_STRING) {
+                String* str = (String*)child.pointer;
+                if (str && str->len > 0) {
+                    // Start paragraph if not in one
+                    if (!in_paragraph) {
+                        stringbuf_append_str(html_buf, "<p>");
+                        in_paragraph = true;
+                    }
+                    // Output text with ligatures
+                    bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
+                    append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+                }
+            } else if (child_type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child.pointer;
+                if (child_elem && child_elem->type) {
+                    StrView name = ((TypeElmt*)child_elem->type)->name;
+
+                    // Check for paragraph break
+                    if ((name.length == 8 && strncmp(name.str, "parbreak", 8) == 0) ||
+                        (name.length == 3 && strncmp(name.str, "par", 3) == 0)) {
+                        if (in_paragraph) {
+                            close_paragraph(html_buf, false);
+                            in_paragraph = false;
+                        }
+                        continue;
+                    }
+
+                    // Check for nested itemize
+                    if (name.length == 7 && strncmp(name.str, "itemize", 7) == 0) {
+                        if (in_paragraph) {
+                            close_paragraph(html_buf, true);
+                            in_paragraph = false;
+                        }
+                        process_itemize(html_buf, child_elem, pool, depth + 1, font_ctx, list_depth + 1);
+                        continue;
+                    }
+
+                    // Check for nested enumerate
+                    if (name.length == 9 && strncmp(name.str, "enumerate", 9) == 0) {
+                        if (in_paragraph) {
+                            close_paragraph(html_buf, true);
+                            in_paragraph = false;
+                        }
+                        int dummy_counter = 0;
+                        process_enumerate(html_buf, child_elem, pool, depth + 1, font_ctx, list_depth + 1, dummy_counter);
+                        continue;
+                    }
+
+                    // Check for textblock - extract content and handle parbreak
+                    if (name.length == 9 && strncmp(name.str, "textblock", 9) == 0) {
+                        // Process textblock contents directly
+                        for (int64_t j = 0; j < child_elem->length; j++) {
+                            Item tb_child = child_elem->items[j];
+                            TypeId tb_type = get_type_id(tb_child);
+
+                            if (tb_type == LMD_TYPE_STRING) {
+                                String* str = (String*)tb_child.pointer;
+                                if (str && str->len > 0) {
+                                    if (!in_paragraph) {
+                                        stringbuf_append_str(html_buf, "<p>");
+                                        in_paragraph = true;
+                                    }
+                                    bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
+                                    append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+                                }
+                            } else if (tb_type == LMD_TYPE_ELEMENT) {
+                                Element* tb_elem = (Element*)tb_child.pointer;
+                                if (tb_elem && tb_elem->type) {
+                                    StrView tb_name = ((TypeElmt*)tb_elem->type)->name;
+                                    if ((tb_name.length == 8 && strncmp(tb_name.str, "parbreak", 8) == 0) ||
+                                        (tb_name.length == 3 && strncmp(tb_name.str, "par", 3) == 0)) {
+                                        if (in_paragraph) {
+                                            close_paragraph(html_buf, false);
+                                            in_paragraph = false;
+                                        }
+                                    } else {
+                                        // Other inline element within textblock
+                                        if (!in_paragraph) {
+                                            stringbuf_append_str(html_buf, "<p>");
+                                            in_paragraph = true;
+                                        }
+                                        process_latex_element(html_buf, tb_child, pool, depth, font_ctx);
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Other inline elements - start paragraph if needed
+                    if (!in_paragraph) {
+                        stringbuf_append_str(html_buf, "<p>");
+                        in_paragraph = true;
+                    }
+                    process_latex_element(html_buf, child, pool, depth, font_ctx);
+                }
+            }
+        }
+
+        // Close any open paragraph
+        if (in_paragraph) {
+            close_paragraph(html_buf, false);
+        }
+    }
+
     stringbuf_append_str(html_buf, "</li>\n");
+    return has_custom_label;
 }
 
 
@@ -1847,6 +2507,25 @@ static void append_escaped_text(StringBuf* html_buf, const char* text) {
 static void append_indent(StringBuf* html_buf, int depth) {
     for (int i = 0; i < depth; i++) {
         stringbuf_append_str(html_buf, "  ");
+    }
+}
+
+// Helper function to trim trailing whitespace from buffer before closing paragraph
+static void close_paragraph(StringBuf* html_buf, bool add_newline) {
+    // Trim trailing whitespace from the buffer
+    if (html_buf->length > 0 && html_buf->str && html_buf->str->chars) {
+        while (html_buf->length > 0 && (html_buf->str->chars[html_buf->length - 1] == ' ' ||
+                                         html_buf->str->chars[html_buf->length - 1] == '\t' ||
+                                         html_buf->str->chars[html_buf->length - 1] == '\n')) {
+            html_buf->length--;
+        }
+        html_buf->str->chars[html_buf->length] = '\0';
+        html_buf->str->len = html_buf->length;
+    }
+    if (add_newline) {
+        stringbuf_append_str(html_buf, "</p>\n");
+    } else {
+        stringbuf_append_str(html_buf, "</p>");
     }
 }
 
