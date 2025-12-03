@@ -84,7 +84,7 @@ const char* math_environments[] = {
 // Raw text environments
 const char* raw_text_environments[] = {
     "verbatim", "lstlisting", "minted", "alltt", "Verbatim", "BVerbatim",
-    "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", NULL
+    "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", "comment", NULL
 };
 
 // Utility function implementations
