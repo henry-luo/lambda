@@ -6,6 +6,532 @@
 #include "../../lib/mempool.h"
 #include <string.h>
 #include <stdlib.h>
+#include <map>
+#include <string>
+#include <vector>
+
+// =============================================================================
+// Counter System
+// =============================================================================
+
+struct Counter {
+    int value = 0;
+    std::string parent;  // Parent counter name (reset when parent steps)
+    std::vector<std::string> children;  // Child counters to reset when this counter steps
+};
+
+static std::map<std::string, Counter> counter_registry;
+
+// Initialize standard LaTeX counters
+static void init_counters() {
+    static bool initialized = false;
+    if (initialized) return;
+    initialized = true;
+
+    // Standard LaTeX counters with their parent relationships
+    counter_registry["part"] = {0, "", {}};
+    counter_registry["chapter"] = {0, "", {}};
+    counter_registry["section"] = {0, "chapter", {}};
+    counter_registry["subsection"] = {0, "section", {}};
+    counter_registry["subsubsection"] = {0, "subsection", {}};
+    counter_registry["paragraph"] = {0, "subsubsection", {}};
+    counter_registry["subparagraph"] = {0, "paragraph", {}};
+    counter_registry["page"] = {1, "", {}};
+    counter_registry["equation"] = {0, "chapter", {}};
+    counter_registry["figure"] = {0, "chapter", {}};
+    counter_registry["table"] = {0, "chapter", {}};
+    counter_registry["footnote"] = {0, "chapter", {}};
+    counter_registry["mpfootnote"] = {0, "", {}};
+    counter_registry["enumi"] = {0, "", {}};
+    counter_registry["enumii"] = {0, "enumi", {}};
+    counter_registry["enumiii"] = {0, "enumii", {}};
+    counter_registry["enumiv"] = {0, "enumiii", {}};
+
+    // Set up parent-child relationships
+    counter_registry["chapter"].children.push_back("section");
+    counter_registry["chapter"].children.push_back("equation");
+    counter_registry["chapter"].children.push_back("figure");
+    counter_registry["chapter"].children.push_back("table");
+    counter_registry["chapter"].children.push_back("footnote");
+    counter_registry["section"].children.push_back("subsection");
+    counter_registry["subsection"].children.push_back("subsubsection");
+    counter_registry["subsubsection"].children.push_back("paragraph");
+    counter_registry["paragraph"].children.push_back("subparagraph");
+    counter_registry["enumi"].children.push_back("enumii");
+    counter_registry["enumii"].children.push_back("enumiii");
+    counter_registry["enumiii"].children.push_back("enumiv");
+}
+
+// Create a new counter (optionally with parent)
+static void new_counter(const std::string& name, const std::string& parent = "") {
+    init_counters();
+    Counter c;
+    c.value = 0;
+    c.parent = parent;
+    counter_registry[name] = c;
+
+    // Add as child to parent if specified
+    if (!parent.empty() && counter_registry.count(parent)) {
+        counter_registry[parent].children.push_back(name);
+    }
+}
+
+// Set counter value
+static void set_counter(const std::string& name, int value) {
+    init_counters();
+    if (counter_registry.count(name)) {
+        counter_registry[name].value = value;
+    }
+}
+
+// Add to counter value
+static void add_to_counter(const std::string& name, int delta) {
+    init_counters();
+    if (counter_registry.count(name)) {
+        counter_registry[name].value += delta;
+    }
+}
+
+// Step counter (increment and reset children)
+static void step_counter(const std::string& name);
+
+// Reset counter and all its descendants recursively
+static void reset_counter_recursive(const std::string& name) {
+    init_counters();
+    if (!counter_registry.count(name)) return;
+
+    counter_registry[name].value = 0;
+
+    // Recursively reset all children
+    for (const auto& child : counter_registry[name].children) {
+        reset_counter_recursive(child);
+    }
+}
+
+// Step counter (increment and reset children recursively)
+static void step_counter(const std::string& name) {
+    init_counters();
+    if (!counter_registry.count(name)) return;
+
+    counter_registry[name].value++;
+
+    // Reset all child counters recursively
+    for (const auto& child : counter_registry[name].children) {
+        reset_counter_recursive(child);
+    }
+}
+
+// Get counter value
+static int get_counter_value(const std::string& name) {
+    init_counters();
+    if (counter_registry.count(name)) {
+        return counter_registry[name].value;
+    }
+    return 0;
+}
+
+// Format counter as arabic numerals
+static std::string format_arabic(int value) {
+    return std::to_string(value);
+}
+
+// Format counter as lowercase roman numerals
+static std::string format_roman(int value, bool upper) {
+    if (value <= 0) return "0";
+    if (value > 3999) return std::to_string(value);
+
+    static const char* ones_lower[] = {"", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"};
+    static const char* tens_lower[] = {"", "x", "xx", "xxx", "xl", "l", "lx", "lxx", "lxxx", "xc"};
+    static const char* hund_lower[] = {"", "c", "cc", "ccc", "cd", "d", "dc", "dcc", "dccc", "cm"};
+    static const char* thou_lower[] = {"", "m", "mm", "mmm"};
+
+    static const char* ones_upper[] = {"", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"};
+    static const char* tens_upper[] = {"", "X", "XX", "XXX", "XL", "L", "LX", "LXX", "LXXX", "XC"};
+    static const char* hund_upper[] = {"", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM"};
+    static const char* thou_upper[] = {"", "M", "MM", "MMM"};
+
+    std::string result;
+    if (upper) {
+        result = std::string(thou_upper[value/1000]) + hund_upper[(value%1000)/100] +
+                 tens_upper[(value%100)/10] + ones_upper[value%10];
+    } else {
+        result = std::string(thou_lower[value/1000]) + hund_lower[(value%1000)/100] +
+                 tens_lower[(value%100)/10] + ones_lower[value%10];
+    }
+    return result;
+}
+
+// Format counter as alphabetic (a, b, c, ... z, aa, ab, ...)
+static std::string format_alph(int value, bool upper) {
+    if (value <= 0) return "0";
+
+    std::string result;
+    while (value > 0) {
+        value--;
+        char c = (value % 26) + (upper ? 'A' : 'a');
+        result = c + result;
+        value /= 26;
+    }
+    return result;
+}
+
+// =============================================================================
+// Label/Reference System
+// =============================================================================
+
+// Label information struct
+struct LabelInfo {
+    std::string anchor_id;  // HTML anchor ID (e.g., "sec-1", "c-1")
+    std::string ref_text;   // Text to display for \ref (e.g., "1", "1.1")
+};
+
+// Label registry - maps label names to their info
+static std::map<std::string, LabelInfo> label_registry;
+static bool label_registry_initialized = false;
+
+// Current label info (set by \refstepcounter, sections, etc.)
+static std::string current_label_anchor = "";
+static std::string current_label_text = "";
+static int label_counter = 0;  // Auto-generate unique anchor IDs
+
+static void init_labels() {
+    if (label_registry_initialized) return;
+    label_registry.clear();
+    current_label_anchor = "";
+    current_label_text = "";
+    label_counter = 0;
+    label_registry_initialized = true;
+}
+
+// Set the current label context (called by \refstepcounter, section commands, etc.)
+static void set_current_label(const std::string& anchor, const std::string& text) {
+    init_labels();
+    current_label_anchor = anchor;
+    current_label_text = text;
+}
+
+// Register a label with its anchor and ref text
+static void register_label(const std::string& name) {
+    init_labels();
+    LabelInfo info;
+    info.anchor_id = current_label_anchor;
+    info.ref_text = current_label_text;
+    label_registry[name] = info;
+}
+
+// Get label info for a reference (returns empty info if not found)
+static LabelInfo get_label_info(const std::string& name) {
+    init_labels();
+    if (label_registry.count(name)) {
+        return label_registry[name];
+    }
+    // Return empty info for undefined labels
+    LabelInfo empty;
+    empty.anchor_id = "";
+    empty.ref_text = "";
+    return empty;
+}
+
+// Generate a unique anchor ID
+static std::string generate_anchor_id(const std::string& prefix = "ref") {
+    init_labels();
+    label_counter++;
+    return prefix + "-" + std::to_string(label_counter);
+}
+
+// =============================================================================
+// Counter Formatters (continued)
+// =============================================================================
+
+// Format counter as footnote symbol
+static std::string format_fnsymbol(int value) {
+    // Standard footnote symbols: * † ‡ § ¶ ‖ ** †† ‡‡
+    static const char* symbols[] = {
+        "",           // 0
+        "*",          // 1
+        "\xE2\x80\xA0",  // † (2)
+        "\xE2\x80\xA1",  // ‡ (3)
+        "\xC2\xA7",      // § (4)
+        "\xC2\xB6",      // ¶ (5)
+        "\xE2\x80\x96",  // ‖ (6)
+        "**",            // 7
+        "\xE2\x80\xA0\xE2\x80\xA0",  // †† (8)
+        "\xE2\x80\xA1\xE2\x80\xA1"   // ‡‡ (9)
+    };
+
+    if (value < 0 || value > 9) return std::to_string(value);
+    return symbols[value];
+}
+
+// =============================================================================
+// Counter Expression Evaluator
+// =============================================================================
+// Evaluates arithmetic expressions in counter arguments like:
+//   3 * -(2+1)
+//   3*\real{1.6} * \real{1.7} + -- 2
+//   \value{c}
+// Supports: +, -, *, parentheses, \real{}, \value{}
+// Double negatives (-- or en-dash –) are treated as positive
+
+// Forward declaration for recursive parsing
+static double parse_expression(const char*& pos);
+
+// Skip whitespace
+static void skip_ws(const char*& pos) {
+    while (*pos == ' ' || *pos == '\t') pos++;
+}
+
+// Parse a number (integer or floating point)
+static double parse_number(const char*& pos) {
+    skip_ws(pos);
+    double result = 0;
+    bool negative = false;
+
+    if (*pos == '-') {
+        negative = true;
+        pos++;
+        skip_ws(pos);
+    } else if (*pos == '+') {
+        pos++;
+        skip_ws(pos);
+    }
+
+    // Check for en-dash (–, UTF-8: E2 80 93) which indicates double negative
+    if ((unsigned char)*pos == 0xE2 && (unsigned char)*(pos+1) == 0x80 && (unsigned char)*(pos+2) == 0x93) {
+        // En-dash after minus means double negative, skip it
+        pos += 3;
+        skip_ws(pos);
+        negative = !negative;  // Double negative
+    }
+
+    // Parse integer part
+    while (*pos >= '0' && *pos <= '9') {
+        result = result * 10 + (*pos - '0');
+        pos++;
+    }
+
+    // Parse fractional part
+    if (*pos == '.') {
+        pos++;
+        double fraction = 0.1;
+        while (*pos >= '0' && *pos <= '9') {
+            result += (*pos - '0') * fraction;
+            fraction *= 0.1;
+            pos++;
+        }
+    }
+
+    return negative ? -result : result;
+}
+
+// Parse a factor (number, parenthesized expression, or \real{}/\value{} command)
+static double parse_factor(const char*& pos);
+
+// Parse term (handles *, /)
+static double parse_term(const char*& pos) {
+    double result = parse_factor(pos);
+    skip_ws(pos);
+
+    while (*pos == '*' || *pos == '/') {
+        char op = *pos++;
+        double rhs = parse_factor(pos);
+        if (op == '*') {
+            // Truncate to integer after each multiplication (LaTeX counter semantics)
+            result = (int)(result * rhs);
+        }
+        else if (rhs != 0) result /= rhs;
+        skip_ws(pos);
+    }
+
+    return result;
+}// Parse expression (handles +, -)
+static double parse_expression(const char*& pos) {
+    skip_ws(pos);
+
+    // Handle leading negative/positive
+    bool negative = false;
+    while (*pos == '-' || *pos == '+') {
+        if (*pos == '-') negative = !negative;
+        pos++;
+        skip_ws(pos);
+        // Check for en-dash (represents -- = double negative, so flip twice = no change)
+        if ((unsigned char)*pos == 0xE2 && (unsigned char)*(pos+1) == 0x80 && (unsigned char)*(pos+2) == 0x93) {
+            // En-dash represents --, which is double negative, so DON'T change the sign
+            // (two flips cancel out)
+            pos += 3;
+            skip_ws(pos);
+        }
+    }
+
+    double result = parse_term(pos);
+    if (negative) result = -result;
+
+    skip_ws(pos);
+
+    while (*pos == '+' || *pos == '-' ||
+           ((unsigned char)*pos == 0xE2 && (unsigned char)*(pos+1) == 0x80 && (unsigned char)*(pos+2) == 0x93)) {
+        bool subtract = false;
+
+        // Handle regular +/-
+        if (*pos == '-') {
+            subtract = true;
+            pos++;
+        } else if (*pos == '+') {
+            pos++;
+        }
+        // Handle en-dash (–) - represents -- which is double negative
+        // En-dash alone acts as a single minus
+        else if ((unsigned char)*pos == 0xE2) {
+            subtract = true;
+            pos += 3;  // Skip UTF-8 en-dash
+        }
+
+        skip_ws(pos);
+
+        // Check for double negative (- followed by - or en-dash)
+        // En-dash here represents --, so it flips twice (no net change)
+        while (*pos == '-' ||
+               ((unsigned char)*pos == 0xE2 && (unsigned char)*(pos+1) == 0x80 && (unsigned char)*(pos+2) == 0x93)) {
+            if (*pos == '-') {
+                // Single hyphen: flip once
+                subtract = !subtract;
+                pos++;
+            } else {
+                // En-dash: represents --, flip twice (no change)
+                // But we're in a context where we're looking for MORE negatives
+                // after an operator, so en-dash represents the original --
+                // which was double negative = no flip
+                pos += 3;
+            }
+            skip_ws(pos);
+        }
+
+        double rhs = parse_term(pos);
+        if (subtract) result -= rhs;
+        else result += rhs;
+        skip_ws(pos);
+    }
+
+    return result;
+}
+
+// Parse a factor
+static double parse_factor(const char*& pos) {
+    skip_ws(pos);
+
+    // Handle unary minus/plus
+    bool negative = false;
+    while (*pos == '-' || *pos == '+') {
+        if (*pos == '-') negative = !negative;
+        pos++;
+        skip_ws(pos);
+    }
+
+    double result = 0;
+
+    // Parenthesized expression
+    if (*pos == '(') {
+        pos++;  // Skip '('
+        result = parse_expression(pos);
+        skip_ws(pos);
+        if (*pos == ')') pos++;  // Skip ')'
+    }
+    // Number
+    else if ((*pos >= '0' && *pos <= '9') || *pos == '.') {
+        result = parse_number(pos);
+    }
+    // Should not happen in well-formed input, return 0
+
+    return negative ? -result : result;
+}
+
+// Serialize element content to expression string for evaluation
+// Handles: strings, \real{}, \value{}, groups
+static std::string serialize_expr_element(Element* elem);
+
+static std::string serialize_expr_item(Item item) {
+    TypeId type = get_type_id(item);
+
+    if (type == LMD_TYPE_STRING) {
+        String* str = (String*)item.pointer;
+        if (str && str->len > 0) {
+            return std::string(str->chars, str->len);
+        }
+        return "";
+    }
+
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item.pointer;
+        if (!elem || !elem->type) return "";
+
+        TypeElmt* elem_type = (TypeElmt*)elem->type;
+        StrView name = elem_type->name;
+
+        // \real{value} - return the floating point value as string
+        if (name.length == 4 && strncmp(name.str, "real", 4) == 0) {
+            // Get the argument value
+            std::string arg_content = serialize_expr_element(elem);
+            // Strip spaces and parse as double
+            const char* p = arg_content.c_str();
+            while (*p == ' ') p++;
+            double val = atof(p);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%.10g", val);
+            return buf;
+        }
+
+        // \value{counter} - return the counter value as string
+        if (name.length == 5 && strncmp(name.str, "value", 5) == 0) {
+            // Get the counter name from argument
+            std::string counter_name = serialize_expr_element(elem);
+            // Strip spaces
+            size_t start = counter_name.find_first_not_of(" \t");
+            size_t end = counter_name.find_last_not_of(" \t");
+            if (start != std::string::npos && end != std::string::npos) {
+                counter_name = counter_name.substr(start, end - start + 1);
+            }
+            int value = get_counter_value(counter_name);
+            return std::to_string(value);
+        }
+
+        // argument or group - recurse into children
+        if ((name.length == 8 && strncmp(name.str, "argument", 8) == 0) ||
+            (name.length == 5 && strncmp(name.str, "group", 5) == 0)) {
+            return serialize_expr_element(elem);
+        }
+
+        // Unknown element, try to serialize children
+        return serialize_expr_element(elem);
+    }
+
+    return "";
+}
+
+static std::string serialize_expr_element(Element* elem) {
+    if (!elem) return "";
+
+    std::string result;
+    for (int64_t i = 0; i < elem->length; i++) {
+        result += serialize_expr_item(elem->items[i]);
+    }
+    return result;
+}
+
+// Evaluate counter expression from element content
+// Returns integer result (truncates floating point)
+static int evaluate_counter_expression(Element* elem) {
+    std::string expr = serialize_expr_element(elem);
+    if (expr.empty()) return 0;
+
+    const char* pos = expr.c_str();
+    double result = parse_expression(pos);
+
+    return (int)result;
+}
+
+// =============================================================================
+// Document metadata storage
+// =============================================================================
 
 // Document metadata storage
 typedef struct {
@@ -134,6 +660,102 @@ static bool needs_font_span(FontContext* ctx) {
     return ctx->series != FONT_SERIES_NORMAL ||
            ctx->shape != FONT_SHAPE_UPRIGHT ||
            ctx->family != FONT_FAMILY_ROMAN;
+}
+
+// Helper: Extract string content from element's first argument
+// Returns empty string if not found
+static std::string extract_argument_string(Element* elem, int arg_index = 0) {
+    if (!elem || elem->length <= arg_index) return "";
+
+    Item child = elem->items[arg_index];
+    TypeId child_type = get_type_id(child);
+
+    // Direct string
+    if (child_type == LMD_TYPE_STRING) {
+        String* str = (String*)child.pointer;
+        if (str && str->len > 0) {
+            return std::string(str->chars, str->len);
+        }
+        return "";
+    }
+
+    // Argument element wrapping a string
+    if (child_type == LMD_TYPE_ELEMENT) {
+        Element* child_elem = (Element*)child.pointer;
+        if (child_elem && child_elem->type) {
+            TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
+            StrView child_name = child_elmt_type->name;
+            if (child_name.length == 8 && strncmp(child_name.str, "argument", 8) == 0) {
+                // Recursively extract from argument
+                if (child_elem->length > 0) {
+                    Item inner = child_elem->items[0];
+                    TypeId inner_type = get_type_id(inner);
+                    if (inner_type == LMD_TYPE_STRING) {
+                        String* str = (String*)inner.pointer;
+                        if (str && str->len > 0) {
+                            return std::string(str->chars, str->len);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return "";
+}
+
+// Helper: Extract integer value from element's argument (for counter values)
+// Handles simple integer expressions
+static int extract_argument_int(Element* elem, int arg_index = 0) {
+    if (!elem || elem->length <= arg_index) return 0;
+
+    Item child = elem->items[arg_index];
+    TypeId child_type = get_type_id(child);
+
+    // Direct string containing number
+    if (child_type == LMD_TYPE_STRING) {
+        String* str = (String*)child.pointer;
+        if (str && str->len > 0) {
+            return atoi(str->chars);
+        }
+        return 0;
+    }
+
+    // Argument element
+    if (child_type == LMD_TYPE_ELEMENT) {
+        Element* child_elem = (Element*)child.pointer;
+        if (child_elem && child_elem->type) {
+            TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
+            StrView child_name = child_elmt_type->name;
+            if (child_name.length == 8 && strncmp(child_name.str, "argument", 8) == 0) {
+                return extract_argument_int(child_elem, 0);
+            }
+        }
+    }
+
+    return 0;
+}
+
+// Helper: Extract argument element (for complex expression evaluation)
+static Element* extract_argument_element(Element* elem, int arg_index = 0) {
+    if (!elem || elem->length <= arg_index) return nullptr;
+
+    Item child = elem->items[arg_index];
+    TypeId child_type = get_type_id(child);
+
+    if (child_type == LMD_TYPE_ELEMENT) {
+        Element* child_elem = (Element*)child.pointer;
+        if (child_elem && child_elem->type) {
+            TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
+            StrView child_name = child_elmt_type->name;
+            if (child_name.length == 8 && strncmp(child_name.str, "argument", 8) == 0) {
+                return child_elem;
+            }
+        }
+        return child_elem;  // Return as-is if not wrapped in argument
+    }
+
+    return nullptr;
 }
 
 // Helper: Unwrap argument element and process its content
@@ -417,7 +1039,7 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
         return;
     }
 
-    printf("DEBUG: format_latex_to_html - html_buf=%p, css_buf=%p\n", html_buf, css_buf);
+    // printf("DEBUG: format_latex_to_html - html_buf=%p, css_buf=%p\n", html_buf, css_buf);
 
     // Initialize document state
     memset(&doc_state, 0, sizeof(DocumentState));
@@ -435,7 +1057,7 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
     // Start HTML document container (using "body" class for LaTeX.js compatibility)
     stringbuf_append_str(html_buf, "<div class=\"body\">\n");
-    printf("DEBUG: Added HTML container to html_buf\n");
+    // printf("DEBUG: Added HTML container to html_buf\n");
 
 
     // Check if we have a valid AST
@@ -443,7 +1065,7 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     } else {
         // Process the LaTeX AST without automatic paragraph wrapper
         // Individual text content will be wrapped in paragraphs as needed
-        printf("DEBUG: About to process LaTeX AST\n");
+        // printf("DEBUG: About to process LaTeX AST\n");
 
         // use MarkReader API
         ItemReader ast_reader(latex_ast.to_const());
@@ -611,34 +1233,34 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
     // Close document container
     stringbuf_append_str(html_buf, "</div>\n");
-    printf("DEBUG: Closed HTML container\n");
+    // printf("DEBUG: Closed HTML container\n");
 
-    printf("DEBUG: HTML and CSS generation completed\n");
+    // printf("DEBUG: HTML and CSS generation completed\n");
 }
 
 // Generate comprehensive CSS for LaTeX documents
 static void generate_latex_css(StringBuf* css_buf) {
     if (!css_buf) {
-        printf("DEBUG: css_buf is NULL!\n");
+        // printf("DEBUG: css_buf is NULL!\n");
         return;
     }
 
-    printf("DEBUG: css_buf=%p, pool=%p, str=%p, length=%zu, capacity=%zu\n",
-           css_buf, css_buf->pool, css_buf->str, css_buf->length, css_buf->capacity);
+    // printf("DEBUG: css_buf=%p, pool=%p, str=%p, length=%zu, capacity=%zu\n",
+    //        css_buf, css_buf->pool, css_buf->str, css_buf->length, css_buf->capacity);
 
     // Validate StringBuf structure before using it
     if (!css_buf->pool) {
-        printf("DEBUG: css_buf->pool is NULL!\n");
+        // printf("DEBUG: css_buf->pool is NULL!\n");
         return;
     }
 
     if (css_buf->str && css_buf->capacity == 0) {
-        printf("DEBUG: css_buf has str but zero capacity!\n");
+        // printf("DEBUG: css_buf has str but zero capacity!\n");
         return;
     }
 
     if (css_buf->length > css_buf->capacity) {
-        printf("DEBUG: css_buf length (%zu) > capacity (%zu)!\n", css_buf->length, css_buf->capacity);
+        // printf("DEBUG: css_buf length (%zu) > capacity (%zu)!\n", css_buf->length, css_buf->capacity);
         return;
     }
 
@@ -771,10 +1393,178 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Skip setlength - it's layout metadata
             return;
         }
-        else if (strcmp(cmd_name, "setcounter") == 0) {
-            // Skip setcounter - counter state (future: implement counter system)
+        // =================================================================
+        // Counter commands
+        // =================================================================
+        else if (strcmp(cmd_name, "newcounter") == 0) {
+            // \newcounter{name}[parent] - create a new counter
+            std::string counter_name = extract_argument_string(elem, 0);
+            std::string parent_name = extract_argument_string(elem, 1);  // optional
+            if (!counter_name.empty()) {
+                new_counter(counter_name, parent_name);
+            }
             return;
         }
+        else if (strcmp(cmd_name, "setcounter") == 0) {
+            // \setcounter{name}{expression} - set counter to expression value
+            std::string counter_name = extract_argument_string(elem, 0);
+            Element* expr_elem = extract_argument_element(elem, 1);
+            int value = expr_elem ? evaluate_counter_expression(expr_elem) : 0;
+            if (!counter_name.empty()) {
+                set_counter(counter_name, value);
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "stepcounter") == 0) {
+            // \stepcounter{name}
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                step_counter(counter_name);
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "addtocounter") == 0) {
+            // \addtocounter{name}{expression} - add expression value to counter
+            std::string counter_name = extract_argument_string(elem, 0);
+            Element* expr_elem = extract_argument_element(elem, 1);
+            int delta = expr_elem ? evaluate_counter_expression(expr_elem) : 0;
+            if (!counter_name.empty()) {
+                add_to_counter(counter_name, delta);
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "arabic") == 0) {
+            // \arabic{counter} - output counter value as arabic numeral
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, format_arabic(value).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "roman") == 0) {
+            // \roman{counter} - output counter value as lowercase roman
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, format_roman(value, false).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "Roman") == 0) {
+            // \Roman{counter} - output counter value as uppercase roman
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, format_roman(value, true).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "alph") == 0) {
+            // \alph{counter} - output counter value as lowercase letter
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, format_alph(value, false).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "Alph") == 0) {
+            // \Alph{counter} - output counter value as uppercase letter
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, format_alph(value, true).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "fnsymbol") == 0) {
+            // \fnsymbol{counter} - output counter value as footnote symbol
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, format_fnsymbol(value).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "real") == 0) {
+            // \real{number} - floating point value (usually in counter expressions, but can appear standalone)
+            std::string num_str = extract_argument_string(elem, 0);
+            if (!num_str.empty()) {
+                // Just output the number as-is (stripped of extra spaces)
+                const char* p = num_str.c_str();
+                while (*p == ' ') p++;
+                stringbuf_append_str(html_buf, p);
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "value") == 0) {
+            // \value{counter} - output counter value (used in expressions, but for now just output)
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                int value = get_counter_value(counter_name);
+                stringbuf_append_str(html_buf, std::to_string(value).c_str());
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "the") == 0) {
+            // \the alone - no-op, the following \value{} or counter command handles output
+            // This handles cases like \the\value{c}
+            return;
+        }
+        else if (strncmp(cmd_name, "the", 3) == 0 && strlen(cmd_name) > 3) {
+            // \theFOO - dynamic counter display command (e.g., \thesection, \thepage)
+            std::string counter_name = cmd_name + 3;  // Skip "the" prefix
+            int value = get_counter_value(counter_name);
+            stringbuf_append_str(html_buf, format_arabic(value).c_str());
+            return;
+        }
+        // =================================================================
+        // Label and Reference commands
+        // =================================================================
+        else if (strcmp(cmd_name, "refstepcounter") == 0) {
+            // \refstepcounter{counter} - step counter and set current label
+            std::string counter_name = extract_argument_string(elem, 0);
+            if (!counter_name.empty()) {
+                step_counter(counter_name);
+                int value = get_counter_value(counter_name);
+                std::string anchor = counter_name + "-" + std::to_string(value);
+                std::string text = std::to_string(value);
+                set_current_label(anchor, text);
+                // Output the anchor
+                stringbuf_append_str(html_buf, "<a id=\"");
+                stringbuf_append_str(html_buf, anchor.c_str());
+                stringbuf_append_str(html_buf, "\"></a>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "label") == 0) {
+            // \label{name} - register current label context under this name
+            std::string label_name = extract_argument_string(elem, 0);
+            if (!label_name.empty()) {
+                register_label(label_name);
+                // If there's a current label anchor, we don't need to output anything
+                // (the anchor was already output by refstepcounter/section)
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "ref") == 0) {
+            // \ref{name} - output link to label
+            std::string label_name = extract_argument_string(elem, 0);
+            LabelInfo info = get_label_info(label_name);
+            stringbuf_append_str(html_buf, "<a href=\"#");
+            stringbuf_append_str(html_buf, info.anchor_id.c_str());
+            stringbuf_append_str(html_buf, "\">");
+            stringbuf_append_str(html_buf, info.ref_text.c_str());
+            stringbuf_append_str(html_buf, "</a>");
+            return;
+        }
+        else if (strcmp(cmd_name, "pageref") == 0) {
+            // \pageref{name} - in HTML, just output ?? since pages don't exist
+            stringbuf_append_str(html_buf, "??");
+            return;
+        }
+        // =================================================================
         else if (strcmp(cmd_name, "title") == 0) {
             process_title(html_buf, elem, pool, depth);
             return;
@@ -966,16 +1756,16 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             process_item(html_buf, elem, pool, depth, font_ctx, 0, false, 0);
         }
         else if (strcmp(cmd_name, "itemize") == 0) {
-            printf("DEBUG: Processing itemize environment directly\n");
+            // printf("DEBUG: Processing itemize environment directly\n");
             process_itemize(html_buf, elem, pool, depth, font_ctx, 0);
         }
         else if (strcmp(cmd_name, "enumerate") == 0) {
-            printf("DEBUG: Processing enumerate environment directly\n");
+            // printf("DEBUG: Processing enumerate environment directly\n");
             int counter = 0;
             process_enumerate(html_buf, elem, pool, depth, font_ctx, 0, counter);
         }
         else if (strcmp(cmd_name, "description") == 0) {
-            printf("DEBUG: Processing description environment directly\n");
+            // printf("DEBUG: Processing description environment directly\n");
             process_description(html_buf, elem, pool, depth, font_ctx);
         }
         else if (strcmp(cmd_name, "quad") == 0) {
@@ -1169,6 +1959,16 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         // Handle text content with ligature conversion
         String* str = (String*)item.pointer;
         if (str && str->len > 0) {
+            // Skip space if buffer already ends with a space (collapse multiple spaces)
+            if (str->len == 1 && str->chars[0] == ' ') {
+                if (html_buf->length > 0 && html_buf->str && html_buf->str->chars) {
+                    char last_char = html_buf->str->chars[html_buf->length - 1];
+                    if (last_char == ' ' || last_char == '\n' || last_char == '\t' || last_char == '>') {
+                        // Skip this space - already have whitespace or just started a tag
+                        return;
+                    }
+                }
+            }
             // Apply ligature conversion based on font context
             bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
             append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
@@ -1236,6 +2036,48 @@ static bool is_block_element(Item item) {
             strcmp(cmd_name, "par") == 0);
 }
 
+// Check if an element is a "silent" command that doesn't produce visual output
+// These commands should not trigger paragraph creation
+static bool is_silent_command(Item item) {
+    TypeId type = get_type_id(item);
+    if (type != LMD_TYPE_ELEMENT) {
+        return false;
+    }
+
+    Element* elem = item.element;
+    if (!elem || !elem->type) {
+        return false;
+    }
+
+    TypeElmt* elmt_type = (TypeElmt*)elem->type;
+    if (!elmt_type || !elmt_type->name.str) {
+        return false;
+    }
+
+    // Convert name to null-terminated string
+    char cmd_name[64];
+    int name_len = elmt_type->name.length < 63 ? elmt_type->name.length : 63;
+    strncpy(cmd_name, elmt_type->name.str, name_len);
+    cmd_name[name_len] = '\0';
+
+    // Silent commands that don't produce output
+    return (strcmp(cmd_name, "newcounter") == 0 ||
+            strcmp(cmd_name, "setcounter") == 0 ||
+            strcmp(cmd_name, "stepcounter") == 0 ||
+            strcmp(cmd_name, "addtocounter") == 0 ||
+            strcmp(cmd_name, "label") == 0 ||
+            strcmp(cmd_name, "newcommand") == 0 ||
+            strcmp(cmd_name, "renewcommand") == 0 ||
+            strcmp(cmd_name, "newenvironment") == 0 ||
+            strcmp(cmd_name, "renewenvironment") == 0 ||
+            strcmp(cmd_name, "newlength") == 0 ||
+            strcmp(cmd_name, "setlength") == 0 ||
+            strcmp(cmd_name, "addtolength") == 0 ||
+            strcmp(cmd_name, "settowidth") == 0 ||
+            strcmp(cmd_name, "settoheight") == 0 ||
+            strcmp(cmd_name, "settodepth") == 0);
+}
+
 // Process element content without paragraph wrapping (for titles, etc.)
 static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     if (!elem || !elem->items) {
@@ -1279,11 +2121,11 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
 // Process element content with intelligent paragraph wrapping
 static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     if (!elem || !elem->items) {
-        printf("DEBUG: process_element_content - elem or items is null\n");
+        // printf("DEBUG: process_element_content - elem or items is null\n");
         return;
     }
 
-    printf("DEBUG: process_element_content - elem->length = %d\n", elem->length);
+    // printf("DEBUG: process_element_content - elem->length = %d\n", elem->length);
 
     // Process element items with intelligent paragraph grouping
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
@@ -1294,10 +2136,10 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
         bool next_paragraph_continue = false;  // Track if next paragraph should have continue class (after lists)
 
         for (int i = 0; i < elem->length; i++) {
-            printf("DEBUG: Processing element content item %d\n", i);
+            // printf("DEBUG: Processing element content item %d\n", i);
             Item content_item = elem->items[i];
             TypeId item_type = get_type_id(content_item);
-            printf("DEBUG: Content item %d has type %d\n", i, item_type);
+            // printf("DEBUG: Content item %d has type %d\n", i, item_type);
 
             // CRITICAL DEBUG: Check for invalid type values
             if (item_type > LMD_TYPE_ERROR) {
@@ -1316,6 +2158,8 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             bool is_text = (item_type == LMD_TYPE_STRING);
             bool is_inline = (item_type == LMD_TYPE_ELEMENT && !is_block);
 
+            // printf("DEBUG: is_block=%d, is_text=%d, is_inline=%d\n", is_block, is_text, is_inline);
+
             // Check if this is a paragraph break element or textblock or noindent
             bool is_par_break = false;
             bool is_textblock = false;
@@ -1324,14 +2168,14 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 Element* elem_ptr = (Element*)content_item.pointer;
                 if (elem_ptr && elem_ptr->type) {
                     StrView elem_name = ((TypeElmt*)elem_ptr->type)->name;
-                    printf("DEBUG: Element name: '%.*s' (length: %zu)\n", (int)elem_name.length, elem_name.str, elem_name.length);
+                    // printf("DEBUG: Element name: '%.*s' (length: %zu)\n", (int)elem_name.length, elem_name.str, elem_name.length);
                     if ((elem_name.length == 3 && strncmp(elem_name.str, "par", 3) == 0) ||
                         (elem_name.length == 8 && strncmp(elem_name.str, "parbreak", 8) == 0)) {
                         is_par_break = true;
-                        printf("DEBUG: Detected par break element\n");
+                        // printf("DEBUG: Detected par break element\n");
                     } else if (elem_name.length == 9 && strncmp(elem_name.str, "textblock", 9) == 0) {
                         is_textblock = true;
-                        printf("DEBUG: Detected textblock element\n");
+                        // printf("DEBUG: Detected textblock element\n");
                     } else if (elem_name.length == 8 && strncmp(elem_name.str, "noindent", 8) == 0) {
                         is_noindent = true;
                         // Only set noindent flag if next item is a plain string (direct content after noindent)
@@ -1344,9 +2188,9 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                             // Only set if next is a plain string (direct content)
                             if (next_type == LMD_TYPE_STRING) {
                                 should_set_noindent = true;
-                                printf("DEBUG: noindent followed by string - setting flag\n");
+                                // printf("DEBUG: noindent followed by string - setting flag\n");
                             } else {
-                                printf("DEBUG: noindent NOT followed by string - not setting flag\n");
+                                // printf("DEBUG: noindent NOT followed by string - not setting flag\n");
                             }
                         }
                         if (should_set_noindent) {
@@ -1358,7 +2202,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
 
             // Skip noindent elements - they just set a flag for next paragraph
             if (is_noindent) {
-                printf("DEBUG: Finished processing element content item %d (noindent)\n", i);
+                // printf("DEBUG: Finished processing element content item %d (noindent)\n", i);
                 continue;
             }
 
@@ -1366,15 +2210,15 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             if (is_textblock) {
                 // Process textblock: text + parbreak
                 Element* textblock_elem = (Element*)content_item.pointer;
-                printf("DEBUG: Processing textblock with length: %lld\n", textblock_elem ? textblock_elem->length : -1);
+                // printf("DEBUG: Processing textblock with length: %lld\n", textblock_elem ? textblock_elem->length : -1);
                 if (textblock_elem && textblock_elem->items && textblock_elem->length >= 1) {
                     // Process the text part
                     Item text_item = textblock_elem->items[0];
-                    printf("DEBUG: First item type: %d (LMD_TYPE_STRING=%d)\n", get_type_id(text_item), LMD_TYPE_STRING);
+                    // printf("DEBUG: First item type: %d (LMD_TYPE_STRING=%d)\n", get_type_id(text_item), LMD_TYPE_STRING);
                     if (get_type_id(text_item) == LMD_TYPE_STRING) {
-                        printf("DEBUG: Processing text item in textblock\n");
+                        // printf("DEBUG: Processing text item in textblock\n");
                     } else {
-                        printf("DEBUG: First item is not a string, processing as element\n");
+                        // printf("DEBUG: First item is not a string, processing as element\n");
                         // Process as element instead
                         if (!in_paragraph || need_new_paragraph) {
                             if (need_new_paragraph && in_paragraph) {
@@ -1508,8 +2352,43 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     next_paragraph_continue = true;
                 }
             } else if (is_text || is_inline) {
+                // printf("DEBUG: Entering is_text || is_inline branch\n");
+                // Check if this is a silent command that doesn't produce output
+                // These should not trigger paragraph creation
+                bool is_silent = is_inline && is_silent_command(content_item);
+                // printf("DEBUG: is_silent=%d\n", is_silent);
+                if (is_silent) {
+                    // Process the silent command without creating a paragraph
+                    process_latex_element(html_buf, content_item, pool, depth, font_ctx);
+                    // printf("DEBUG: Finished processing element content item %d (silent command)\n", i);
+                    continue;
+                }
+
+                // Skip whitespace-only text strings at the start of a new paragraph
+                if (is_text && need_new_paragraph) {
+                    // printf("DEBUG: Checking text for whitespace at paragraph start, need_new_paragraph=%d\n", need_new_paragraph);
+                    String* str = (String*)content_item.pointer;
+                    if (str && str->chars) {
+                        // printf("DEBUG: Text content: '%s' (len=%d)\n", str->chars, (int)str->len);
+                        // Check if string is whitespace-only
+                        bool is_whitespace_only = true;
+                        for (const char* p = str->chars; *p; p++) {
+                            if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                                is_whitespace_only = false;
+                                break;
+                            }
+                        }
+                        if (is_whitespace_only) {
+                            // printf("DEBUG: Skipping whitespace-only string at paragraph start\n");
+                            continue;  // Skip this whitespace string
+                        }
+                    }
+                }
+
                 // Handle paragraph creation based on context
+                // printf("DEBUG: in_paragraph=%d, need_new_paragraph=%d\n", in_paragraph, need_new_paragraph);
                 if (!in_paragraph || need_new_paragraph) {
+                    // printf("DEBUG: Creating paragraph\n");
                     if (need_new_paragraph && in_paragraph) {
                         // Close font span before closing paragraph
                         if (font_span_open) {
@@ -1520,6 +2399,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                         close_paragraph(html_buf, true);
                     }
                     open_paragraph(html_buf, next_paragraph_noindent, next_paragraph_continue);
+                    // printf("DEBUG: After open_paragraph, len=%zu\n", html_buf->length);
                     next_paragraph_noindent = false;
                     next_paragraph_continue = false;
                     in_paragraph = true;
@@ -1543,6 +2423,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
 
                 // Process inline content (both text and inline elements)
                 process_latex_element(html_buf, content_item, pool, depth, font_ctx);
+                // printf("DEBUG: After process_latex_element, len=%zu\n", html_buf->length);
             } else {
                 // Unknown content type - treat as inline if we're in a paragraph context
                 if (!in_paragraph) {
@@ -1554,7 +2435,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 process_latex_element(html_buf, content_item, pool, depth, font_ctx);
             }
 
-            printf("DEBUG: Finished processing element content item %d\n", i);
+            // printf("DEBUG: Finished processing element content item %d\n", i);
         }
 
         // Close any open font span before closing paragraph
@@ -1564,10 +2445,12 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
 
         // Close any remaining open paragraph
         if (in_paragraph) {
+            // printf("DEBUG: Closing remaining paragraph, len before=%zu\n", html_buf->length);
             close_paragraph(html_buf, true);
+            // printf("DEBUG: After close_paragraph, len=%zu\n", html_buf->length);
         }
     }
-    printf("DEBUG: process_element_content completed\n");
+    // printf("DEBUG: process_element_content completed\n");
 }
 
 // Helper function for recursive text extraction from elements
@@ -2464,6 +3347,13 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
     if (!text) return;
 
     for (const char* p = text; *p; p++) {
+        // Check for UTF-8 non-breaking space (U+00A0 = 0xC2 0xA0)
+        if ((unsigned char)*p == 0xC2 && (unsigned char)*(p+1) == 0xA0) {
+            stringbuf_append_str(html_buf, "&nbsp;");
+            p++;  // Skip second byte
+            continue;
+        }
+
         // Check for ligatures first (unless in typewriter font)
         if (!is_tt) {
             bool matched_ligature = false;
@@ -2548,6 +3438,63 @@ static void close_paragraph(StringBuf* html_buf, bool add_newline) {
         html_buf->str->chars[html_buf->length] = '\0';
         html_buf->str->len = html_buf->length;
     }
+
+    // Check if the paragraph is empty (ends with <p> or <p class="...">)
+    // If so, remove the opening tag instead of adding closing tag
+    if (html_buf->length >= 3 && html_buf->str && html_buf->str->chars) {
+        // Check for plain <p>
+        if (html_buf->length >= 3 &&
+            html_buf->str->chars[html_buf->length - 3] == '<' &&
+            html_buf->str->chars[html_buf->length - 2] == 'p' &&
+            html_buf->str->chars[html_buf->length - 1] == '>') {
+            // Remove <p>
+            html_buf->length -= 3;
+            html_buf->str->chars[html_buf->length] = '\0';
+            html_buf->str->len = html_buf->length;
+            return;
+        }
+
+        // Check for <p class="..."> - must end with ">
+        // First, check if buffer ends with '>'
+        if (html_buf->str->chars[html_buf->length - 1] == '>') {
+            // Search backwards for '<p ' or '<p>'
+            size_t search_limit = (html_buf->length > 50) ? (html_buf->length - 50) : 0;
+            for (size_t i = html_buf->length - 1; i > search_limit; i--) {
+                if (html_buf->str->chars[i] == '<' && i + 1 < html_buf->length) {
+                    // Check if this is <p or <p class="...">
+                    if (html_buf->str->chars[i + 1] == 'p' &&
+                        (i + 2 == html_buf->length - 1 || html_buf->str->chars[i + 2] == ' ') &&
+                        html_buf->str->chars[html_buf->length - 1] == '>') {
+                        // This is <p> or <p class="..."> - check there's no content after
+                        // We've already trimmed whitespace, so if buffer ends with ">",
+                        // this is the opening tag with no content
+                        // BUT: we need to make sure there's no content between <p...> and end
+                        // Just checking if buffer ends with > right after finding <p isn't enough
+                        // We need to verify the > is the closing > of the <p tag
+                        bool found_content = false;
+                        for (size_t j = i; j < html_buf->length; j++) {
+                            if (html_buf->str->chars[j] == '>') {
+                                // Check if there's anything after this > (other than the final position)
+                                if (j + 1 < html_buf->length) {
+                                    found_content = true;
+                                }
+                                break;
+                            }
+                        }
+                        if (!found_content) {
+                            // Empty paragraph - remove the <p...> tag
+                            html_buf->length = i;
+                            html_buf->str->chars[html_buf->length] = '\0';
+                            html_buf->str->len = html_buf->length;
+                            return;
+                        }
+                    }
+                    break;  // Found a <, stop searching
+                }
+            }
+        }
+    }
+
     if (add_newline) {
         stringbuf_append_str(html_buf, "</p>\n");
     } else {
@@ -2562,8 +3509,12 @@ static void open_paragraph(StringBuf* html_buf, bool noindent, bool cont) {
     // Determine what classes to add
     bool has_class = (noindent || cont || alignment_class != nullptr);
 
+    // printf("DEBUG: open_paragraph: has_class=%d, noindent=%d, cont=%d, alignment=%s\n", has_class, noindent, cont, alignment_class ? alignment_class : "(none)");
+
     if (!has_class) {
+        // printf("DEBUG: Appending <p>, buf before='%s' (len=%zu)\n", html_buf->str ? html_buf->str->chars : "(null)", html_buf->length);
         stringbuf_append_str(html_buf, "<p>");
+        // printf("DEBUG: buf after='%s' (len=%zu)\n", html_buf->str ? html_buf->str->chars : "(null)", html_buf->length);
         return;
     }
 
