@@ -7,6 +7,7 @@
     "source_dirs": [
         "lambda/input",
         "lambda/input/css",
+        "lambda/input/latex",
         "lambda/format"
     ],
     "source_files": [
@@ -345,6 +346,10 @@
                 "lambda/input/css/css_engine.cpp",
                 "lambda/input/css/css_formatter.cpp",
                 "lambda/input/css/css_style_node.cpp",
+                "lambda/input/latex/latex_parser.cpp",
+                "lambda/input/latex/latex_primitives.cpp",
+                "lambda/input/latex/latex_commands.cpp",
+                "lambda/input/latex/latex_environments.cpp",
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",
@@ -1827,6 +1832,18 @@
                             "gtest_main"
                         ],
                         "binary": "test_jsx_roundtrip_gtest.exe"
+                    },
+                    {
+                        "source": "test/test_latex_parser_gtest.cpp",
+                        "name": "\ud83d\udcc4 LaTeX Parser Unit Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_parser_gtest.exe"
                     },
                     {
                         "source": "test/latex/test_latex_html_baseline.cpp",
