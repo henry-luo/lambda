@@ -714,18 +714,43 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // setup inline context
     float content_width = lycon->block.content_width;
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
-    line_init(lycon, 0, content_width);
+    
+    // Calculate the block's inner content bounds based on border and padding
+    // Note: content_width is already the inner content width (excluding padding/border)
+    // line.left/right define the line box boundaries in local block coordinates
+    float inner_left = 0;
+    
     if (block->bound) {
         if (block->bound->border) {
-            lycon->line.advance_x += block->bound->border->width.left;
+            inner_left += block->bound->border->width.left;
             lycon->block.advance_y += block->bound->border->width.top;
-            lycon->line.right -= block->bound->border->width.right;
         }
-        lycon->line.advance_x += block->bound->padding.left;
+        inner_left += block->bound->padding.left;
         lycon->block.advance_y += block->bound->padding.top;
-        lycon->line.left = lycon->line.advance_x;
-        lycon->line.right = lycon->line.left + content_width;
     }
+    
+    // line.right = inner_left + content_width gives the full content area
+    float inner_right = inner_left + content_width;
+    
+    // Set the block's container bounds (line.left/right)
+    // These define the nominal line box boundaries for this block
+    lycon->line.left = inner_left;
+    lycon->line.right = inner_right;
+    
+    // Initialize effective bounds to match container bounds
+    // line_reset() will adjust these for floats if needed
+    lycon->line.effective_left = inner_left;
+    lycon->line.effective_right = inner_right;
+    lycon->line.has_float_intrusion = false;
+    lycon->line.advance_x = inner_left;
+    lycon->line.vertical_align = CSS_VALUE_BASELINE;
+    
+    // Now call line_reset to adjust for floats at current Y position
+    // This will call adjust_line_for_floats which updates effective_left/right
+    line_reset(lycon);
+    
+    log_debug("setup_inline: line.left=%.1f, line.right=%.1f, effective_left=%.1f, effective_right=%.1f, advance_x=%.1f",
+              lycon->line.left, lycon->line.right, lycon->line.effective_left, lycon->line.effective_right, lycon->line.advance_x);
 
     if (block->blk) lycon->block.text_align = block->blk->text_align;
     // setup font
@@ -971,7 +996,11 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     // IMPORTANT: Apply clear BEFORE setting up inline context and laying out children
     // Clear positions this element below earlier floats
     // This must happen after Y position and margins are set, but before children are laid out
-    if (block->position && block->position->clear != CSS_VALUE_NONE) {
+    // Note: Check for actual clear values (LEFT=50, RIGHT=51, BOTH), not just "not NONE"
+    // because uninitialized clear is 0 (CSS_VALUE__UNDEF) which would incorrectly pass "!= NONE"
+    if (block->position && (block->position->clear == CSS_VALUE_LEFT ||
+                             block->position->clear == CSS_VALUE_RIGHT ||
+                             block->position->clear == CSS_VALUE_BOTH)) {
         log_debug("Element has clear property, applying clear layout BEFORE children");
         layout_clear_element(lycon, block);
     }
@@ -1307,16 +1336,27 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
                 else {
                     // check sibling margin collapsing
-                    float collapse = 0;
-                    View* prev_view = block->prev_placed_view();
-                    if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
-                        ViewBlock* prev_block = (ViewBlock*)prev_view;
-                        if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
-                            collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
-                            block->y -= collapse;
-                            block->bound->margin.top -= collapse;
-                            log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
+                    // CSS 2.2 Section 8.3.1: Margins do NOT collapse when there's clearance
+                    // If this block has clear property, skip sibling margin collapsing
+                    bool has_clearance = block->position && 
+                        (block->position->clear == CSS_VALUE_LEFT ||
+                         block->position->clear == CSS_VALUE_RIGHT ||
+                         block->position->clear == CSS_VALUE_BOTH);
+                    
+                    if (!has_clearance) {
+                        float collapse = 0;
+                        View* prev_view = block->prev_placed_view();
+                        if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
+                            ViewBlock* prev_block = (ViewBlock*)prev_view;
+                            if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
+                                collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
+                                block->y -= collapse;
+                                block->bound->margin.top -= collapse;
+                                log_debug("collapsed margin between sibling blocks: %f, block->y now: %f", collapse, block->y);
+                            }
                         }
+                    } else {
+                        log_debug("skipping sibling margin collapsing for element with clear property");
                     }
                 }
                 lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;

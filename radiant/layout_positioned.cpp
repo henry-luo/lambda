@@ -661,8 +661,8 @@ void float_context_position_float(FloatContext* ctx, ViewBlock* element, float c
  * 3. Adjust surrounding content (handled by adjust_line_for_floats and clear)
  *
  * CSS 2.2 Section 9.5.1: Float Positioning Rules
- * - float:left positions at the left edge of containing block
- * - float:right positions at the right edge of containing block
+ * - float:left positions at the left edge of available space (after earlier floats)
+ * - float:right positions at the right edge of available space (before earlier floats)
  */
 void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     if (!element_has_float(block)) {
@@ -684,45 +684,41 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (float_ctx) {
-        // For float:right, reposition the element to the right edge of the container
-        if (block->position->float_prop == CSS_VALUE_RIGHT && float_ctx->container) {
-            ViewBlock* container = float_ctx->container;
-            float margin_right = block->bound ? block->bound->margin.right : 0;
-
-            // Calculate the right edge of the container's content area
-            // Since block->x is relative to its parent, we need to calculate relative position
-            // container->width gives the width of the content area
-            float container_content_width = container->width;
-            if (container->bound) {
-                // Subtract right padding and border to get content area width
-                container_content_width -= container->bound->padding.right;
-                if (container->bound->border) {
-                    container_content_width -= container->bound->border->width.right;
-                }
-                // Also subtract left padding and border from content width
-                container_content_width -= container->bound->padding.left;
-                if (container->bound->border) {
-                    container_content_width -= container->bound->border->width.left;
-                }
-            }
-
-            // Calculate relative x position: position at right edge of container content area
-            // new_x is relative to container's left edge (after padding/border)
-            float content_area_left_offset = 0;
-            if (container->bound) {
-                content_area_left_offset = container->bound->padding.left;
-                if (container->bound->border) {
-                    content_area_left_offset += container->bound->border->width.left;
-                }
-            }
-
-            // Position float at right edge: content_area_left + content_width - block_width - margin_right
-            float new_x = content_area_left_offset + container_content_width - block->width - margin_right;
-            log_debug("Float:right repositioning: old_x=%.1f, new_x=%.1f (container_content_width=%.1f, width=%.1f, margin_right=%.1f)",
-                      block->x, new_x, container_content_width, block->width, margin_right);
+        ViewBlock* container = float_ctx->container;
+        float margin_left = block->bound ? block->bound->margin.left : 0;
+        float margin_right = block->bound ? block->bound->margin.right : 0;
+        
+        // Get the current Y position of this float (relative to container content area)
+        // block->y is relative to the current parent, need to convert to container space
+        float current_y = block->y;
+        if (block->bound) {
+            current_y -= block->bound->margin.top;  // Remove margin that was already applied
+        }
+        
+        // Query available horizontal space at this Y position
+        // The float should be positioned within this available space
+        float total_height = block->height + (block->bound ? 
+            block->bound->margin.top + block->bound->margin.bottom : 0);
+        FloatAvailableSpace space = float_space_at_y(float_ctx, current_y, total_height);
+        
+        log_debug("Float positioning: current_y=%.1f, available space left=%.1f, right=%.1f",
+                  current_y, space.left, space.right);
+        
+        if (block->position->float_prop == CSS_VALUE_LEFT) {
+            // Left float: position at left edge of available space
+            // space.left is the x position after any existing left floats
+            float new_x = space.left + margin_left;
+            log_debug("Float:left repositioning: old_x=%.1f, new_x=%.1f (space.left=%.1f, margin_left=%.1f)",
+                      block->x, new_x, space.left, margin_left);
             block->x = new_x;
         }
-        // float:left keeps its position (already at left edge from normal flow)
+        else if (block->position->float_prop == CSS_VALUE_RIGHT && container) {
+            // Right float: position at right edge of available space
+            float new_x = space.right - block->width - margin_right;
+            log_debug("Float:right repositioning: old_x=%.1f, new_x=%.1f (space.right=%.1f, width=%.1f, margin_right=%.1f)",
+                      block->x, new_x, space.right, block->width, margin_right);
+            block->x = new_x;
+        }
 
         // Add the float to the context
         float_context_add_float(float_ctx, block);
@@ -919,7 +915,14 @@ void cleanup_float_context(LayoutContext* lycon) {
  * Apply clear property to an element
  */
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->position || block->position->clear == CSS_VALUE_NONE) return;
+    // Check for actual clear values: LEFT, RIGHT, or BOTH
+    // Note: We can't use "!= CSS_VALUE_NONE" because uninitialized clear is 0 (CSS_VALUE__UNDEF)
+    if (!block->position || 
+        (block->position->clear != CSS_VALUE_LEFT &&
+         block->position->clear != CSS_VALUE_RIGHT &&
+         block->position->clear != CSS_VALUE_BOTH)) {
+        return;
+    }
 
     log_debug("Applying clear property (clear=%d) to element %s",
               block->position->clear, block->node_name());
