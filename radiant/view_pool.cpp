@@ -284,7 +284,7 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         char weight_buf[16];
         snprintf(weight_buf, sizeof(weight_buf), "%d", span->font->font_weight);
 
-        strbuf_append_format(buf, "{font:{family:'%s', size:%d, style:%s, weight:%s, decoration:%s}}\n",
+        strbuf_append_format(buf, "{font:{family:'%s', size:%.1f, style:%s, weight:%s, decoration:%s}}\n",
             span->font->family, span->font->font_size, css_enum_info(span->font->font_style)->name,
             weight_buf, css_enum_info(span->font->text_deco)->name);
     }
