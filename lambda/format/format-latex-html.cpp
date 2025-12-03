@@ -42,7 +42,14 @@ typedef struct {
     bool em_active;  // Track if \em is active (for toggling)
 } FontContext;
 
-// Forward declarations
+// Alignment context for tracking paragraph alignment
+typedef enum {
+    ALIGN_NORMAL,      // Default paragraph alignment
+    ALIGN_CENTERING,   // \centering command
+    ALIGN_RAGGEDRIGHT, // \raggedright command  
+    ALIGN_RAGGEDLEFT   // \raggedleft command
+} AlignmentMode;
+
 static void generate_latex_css(StringBuf* css_buf);
 static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth, FontContext* font_ctx);
 static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
@@ -69,6 +76,7 @@ static void append_escaped_text(StringBuf* html_buf, const char* text);
 static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* text, bool is_tt);
 static void append_indent(StringBuf* html_buf, int depth);
 static void close_paragraph(StringBuf* html_buf, bool add_newline);
+static void open_paragraph(StringBuf* html_buf, bool noindent, bool cont);
 
 // reader-based forward declarations
 static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx);
@@ -80,6 +88,17 @@ static FontContext font_context = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_
 static int chapter_counter = 0;         // Counter for chapter numbering within document
 static int section_counter = 0;         // Counter for section numbering within chapter (resets on new chapter)
 static int global_section_id = 0;       // Global counter for id="sec-N" attribute
+static AlignmentMode current_alignment = ALIGN_NORMAL;  // Track current paragraph alignment
+
+// Alignment context helper functions
+static const char* get_alignment_css_class(AlignmentMode align) {
+    switch (align) {
+        case ALIGN_CENTERING: return "centering";
+        case ALIGN_RAGGEDRIGHT: return "raggedright";
+        case ALIGN_RAGGEDLEFT: return "raggedleft";
+        default: return nullptr;
+    }
+}
 
 // Helper functions for font context
 static const char* get_font_css_class(FontContext* ctx) {
@@ -694,8 +713,9 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
             return;
         } else if (strcmp(cmd_name, "group") == 0 || strcmp(cmd_name, "curly_group") == 0) {
-            // Curly braces create a font scope - save/restore context
+            // Curly braces create a font and alignment scope - save/restore context
             FontContext saved_ctx = *font_ctx;
+            AlignmentMode saved_alignment = current_alignment;
             size_t before_len = html_buf->length;
 
             // Check if this group contains nested groups
@@ -718,6 +738,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
 
             process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
             *font_ctx = saved_ctx;
+            current_alignment = saved_alignment;  // Restore alignment scope
 
             // Add zero-width space after group for word boundary (U+200B)
             // Empty groups {} are explicitly used in LaTeX for word boundary
@@ -866,6 +887,19 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         else if (strcmp(cmd_name, "par") == 0) {
             // Par creates a paragraph break - handled by paragraph logic
             // This is a no-op in HTML since paragraph breaks are handled by the paragraph wrapper
+        }
+        // Alignment commands - set current paragraph alignment
+        else if (strcmp(cmd_name, "centering") == 0) {
+            current_alignment = ALIGN_CENTERING;
+            return;  // No HTML output, just sets state
+        }
+        else if (strcmp(cmd_name, "raggedright") == 0) {
+            current_alignment = ALIGN_RAGGEDRIGHT;
+            return;  // No HTML output, just sets state
+        }
+        else if (strcmp(cmd_name, "raggedleft") == 0) {
+            current_alignment = ALIGN_RAGGEDLEFT;
+            return;  // No HTML output, just sets state
         }
         else if (strcmp(cmd_name, "verb") == 0) {
             stringbuf_append_str(html_buf, "<code class=\"tt\">");
@@ -1334,12 +1368,9 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                             if (need_new_paragraph && in_paragraph) {
                                 close_paragraph(html_buf, true);
                             }
-                            if (next_paragraph_noindent) {
-                                stringbuf_append_str(html_buf, "<p class=\"noindent\">");
-                                next_paragraph_noindent = false;
-                            } else {
-                                stringbuf_append_str(html_buf, "<p>");
-                            }
+                            open_paragraph(html_buf, next_paragraph_noindent, next_paragraph_continue);
+                            next_paragraph_noindent = false;
+                            next_paragraph_continue = false;
                             in_paragraph = true;
                             need_new_paragraph = false;
                         }
@@ -1357,12 +1388,9 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                                 }
                                 close_paragraph(html_buf, true);
                             }
-                            if (next_paragraph_noindent) {
-                                stringbuf_append_str(html_buf, "<p class=\"noindent\">");
-                                next_paragraph_noindent = false;
-                            } else {
-                                stringbuf_append_str(html_buf, "<p>");
-                            }
+                            open_paragraph(html_buf, next_paragraph_noindent, next_paragraph_continue);
+                            next_paragraph_noindent = false;
+                            next_paragraph_continue = false;
                             in_paragraph = true;
                             need_new_paragraph = false;
                         }
@@ -1479,15 +1507,9 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                         // This shouldn't happen since par breaks close paragraphs
                         close_paragraph(html_buf, true);
                     }
-                    if (next_paragraph_continue) {
-                        stringbuf_append_str(html_buf, "<p class=\"continue\">");
-                        next_paragraph_continue = false;
-                    } else if (next_paragraph_noindent) {
-                        stringbuf_append_str(html_buf, "<p class=\"noindent\">");
-                        next_paragraph_noindent = false;
-                    } else {
-                        stringbuf_append_str(html_buf, "<p>");
-                    }
+                    open_paragraph(html_buf, next_paragraph_noindent, next_paragraph_continue);
+                    next_paragraph_noindent = false;
+                    next_paragraph_continue = false;
                     in_paragraph = true;
                     need_new_paragraph = false;
                 }
@@ -1512,15 +1534,9 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             } else {
                 // Unknown content type - treat as inline if we're in a paragraph context
                 if (!in_paragraph) {
-                    if (next_paragraph_continue) {
-                        stringbuf_append_str(html_buf, "<p class=\"continue\">");
-                        next_paragraph_continue = false;
-                    } else if (next_paragraph_noindent) {
-                        stringbuf_append_str(html_buf, "<p class=\"noindent\">");
-                        next_paragraph_noindent = false;
-                    } else {
-                        stringbuf_append_str(html_buf, "<p>");
-                    }
+                    open_paragraph(html_buf, next_paragraph_noindent, next_paragraph_continue);
+                    next_paragraph_noindent = false;
+                    next_paragraph_continue = false;
                     in_paragraph = true;
                 }
                 process_latex_element(html_buf, content_item, pool, depth, font_ctx);
@@ -2527,6 +2543,38 @@ static void close_paragraph(StringBuf* html_buf, bool add_newline) {
     } else {
         stringbuf_append_str(html_buf, "</p>");
     }
+}
+
+// Helper function to open paragraph with appropriate classes (alignment, noindent, continue)
+static void open_paragraph(StringBuf* html_buf, bool noindent, bool cont) {
+    const char* alignment_class = get_alignment_css_class(current_alignment);
+    
+    // Determine what classes to add
+    bool has_class = (noindent || cont || alignment_class != nullptr);
+    
+    if (!has_class) {
+        stringbuf_append_str(html_buf, "<p>");
+        return;
+    }
+    
+    stringbuf_append_str(html_buf, "<p class=\"");
+    
+    bool first_class = true;
+    if (noindent) {
+        stringbuf_append_str(html_buf, "noindent");
+        first_class = false;
+    }
+    if (cont) {
+        if (!first_class) stringbuf_append_str(html_buf, " ");
+        stringbuf_append_str(html_buf, "continue");
+        first_class = false;
+    }
+    if (alignment_class) {
+        if (!first_class) stringbuf_append_str(html_buf, " ");
+        stringbuf_append_str(html_buf, alignment_class);
+    }
+    
+    stringbuf_append_str(html_buf, "\">");
 }
 
 // ===== MarkReader-based implementations =====
