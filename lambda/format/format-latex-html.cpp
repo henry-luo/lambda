@@ -46,7 +46,7 @@ typedef struct {
 typedef enum {
     ALIGN_NORMAL,      // Default paragraph alignment
     ALIGN_CENTERING,   // \centering command
-    ALIGN_RAGGEDRIGHT, // \raggedright command  
+    ALIGN_RAGGEDRIGHT, // \raggedright command
     ALIGN_RAGGEDLEFT   // \raggedleft command
 } AlignmentMode;
 
@@ -228,7 +228,7 @@ static const struct {
     // Spaces
     {"space", " "},
     {"nobreakspace", "\xC2\xA0"},           // U+00A0 nbsp
-    {"thinspace", "\xE2\x80\x89"},          // U+2009
+    {"thinspace", " "},                     // Regular space (for HTML compatibility)
     {"enspace", "\xE2\x80\x82"},            // U+2002
     {"enskip", "\xE2\x80\x82"},             // U+2002
     {"quad", "\xE2\x80\x83"},               // U+2003 em space
@@ -763,6 +763,18 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Skip documentclass - it's metadata
             return;
         }
+        else if (strcmp(cmd_name, "usepackage") == 0) {
+            // Skip usepackage - it's preamble metadata
+            return;
+        }
+        else if (strcmp(cmd_name, "setlength") == 0) {
+            // Skip setlength - it's layout metadata
+            return;
+        }
+        else if (strcmp(cmd_name, "setcounter") == 0) {
+            // Skip setcounter - counter state (future: implement counter system)
+            return;
+        }
         else if (strcmp(cmd_name, "title") == 0) {
             process_title(html_buf, elem, pool, depth);
             return;
@@ -801,15 +813,15 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "center") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "list center", font_ctx);
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "flushleft") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "list flushleft", font_ctx);
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "flushright") == 0) {
-            process_alignment_environment(html_buf, elem, pool, depth, "list flushright", font_ctx);
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
             return;
         }
         else if (strcmp(cmd_name, "quote") == 0) {
@@ -1755,13 +1767,13 @@ static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, 
                     process_verbatim(html_buf, elem, pool, depth);
                 }
                 else if (strcmp(env_name->chars, "center") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "list center", font_ctx);
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-center", font_ctx);
                 }
                 else if (strcmp(env_name->chars, "flushleft") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "list flushleft", font_ctx);
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", font_ctx);
                 }
                 else if (strcmp(env_name->chars, "flushright") == 0) {
-                    process_alignment_environment(html_buf, elem, pool, depth, "list flushright", font_ctx);
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", font_ctx);
                 }
                 // Font environments - wrap content in appropriate span
                 else if (strcmp(env_name->chars, "small") == 0 ||
@@ -2490,7 +2502,7 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
         // Check for single hyphen (not part of em/en dash)
         else if (*p == '-') {
             if (is_tt) {
-                stringbuf_append_char(html_buf, '-'); // U+002D hyphen-minus
+                stringbuf_append_char(html_buf, '-'); // U+002D hyphen-minus in typewriter
             } else {
                 stringbuf_append_str(html_buf, "\xE2\x80\x90"); // U+2010 hyphen
             }
@@ -2505,9 +2517,7 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
         else if (*p == '&') {
             stringbuf_append_str(html_buf, "&amp;");
         }
-        else if (*p == '"') {
-            stringbuf_append_str(html_buf, "&quot;");
-        }
+        // Note: We don't escape " to &quot; - quotes are valid in HTML text content
         else {
             stringbuf_append_char(html_buf, *p);
         }
@@ -2548,17 +2558,17 @@ static void close_paragraph(StringBuf* html_buf, bool add_newline) {
 // Helper function to open paragraph with appropriate classes (alignment, noindent, continue)
 static void open_paragraph(StringBuf* html_buf, bool noindent, bool cont) {
     const char* alignment_class = get_alignment_css_class(current_alignment);
-    
+
     // Determine what classes to add
     bool has_class = (noindent || cont || alignment_class != nullptr);
-    
+
     if (!has_class) {
         stringbuf_append_str(html_buf, "<p>");
         return;
     }
-    
+
     stringbuf_append_str(html_buf, "<p class=\"");
-    
+
     bool first_class = true;
     if (noindent) {
         stringbuf_append_str(html_buf, "noindent");
@@ -2573,7 +2583,7 @@ static void open_paragraph(StringBuf* html_buf, bool noindent, bool cont) {
         if (!first_class) stringbuf_append_str(html_buf, " ");
         stringbuf_append_str(html_buf, alignment_class);
     }
-    
+
     stringbuf_append_str(html_buf, "\">");
 }
 
