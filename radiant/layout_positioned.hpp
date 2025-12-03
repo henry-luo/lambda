@@ -77,6 +77,8 @@ typedef struct FloatContext {
 typedef struct FloatAvailableSpace {
     float left;                 // Left edge of available space
     float right;                // Right edge of available space
+    bool has_left_float;        // True if a left float intrudes at this Y
+    bool has_right_float;       // True if a right float intrudes at this Y
 } FloatAvailableSpace;
 
 // Core positioning functions
