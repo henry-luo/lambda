@@ -29,30 +29,63 @@ static inline void add_attribute_to_element(Input* input, Element* element, cons
 // LaTeX special characters that need escaping
 static const char* latex_special_chars = "\\{}$&#^_%~";
 
+// LaTeX diacritic commands and their Unicode combining characters
+// Format: command_char, combining_char (to append after base), standalone_char
+struct DiacriticInfo {
+    char cmd;              // The command character (e.g., '^' for \^)
+    const char* combining; // Unicode combining character to append after base char
+    const char* standalone; // Standalone character when no base given (e.g., \^{})
+};
+
+static const DiacriticInfo diacritic_table[] = {
+    {'\'', "\u0301", "\u00B4"},   // acute accent: é
+    {'`',  "\u0300", "\u0060"},   // grave accent: è
+    {'^',  "\u0302", "\u005E"},   // circumflex: ê
+    {'"',  "\u0308", "\u00A8"},   // umlaut/diaeresis: ë
+    {'~',  "\u0303", "\u007E"},   // tilde: ñ
+    {'=',  "\u0304", "\u00AF"},   // macron: ē
+    {'.',  "\u0307", "\u02D9"},   // dot above: ė
+    {'u',  "\u0306", "\u02D8"},   // breve: ă
+    {'v',  "\u030C", "\u02C7"},   // caron/háček: ě
+    {'H',  "\u030B", "\u02DD"},   // double acute: ő
+    {'c',  "\u0327", "\u00B8"},   // cedilla: ç
+    {'d',  "\u0323", "\u200B\u0323"}, // dot below: ḍ
+    {'b',  "\u0332", "\u005F"},   // macron below: ḏ
+    {'r',  "\u030A", "\u02DA"},   // ring above: å
+    {'k',  "\u0328", "\u02DB"},   // ogonek: ą
+    {'t',  "\u0361", "\u200B\u0361"}, // tie: o͡o
+    {0, nullptr, nullptr}        // sentinel
+};
+
+// Find diacritic info for a given command character
+static const DiacriticInfo* find_diacritic(char cmd) {
+    for (const DiacriticInfo* d = diacritic_table; d->cmd != 0; d++) {
+        if (d->cmd == cmd) return d;
+    }
+    return nullptr;
+}
+
 // normalize whitespace in LaTeX text according to LaTeX rules:
 // - multiple spaces/tabs collapse to single space
 // - newlines within paragraphs become spaces
-// - leading/trailing whitespace is trimmed
+// Note: leading and trailing whitespace is preserved as it may be significant
 static void normalize_latex_whitespace(StringBuf* sb, Pool* pool) {
     if (sb->length == 0) return;
-    
+
     // create temporary buffer to hold normalized text
     size_t capacity = sb->length + 1;  // at most same size
     char* temp = (char*)pool_alloc(pool, capacity);
     if (!temp) return;
-    
+
     size_t temp_len = 0;
-    bool in_whitespace = true;  // start in whitespace mode to trim leading
-    bool has_content = false;   // track if we've added any non-whitespace
-    
+    bool in_whitespace = false;  // don't trim leading whitespace
+
     for (size_t i = 0; i < sb->length; i++) {
         char c = sb->str->chars[i];
-        
+
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            // whitespace character
-            if (!in_whitespace && has_content) {
-                // not already in whitespace mode and we have content
-                // add a single space
+            // whitespace character - collapse multiple to single space
+            if (!in_whitespace) {
                 temp[temp_len++] = ' ';
                 in_whitespace = true;
             }
@@ -60,21 +93,17 @@ static void normalize_latex_whitespace(StringBuf* sb, Pool* pool) {
             // non-whitespace character
             temp[temp_len++] = c;
             in_whitespace = false;
-            has_content = true;
         }
     }
-    
-    // trim trailing whitespace if needed
-    while (temp_len > 0 && temp[temp_len - 1] == ' ') {
-        temp_len--;
-    }
-    
+
+    // Don't trim trailing whitespace - it may be significant before groups/commands
+
     // copy normalized text back to original buffer
     stringbuf_reset(sb);
     if (temp_len > 0) {
         stringbuf_append_str_n(sb, temp, temp_len);
     }
-    
+
     // note: temp will be freed when pool is destroyed
 }
 
@@ -135,7 +164,8 @@ static String* parse_command_name(InputContext& ctx, const char **latex) {
     stringbuf_reset(sb);
 
     // Handle single-character control symbols (LaTeX-JS style)
-    if (**latex && strchr("$%#&{}_\\-,/@^~", **latex)) {
+    // Includes diacritics: ^ ~ ' ` " = .
+    if (**latex && strchr("$%#&{}_\\-,/@^~'`\"=.", **latex)) {
         stringbuf_append_char(sb, **latex);
         (*latex)++;
         return stringbuf_to_string(sb);
@@ -294,17 +324,131 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         char escaped_char = cmd_name->chars[0];
         // printf("DEBUG: Processing control symbol: \\%c\n", escaped_char);
 
-        // Handle control symbols that produce literal characters
+        // Check if this is a diacritic command
+        const DiacriticInfo* diacritic = find_diacritic(escaped_char);
+        if (diacritic) {
+            // This is a diacritic command - check for base character
+            StringBuf* text_sb = ctx.sb;
+            stringbuf_reset(text_sb);
+
+            char base_char = 0;
+            bool has_base = false;
+
+            if (**latex == '{') {
+                // Braced argument: \^{o} or \^{}
+                (*latex)++; // Skip {
+                if (**latex != '}') {
+                    // Get the base character from inside braces
+                    // Handle multi-byte UTF-8 or simple ASCII
+                    if (**latex == '\\') {
+                        // Special case: \"{\\i} for ï (dotless i with umlaut)
+                        (*latex)++; // Skip backslash
+                        if (**latex == 'i') {
+                            stringbuf_append_str(text_sb, "\u0131"); // dotless i
+                            has_base = true;
+                            (*latex)++; // Skip i
+                        } else if (**latex == 'j') {
+                            stringbuf_append_str(text_sb, "\u0237"); // dotless j
+                            has_base = true;
+                            (*latex)++; // Skip j
+                        } else {
+                            // Other escaped char, just use it
+                            stringbuf_append_char(text_sb, **latex);
+                            has_base = true;
+                            (*latex)++;
+                        }
+                    } else {
+                        // Regular character - could be UTF-8
+                        unsigned char c = (unsigned char)**latex;
+                        if ((c & 0x80) == 0) {
+                            // ASCII
+                            stringbuf_append_char(text_sb, **latex);
+                            (*latex)++;
+                        } else if ((c & 0xE0) == 0xC0) {
+                            // 2-byte UTF-8
+                            stringbuf_append_char(text_sb, *(*latex)++);
+                            if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                        } else if ((c & 0xF0) == 0xE0) {
+                            // 3-byte UTF-8
+                            stringbuf_append_char(text_sb, *(*latex)++);
+                            if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                            if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                        } else if ((c & 0xF8) == 0xF0) {
+                            // 4-byte UTF-8
+                            stringbuf_append_char(text_sb, *(*latex)++);
+                            if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                            if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                            if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                        }
+                        has_base = true;
+                    }
+                }
+                // Skip to closing brace
+                while (**latex && **latex != '}') (*latex)++;
+                if (**latex == '}') (*latex)++; // Skip }
+            } else if (**latex == '\\' && (*(*latex + 1) == 'i' || *(*latex + 1) == 'j')) {
+                // Special case: \"\i or \"\j (diacritic followed by dotless i/j)
+                (*latex)++; // Skip backslash
+                if (**latex == 'i') {
+                    stringbuf_append_str(text_sb, "\u0131"); // dotless i
+                } else {
+                    stringbuf_append_str(text_sb, "\u0237"); // dotless j
+                }
+                has_base = true;
+                (*latex)++; // Skip i/j
+                // Check if followed by space (command gobbles space)
+                if (**latex == ' ') (*latex)++;
+            } else if (**latex && **latex != ' ' && **latex != '\n' && **latex != '\t' &&
+                       **latex != '\\' && **latex != '{' && **latex != '}') {
+                // Unbraced single character: \^o
+                unsigned char c = (unsigned char)**latex;
+                if ((c & 0x80) == 0) {
+                    // ASCII
+                    stringbuf_append_char(text_sb, **latex);
+                    (*latex)++;
+                } else if ((c & 0xE0) == 0xC0) {
+                    // 2-byte UTF-8
+                    stringbuf_append_char(text_sb, *(*latex)++);
+                    if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                } else if ((c & 0xF0) == 0xE0) {
+                    // 3-byte UTF-8
+                    stringbuf_append_char(text_sb, *(*latex)++);
+                    if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                    if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                } else if ((c & 0xF8) == 0xF0) {
+                    // 4-byte UTF-8
+                    stringbuf_append_char(text_sb, *(*latex)++);
+                    if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                    if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                    if (**latex) stringbuf_append_char(text_sb, *(*latex)++);
+                }
+                has_base = true;
+            }
+
+            if (has_base) {
+                // Append combining diacritic after base character
+                stringbuf_append_str(text_sb, diacritic->combining);
+            } else {
+                // No base character - use standalone form + ZWSP for word boundary
+                stringbuf_append_str(text_sb, diacritic->standalone);
+                stringbuf_append_str(text_sb, "\u200B"); // Zero-width space for word boundary
+            }
+
+            // Control symbols preserve ONE trailing space (unlike commands which gobble space)
+            if (**latex == ' ') {
+                stringbuf_append_char(text_sb, ' ');
+                (*latex)++;
+            }
+
+            // Return as string (will be normalized by Unicode later)
+            String* result_str = stringbuf_to_string(text_sb);
+            return {.item = s2it(result_str)};
+        }
+
+        // Handle control symbols that produce literal characters (non-diacritics)
         if (escaped_char == '$' || escaped_char == '%' || escaped_char == '#' ||
             escaped_char == '&' || escaped_char == '{' || escaped_char == '}' ||
-            escaped_char == '_' || escaped_char == '^' || escaped_char == '~') {
-
-            // Handle ^ and ~ which might have {} after them
-            if (escaped_char == '^' || escaped_char == '~') {
-                if (**latex == '{' && *(*latex + 1) == '}') {
-                    (*latex) += 2; // Skip {}
-                }
-            }
+            escaped_char == '_') {
 
             // printf("DEBUG: Converting control symbol \\%c to literal '%c' element\n", escaped_char, escaped_char);
 
@@ -318,6 +462,13 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             StringBuf* text_sb = ctx.sb;
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
+
+            // Control symbols preserve ONE trailing space (unlike commands which gobble space)
+            if (**latex == ' ') {
+                stringbuf_append_char(text_sb, ' ');
+                (*latex)++;
+            }
+
             String* char_str = stringbuf_to_string(text_sb);
 
             if (char_str) {
@@ -345,7 +496,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             stringbuf_append_str(text_sb, "\u00AD"); // Unicode soft hyphen
 
             String* text_str = stringbuf_to_string(text_sb);
-            return {.item = (uint64_t)text_str};
+            return {.item = s2it(text_str)};
         }
         else if (escaped_char == '/') {
             // \/ = zero-width non-joiner
@@ -355,7 +506,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             stringbuf_append_str(text_sb, "\u200C"); // Unicode ZWNJ
 
             String* text_str = stringbuf_to_string(text_sb);
-            return {.item = (uint64_t)text_str};
+            return {.item = s2it(text_str)};
         }
         else if (escaped_char == '@') {
             // \@ = zero-width space (prevent space collapsing)
@@ -365,7 +516,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             stringbuf_append_str(text_sb, "\u200B"); // Unicode zero-width space
 
             String* text_str = stringbuf_to_string(text_sb);
-            return {.item = (uint64_t)text_str};
+            return {.item = s2it(text_str)};
         }
         // Handle line break (\\) with optional spacing: \\[dimension]
         else if (escaped_char == '\\') {
@@ -374,24 +525,24 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             if (!element) {
                 return {.item = ITEM_ERROR};
             }
-            
+
             // Check for optional spacing argument: \\[1cm]
             skip_whitespace(latex);
             if (**latex == '[') {
                 (*latex)++; // Skip [
-                
+
                 // Parse dimension argument
                 StringBuf* dim_sb = ctx.sb;
                 stringbuf_reset(dim_sb);
-                
+
                 while (**latex && **latex != ']') {
                     stringbuf_append_char(dim_sb, **latex);
                     (*latex)++;
                 }
-                
+
                 if (**latex == ']') {
                     (*latex)++; // Skip ]
-                    
+
                     // Add dimension as child element
                     if (dim_sb->length > 0) {
                         String* dim_str = stringbuf_to_string(dim_sb);
@@ -402,7 +553,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                     }
                 }
             }
-            
+
             return {.item = (uint64_t)element};
         }
     }
@@ -414,24 +565,24 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         if (!element) {
             return {.item = ITEM_ERROR};
         }
-        
+
         // Check for optional spacing argument: \\[1cm]
         skip_whitespace(latex);
         if (**latex == '[') {
             (*latex)++; // Skip [
-            
+
             // Parse dimension argument
             StringBuf* dim_sb = ctx.sb;
             stringbuf_reset(dim_sb);
-            
+
             while (**latex && **latex != ']') {
                 stringbuf_append_char(dim_sb, **latex);
                 (*latex)++;
             }
-            
+
             if (**latex == ']') {
                 (*latex)++; // Skip ]
-                
+
                 // Add dimension as child element
                 if (dim_sb->length > 0) {
                     String* dim_str = stringbuf_to_string(dim_sb);
@@ -442,7 +593,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                 }
             }
         }
-        
+
         return {.item = (uint64_t)element};
     }
 
@@ -477,9 +628,26 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
     }
 
-    // Handle verb command
-    if (strcmp(cmd_name->chars, "verb") == 0) {
-        // printf("DEBUG: Processing verb command\n");
+    // Symbol commands that don't take arguments - return early to avoid consuming {}
+    // These produce special characters and should not consume a following {} group
+    static const char* symbol_commands[] = {
+        "ss", "SS", "o", "O", "ae", "AE", "oe", "OE", "aa", "AA",
+        "i", "j", "l", "L", "dh", "DH", "th", "TH",
+        "dag", "ddag", "S", "P", "copyright", "pounds",
+        "LaTeX", "TeX", "LaTeXe",
+        NULL
+    };
+    for (const char** sym = symbol_commands; *sym; sym++) {
+        if (strcmp(cmd_name->chars, *sym) == 0) {
+            Element* element = create_latex_element(input, cmd_name->chars);
+            return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
+        }
+    }
+
+    // Handle verb command (and verb*)
+    if (strcmp(cmd_name->chars, "verb") == 0 || strcmp(cmd_name->chars, "verb*") == 0) {
+        bool show_spaces = (strcmp(cmd_name->chars, "verb*") == 0);
+        // printf("DEBUG: Processing verb command (show_spaces=%d)\n", show_spaces);
         // Parse \verb|text| or \verb/text/ etc.
         if (**latex) {
             char delimiter = **latex;
@@ -490,7 +658,12 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
             stringbuf_reset(verb_sb);
 
             while (**latex && **latex != delimiter) {
-                stringbuf_append_char(verb_sb, **latex);
+                if (show_spaces && **latex == ' ') {
+                    // U+2423 OPEN BOX for visible space in verb*
+                    stringbuf_append_str(verb_sb, "\xE2\x90\xA3");
+                } else {
+                    stringbuf_append_char(verb_sb, **latex);
+                }
                 (*latex)++;
             }
 
@@ -513,11 +686,32 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
 
     // Handle special multi-character escape sequences
     if (strcmp(cmd_name->chars, "textbackslash") == 0) {
+        MarkBuilder& builder = ctx.builder;
+        // Skip optional {} argument
+        bool had_braces = false;
+        if (**latex == '{') {
+            had_braces = true;
+            (*latex)++;
+            while (**latex && **latex != '}') (*latex)++;
+            if (**latex == '}') (*latex)++;
+        }
+
         // Create textbackslash element to avoid string merging
         Element* element = create_latex_element(input, "textbackslash");
         if (!element) {
             return {.item = ITEM_ERROR};
         }
+
+        // If we had braces {} and next char is a space, preserve it in content
+        // This implements the LaTeX rule that {} acts as a terminator that stops space-gobbling
+        if (had_braces && **latex == ' ') {
+            String* space_str = builder.createString(" ", 1);
+            if (space_str) {
+                list_push((List*)element, {.item = s2it(space_str)});
+            }
+            (*latex)++; // Consume the space
+        }
+
         return {.item = (uint64_t)element};
     }
 
@@ -538,7 +732,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
     if (strcmp(cmd_name->chars, "item") == 0) {
         // \item commands don't take arguments in braces
         // Their content is everything until the next \item or \end{environment}
-        
+
         MarkBuilder& builder = ctx.builder;
         skip_whitespace(latex);
 
@@ -546,7 +740,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
         while (**latex) {
             skip_whitespace(latex);
             if (!**latex) break;
-            
+
             // Stop at next \item or \end (check AFTER skipping whitespace)
             if (strncmp(*latex, "\\item", 5) == 0 || strncmp(*latex, "\\end{", 5) == 0) {
                 break;
@@ -592,7 +786,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                         // The first item in the argument element should be the environment name
                         Item content_item = arg_element->items[0];
                         TypeId content_type = get_type_id(content_item);
-                        
+
                         if (content_type == LMD_TYPE_STRING) {
                             String* env_string = (String*)content_item.pointer;
                             if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
@@ -816,7 +1010,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                         if (text_sb->length > 0) {
                             // normalize whitespace before creating string
                             normalize_latex_whitespace(text_sb, input->pool);
-                            
+
                             String *text_string = stringbuf_to_string(text_sb);
                             stringbuf_reset(text_sb);
 
@@ -859,7 +1053,10 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                         }
                     }
 
-                    skip_whitespace(latex);
+                    // Only skip whitespace after text content (not after commands)
+                    // Note: This is intentionally commented out because whitespace
+                    // should be preserved after \end{} within environments
+                    // skip_whitespace(latex);
                 }
             }
         }
@@ -889,7 +1086,8 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
         return {.item = ITEM_ERROR};
     }
 
-    skip_whitespace(latex);
+    // Don't skip whitespace here - it may be significant for text content
+    // Whitespace is skipped at specific points after commands/environments
 
     if (!**latex) {
         parse_depth--;
@@ -1005,6 +1203,47 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
         return {.item = ITEM_ERROR};
     }
 
+    // Handle LaTeX groups {content}
+    if (**latex == '{') {
+        (*latex)++; // Skip opening brace
+
+        // Create a group element
+        Element* group = create_latex_element(input, "group");
+        if (!group) {
+            parse_depth--;
+            return {.item = ITEM_ERROR};
+        }
+
+        // Parse content until closing brace
+        while (**latex && **latex != '}') {
+            Item child = parse_latex_element(ctx, latex);
+            if (child.item == ITEM_ERROR) {
+                parse_depth--;
+                return {.item = ITEM_ERROR};
+            }
+            if (child.item != ITEM_NULL) {
+                list_push((List*)group, child);
+            }
+            // Don't skip whitespace here - it should be part of text nodes
+        }
+
+        // Skip the closing brace
+        if (**latex == '}') {
+            (*latex)++;
+        }
+
+        ((TypeElmt*)group->type)->content_length = ((List*)group)->length;
+        parse_depth--;
+        return {.item = (uint64_t)group};
+    }
+
+    // Handle closing brace outside a group context (shouldn't happen normally)
+    if (**latex == '}') {
+        // Return null to signal end of group content to caller
+        parse_depth--;
+        return {.item = ITEM_NULL};
+    }
+
     // Parse regular text content
     // printf("DEBUG: Parsing text starting at: '%.20s'\n", *latex);
     StringBuf* text_sb = ctx.sb;
@@ -1017,7 +1256,8 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
             // printf("DEBUG: Found backslash at position %d\n", text_chars);
             // Check if this is an escaped character or command
             const char* next_char = *latex + 1;
-            if (next_char && strchr("{}$&#^_%~", *next_char)) {
+            // Note: ^, ~, ', `, ", =, . are diacritics and should be handled by parse_latex_command
+            if (next_char && strchr("{}$&#_%", *next_char)) {
                 // This is an escaped character
                 (*latex)++; // Skip backslash
                 switch (**latex) {
@@ -1026,10 +1266,8 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                     case '$': stringbuf_append_char(text_sb, '$'); break;
                     case '&': stringbuf_append_char(text_sb, '&'); break;
                     case '#': stringbuf_append_char(text_sb, '#'); break;
-                    case '^': stringbuf_append_char(text_sb, '^'); break;
                     case '_': stringbuf_append_char(text_sb, '_'); break;
                     case '%': stringbuf_append_char(text_sb, '%'); break;
-                    case '~': stringbuf_append_char(text_sb, '~'); break;
                     default:
                         stringbuf_append_char(text_sb, '\\');
                         stringbuf_append_char(text_sb, **latex);
@@ -1061,10 +1299,12 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                 (*latex)++;
                 text_chars++;
             }
-        } else if (**latex == '{' && *(*latex + 1) == '}') {
-            // Skip empty LaTeX groups {} - they're just syntactic elements
-            (*latex) += 2;
-            // Don't increment text_chars or append anything
+        } else if (**latex == '{') {
+            // Start of a group - break text parsing and handle group below
+            break;
+        } else if (**latex == '}') {
+            // End of a group - break text parsing (caller handles the closing brace)
+            break;
         } else if (**latex == '$' || **latex == '%') {
             // Math mode or comment, break
             // printf("DEBUG: Found math, breaking with %d chars collected\n", text_chars);
@@ -1095,6 +1335,16 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
             stringbuf_append_str(text_sb, "\u00A0");  // nbsp
             (*latex)++;
             text_chars++;
+        } else if (**latex == '\'') {
+            // ASCII apostrophe → right single quotation mark (LaTeX smart quotes)
+            stringbuf_append_str(text_sb, "\u2019");  // '
+            (*latex)++;
+            text_chars++;
+        } else if (**latex == '`') {
+            // ASCII backtick → left single quotation mark (LaTeX smart quotes)
+            stringbuf_append_str(text_sb, "\u2018");  // '
+            (*latex)++;
+            text_chars++;
         } else {
             stringbuf_append_char(text_sb, **latex);
             (*latex)++;
@@ -1107,7 +1357,7 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
     if (text_sb->length > 0) {
         // normalize whitespace before creating string
         normalize_latex_whitespace(text_sb, input->pool);
-        
+
         // printf("DEBUG: Processing collected text\n");
         String* text_str = builder.createString(text_sb->str->chars, text_sb->length);
         // printf("DEBUG: Returning text node: '%.*s' (length: %zu)\n",
@@ -1209,14 +1459,34 @@ void parse_latex(Input* input, const char* latex_string) {
 
             list_push((List*)root_element, element);
             // printf("DEBUG: Added element %d to root (type=%d)\n", element_count, elem_type);
+
+            // Skip whitespace after commands, but NOT after:
+            // - groups (since {} preserves following space)
+            // - verb (since \verb|...| has its own delimiter and preserves following space)
+            // - environments (since \end{...} should preserve following space, like empty, etc.)
+            if (elem_type == LMD_TYPE_ELEMENT) {
+                Element* elem = (Element*)element.pointer;
+                TypeElmt* type_info = (TypeElmt*)elem->type;
+                StrView name = type_info->name;
+                bool is_group = (name.length == 5 && strncmp(name.str, "group", 5) == 0);
+                bool is_verb = (name.length == 4 && strncmp(name.str, "verb", 4) == 0);
+                bool is_empty = (name.length == 5 && strncmp(name.str, "empty", 5) == 0);
+                // Environments that have content and should preserve trailing space
+                bool is_environment = is_empty; // Add more environments as needed
+                if (!is_group && !is_verb && !is_environment) {
+                    skip_whitespace(&latex);
+                }
+            } else {
+                skip_whitespace(&latex);
+            }
         } else if (element.item == ITEM_ERROR) {
             // printf("DEBUG: Error parsing element %d\n", element_count);
             break;
         } else {
             // printf("DEBUG: Element %d was null (likely \\end{} or comment)\n", element_count);
+            // Skip whitespace after null returns too
+            skip_whitespace(&latex);
         }
-        // Skip whitespace first
-        skip_whitespace(&latex);
 
         // Check for paragraph breaks and create paragraph break elements
         if (*latex == '\n') {
