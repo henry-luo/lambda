@@ -1306,7 +1306,25 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             } else if (block->bound) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
-                if (block->parent_view()->first_placed_child() == block) {  // first child
+                
+                // Find first in-flow child (skip floats for margin collapsing purposes)
+                View* first_in_flow_child = block->parent_view()->first_placed_child();
+                while (first_in_flow_child) {
+                    if (!first_in_flow_child->is_block()) break;
+                    ViewBlock* vb = (ViewBlock*)first_in_flow_child;
+                    if (vb->position && element_has_float(vb)) {
+                        // Skip to next placed sibling
+                        View* next = (View*)first_in_flow_child->next_sibling;
+                        while (next && !next->view_type) {
+                            next = (View*)next->next_sibling;
+                        }
+                        first_in_flow_child = next;
+                        continue;
+                    }
+                    break;
+                }
+                
+                if (first_in_flow_child == block) {  // first in-flow child
                     if (block->bound->margin.top > 0) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                         // Check if parent creates a BFC - BFC prevents margin collapsing
@@ -1345,7 +1363,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     
                     if (!has_clearance) {
                         float collapse = 0;
+                        // Find previous in-flow sibling (skip floats)
                         View* prev_view = block->prev_placed_view();
+                        while (prev_view && prev_view->is_block()) {
+                            ViewBlock* vb = (ViewBlock*)prev_view;
+                            // Skip floats - they're out of normal flow and don't participate in margin collapsing
+                            if (vb->position && element_has_float(vb)) {
+                                prev_view = prev_view->prev_placed_view();
+                                continue;
+                            }
+                            break;
+                        }
                         if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
                             ViewBlock* prev_block = (ViewBlock*)prev_view;
                             if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {

@@ -151,16 +151,23 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     float cb_x = containing_block->x, cb_y = containing_block->y;
     float cb_width = containing_block->width, cb_height = containing_block->height;
 
-    // update to padding box
+    // Calculate border offset - the absolute element is positioned relative to padding box,
+    // but block->x/y are stored relative to containing block's origin (border box)
+    float border_offset_x = 0, border_offset_y = 0;
+    
+    // update to padding box dimensions
     if (containing_block->bound) {
         if (containing_block->bound->border) {
-            cb_x += containing_block->bound->border->width.left;
-            cb_y += containing_block->bound->border->width.top;
+            border_offset_x = containing_block->bound->border->width.left;
+            border_offset_y = containing_block->bound->border->width.top;
+            cb_x += border_offset_x;
+            cb_y += border_offset_y;
             cb_width -= (containing_block->bound->border->width.left + containing_block->bound->border->width.right);
             cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
         }
     }
-    log_debug("containing block padding box: (%d, %d) size (%d, %d)", cb_x, cb_y, cb_width, cb_height);
+    log_debug("containing block padding box: (%d, %d) size (%d, %d), border_offset: (%f, %f)", 
+              (int)cb_x, (int)cb_y, (int)cb_width, (int)cb_height, border_offset_x, border_offset_y);
 
     float content_width, content_height;
     // calculate horizontal position
@@ -180,14 +187,14 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         content_width = max(cb_width - (block->bound ? block->bound->margin.right + block->bound->margin.left : 0), 0.0f);
     }
 
-    // Now determine x position
+    // Now determine x position (relative to padding box, then add border offset)
     if (block->position->has_left) {
-        block->x = block->position->left + (block->bound ? block->bound->margin.left : 0);
+        block->x = border_offset_x + block->position->left + (block->bound ? block->bound->margin.left : 0);
     } else if (block->position->has_right) {
-        block->x = cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - content_width;
+        block->x = border_offset_x + cb_width - block->position->right - (block->bound ? block->bound->margin.right : 0) - content_width;
     } else {
         // neither left nor right specified - use static position (with margin offset)
-        block->x = block->bound ? block->bound->margin.left : 0;
+        block->x = border_offset_x + (block->bound ? block->bound->margin.left : 0);
     }
     assert(content_width >= 0);
 
@@ -205,14 +212,14 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         content_height = max(cb_height - (block->bound ? block->bound->margin.bottom + block->bound->margin.top : 0), 0.0f);
     }
 
-    // Now determine y position
+    // Now determine y position (relative to padding box, then add border offset)
     if (block->position->has_top) {
-        block->y = block->position->top + (block->bound ? block->bound->margin.top : 0);
+        block->y = border_offset_y + block->position->top + (block->bound ? block->bound->margin.top : 0);
     } else if (block->position->has_bottom) {
-        block->y = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0) - content_height;
+        block->y = border_offset_y + cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0) - content_height;
     } else {
         // neither top nor bottom specified - use static position (with margin offset)
-        block->y = block->bound ? block->bound->margin.top : 0;
+        block->y = border_offset_y + (block->bound ? block->bound->margin.top : 0);
     }
     assert(content_height >= 0);
 
@@ -838,27 +845,33 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
 
     // Convert available space from container-relative to local block coordinates
     // The left/right from float_space_at_y are relative to container content area
-    // We need to adjust them to be relative to the current block's content area
-    float local_left = space.left - block_offset_x;
-    float local_right = space.right - block_offset_x;
+    // We need to convert to containing_block's local coordinate system
+    // 
+    // Coordinate systems:
+    // - space.left/right: relative to float context container's content area origin
+    // - containing_block->x: block position relative to container content area
+    // - line.left/right: local to containing_block, including border+padding offset
+    // - effective_left/right: must be in same coord system as line.left/right
+    
+    // Convert container coordinates to containing_block's local coordinates
+    // (relative to block's origin at (0,0))
+    float local_left = space.left - containing_block->x;
+    float local_right = space.right - containing_block->x;
+    
+    // The effective bounds should be in the same coordinate system as line.left/right
+    // which is local to the block and starts at border+padding offset
+    float new_effective_left = local_left;
+    float new_effective_right = local_right;
 
-    // Clamp to the current block's content area
-    local_left = max(local_left, 0.0f);
-    local_right = min(local_right, lycon->block.content_width);
+    // Clamp to the current block's line bounds
+    // line.left is the content area left edge (border + padding offset)
+    // line.right is the content area right edge  
+    new_effective_left = max(new_effective_left, lycon->line.left);
+    new_effective_right = min(new_effective_right, lycon->line.right);
 
-    // Update line boundaries if floats intrude
-    // Note: line.left/right are the CONTAINER bounds, should not be modified
-    // line.effective_left/effective_right are the float-adjusted bounds for this specific line
-    float new_effective_left = containing_block->x + local_left;
-    float new_effective_right = containing_block->x + local_right;
-
-    // Add border and padding to absolute left
-    if (containing_block->bound) {
-        if (containing_block->bound->border) {
-            new_effective_left += containing_block->bound->border->width.left;
-        }
-        new_effective_left += containing_block->bound->padding.left;
-    }
+    log_debug("Float adjustment: space=(%.1f, %.1f), block_x=%.1f, local=(%.1f, %.1f), new_effective=(%.1f, %.1f)",
+              space.left, space.right, containing_block->x, local_left, local_right,
+              new_effective_left, new_effective_right);
 
     // Apply the float intrusion to effective bounds (not the container bounds!)
     if (space.has_left_float && new_effective_left > lycon->line.left) {
