@@ -602,7 +602,11 @@ void render_children(RenderContext* rdcon, View* view) {
                 render_list_view(rdcon, block);
             }
             else {
-                if (block->position && block->position->position != CSS_VALUE_RELATIVE) {
+                // Skip only absolute/fixed positioned elements - they are rendered separately
+                // Floats (which also have position struct) should be rendered in normal flow
+                if (block->position && 
+                    (block->position->position == CSS_VALUE_ABSOLUTE || 
+                     block->position->position == CSS_VALUE_FIXED)) {
                     log_debug("absolute/fixed positioned block, skip in normal rendering");
                 } else {
                     render_block_view(rdcon, block);
