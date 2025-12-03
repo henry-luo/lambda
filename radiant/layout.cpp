@@ -309,13 +309,31 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
         
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
-        // (or 'table' for inline-table). This applies before layout decisions.
-        if (elem->position && 
-            (elem->position->float_prop == CSS_VALUE_LEFT || elem->position->float_prop == CSS_VALUE_RIGHT)) {
+        // Check float property from specified styles (before view is created)
+        CssEnum float_value = CSS_VALUE_NONE;
+        
+        // First check if position is already resolved
+        if (elem->position) {
+            float_value = elem->position->float_prop;
+        } else if (elem->specified_style && elem->specified_style->tree) {
+            // Check float property from CSS style tree
+            AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+            if (float_node) {
+                StyleNode* style_node = (StyleNode*)float_node->declaration;
+                if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                    CssValue* val = style_node->winning_decl->value;
+                    if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                        float_value = val->data.keyword;
+                    }
+                }
+            }
+        }
+        
+        if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
             // Float transforms most display values to block
             if (display.outer != CSS_VALUE_NONE) {
-                log_debug("Float on %s: transforming display from outer=%d to BLOCK", 
-                          node->node_name(), display.outer);
+                log_debug("Float on %s: transforming display from outer=%d to BLOCK (float=%d)", 
+                          node->node_name(), display.outer, float_value);
                 display.outer = CSS_VALUE_BLOCK;
                 // Keep inner display but treat as flow for layout purposes if it's a table type
                 if (display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
