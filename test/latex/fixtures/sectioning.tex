@@ -1,85 +1,65 @@
-** basic sectioning
+** a chapter
 .
-\section{Introduction}
-This is the introduction section.
+\documentclass{book}
+\begin{document}
+\chapter{A Chapter}
 
-\subsection{Background}
-This is a subsection with background information.
+Then the text follows.
+\chapter{A Chapter}
+Then the text follows.
 
-\subsubsection{Details}
-This is a subsubsection with details.
+\end{document}
 .
 <div class="body">
-<div class="latex-section">Introduction</div>
-<p>This is the introduction section.</p>
-<div class="latex-subsection">Background</div>
-<p>This is a subsection with background information.</p>
-<div class="latex-subsubsection">Details</div>
-<p>This is a subsubsection with details.</p>
+<h1 id="sec-1"><div>Chapter 1</div>A Chapter</h1>
+<p>Then the text follows.</p>
+<h1 id="sec-2"><div>Chapter 2</div>A Chapter</h1>
+<p>Then the text follows.</p>
 </div>
 .
 
 
-** document with title
+** a chapter and a section
 .
-\title{Test Document}
-\author{Test Author}
-\date{January 2024}
+\documentclass{book}
+\begin{document}
 
-\maketitle
+\chapter{A Chapter}
 
-\section{First Section}
-Content of the first section.
+\section{Here starts a section}
+
+Then the text follows.
+
+\chapter{A Chapter}\section{Here starts a section}
+Then the text follows.
+\end{document}
 .
 <div class="body">
-<div class="latex-title">Test Document</div>
-<div class="latex-author">Test Author</div>
-<div class="latex-date">January 2024</div>
-<div class="latex-section">First Section</div>
-<p>Content of the first section.</p>
+<h1 id="sec-1"><div>Chapter 1</div>A Chapter</h1>
+<h2 id="sec-2">1.1 Here starts a section</h2>
+<p>Then the text follows.</p>
+<h1 id="sec-3"><div>Chapter 2</div>A Chapter</h1>
+<h2 id="sec-4">2.1 Here starts a section</h2>
+<p>Then the text follows.</p>
 </div>
 .
 
 
-** multiple sections
+** section inside a macro - correct visual appearance to be done with CSS
 .
-\section{First Section}
-Content of first section.
+% this can only be output properly if we switch to an AST: then the previous paragraph will end at \section{}
+Start with \emph{some \section{A Section}} text.
 
-\section{Second Section}
-Content of second section.
-
-\subsection{Subsection A}
-Content of subsection A.
-
-\subsection{Subsection B}
-Content of subsection B.
+Then more text follows.
 .
 <div class="body">
-<div class="latex-section">First Section</div>
-<p>Content of first section.</p>
-<div class="latex-section">Second Section</div>
-<p>Content of second section.</p>
-<div class="latex-subsection">Subsection A</div>
-<p>Content of subsection A.</p>
-<div class="latex-subsection">Subsection B</div>
-<p>Content of subsection B.</p>
+<p>Start with <span class="it">some<h2 id="sec-1">1 A Section</h2></span> text.</p>
+<p>Then more text follows.</p>
 </div>
 .
 
 
-** section with formatting
+!** table of contents
 .
-\section{\textbf{Bold Section Title}}
-This section has a bold title.
-
-\subsection{Subsection with \textit{italic} word}
-This subsection has italic text in the title.
 .
-<div class="body">
-<div class="latex-section"><span class="bf">Bold Section Title</span></div>
-<p>This section has a bold title.</p>
-<div class="latex-subsection">Subsection with <span class="it">italic</span> word</div>
-<p>This subsection has italic text in the title.</p>
-</div>
 .
