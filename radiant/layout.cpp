@@ -39,21 +39,72 @@ bool is_only_whitespace(const char* str) {
     return true;
 }
 
-float calc_normal_line_height(FT_Face face) {
-    FT_Short ascender  = face->size->metrics.ascender;
-    FT_Short descender = -face->size->metrics.descender;
-    FT_Short height    = face->size->metrics.height;
-    float line_height;
-    if (height != ascender + descender) {
-        // true line gap exists
-        line_height = height / 64.0f;
-        log_debug("Using font height for line height: %f", line_height);
-    } else {
-        // Synthesized leading
-        float line_gap = (ascender + descender) * 0.1f;   // adds 0.1em line gap when it is 0 from font
-        line_height = (ascender + descender + line_gap) / 64.0f;
-        log_debug("Using synthesized line gap: %f, asc %d, desc %d, line height: %f", line_gap, ascender, descender, line_height);
+// Constant for fsSelection bit 7 (USE_TYPO_METRICS)
+constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
+
+// Read OS/2 table metrics using FreeType
+// Reference: Chrome Blink simple_font_data.cc TypoAscenderAndDescender()
+// Chrome checks fsSelection bit 7 (USE_TYPO_METRICS) to decide which metrics to use
+TypoMetrics get_os2_typo_metrics(FT_Face face) {
+    TypoMetrics result = {0, 0, 0, false, false};
+
+    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+    if (!os2) {
+        log_debug("No OS/2 table available for font: %s", face->family_name);
+        return result;  // No OS/2 table available
     }
+
+    // Convert from font units to CSS pixels
+    // scale = ppem / units_per_EM
+    float scale = (float)face->size->metrics.y_ppem / face->units_per_EM;
+
+    // Check fsSelection bit 7 (USE_TYPO_METRICS)
+    result.use_typo_metrics = (os2->fsSelection & OS2_FS_SELECTION_USE_TYPO_METRICS) != 0;
+
+    result.ascender = os2->sTypoAscender * scale;
+    result.descender = -os2->sTypoDescender * scale;  // Make positive (OS/2 descender is negative)
+    // CSS spec: line gap must be floored at zero
+    result.line_gap = (os2->sTypoLineGap > 0) ? (os2->sTypoLineGap * scale) : 0.0f;
+    result.valid = true;
+
+    log_debug("OS/2 typo metrics for %s: asc=%.2f, desc=%.2f, gap=%.2f, USE_TYPO=%s (raw: %d, %d, %d, fsSelection=0x%04x)",
+              face->family_name, result.ascender, result.descender, result.line_gap,
+              result.use_typo_metrics ? "yes" : "no",
+              os2->sTypoAscender, os2->sTypoDescender, os2->sTypoLineGap, os2->fsSelection);
+
+    return result;
+}
+
+// Calculate normal line height following CSS Inline Layout Module Level 3 spec
+// and Chrome Blink implementation (simple_font_data.cc PlatformInit)
+// Chrome uses OS/2 sTypo* metrics when USE_TYPO_METRICS flag is set.
+// Otherwise it uses HHEA metrics.
+// Formula: round(ascender) + round(descender) + round(line_gap)
+float calc_normal_line_height(FT_Face face) {
+    // Get OS/2 sTypo metrics
+    TypoMetrics typo = get_os2_typo_metrics(face);
+
+    // Only use sTypo metrics when USE_TYPO_METRICS flag is set (fsSelection bit 7)
+    // Chrome checks this flag to decide which metrics to use for line-height
+    if (typo.valid && typo.use_typo_metrics) {
+        // Chrome formula: round each component separately, then sum
+        long asc_r = lroundf(typo.ascender);
+        long desc_r = lroundf(typo.descender);
+        long gap_r = lroundf(typo.line_gap);
+        float line_height = (float)(asc_r + desc_r + gap_r);
+        log_debug("Normal line height (sTypo, USE_TYPO_METRICS=1): %.2f (asc=%ld + desc=%ld + gap=%ld) for %s",
+                  line_height, asc_r, desc_r, gap_r, face->family_name);
+        return line_height;
+    }
+
+    // Use FreeType's computed metrics (HHEA-based) when:
+    // 1. No OS/2 table available, OR
+    // 2. USE_TYPO_METRICS flag is NOT set
+    // Note: Use FreeType's height directly as it represents the recommended line spacing
+    float ft_height = face->size->metrics.height / 64.0f;
+    float line_height = roundf(ft_height);
+    log_debug("Normal line height (HHEA height): %.2f for %s",
+              line_height, face->family_name);
     return line_height;
 }
 
@@ -297,21 +348,21 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
     if (node->is_element()) {
         DomElement* elem = node->as_element();
-        
+
         // Skip floats that were pre-laid in the float pre-pass
         if (elem->float_prelaid) {
             log_debug("skipping pre-laid float: %s", node->node_name());
             return;
         }
-        
+
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
         log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
-        
+
         // CSS 2.2 Section 9.7: When float is not 'none', display is computed as 'block'
         // Check float property from specified styles (before view is created)
         CssEnum float_value = CSS_VALUE_NONE;
-        
+
         // First check if position is already resolved
         if (elem->position) {
             float_value = elem->position->float_prop;
@@ -328,11 +379,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 }
             }
         }
-        
+
         if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
             // Float transforms most display values to block
             if (display.outer != CSS_VALUE_NONE) {
-                log_debug("Float on %s: transforming display from outer=%d to BLOCK (float=%d)", 
+                log_debug("Float on %s: transforming display from outer=%d to BLOCK (float=%d)",
                           node->node_name(), display.outer, float_value);
                 display.outer = CSS_VALUE_BLOCK;
                 // Keep inner display but treat as flow for layout purposes if it's a table type
@@ -347,7 +398,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 }
             }
         }
-        
+
         if (strcmp(node->node_name(), "table") == 0) {
             log_debug("TABLE ELEMENT in layout_flow_node - outer=%d, inner=%d (TABLE=%d)",
                    display.outer, display.inner, CSS_VALUE_TABLE);
@@ -456,8 +507,15 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
-    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face);
+    if (typo.valid && typo.use_typo_metrics) {
+        lycon->block.init_ascender = typo.ascender;
+        lycon->block.init_descender = typo.descender;
+    } else {
+        lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+        lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    }
 
     // navigate DomNode tree to find body
     DomNode* body_node = nullptr;

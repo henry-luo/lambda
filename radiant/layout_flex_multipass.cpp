@@ -498,8 +498,15 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Inherit text alignment and other block properties from flex item
     if (flex_item->blk) {
         lycon->block.text_align = flex_item->blk->text_align;
-        // lycon->block.line_height = flex_item->blk->line_height;
     }
+
+    // CRITICAL: Set up font for this flex item (required for correct line-height calculation)
+    // The flex item may have its own font-size (e.g., inline-block with font-size: 48px)
+    if (flex_item->font) {
+        setup_font(lycon->ui_context, &lycon->font, flex_item->font);
+    }
+    // Set up line height for this flex item (uses the font that was just set up)
+    setup_line_height(lycon, flex_item);
 
     // Set up line formatting context for inline content
     line_init(lycon, content_x_offset, content_x_offset + content_width);
@@ -593,7 +600,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     // Layout content within each flex item with their final sizes
     View* child = flex_container->first_child;
     while (child) {
-        if (child->view_type == RDT_VIEW_BLOCK) {
+        // Include both block and inline-block flex items
+        if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* flex_item = (ViewBlock*)child;
             log_debug("Final layout for flex item %p: %dx%d", flex_item, flex_item->width, flex_item->height);
 

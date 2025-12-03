@@ -341,12 +341,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
  */
 static CssEnum get_element_float_value(DomElement* elem) {
     if (!elem) return CSS_VALUE_NONE;
-    
+
     // First check if position is already resolved
     if (elem->position) {
         return elem->position->float_prop;
     }
-    
+
     // Check float property from CSS style tree
     if (elem->specified_style && elem->specified_style->tree) {
         AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
@@ -366,36 +366,36 @@ static CssEnum get_element_float_value(DomElement* elem) {
 /**
  * Pre-scan inline siblings for floats and layout them first
  * This ensures floats are positioned before inline content that follows them in DOM order
- * 
+ *
  * Per CSS 2.2: floats affect the current line, so they must be positioned before
  * we lay out inline content that shares the same line.
- * 
+ *
  * IMPORTANT: This only applies when there's inline content mixed with floats.
  * If all siblings are block-level, floats appear at their encounter point.
- * 
+ *
  * @param lycon Layout context
  * @param first_child First child to scan from
  * @param parent_block The parent block establishing the formatting context
  */
 /**
  * Pre-scan and layout ALL floats in the content.
- * 
+ *
  * CSS floats are "out of flow" - they're positioned and then content flows around them.
  * This means floats affect content that comes BEFORE them in DOM order if that content
  * is on the same line.
- * 
+ *
  * For simplicity, we pre-lay ALL floats at Y=0, then during inline layout, content
  * flows around them via adjust_line_for_floats(). If this causes issues with floats
  * that should appear lower (due to preceding block-level content), we'll need a more
  * sophisticated approach.
- * 
+ *
  * This handles cases like:
  *   <span>Filler Text</span><float/>  -> float at (0,0), text at (96,0) ✓
  *   <span>Long text...</span><float/> -> float at (0,0) - WRONG, should be (0, line2)
  */
 static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewBlock* parent_block) {
     if (!first_child) return;
-    
+
     // Check if there are any floats in the content
     // Also check if the content BEFORE the first float is short enough to share a line
     bool has_floats = false;
@@ -405,7 +405,7 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
     // Use lycon->block.content_width which is set during block setup
     float container_width = lycon->block.content_width;
     DomNode* first_float_node = nullptr;
-    
+
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (!child->is_element()) {
             // Text nodes - estimate width (rough approximation)
@@ -426,10 +426,10 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
             }
             continue;
         }
-        
+
         DomElement* elem = child->as_element();
         if (elem->float_prelaid) continue;
-        
+
         // Check if element is a float
         CssEnum float_value = get_element_float_value(elem);
         if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
@@ -437,13 +437,13 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
             if (!first_float_node) first_float_node = child;
             continue;
         }
-        
+
         // Check if element is inline or block content before the first float
         if (!first_float_node) {
             DisplayValue display = resolve_display_value(child);
             if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK) {
                 has_inline_content = true;
-                
+
                 // Count text content inside this inline element for width estimation
                 for (DomNode* text_node = elem->first_child; text_node; text_node = text_node->next_sibling) {
                     if (text_node->is_text()) {
@@ -467,16 +467,16 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
             }
         }
     }
-    
+
     // No floats to pre-scan
     if (!has_floats) {
         log_debug("[FLOAT PRE-SCAN] No floats found, skipping pre-scan");
         return;
     }
-    
+
     log_debug("[FLOAT PRE-SCAN] has_inline_content=%d, container_width=%.1f, preceding_content_width=%.1f",
               has_inline_content, container_width, preceding_content_width);
-    
+
     // Check if preceding content is too wide to share a line with the float
     // If so, don't pre-scan - let the float appear at its encounter point
     if (has_inline_content && container_width > 0) {
@@ -485,7 +485,7 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         // - floats-029: container=1200, content=67, float=96 → 67+96=163 < 1200 → pre-scan
         // - floats-020: container=216, content=~200+, float=96 → 200+96=296 > 216 → no pre-scan
         float float_width = 100.0f;  // Conservative estimate
-        
+
         // If preceding content + float > container width, don't pre-scan
         if (preceding_content_width + float_width > container_width) {
             log_debug("[FLOAT PRE-SCAN] Content before float (%.1f) + float (%.1f) > container (%.1f), skip pre-scan",
@@ -493,59 +493,59 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
             return;
         }
     }
-    
+
     // Initialize float context if needed (for float positioning)
     if (!lycon->current_float_context && parent_block) {
         lycon->current_float_context = float_context_create(parent_block);
-        log_debug("[FLOAT PRE-SCAN] Created float context for parent block %s", 
+        log_debug("[FLOAT PRE-SCAN] Created float context for parent block %s",
                   parent_block->node_name());
     }
-    
+
     if (!lycon->current_float_context) {
         log_debug("[FLOAT PRE-SCAN] No float context available, cannot pre-scan");
         return;
     }
-    
+
     log_debug("[FLOAT PRE-SCAN] Pre-laying ALL floats in content");
-    
+
     // Pre-lay ALL floats in the content
     // This is a simplification - ideally we'd only pre-lay floats that can share a line with preceding content
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
-        
+
         DomElement* elem = child->as_element();
-        
+
         // Skip if already pre-laid
         if (elem->float_prelaid) continue;
-        
+
         CssEnum float_value = get_element_float_value(elem);
         if (float_value != CSS_VALUE_LEFT && float_value != CSS_VALUE_RIGHT) continue;
-        
-        log_debug("[FLOAT PRE-SCAN] Pre-laying float: %s (float=%d)", 
+
+        log_debug("[FLOAT PRE-SCAN] Pre-laying float: %s (float=%d)",
                   child->node_name(), float_value);
-        
+
         // Layout the float now
         DisplayValue display = resolve_display_value(child);
         display.outer = CSS_VALUE_BLOCK;  // Floats become block per CSS 9.7
-        
+
         // Mark as pre-laid to skip during normal flow
         elem->float_prelaid = true;
-        
+
         // Layout the float block
         layout_block(lycon, child, display);
     }
-    
+
     // After pre-scanning floats, adjust the current line bounds for the floats we just laid out
     // This is critical: the first line needs to start AFTER the float, not at x=0
-    // 
-    // Note: We can't use adjust_line_for_floats() here because lycon->view is not set to the 
+    //
+    // Note: We can't use adjust_line_for_floats() here because lycon->view is not set to the
     // current block yet. Instead, directly query float space at y=0 and update line bounds.
     if (lycon->current_float_context) {
         log_debug("[FLOAT PRE-SCAN] Adjusting initial line bounds for pre-scanned floats");
-        
+
         float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
         FloatAvailableSpace space = float_space_at_y(lycon->current_float_context, 0.0f, line_height);
-        
+
         if (space.has_left_float) {
             // Left float intrudes - adjust effective_left and advance_x
             // space.left is relative to the container content area
@@ -571,7 +571,7 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
             }
         }
     }
-    
+
     log_debug("[FLOAT PRE-SCAN] Pre-scan complete");
 }
 
@@ -608,7 +608,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 // Pre-scan and layout floats BEFORE laying out inline content
                 // This ensures floats are positioned and affect line bounds correctly
                 prescan_and_layout_floats(lycon, child, block);
-                
+
                 // inline content flow
                 do {
                     layout_flow_node(lycon, child);
@@ -716,12 +716,12 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // setup inline context
     float content_width = lycon->block.content_width;
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
-    
+
     // Calculate the block's inner content bounds based on border and padding
     // Note: content_width is already the inner content width (excluding padding/border)
     // line.left/right define the line box boundaries in local block coordinates
     float inner_left = 0;
-    
+
     if (block->bound) {
         if (block->bound->border) {
             inner_left += block->bound->border->width.left;
@@ -730,15 +730,15 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         inner_left += block->bound->padding.left;
         lycon->block.advance_y += block->bound->padding.top;
     }
-    
+
     // line.right = inner_left + content_width gives the full content area
     float inner_right = inner_left + content_width;
-    
+
     // Set the block's container bounds (line.left/right)
     // These define the nominal line box boundaries for this block
     lycon->line.left = inner_left;
     lycon->line.right = inner_right;
-    
+
     // Initialize effective bounds to match container bounds
     // line_reset() will adjust these for floats if needed
     lycon->line.effective_left = inner_left;
@@ -746,11 +746,11 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.has_float_intrusion = false;
     lycon->line.advance_x = inner_left;
     lycon->line.vertical_align = CSS_VALUE_BASELINE;
-    
+
     // Now call line_reset to adjust for floats at current Y position
     // This will call adjust_line_for_floats which updates effective_left/right
     line_reset(lycon);
-    
+
     log_debug("setup_inline: line.left=%.1f, line.right=%.1f, effective_left=%.1f, effective_right=%.1f, advance_x=%.1f",
               lycon->line.left, lycon->line.right, lycon->line.effective_left, lycon->line.effective_right, lycon->line.advance_x);
 
@@ -763,8 +763,16 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     setup_line_height(lycon, block);
 
     // setup initial ascender and descender
-    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
-    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
+    TypoMetrics typo = get_os2_typo_metrics(lycon->font.ft_face);
+    if (typo.valid && typo.use_typo_metrics) {
+        lycon->block.init_ascender = typo.ascender;
+        lycon->block.init_descender = typo.descender;
+    } else {
+        // Fallback to FreeType HHEA metrics
+        lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+        lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
+    }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
     log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
@@ -772,9 +780,9 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
 
 void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
-    
+
     // CSS 2.2 9.5: For floats appearing after inline content, position at bottom of current line
-    // "A floating box's outer top may not be higher than the outer top of any block or floated 
+    // "A floating box's outer top may not be higher than the outer top of any block or floated
     // box generated by an element earlier in the source document."
     // When a float appears after inline content on the current line, it should start
     // below that content, not at advance_y which may be 0.
@@ -787,7 +795,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
                 StyleNode* style_node = (StyleNode*)float_node->declaration;
                 if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
                     CssValue* val = style_node->winning_decl->value;
-                    if (val->type == CSS_VALUE_TYPE_KEYWORD && 
+                    if (val->type == CSS_VALUE_TYPE_KEYWORD &&
                         (val->data.keyword == CSS_VALUE_LEFT || val->data.keyword == CSS_VALUE_RIGHT)) {
                         is_float = true;
                     }
@@ -795,7 +803,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
             }
         }
     }
-    
+
     if (is_float && !pa_line->is_line_start) {
         // Float appears after inline content - position at bottom of current line
         float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
@@ -803,7 +811,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
         log_debug("Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)",
                   block->y, pa_block->advance_y, line_height);
     }
-    
+
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d",
         elmt->node_name(), block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
 
@@ -1103,7 +1111,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
                 log_debug("[BFC] Height expanded: old=%.1f, new=%.1f", old_height, block->height);
             }
         }
-        
+
         // Also check legacy FloatContext
         FloatContext* float_ctx = get_current_float_context(lycon);
         log_debug("BFC %s: float_ctx=%p, container=%p, this_block=%p",
@@ -1135,7 +1143,7 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
                 block->height = max_float_bottom;
                 log_debug("BFC height expansion: old=%.1f, new=%.1f (float_bottom=%.1f)",
                           old_height, block->height, max_float_bottom);
-                
+
                 // Update scroller clip to match new height (for overflow:hidden rendering)
                 if (block->scroller && block->scroller->has_clip) {
                     block->scroller->clip.bottom = block->height;
@@ -1148,18 +1156,18 @@ void layout_block_content(LayoutContext* lycon, DomNode *elmt, ViewBlock* block,
     // Apply CSS float layout using BFC or legacy FloatContext
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
-        
+
         // For now, always use legacy FloatContext to maintain backward compatibility
         // BFC float positioning will be enabled later after further testing
         layout_float_element(lycon, block);
-        
+
         // Also add to BFC for future line adjustments (parallel tracking)
         if (lycon->bfc) {
             lycon->bfc->add_float(block);
             log_debug("[BFC] Float added to BFC (legacy positioned)");
         }
     }
-    
+
     // Restore parent BFC if we created a new one
     if (lycon->owns_bfc && lycon->bfc && lycon->bfc->parent_bfc) {
         lycon->bfc = lycon->bfc->parent_bfc;
@@ -1190,7 +1198,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 StyleNode* style_node = (StyleNode*)float_node->declaration;
                 if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
                     CssValue* val = style_node->winning_decl->value;
-                    if (val->type == CSS_VALUE_TYPE_KEYWORD && 
+                    if (val->type == CSS_VALUE_TYPE_KEYWORD &&
                         (val->data.keyword == CSS_VALUE_LEFT || val->data.keyword == CSS_VALUE_RIGHT)) {
                         is_float = true;
                     }
@@ -1198,7 +1206,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
     }
-    
+
     // Only cause line break for non-inline-block, non-float blocks
     if (display.outer != CSS_VALUE_INLINE_BLOCK && !is_float) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
@@ -1314,7 +1322,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             } else if (block->bound) {
                 // collapse top margin with parent block
                 log_debug("check margin collapsing");
-                
+
                 // Find first in-flow child (skip floats for margin collapsing purposes)
                 View* first_in_flow_child = block->parent_view()->first_placed_child();
                 while (first_in_flow_child) {
@@ -1331,7 +1339,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                     break;
                 }
-                
+
                 if (first_in_flow_child == block) {  // first in-flow child
                     if (block->bound->margin.top > 0) {
                         ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
@@ -1364,11 +1372,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // check sibling margin collapsing
                     // CSS 2.2 Section 8.3.1: Margins do NOT collapse when there's clearance
                     // If this block has clear property, skip sibling margin collapsing
-                    bool has_clearance = block->position && 
+                    bool has_clearance = block->position &&
                         (block->position->clear == CSS_VALUE_LEFT ||
                          block->position->clear == CSS_VALUE_RIGHT ||
                          block->position->clear == CSS_VALUE_BOTH);
-                    
+
                     if (!has_clearance) {
                         float collapse = 0;
                         // Find previous in-flow sibling (skip floats)

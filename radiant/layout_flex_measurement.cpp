@@ -131,6 +131,29 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         int max_child_height = 0;  // For row flex containers
         measured_width = 0;
         DomElement* child_elem = child->as_element();
+
+        // Get font-size from resolved styles (after init_flex_item_view resolved CSS)
+        ViewElement* view_elem = (ViewElement*)child_elem;
+        int elem_font_size = 16;  // default fallback
+        if (view_elem && view_elem->font && view_elem->font->font_size > 0) {
+            elem_font_size = (int)(view_elem->font->font_size + 0.5f);
+        }
+
+        // Calculate actual line height using the font's metrics (Chrome-compatible)
+        // This requires setting up the font first to get accurate FT_Face metrics
+        int text_line_height = elem_font_size;  // fallback
+        if (lycon->ui_context && view_elem && view_elem->font) {
+            // Set up font at the element's font size
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, view_elem->font);
+            if (temp_font.ft_face) {
+                // Use the Chrome-compatible line height calculation
+                text_line_height = (int)(calc_normal_line_height(temp_font.ft_face) + 0.5f);
+            }
+        }
+        log_debug("measure_flex_child_content: elem_font_size=%d, text_line_height=%d",
+                  elem_font_size, text_line_height);
+
         if (child_elem) {
             DomNode* sub_child = child_elem->first_child;
             while (sub_child) {
@@ -147,7 +170,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             }
                         }
                         if (!is_whitespace_only) {
-                            int text_height = 20;  // Approximate line height for actual text
+                            // Use computed line height based on element's font-size
+                            int text_height = text_line_height;
                             if (is_row_flex) {
                                 // Row flex: text is a flex item, use max
                                 if (text_height > max_child_height) {
@@ -256,6 +280,17 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         }
         content_width = measured_width;
         content_height = measured_height;
+
+        // Add padding and border to measured height for total height
+        // CSS box model: total_height = content_height + padding + border
+        if (elem && elem->bound) {
+            measured_height += (int)(elem->bound->padding.top + elem->bound->padding.bottom);
+            if (elem->bound->border) {
+                measured_height += (int)(elem->bound->border->width.top + elem->bound->border->width.bottom);
+            }
+            log_debug("Added box model to height: content=%d, total=%d (padding+border)",
+                      content_height, measured_height);
+        }
 
         log_debug("Measured element %s: %dx%d (content-based estimation)",
                   child->node_name(), measured_width, measured_height);
