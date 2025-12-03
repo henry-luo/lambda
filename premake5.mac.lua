@@ -92,88 +92,6 @@ project "lambda-lib"
     }
     
 
-project "lambda-input-full-c"
-    kind "SharedLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lambda/parse.c",
-        "lib/arraylist.c",
-        "lib/avl_tree.c",
-        "lib/hashmap.c",
-        "lib/file.c",
-        "lib/log.c",
-        "lib/utf.c",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-javascript/bindings/c",
-        "mac-deps/rpmalloc-install/include",
-        "/opt/homebrew/opt/freetype/include/freetype2",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
-        "mac-deps/curl-8.10.1/include",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-fno-omit-frame-pointer",
-        "-g",
-        "-O2",
-        "-std=c17"
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/opt/homebrew/lib/libnghttp2.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libmbedtls.a",
-        "/opt/homebrew/lib/libmbedx509.a",
-        "/opt/homebrew/lib/libmbedcrypto.a",
-        "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-    }
-    
-    links {
-        "lambda-lib",
-    }
-    
-    defines {
-        "SIMPLE_SCHEMA_PARSER",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-        "-framework Cocoa",
-        "-framework IOKit",
-        "-framework CoreVideo",
-        "-framework OpenGL",
-        "-framework Foundation",
-        "-framework CoreGraphics",
-        "-framework AppKit",
-        "-framework Carbon",
-    }
-    
-
 project "lambda-input-full-cpp"
     kind "SharedLib"
     language "C++"
@@ -324,7 +242,6 @@ project "lambda-input-full"
     }
     
     links {
-        "lambda-input-full-c",
         "lambda-input-full-cpp",
     }
     
@@ -410,6 +327,7 @@ project "lambda"
         "radiant/layout_inline.cpp",
         "radiant/layout_text.cpp",
         "radiant/layout_positioned.cpp",
+        "radiant/layout_bfc.cpp",
         "radiant/layout_table.cpp",
         "radiant/layout_flex.cpp",
         "radiant/layout_flex_measurement.cpp",
@@ -1353,7 +1271,6 @@ project "test_arena_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -1518,7 +1435,6 @@ project "test_mime_detect_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -1620,7 +1536,6 @@ project "test_mark_builder_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -1723,7 +1638,6 @@ project "test_mark_builder_deepcopy_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -1826,7 +1740,6 @@ project "test_mark_editor_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -1929,7 +1842,6 @@ project "test_name_pool_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2032,7 +1944,6 @@ project "test_mark_reader_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2135,7 +2046,6 @@ project "test_error_tracking"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2238,7 +2148,6 @@ project "test_math_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2341,7 +2250,6 @@ project "test_math_ascii_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2444,7 +2352,6 @@ project "test_markup_roundtrip_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2547,7 +2454,6 @@ project "test_entity_emoji_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2650,7 +2556,6 @@ project "test_input_roundtrip_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2753,7 +2658,6 @@ project "test_html_roundtrip_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2856,7 +2760,6 @@ project "test_html_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -2959,7 +2862,6 @@ project "test_html_negative_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3066,7 +2968,6 @@ project "test_lambda_domnode_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3169,7 +3070,6 @@ project "test_dir_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3271,7 +3171,6 @@ project "test_graph_parser_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3374,7 +3273,6 @@ project "test_validator_input_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3477,7 +3375,6 @@ project "test_validator_features_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3580,7 +3477,6 @@ project "test_null_vs_missing_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3683,7 +3579,6 @@ project "test_enhanced_errors"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3786,7 +3681,6 @@ project "test_validation_options"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3889,7 +3783,6 @@ project "test_format_validation"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -3992,7 +3885,6 @@ project "test_validator_integration"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4095,7 +3987,6 @@ project "test_type_references_simple"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4198,7 +4089,6 @@ project "test_graph_formatter_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4301,7 +4191,6 @@ project "test_sysinfo_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4404,7 +4293,6 @@ project "test_jsx_roundtrip_new_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4507,7 +4395,6 @@ project "test_mdx_roundtrip_new_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4763,7 +4650,6 @@ project "test_css_dom_integration"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4877,7 +4763,6 @@ project "test_css_dom_crud"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -4991,7 +4876,6 @@ project "test_css_style_application_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5098,7 +4982,6 @@ project "test_html_css_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5201,7 +5084,6 @@ project "test_css_tokenizer_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5304,7 +5186,6 @@ project "test_css_tokenizer_unit"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5407,7 +5288,6 @@ project "test_css_parser_unit"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5510,7 +5390,6 @@ project "test_css_engine_unit"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5613,7 +5492,6 @@ project "test_css_engine_negative"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5716,7 +5594,6 @@ project "test_css_formatter_unit"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5819,7 +5696,6 @@ project "test_css_roundtrip_unit"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -5922,7 +5798,6 @@ project "test_compound_descendant_selectors"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6025,7 +5900,6 @@ project "test_selector_groups"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6128,7 +6002,6 @@ project "test_css_parser_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6231,7 +6104,6 @@ project "test_css_integration_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6334,7 +6206,6 @@ project "test_css_files_safe_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6437,7 +6308,6 @@ project "test_css_frameworks_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6540,7 +6410,6 @@ project "test_css_to_mark_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6643,7 +6512,6 @@ project "test_mdx_roundtrip_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6745,7 +6613,6 @@ project "test_jsx_roundtrip_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6850,7 +6717,6 @@ project "test_latex_html_baseline"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -6954,7 +6820,6 @@ project "test_validator_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -7055,7 +6920,6 @@ project "test_ast_validator_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -7157,7 +7021,6 @@ project "test_validator_path_reporting"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -7559,7 +7422,6 @@ project "test_http_gtest"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",
@@ -7664,7 +7526,6 @@ project "test_latex_html_extended"
     
     links {
         "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
         "gtest",
         "gtest_main",

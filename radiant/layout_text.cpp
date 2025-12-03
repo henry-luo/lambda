@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "layout_positioned.hpp"
+#include "layout_bfc.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
@@ -38,14 +39,80 @@ static inline bool should_break_line(LayoutContext* lycon, float current_x, floa
         // Never break in max-content mode
         return false;
     }
+    // Use effective_right which accounts for float intrusions
+    // effective_right is adjusted per-line based on floats at current Y
+    float line_right = lycon->line.has_float_intrusion ? 
+                       lycon->line.effective_right : lycon->line.right;
     if (is_min_content_mode(lycon)) {
         // In min-content mode, we break at every opportunity
-        // This is handled by the normal flow checking line.right
-        // but line.right should be set to 0 or very small
-        return current_x + width > lycon->line.right;
+        return current_x + width > line_right;
     }
     // Normal mode: check if line is full
-    return current_x + width > lycon->line.right;
+    return current_x + width > line_right;
+}
+
+// ============================================================================
+// BFC-aware Line Adjustment
+// ============================================================================
+
+/**
+ * Update effective line bounds based on floats in the current BFC.
+ * Called at line start and potentially mid-line when floats are encountered.
+ */
+void update_line_for_bfc_floats(LayoutContext* lycon) {
+    BlockFormattingContext* bfc = lycon->bfc;
+    if (!bfc) {
+        // No BFC - effective bounds same as normal bounds
+        lycon->line.effective_left = lycon->line.left;
+        lycon->line.effective_right = lycon->line.right;
+        lycon->line.has_float_intrusion = false;
+        return;
+    }
+    
+    // Get current block and calculate its offset in BFC
+    ViewBlock* current_block = (ViewBlock*)lycon->view;
+    if (!current_block || !current_block->is_block()) {
+        lycon->line.effective_left = lycon->line.left;
+        lycon->line.effective_right = lycon->line.right;
+        lycon->line.has_float_intrusion = false;
+        return;
+    }
+    
+    // Calculate Y position in BFC coordinates
+    float offset_x = 0, offset_y = 0;
+    calculate_block_offset_in_bfc(current_block, bfc, &offset_x, &offset_y);
+    float bfc_y = offset_y + lycon->block.advance_y;
+    
+    // Query available space at this Y
+    float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
+    BfcAvailableSpace space = bfc->space_at_y(bfc_y, line_height);
+    
+    // Convert from BFC coordinates to local block coordinates
+    float local_left = space.left - offset_x;
+    float local_right = space.right - offset_x;
+    
+    // Clamp to block's content area
+    local_left = fmax(local_left, lycon->line.left);
+    local_right = fmin(local_right, lycon->line.right);
+    
+    // Update effective bounds
+    if (local_left > lycon->line.left || local_right < lycon->line.right) {
+        lycon->line.effective_left = local_left;
+        lycon->line.effective_right = local_right;
+        lycon->line.has_float_intrusion = true;
+        
+        // If advance_x is before effective_left, move it
+        if (lycon->line.advance_x < lycon->line.effective_left) {
+            lycon->line.advance_x = lycon->line.effective_left;
+        }
+        
+        log_debug("[BFC] Line adjusted for floats: effective (%.1f, %.1f), bfc_y=%.1f",
+                  lycon->line.effective_left, lycon->line.effective_right, bfc_y);
+    } else {
+        lycon->line.effective_left = lycon->line.left;
+        lycon->line.effective_right = lycon->line.right;
+        lycon->line.has_float_intrusion = false;
+    }
 }
 
 // Forward declarations
@@ -66,26 +133,34 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
 void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
-    lycon->line.advance_x = lycon->line.left;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
 
-    // Phase 6: Apply line box adjustment for floats
-    // Use the shared float context from the layout context
+    // IMPORTANT: Reset effective bounds to container bounds before float adjustment
+    // line.left/right are the container bounds, set once in line_init()
+    // effective_left/right are recalculated per line based on floats at that Y
+    lycon->line.effective_left = lycon->line.left;
+    lycon->line.effective_right = lycon->line.right;
+    lycon->line.has_float_intrusion = false;
+    lycon->line.advance_x = lycon->line.left;  // Start at container left
+
+    // Adjust effective bounds for floats at current Y position
     FloatContext* float_ctx = get_current_float_context(lycon);
     if (float_ctx) {
         adjust_line_for_floats(lycon, float_ctx);
         log_debug("DEBUG: Used shared float context %p for line adjustment", (void*)float_ctx);
-    } else {
-        log_debug("DEBUG: No float context available for line adjustment");
     }
 }
 
 void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.left = left;  lycon->line.right = right;
+    // Initialize effective bounds to full width (will be adjusted for floats later)
+    lycon->line.effective_left = left;
+    lycon->line.effective_right = right;
+    lycon->line.has_float_intrusion = false;
     line_reset(lycon);
     lycon->line.vertical_align = CSS_VALUE_BASELINE;  // vertical-align does not inherit
 }
@@ -166,7 +241,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         FT_GlyphSlot slot = lycon->font.ft_face->glyph;
         // Use precise float calculation for advance
         text_width += (float)(slot->advance.x) / 64.0f;
-        if (lycon->line.advance_x + text_width > lycon->line.right) { // line filled up
+        // Use effective_right which accounts for float intrusions
+        float line_right = lycon->line.has_float_intrusion ? 
+                           lycon->line.effective_right : lycon->line.right;
+        if (lycon->line.advance_x + text_width > line_right) { // line filled up
             return RDT_LINE_FILLED;
         }
         str++;
@@ -358,7 +436,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         log_debug("layout char: '%c', x: %f, width: %f, wd: %f, line right: %f",
             *str == '\n' || *str == '\r' ? '^' : *str, rect->x, rect->width, wd, lycon->line.right);
         rect->width += wd;
-        if (rect->x + rect->width > lycon->line.right) { // line filled up
+        // Use effective_right which accounts for float intrusions
+        float line_right = lycon->line.has_float_intrusion ? 
+                           lycon->line.effective_right : lycon->line.right;
+        if (rect->x + rect->width > line_right) { // line filled up
             log_debug("line filled up");
             if (is_space(*str)) { // break at the current space
                 log_debug("break on space");

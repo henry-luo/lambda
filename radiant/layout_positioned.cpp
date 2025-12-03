@@ -479,6 +479,8 @@ FloatAvailableSpace float_space_at_y(FloatContext* ctx, float y, float line_heig
     FloatAvailableSpace space;
     space.left = ctx->content_left;
     space.right = ctx->content_right;
+    space.has_left_float = false;
+    space.has_right_float = false;
 
     if (!ctx) return space;
 
@@ -491,6 +493,7 @@ FloatAvailableSpace float_space_at_y(FloatContext* ctx, float y, float line_heig
             // Left float intrudes from the left
             if (box->margin_box_right > space.left) {
                 space.left = box->margin_box_right;
+                space.has_left_float = true;
             }
         }
     }
@@ -501,12 +504,14 @@ FloatAvailableSpace float_space_at_y(FloatContext* ctx, float y, float line_heig
             // Right float intrudes from the right
             if (box->margin_box_left < space.right) {
                 space.right = box->margin_box_left;
+                space.has_right_float = true;
             }
         }
     }
 
-    log_debug("Space at y=%.1f (height=%.1f): left=%.1f, right=%.1f, width=%.1f",
-              y, line_height, space.left, space.right, space.right - space.left);
+    log_debug("Space at y=%.1f (height=%.1f): left=%.1f, right=%.1f, width=%.1f, left_float=%d, right_float=%d",
+              y, line_height, space.left, space.right, space.right - space.left,
+              space.has_left_float, space.has_right_float);
 
     return space;
 }
@@ -742,11 +747,17 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
  * - Lines INSIDE a float should NOT be adjusted by the parent's float context
  */
 void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
-    if (!float_ctx || !float_ctx->container) return;
+    if (!float_ctx || !float_ctx->container) {
+        log_debug("adjust_line_for_floats: early exit - no float_ctx or container");
+        return;
+    }
 
     // Get the current view being laid out - may not be a block
     View* current_view = lycon->view;
-    if (!current_view) return;
+    if (!current_view) {
+        log_debug("adjust_line_for_floats: early exit - no current_view");
+        return;
+    }
 
     // Check if current block is inside the float context container
     // This handles both direct children and nested content
@@ -793,6 +804,7 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
 
     if (!found_container) {
         // Current view is not inside the float context container
+        log_debug("adjust_line_for_floats: early exit - view not inside container");
         return;
     }
 
@@ -806,7 +818,10 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
             search = search->parent_view();
         }
     }
-    if (!containing_block) return;
+    if (!containing_block) {
+        log_debug("adjust_line_for_floats: early exit - no containing_block");
+        return;
+    }
 
     // Convert current line Y to container-relative coordinates
     float line_top_container = block_offset_y + lycon->block.advance_y;
@@ -817,6 +832,13 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
 
     // Query available space at current line position (in container coordinates)
     FloatAvailableSpace space = float_space_at_y(float_ctx, line_top_container, line_height);
+
+    // If there's no float intrusion at this Y position, skip adjustment entirely
+    // This is critical for cleared elements that are positioned below floats
+    if (!space.has_left_float && !space.has_right_float) {
+        log_debug("No float intrusion at this Y position, skipping adjustment");
+        return;
+    }
 
     // Convert available space from container-relative to local block coordinates
     // The left/right from float_space_at_y are relative to container content area
@@ -829,29 +851,35 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
     local_right = min(local_right, lycon->block.content_width);
 
     // Update line boundaries if floats intrude
-    if (local_left > 0 || local_right < lycon->block.content_width) {
-        // Convert to absolute coordinates for the line
-        float abs_left = containing_block->x + local_left;
-        float abs_right = containing_block->x + local_right;
+    // Note: line.left/right are the CONTAINER bounds, should not be modified
+    // line.effective_left/effective_right are the float-adjusted bounds for this specific line
+    float new_effective_left = containing_block->x + local_left;
+    float new_effective_right = containing_block->x + local_right;
 
-        // Add border and padding to absolute left
-        if (containing_block->bound) {
-            if (containing_block->bound->border) {
-                abs_left += containing_block->bound->border->width.left;
-            }
-            abs_left += containing_block->bound->padding.left;
+    // Add border and padding to absolute left
+    if (containing_block->bound) {
+        if (containing_block->bound->border) {
+            new_effective_left += containing_block->bound->border->width.left;
         }
+        new_effective_left += containing_block->bound->padding.left;
+    }
 
-        if (abs_left > lycon->line.left || abs_right < lycon->line.right) {
-            log_debug("Line boundaries adjusted: left %.1f->%.1f, right %.1f->%.1f",
-                      lycon->line.left, abs_left, lycon->line.right, abs_right);
-            if (abs_left > lycon->line.left) lycon->line.left = abs_left;
-            if (abs_right < lycon->line.right) lycon->line.right = abs_right;
-            // Also update advance_x if we're at line start
-            if (lycon->line.is_line_start) {
-                lycon->line.advance_x = lycon->line.left;
-            }
+    // Apply the float intrusion to effective bounds (not the container bounds!)
+    if (space.has_left_float && new_effective_left > lycon->line.left) {
+        log_debug("Line effective_left adjusted: %.1f->%.1f (float intrusion)",
+                  lycon->line.effective_left, new_effective_left);
+        lycon->line.effective_left = new_effective_left;
+        lycon->line.has_float_intrusion = true;
+        // Also update advance_x if we're at line start
+        if (lycon->line.is_line_start && lycon->line.advance_x < new_effective_left) {
+            lycon->line.advance_x = new_effective_left;
         }
+    }
+    if (space.has_right_float && new_effective_right < lycon->line.right) {
+        log_debug("Line effective_right adjusted: %.1f->%.1f (float intrusion)",
+                  lycon->line.effective_right, new_effective_right);
+        lycon->line.effective_right = new_effective_right;
+        lycon->line.has_float_intrusion = true;
     }
 }
 
