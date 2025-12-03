@@ -105,6 +105,38 @@ bool files_are_identical(const char* file1, const char* file2) {
 // ===== SEMANTIC HTML COMPARISON HELPERS =====
 // These allow "good enough" roundtrip testing that ignores known parser limitations
 
+// Normalize HTML entities that are semantically equivalent
+// &quot; -> " and &apos; -> ' (these are equivalent in text content)
+char* normalize_entities(const char* html) {
+    if (!html) return NULL;
+
+    size_t len = strlen(html);
+    char* result = (char*)malloc(len + 1);
+    if (!result) return NULL;
+
+    const char* read = html;
+    char* write = result;
+
+    while (*read) {
+        // Check for &quot;
+        if (strncmp(read, "&quot;", 6) == 0) {
+            *write++ = '"';
+            read += 6;
+            continue;
+        }
+        // Check for &apos;
+        if (strncmp(read, "&apos;", 6) == 0) {
+            *write++ = '\'';
+            read += 6;
+            continue;
+        }
+        *write++ = *read++;
+    }
+
+    *write = '\0';
+    return result;
+}
+
 // Skip DOCTYPE declaration if present
 const char* skip_doctype(const char* html) {
     const char* p = html;
@@ -256,7 +288,7 @@ char* normalize_whitespace(const char* html) {
     return result;
 }
 
-// Semantic HTML comparison: ignores DOCTYPE, comments, whitespace differences, and implicit tbody
+// Semantic HTML comparison: ignores DOCTYPE, comments, whitespace differences, implicit tbody, and entity variations
 bool are_semantically_equivalent(const char* html1, const char* html2) {
     // Skip DOCTYPE in both
     const char* h1 = skip_doctype(html1);
@@ -272,13 +304,27 @@ bool are_semantically_equivalent(const char* html1, const char* html2) {
         return false;
     }
 
-    // Normalize whitespace
-    char* norm1 = normalize_whitespace(tbody_stripped1);
-    char* norm2 = normalize_whitespace(tbody_stripped2);
+    // Normalize entities (&quot; -> ", &apos; -> ')
+    char* entity_norm1 = normalize_entities(tbody_stripped1);
+    char* entity_norm2 = normalize_entities(tbody_stripped2);
 
     // Free intermediate results
     free(tbody_stripped1);
     free(tbody_stripped2);
+
+    if (!entity_norm1 || !entity_norm2) {
+        free(entity_norm1);
+        free(entity_norm2);
+        return false;
+    }
+
+    // Normalize whitespace
+    char* norm1 = normalize_whitespace(entity_norm1);
+    char* norm2 = normalize_whitespace(entity_norm2);
+
+    // Free intermediate results
+    free(entity_norm1);
+    free(entity_norm2);
 
     if (!norm1 || !norm2) {
         free(norm1);

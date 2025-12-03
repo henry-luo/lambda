@@ -1268,7 +1268,8 @@
                         "additional_sources": [
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp"
+                            "lambda/input/css/selector_matcher.cpp",
+                            "radiant/symbol_resolver.cpp"
                         ],
                         "binary": "test_lambda_domnode_gtest.exe"
                     },
@@ -1518,7 +1519,8 @@
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp"
+                            "lambda/input/css/selector_matcher.cpp",
+                            "radiant/symbol_resolver.cpp"
                         ],
                         "binary": "test_css_dom_integration.exe"
                     },
@@ -1543,7 +1545,8 @@
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp"
+                            "lambda/input/css/selector_matcher.cpp",
+                            "radiant/symbol_resolver.cpp"
                         ],
                         "binary": "test_css_dom_crud.exe"
                     },
@@ -1568,7 +1571,8 @@
                             "lambda/input/css/css_formatter.cpp",
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp"
+                            "lambda/input/css/selector_matcher.cpp",
+                            "radiant/symbol_resolver.cpp"
                         ],
                         "binary": "test_css_style_application_gtest.exe"
                     },
@@ -1586,7 +1590,8 @@
                         "additional_sources": [
                             "lambda/input/css/dom_node.cpp",
                             "lambda/input/css/dom_element.cpp",
-                            "lambda/input/css/selector_matcher.cpp"
+                            "lambda/input/css/selector_matcher.cpp",
+                            "radiant/symbol_resolver.cpp"
                         ],
                         "binary": "test_html_css_gtest.exe"
                     },
@@ -1671,7 +1676,8 @@
                             "lambda/input/css/css_parser.cpp",
                             "lambda/input/css/css_value_parser.cpp",
                             "lambda/input/css/css_value.cpp",
-                            "lambda/input/css/css_formatter.cpp"
+                            "lambda/input/css/css_formatter.cpp",
+                            "radiant/symbol_resolver.cpp"
                         ],
                         "libraries": [
                             "gtest",

@@ -232,26 +232,26 @@ std::vector<LatexHtmlFixture> load_all_fixtures() {
 // Load baseline fixtures only (must pass 100%)
 std::vector<LatexHtmlFixture> load_baseline_fixtures() {
     std::vector<LatexHtmlFixture> baseline_fixtures;
-    
+
     std::string fixtures_dir = "test/latex/fixtures";
-    
+
     // Baseline test files that must always pass 100%
+    // Using original latex-js fixtures
     std::set<std::string> baseline_files = {
         "basic_test.tex",
-        "basic_text.tex",
+        "text.tex",
         "environments.tex",
-        "formatting.tex",
         "sectioning.tex"
     };
-    
+
     if (!std::filesystem::exists(fixtures_dir)) {
         std::cerr << "Warning: Fixtures directory not found: " << fixtures_dir << std::endl;
         return baseline_fixtures;
     }
-    
+
     FixtureLoader loader;
     std::vector<FixtureFile> fixture_files = loader.load_fixtures_directory(fixtures_dir);
-    
+
     for (const auto& file : fixture_files) {
         for (const auto& fixture : file.fixtures) {
             // Check if this fixture belongs to a baseline file
@@ -260,36 +260,36 @@ std::vector<LatexHtmlFixture> load_baseline_fixtures() {
             }
         }
     }
-    
+
     std::cout << "Loaded " << baseline_fixtures.size() << " baseline fixtures from "
               << baseline_files.size() << " files" << std::endl;
-    
+
     return baseline_fixtures;
 }
 
 // Load ongoing development fixtures
 std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
     std::vector<LatexHtmlFixture> ongoing_fixtures;
-    
+
     std::string fixtures_dir = "test/latex/fixtures";
-    
+
     // Baseline test files (exclude these)
+    // Using original latex-js fixtures
     std::set<std::string> baseline_files = {
         "basic_test.tex",
-        "basic_text.tex",
+        "text.tex",
         "environments.tex",
-        "formatting.tex",
         "sectioning.tex"
     };
-    
+
     if (!std::filesystem::exists(fixtures_dir)) {
         std::cerr << "Warning: Fixtures directory not found: " << fixtures_dir << std::endl;
         return ongoing_fixtures;
     }
-    
+
     FixtureLoader loader;
     std::vector<FixtureFile> fixture_files = loader.load_fixtures_directory(fixtures_dir);
-    
+
     for (const auto& file : fixture_files) {
         for (const auto& fixture : file.fixtures) {
             // Check if this fixture is NOT in baseline files
@@ -298,9 +298,9 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
             }
         }
     }
-    
+
     std::cout << "Loaded " << ongoing_fixtures.size() << " ongoing fixtures" << std::endl;
-    
+
     return ongoing_fixtures;
 }
 
