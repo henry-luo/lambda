@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_TRUETYPE_TABLES_H
+
 // Enhanced font metrics computation
 void compute_advanced_font_metrics(EnhancedFontBox* fbox) {
     if (!fbox || !fbox->face) {
@@ -54,14 +58,39 @@ void compute_opentype_metrics(EnhancedFontBox* fbox) {
     FT_Face face = fbox->face;
     EnhancedFontMetrics* metrics = &fbox->metrics;
 
-    // For now, use basic FreeType metrics as OpenType metrics
-    // In a full implementation, this would parse OpenType tables
+    // Read actual OS/2 table metrics for SFNT fonts
+    // Reference: CSS Inline Layout Module Level 3 §5.1 and Chrome Blink simple_font_data.cc
     if (face->face_flags & FT_FACE_FLAG_SFNT) {
-        metrics->typo_ascender = metrics->ascender;
-        metrics->typo_descender = metrics->descender;
-        metrics->typo_line_gap = metrics->line_gap;
-        metrics->win_ascent = metrics->ascender;
-        metrics->win_descent = -metrics->descender;
+        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+        if (os2) {
+            // Convert from font units to pixels
+            float scale = (float)face->size->metrics.y_ppem / face->units_per_EM;
+
+            // OS/2 table sTypo* metrics (preferred for line height per CSS spec)
+            metrics->typo_ascender = (int)(os2->sTypoAscender * scale);
+            metrics->typo_descender = (int)(os2->sTypoDescender * scale);  // Typically negative
+            // CSS spec: line gap must be floored at zero
+            metrics->typo_line_gap = (os2->sTypoLineGap > 0) ? (int)(os2->sTypoLineGap * scale) : 0;
+
+            // OS/2 table usWin* metrics (for clipping bounds)
+            metrics->win_ascent = (int)(os2->usWinAscent * scale);
+            metrics->win_descent = (int)(os2->usWinDescent * scale);  // Positive value
+
+            log_debug(font_log, "OS/2 table metrics for %s: sTypo(%d,%d,%d) usWin(%d,%d)",
+                      face->family_name, metrics->typo_ascender, metrics->typo_descender,
+                      metrics->typo_line_gap, metrics->win_ascent, metrics->win_descent);
+        } else {
+            // No OS/2 table, fall back to basic metrics
+            metrics->typo_ascender = metrics->ascender;
+            metrics->typo_descender = metrics->descender;
+            metrics->typo_line_gap = metrics->line_gap;
+            metrics->win_ascent = metrics->ascender;
+            metrics->win_descent = -metrics->descender;
+            log_debug(font_log, "No OS/2 table for SFNT font %s, using basic metrics", face->family_name);
+        }
+
+        // HHEA table metrics (FreeType's default source for face->size->metrics)
+        // These are already what FreeType provides in face->size->metrics
         metrics->hhea_ascender = metrics->ascender;
         metrics->hhea_descender = metrics->descender;
         metrics->hhea_line_gap = metrics->line_gap;

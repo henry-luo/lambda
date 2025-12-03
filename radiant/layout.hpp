@@ -225,6 +225,23 @@ void line_reset(LayoutContext* lycon);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);
 
+// Structure for OS/2 sTypo metrics (shared across layout modules)
+struct TypoMetrics {
+    float ascender;      // sTypoAscender in CSS pixels
+    float descender;     // sTypoDescender in CSS pixels (positive value)
+    float line_gap;      // sTypoLineGap in CSS pixels (floored at 0)
+    bool valid;
+    bool use_typo_metrics;  // fsSelection bit 7
+};
+
+// Get OS/2 sTypo metrics for a font face
+// Returns metrics with valid=false if no OS/2 table is available
+TypoMetrics get_os2_typo_metrics(FT_Face face);
+
+// Calculate normal line height following Chrome's algorithm
+// Uses OS/2 sTypo* metrics when available, otherwise HHEA metrics
+float calc_normal_line_height(FT_Face face);
+
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 

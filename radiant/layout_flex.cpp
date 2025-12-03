@@ -737,13 +737,14 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             continue;
         }
 
-        // Step 1: Measure content (populates measurement cache)
-        log_debug("Step 1: Measuring content for %s", child->node_name());
-        measure_flex_child_content(lycon, child);
-
-        // Step 2: Create/verify View structure
-        log_debug("Step 2: Creating View for %s", child->node_name());
+        // Step 1: Create/verify View structure FIRST (resolves CSS styles)
+        // This must happen before measurement so font-size etc. are available
+        log_debug("Step 1: Creating View for %s", child->node_name());
         init_flex_item_view(lycon, child);
+
+        // Step 2: Measure content (uses resolved styles)
+        log_debug("Step 2: Measuring content for %s", child->node_name());
+        measure_flex_child_content(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup
         ViewElement* item = (ViewElement*)child->as_element();
