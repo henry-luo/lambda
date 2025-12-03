@@ -65,6 +65,23 @@ static const DiacriticInfo* find_diacritic(char cmd) {
     return nullptr;
 }
 
+// Check if an element is a whitespace-eating environment (like comment)
+// These environments absorb trailing whitespace/newlines
+static bool is_whitespace_eating_element(Item item) {
+    TypeId type = get_type_id(item);
+    if (type != LMD_TYPE_ELEMENT) return false;
+
+    Element* elem = (Element*)item.pointer;
+    if (!elem || !elem->type) return false;
+
+    TypeElmt* elmt_type = (TypeElmt*)elem->type;
+    if (!elmt_type->name.str || elmt_type->name.length == 0) return false;
+
+    // comment environment eats trailing whitespace
+    return (elmt_type->name.length == 7 &&
+            strncmp(elmt_type->name.str, "comment", 7) == 0);
+}
+
 // normalize whitespace in LaTeX text according to LaTeX rules:
 // - multiple spaces/tabs collapse to single space
 // - newlines within paragraphs become spaces
@@ -96,7 +113,13 @@ static void normalize_latex_whitespace(StringBuf* sb, Pool* pool) {
         }
     }
 
-    // Don't trim trailing whitespace - it may be significant before groups/commands
+    // Only trim trailing NEWLINES (not regular spaces)
+    // The main loop handles newline-to-space conversion, so we don't want doubled
+    // spaces from both parser and main loop. But regular trailing spaces should
+    // be preserved as they're significant before commands like \begin{env}.
+    while (temp_len > 0 && (temp[temp_len - 1] == '\n' || temp[temp_len - 1] == '\r')) {
+        temp_len--;
+    }
 
     // copy normalized text back to original buffer
     stringbuf_reset(sb);
@@ -186,7 +209,7 @@ static Array* parse_command_arguments(InputContext& ctx, const char **latex) {
     Array* args = array_pooled(input->pool);
     if (!args) return NULL;
 
-    skip_whitespace(latex);
+    skip_tab_pace(latex);  // Only skip horizontal whitespace before arguments
 
     // Parse optional arguments [...]
     while (**latex == '[') {
@@ -198,7 +221,7 @@ static Array* parse_command_arguments(InputContext& ctx, const char **latex) {
             Item arg_item = {.item = s2it(opt_arg)};
             array_append(args, arg_item, input->pool);
         }
-        skip_whitespace(latex);
+        skip_tab_pace(latex);  // Only skip horizontal whitespace
     }
 
     // Parse required arguments {...}
@@ -298,7 +321,37 @@ static Array* parse_command_arguments(InputContext& ctx, const char **latex) {
             // printf("DEBUG: Argument too short, skipping\n");
         }
 
-        skip_whitespace(latex);
+        // Check if there are more required arguments (peek for {)
+        // Only skip horizontal whitespace if there's another argument coming
+        const char* peek = *latex;
+        while (*peek == ' ' || *peek == '\t') peek++;
+        if (*peek == '{') {
+            skip_tab_pace(latex);  // Skip whitespace to get to next argument
+        }
+        // Otherwise, don't consume trailing whitespace - it may be significant
+    }
+
+    // Parse trailing optional arguments [...] (e.g., \newcounter{name}[parent])
+    // First check if there's an optional argument
+    const char* opt_peek = *latex;
+    while (*opt_peek == ' ' || *opt_peek == '\t') opt_peek++;
+
+    while (*opt_peek == '[') {
+        // There is an optional argument, skip whitespace to get to it
+        skip_tab_pace(latex);
+
+        (*latex)++; // Skip [
+        String* opt_arg = parse_latex_string_content(ctx, latex, ']');
+        if (**latex == ']') (*latex)++; // Skip ]
+
+        if (opt_arg && opt_arg->len > 0) {
+            Item arg_item = {.item = s2it(opt_arg)};
+            array_append(args, arg_item, input->pool);
+        }
+
+        // Check for more optional arguments
+        opt_peek = *latex;
+        while (*opt_peek == ' ' || *opt_peek == '\t') opt_peek++;
     }
 
     return args;
@@ -630,6 +683,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
 
     // Symbol commands that don't take arguments - return early to avoid consuming {}
     // These produce special characters and should not consume a following {} group
+    // In LaTeX, alphabetic commands gobble trailing whitespace
     static const char* symbol_commands[] = {
         "ss", "SS", "o", "O", "ae", "AE", "oe", "OE", "aa", "AA",
         "i", "j", "l", "L", "dh", "DH", "th", "TH",
@@ -639,6 +693,11 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
     };
     for (const char** sym = symbol_commands; *sym; sym++) {
         if (strcmp(cmd_name->chars, *sym) == 0) {
+            // Gobble trailing space (standard LaTeX behavior for alphabetic commands)
+            // But preserve space if followed by {} (empty braces terminate command)
+            if (**latex == ' ' || **latex == '\t') {
+                (*latex)++;  // Gobble one space
+            }
             Element* element = create_latex_element(input, cmd_name->chars);
             return element ? Item{.item = (uint64_t)element} : Item{.item = ITEM_ERROR};
         }
@@ -1390,10 +1449,10 @@ static Item parse_latex_element(InputContext& ctx, const char **latex) {
                 // printf("DEBUG: Found paragraph break at position %d\n", text_chars);
                 break;
             } else {
-                // Single newline, include in text
-                stringbuf_append_char(text_sb, **latex);
-                (*latex)++;
-                text_chars++;
+                // Single newline - DON'T include in text, let main loop handle
+                // as a space node. This ensures proper space handling around
+                // whitespace-eating environments like comment.
+                break;
             }
         } else if (**latex == '~') {
             // bare tilde is non-breaking space in LaTeX
@@ -1500,10 +1559,81 @@ void parse_latex(Input* input, const char* latex_string) {
     }
 
     // Parse LaTeX content
-    skip_whitespace(&latex);
+    skip_whitespace(&latex);  // Skip ALL whitespace at start of document
 
     int element_count = 0;
+
     while (*latex && element_count < 1000) { // Safety limit
+        // First check for paragraph breaks before parsing the next element
+        if (*latex == '\n') {
+            // printf("DEBUG: Found newline at loop start\n");
+            const char* lookahead = latex + 1;
+            // Skip spaces and tabs after first newline
+            while (*lookahead == ' ' || *lookahead == '\t') lookahead++;
+            if (*lookahead == '%') {
+                // Skip comment line
+                while (*lookahead && *lookahead != '\n') lookahead++;
+                if (*lookahead == '\n') lookahead++;
+            }
+            // If there's another newline, create paragraph break element
+            if (*lookahead == '\n') {
+                // printf("DEBUG: Creating paragraph break element at loop start\n");
+                Element* par_element = create_latex_element(input, "parbreak");
+                if (par_element) {
+                    list_push((List*)root_element, {.item = (uint64_t)par_element});
+                }
+                latex = lookahead + 1; // Skip to after the second newline
+                skip_whitespace(&latex); // Skip any additional whitespace
+                continue;  // Continue to process next element
+            } else {
+                // Single newline - in LaTeX, this acts as a space between content
+                // Only add a space if we've already parsed some content (not at the start)
+                if (*lookahead && *lookahead != '\n' && element_count > 0) {
+                    // Special handling: if the last element is a whitespace-eating environment
+                    // (like comment), only add space if there was a space BEFORE that element.
+                    // This handles the case: "with%\n\begin{comment}...\end{comment}\nout"
+                    // where the % ate the newline before the comment, so no space after either.
+                    List* list = (List*)root_element;
+                    bool should_add_space = true;
+                    if (list->length > 0) {
+                        Item last_item = list->items[list->length - 1];
+                        if (is_whitespace_eating_element(last_item)) {
+                            // Check if there's a space immediately before the comment
+                            if (list->length >= 2) {
+                                Item prev_item = list->items[list->length - 2];
+                                TypeId prev_type = get_type_id(prev_item);
+                                if (prev_type == LMD_TYPE_STRING) {
+                                    String* prev_str = (String*)prev_item.pointer;
+                                    // Only add space if prev is exactly " "
+                                    if (prev_str && prev_str->len == 1 && prev_str->chars[0] == ' ') {
+                                        // There was a space before comment, allow space after
+                                        should_add_space = true;
+                                    } else {
+                                        // No single space before comment, suppress space after
+                                        should_add_space = false;
+                                    }
+                                } else {
+                                    // Previous item wasn't text, no space before
+                                    should_add_space = false;
+                                }
+                            } else {
+                                // Comment is first item, no space before
+                                should_add_space = false;
+                            }
+                        }
+                    }
+                    if (should_add_space) {
+                        // Insert a space text node
+                        MarkBuilder& builder = ctx.builder;
+                        String* space_str = builder.createString(" ", 1);
+                        list_push((List*)root_element, {.item = (uint64_t)space_str | ((uint64_t)LMD_TYPE_STRING << 56)});
+                    }
+                }
+                latex = lookahead;
+                continue;
+            }
+        }
+
         // printf("DEBUG: Parsing element %d, current position: '%.50s...'\n", element_count, latex);
 
         Item element = parse_latex_element(ctx, &latex);
@@ -1525,58 +1655,14 @@ void parse_latex(Input* input, const char* latex_string) {
             list_push((List*)root_element, element);
             // printf("DEBUG: Added element %d to root (type=%d)\n", element_count, elem_type);
 
-            // Skip whitespace after commands, but NOT after:
-            // - groups (since {} preserves following space)
-            // - verb (since \verb|...| has its own delimiter and preserves following space)
-            // - environments (since \end{...} should preserve following space, like empty, etc.)
-            if (elem_type == LMD_TYPE_ELEMENT) {
-                Element* elem = (Element*)element.pointer;
-                TypeElmt* type_info = (TypeElmt*)elem->type;
-                StrView name = type_info->name;
-                bool is_group = (name.length == 5 && strncmp(name.str, "group", 5) == 0);
-                bool is_verb = (name.length == 4 && strncmp(name.str, "verb", 4) == 0);
-                bool is_empty = (name.length == 5 && strncmp(name.str, "empty", 5) == 0);
-                // Environments that have content and should preserve trailing space
-                bool is_environment = is_empty; // Add more environments as needed
-                if (!is_group && !is_verb && !is_environment) {
-                    skip_whitespace(&latex);
-                }
-            } else {
-                skip_whitespace(&latex);
-            }
+            // Don't skip whitespace after elements - let paragraph break check handle newlines
+            // and text parsing will handle spaces
         } else if (element.item == ITEM_ERROR) {
             // printf("DEBUG: Error parsing element %d\n", element_count);
             break;
         } else {
             // printf("DEBUG: Element %d was null (likely \\end{} or comment)\n", element_count);
-            // Skip whitespace after null returns too
-            skip_whitespace(&latex);
-        }
-
-        // Check for paragraph breaks and create paragraph break elements
-        if (*latex == '\n') {
-            const char* lookahead = latex + 1;
-            // Skip spaces and comments after first newline
-            while (*lookahead == ' ' || *lookahead == '\t') lookahead++;
-            if (*lookahead == '%') {
-                // Skip comment line
-                while (*lookahead && *lookahead != '\n') lookahead++;
-                if (*lookahead == '\n') lookahead++;
-            }
-            // If there's another newline, create paragraph break element
-            if (*lookahead == '\n') {
-                // printf("DEBUG: Creating paragraph break element in main loop\n");
-
-                // Create a paragraph break element
-                Element* par_element = create_latex_element(input, "parbreak");
-                if (par_element) {
-                    list_push((List*)root_element, {.item = (uint64_t)par_element});
-                    // printf("DEBUG: Added paragraph break element to root\n");
-                }
-
-                latex = lookahead + 1; // Skip to after the second newline
-                skip_whitespace(&latex); // Skip any additional whitespace
-            }
+            // Don't skip whitespace after null returns either
         }
 
         element_count++;
