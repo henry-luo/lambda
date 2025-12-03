@@ -344,12 +344,12 @@ TEST_F(LatexHtmlFixtureTest, SectioningCommands) {
 This is the introduction.
 \subsection{Background}
 This is background information.)";
-    fixture.expected_html = R"(<div class="body">
-<div class="latex-section">Introduction</div>
-<p>This is the introduction.</p>
-<div class="latex-subsection">Background</div>
-<p>This is background information.</p>
-</div>)";
+    fixture.expected_html = "<div class=\"body\">\n"
+        "<h2 id=\"sec-1\">1\xE2\x80\x83Introduction</h2>\n"
+        "<p>This is the introduction.</p>\n"
+        "<div class=\"latex-subsection\">Background</div>\n"
+        "<p>This is background information.</p>\n"
+        "</div>";
     fixture.skip_test = false;
 
     run_fixture_test(fixture);
@@ -364,9 +364,9 @@ TEST_F(LatexHtmlFixtureTest, ListEnvironments) {
 \item Second item
 \end{itemize})";
     fixture.expected_html = R"(<div class="body">
-<ul class="latex-itemize">
-<li>First item</li>
-<li>Second item</li>
+<ul class="list">
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>First item</p></li>
+<li><span class="itemlabel"><span class="hbox llap">•</span></span><p>Second item</p></li>
 </ul>
 </div>)";
     fixture.skip_test = false;
