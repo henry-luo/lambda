@@ -115,6 +115,8 @@ declare -a suite_category_status=()
 
 # Individual C test tracking (Level 2: individual C tests)
 declare -a c_test_names=()
+declare -a c_test_base_names=()
+declare -a c_test_icons=()
 declare -a c_test_totals=()
 declare -a c_test_passed=()
 declare -a c_test_failed=()
@@ -247,9 +249,30 @@ get_c_test_display_name() {
         "test_flex_layout_gtest") echo "📐 Comprehensive Flex Layout Tests (GTest)" ;;
         "test_flex_layout") echo "📐 Comprehensive Flex Layout Tests (Criterion)" ;;
         "test_flex_standalone") echo "🔧 Standalone Flex Layout Tests" ;;
-        "test_flex_new_features") echo "🚀 Advanced Flex New Features Tests (GTest)" ;;
-        *) echo "🧪 $exe_name" ;;
+        "test_flex_new_features") echo "🚀 Advanced Flex New Features Tests" ;;
+        *) echo "$exe_name" ;;
     esac
+}
+
+# Function to get test icon from build configuration
+get_c_test_icon() {
+    local exe_name="$1"
+
+    # Try to get icon from build configuration
+    local icon=$(jq -r --arg exe "$exe_name" '
+        .test.test_suites[] |
+        select(.disabled != true) |
+        .tests[]? |
+        select((.source // "") | test("\\b" + $exe + "\\.(c|cpp)$")) |
+        .icon // "🧪"
+    ' build_lambda_config.json 2>/dev/null | head -1)
+
+    # Return icon or default
+    if [ -n "$icon" ] && [ "$icon" != "null" ]; then
+        echo "$icon"
+    else
+        echo "🧪"
+    fi
 }
 
 # Function to check if test needs recompilation and build if necessary
@@ -503,6 +526,7 @@ run_single_test() {
     local test_exe="$1"
     local base_name=$(basename "$test_exe" .exe)
     local c_test_display_name=$(get_c_test_display_name "$base_name")
+    local c_test_icon=$(get_c_test_icon "$base_name")
     local suite_category=$(get_test_suite_category "$base_name")
     local result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
 
@@ -511,7 +535,7 @@ run_single_test() {
         echo "❌ Failed to compile $base_name, skipping test" >&2
         # Create a minimal error JSON file for consistency
         echo '{"passed": 0, "failed": 1, "tests": [{"name": "compilation_error", "status": "failed", "message": "Test compilation failed"}]}' > "$result_file"
-        echo "0 1 ❌ ERROR $c_test_display_name $suite_category"
+        echo "0 1 ❌ ERROR $c_test_display_name $c_test_icon $suite_category"
         return 1
     fi
 
@@ -572,6 +596,7 @@ run_single_test() {
         echo "  \"test_exe\": \"$test_exe\","
         echo "  \"base_name\": \"$base_name\","
         echo "  \"display_name\": \"$c_test_display_name\","
+        echo "  \"icon\": \"$c_test_icon\","
         echo "  \"suite_category\": \"$suite_category\","
         echo "  \"passed\": $passed,"
         echo "  \"failed\": $failed,"
@@ -743,11 +768,11 @@ if [ -n "$TARGET_CATEGORY" ]; then
         base_name=$(basename "$test_exe" .exe)
         # Get the category from build configuration
         test_category=$(jq -r --arg exe "$base_name.exe" '
-            .test.test_suites[] | 
-            select(.tests[]?.binary == $exe) | 
+            .test.test_suites[] |
+            select(.tests[]?.binary == $exe) |
             .category // "baseline"
         ' build_lambda_config.json | head -n1)
-        
+
         if [ "$test_category" = "$TARGET_CATEGORY" ]; then
             filtered_executables+=("$test_exe")
         fi
@@ -873,6 +898,7 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
         if [ -f "$result_file" ]; then
             # Parse JSON result file
             display_name=$(jq -r '.display_name' "$result_file" 2>/dev/null)
+            icon=$(jq -r '.icon' "$result_file" 2>/dev/null)
             suite_category=$(jq -r '.suite_category' "$result_file" 2>/dev/null)
             passed=$(jq -r '.passed' "$result_file" 2>/dev/null)
             failed=$(jq -r '.failed' "$result_file" 2>/dev/null)
@@ -880,15 +906,16 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
             status=$(jq -r '.status' "$result_file" 2>/dev/null)
 
             # Validate parsed values
-            if [ "$display_name" = "null" ] || [ -z "$display_name" ]; then display_name="🧪 $base_name"; fi
+            if [ "$display_name" = "null" ] || [ -z "$display_name" ]; then display_name="$base_name"; fi
+            if [ "$icon" = "null" ] || [ -z "$icon" ]; then icon="🧪"; fi
             if [ "$suite_category" = "null" ] || [ -z "$suite_category" ]; then suite_category="unknown"; fi
             if [ "$passed" = "null" ] || [ -z "$passed" ]; then passed=0; fi
             if [ "$failed" = "null" ] || [ -z "$failed" ]; then failed=0; fi
             if [ "$total" = "null" ] || [ -z "$total" ]; then total=$((passed + failed)); fi
             if [ "$status" = "null" ] || [ -z "$status" ]; then status="❌ ERROR"; fi
 
-            # Show individual test results as we process them
-            echo "   $status $display_name ($passed/$total tests)"
+            # Show individual test results: icon status (n/m tests) name (exe)
+            echo "   $icon $status ($passed/$total tests) $display_name (${base_name}.exe)"
 
             # Add to overall totals
             total_tests=$((total_tests + total))
@@ -897,6 +924,8 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
 
             # Track individual C test results
             c_test_names+=("$display_name")
+            c_test_base_names+=("$base_name")
+            c_test_icons+=("$icon")
             c_test_totals+=("$total")
             c_test_passed+=("$passed")
             c_test_failed+=("$failed")
@@ -1137,11 +1166,13 @@ for suite_cat in "${all_suite_categories[@]}"; do
         for i in "${!c_test_suites[@]}"; do
             if [ "${c_test_suites[$i]}" = "$suite_cat" ]; then
                 c_test_name="${c_test_names[$i]}"
+                c_base_name="${c_test_base_names[$i]}"
+                c_icon="${c_test_icons[$i]}"
                 status="${c_test_status[$i]}"
                 passed="${c_test_passed[$i]}"
                 total="${c_test_totals[$i]}"
 
-                echo "     └─ $c_test_name $status ($passed/$total tests)"
+                echo "     └─ $c_icon $status ($passed/$total tests) $c_test_name (${c_base_name}.exe)"
             fi
         done
     fi
