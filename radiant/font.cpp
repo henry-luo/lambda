@@ -94,9 +94,30 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
             log_font_loading_result(font_name, false, "FreeType error");
             face = NULL;
         } else {
-            // Set height of the font
-            FT_Set_Pixel_Sizes(face, 0, font_size);
-            log_debug("Font loaded: %s, size: %dpx", font_name, font_size);
+            // For color emoji fonts (like Apple Color Emoji) with fixed bitmap sizes,
+            // we need to use FT_Select_Size instead of FT_Set_Pixel_Sizes
+            if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
+                (face->face_flags & FT_FACE_FLAG_COLOR) && 
+                face->num_fixed_sizes > 0) {
+                // Find the best matching fixed size for the requested font_size
+                int best_idx = 0;
+                int best_diff = INT_MAX;
+                for (int i = 0; i < face->num_fixed_sizes; i++) {
+                    int ppem = face->available_sizes[i].y_ppem >> 6;
+                    int diff = abs(ppem - (int)font_size);
+                    if (diff < best_diff) {
+                        best_diff = diff;
+                        best_idx = i;
+                    }
+                }
+                FT_Select_Size(face, best_idx);
+                log_debug("Color emoji font loaded: %s, selected fixed size index: %d (ppem: %ld)", 
+                    font_name, best_idx, face->available_sizes[best_idx].y_ppem >> 6);
+            } else {
+                // Set height of the font
+                FT_Set_Pixel_Sizes(face, 0, font_size);
+                log_debug("Font loaded: %s, size: %dpx", font_name, font_size);
+            }
             // Set font size using 26.6 fixed point for sub-pixel precision
             // Convert float font_size to 26.6 fixed point (multiply by 64)
             // FT_F26Dot6 char_size = (FT_F26Dot6)(font_size * 64.0);
@@ -177,15 +198,51 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
             FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
             if (entry) {
                 log_debug("Fontface loaded from cache: %s", cache_key->str);
+                FT_Face cached_face = entry->face;
+                // Ensure color emoji fonts have correct size selected
+                if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
+                    (cached_face->face_flags & FT_FACE_FLAG_COLOR) && 
+                    cached_face->num_fixed_sizes > 0) {
+                    int best_idx = 0;
+                    int best_diff = INT_MAX;
+                    for (int i = 0; i < cached_face->num_fixed_sizes; i++) {
+                        int ppem = cached_face->available_sizes[i].y_ppem >> 6;
+                        int diff = abs(ppem - (int)font_style->font_size);
+                        if (diff < best_diff) {
+                            best_diff = diff;
+                            best_idx = i;
+                        }
+                    }
+                    FT_Select_Size(cached_face, best_idx);
+                }
                 strbuf_free(cache_key);
-                return entry->face;
+                return cached_face;
             }
         }
         
         // Load the font file (use collection_index for TTC files)
         FT_Long face_index = font->is_collection ? font->collection_index : 0;
         if (FT_New_Face(uicon->ft_library, font->file_path, face_index, &face) == 0) {
-            FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+            // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
+            if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
+                (face->face_flags & FT_FACE_FLAG_COLOR) && 
+                face->num_fixed_sizes > 0) {
+                // Find the best matching fixed size
+                int best_idx = 0;
+                int best_diff = INT_MAX;
+                for (int i = 0; i < face->num_fixed_sizes; i++) {
+                    int ppem = face->available_sizes[i].y_ppem >> 6;
+                    int diff = abs(ppem - (int)font_style->font_size);
+                    if (diff < best_diff) {
+                        best_diff = diff;
+                        best_idx = i;
+                    }
+                }
+                FT_Select_Size(face, best_idx);
+                log_debug("Color emoji font (database): %s, selected fixed size index: %d", font_name, best_idx);
+            } else {
+                FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+            }
             
             // Cache the loaded font
             if (uicon->fontface_map) {
@@ -233,15 +290,51 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
                 if (entry) {
                     log_debug("Fontface loaded from cache (platform): %s", cache_key->str);
+                    FT_Face cached_face = entry->face;
+                    // Ensure color emoji fonts have correct size selected
+                    if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
+                        (cached_face->face_flags & FT_FACE_FLAG_COLOR) && 
+                        cached_face->num_fixed_sizes > 0) {
+                        int best_idx = 0;
+                        int best_diff = INT_MAX;
+                        for (int i = 0; i < cached_face->num_fixed_sizes; i++) {
+                            int ppem = cached_face->available_sizes[i].y_ppem >> 6;
+                            int diff = abs(ppem - (int)font_style->font_size);
+                            if (diff < best_diff) {
+                                best_diff = diff;
+                                best_idx = i;
+                            }
+                        }
+                        FT_Select_Size(cached_face, best_idx);
+                    }
                     strbuf_free(cache_key);
                     free(font_path);
-                    return entry->face;
+                    return cached_face;
                 }
             }
             
             // Load the font file
             if (FT_New_Face(uicon->ft_library, font_path, 0, &face) == 0) {
-                FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+                // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
+                if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
+                    (face->face_flags & FT_FACE_FLAG_COLOR) && 
+                    face->num_fixed_sizes > 0) {
+                    // Find the best matching fixed size
+                    int best_idx = 0;
+                    int best_diff = INT_MAX;
+                    for (int i = 0; i < face->num_fixed_sizes; i++) {
+                        int ppem = face->available_sizes[i].y_ppem >> 6;
+                        int diff = abs(ppem - (int)font_style->font_size);
+                        if (diff < best_diff) {
+                            best_diff = diff;
+                            best_idx = i;
+                        }
+                    }
+                    FT_Select_Size(face, best_idx);
+                    log_debug("Color emoji font (platform): %s, selected fixed size index: %d", font_name, best_idx);
+                } else {
+                    FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
+                }
                 
                 // Cache the loaded font
                 if (uicon->fontface_map) {
@@ -271,7 +364,8 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
     // FT_LOAD_NO_HINTING matches browser closely, whereas FT_LOAD_FORCE_AUTOHINT makes the text narrower
-    FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
+    // FT_LOAD_COLOR is required for color emoji fonts (Apple Color Emoji, Noto Color Emoji, etc.)
+    FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
     if (char_index > 0) {
         error = FT_Load_Glyph(face, char_index, load_flags);
         if (!error) { slot = face->glyph;  return slot; }
