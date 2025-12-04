@@ -718,6 +718,7 @@ typedef struct CssDeclaration {
     bool important;           // !important flag
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
+    const char* property_name; // Original property name (for unknown/vendor properties)
 
     // Memory management and validation
     bool valid;               // Validation flag

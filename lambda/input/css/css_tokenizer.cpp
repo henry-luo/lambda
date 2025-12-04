@@ -44,6 +44,25 @@ static CssUnit parse_css_unit(const char* unit_str, size_t length) {
     // Grid fractional units
     if (strcmp(unit, "fr") == 0) return CSS_UNIT_FR;
 
+    // Angle units
+    if (strcmp(unit, "deg") == 0) return CSS_UNIT_DEG;
+    if (strcmp(unit, "rad") == 0) return CSS_UNIT_RAD;
+    if (strcmp(unit, "grad") == 0) return CSS_UNIT_GRAD;
+    if (strcmp(unit, "turn") == 0) return CSS_UNIT_TURN;
+
+    // Time units
+    if (strcmp(unit, "s") == 0) return CSS_UNIT_S;
+    if (strcmp(unit, "ms") == 0) return CSS_UNIT_MS;
+
+    // Frequency units
+    if (strcmp(unit, "hz") == 0) return CSS_UNIT_HZ;
+    if (strcmp(unit, "khz") == 0) return CSS_UNIT_KHZ;
+
+    // Resolution units
+    if (strcmp(unit, "dpi") == 0) return CSS_UNIT_DPI;
+    if (strcmp(unit, "dpcm") == 0) return CSS_UNIT_DPCM;
+    if (strcmp(unit, "dppx") == 0) return CSS_UNIT_DPPX;
+
     return CSS_UNIT_NONE;
 }
 
@@ -994,9 +1013,9 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         }
                     }
                 }
-                // Check for identifier starting with - (e.g., -webkit-transform)
-                else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_')) {
-                    // Identifier starting with -
+                // Check for custom property (--foo) or identifier starting with - (e.g., -webkit-transform)
+                else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_' || input[pos + 1] == '-')) {
+                    // Identifier starting with - or -- (custom property)
                     size_t start = pos;
                     while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
                         pos++;

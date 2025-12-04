@@ -218,7 +218,7 @@ TEST_F(CssFormatterUnitTest, FormatValue_LengthPixels) {
     const char* result = formatter->output->str->chars;
 
     ASSERT_NE(result, nullptr);
-    EXPECT_STREQ(result, "10.00px");
+    EXPECT_STREQ(result, "10px");  // Clean format without trailing zeros
 }
 
 TEST_F(CssFormatterUnitTest, FormatValue_LengthEm) {
@@ -241,7 +241,7 @@ TEST_F(CssFormatterUnitTest, FormatValue_Number) {
     const char* result = formatter->output->str->chars;
 
     ASSERT_NE(result, nullptr);
-    EXPECT_STREQ(result, "1.50");
+    EXPECT_STREQ(result, "1.5");  // Clean format without trailing zeros
 }
 
 TEST_F(CssFormatterUnitTest, FormatValue_NumberZero) {
@@ -252,7 +252,7 @@ TEST_F(CssFormatterUnitTest, FormatValue_NumberZero) {
     const char* result = formatter->output->str->chars;
 
     ASSERT_NE(result, nullptr);
-    EXPECT_STREQ(result, "0.00");
+    EXPECT_STREQ(result, "0");  // Clean format without trailing zeros
 }
 
 TEST_F(CssFormatterUnitTest, FormatValue_NullValue) {
