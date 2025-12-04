@@ -364,7 +364,8 @@ bool load_unicode_glyph(FT_Face face, uint32_t codepoint, FT_GlyphSlot* glyph) {
         return false;
     }
 
-    FT_Error error = FT_Load_Glyph(face, glyph_index, (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING));
+    // FT_LOAD_COLOR is required for color emoji fonts (Apple Color Emoji, Noto Color Emoji, etc.)
+    FT_Error error = FT_Load_Glyph(face, glyph_index, (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR));
     if (error) {
         log_debug(text_log, "FreeType error loading glyph U+%04X: %d", codepoint, error);
         return false;
