@@ -221,6 +221,15 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
         if (child_type_id == LMD_TYPE_ELEMENT) {
             Element* html_child = (Element*)child_item.pointer;
 
+            // Skip HTML comments and DOCTYPE - they are stored as DomComment nodes
+            // in the DOM tree, not DomElement, so we just skip them here.
+            // The DOM iterator will skip DomComment nodes via !is_element() check below.
+            TypeElmt* child_type = (TypeElmt*)html_child->type;
+            if (child_type && (strcmp(child_type->name.str, "!--") == 0 ||
+                               strcasecmp(child_type->name.str, "!DOCTYPE") == 0)) {
+                continue;  // Skip comment/DOCTYPE - DOM has corresponding DomComment
+            }
+
             if (!dom_child) {
                 // HTML has more element children than DOM - shouldn't happen
                 break;
