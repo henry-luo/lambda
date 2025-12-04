@@ -20,8 +20,50 @@ void render_children(RenderContext* rdcon, View* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip);
 
+// draw a color glyph bitmap (BGRA format, used for color emoji) into the doc surface
+void draw_color_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
+    int left = max(rdcon->block.clip.left, x);
+    int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
+    int top = max(rdcon->block.clip.top, y);
+    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->rows);
+    if (left >= right || top >= bottom) return; // glyph outside the surface
+    ImageSurface* surface = rdcon->ui_context->surface;
+    for (int i = top - y; i < bottom - y; i++) {
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
+        uint8_t* src_row = bitmap->buffer + i * bitmap->pitch;
+        for (int j = left - x; j < right - x; j++) {
+            if (x + j < 0 || x + j >= surface->width) continue;
+            // BGRA format: Blue, Green, Red, Alpha (4 bytes per pixel)
+            uint8_t* src = src_row + j * 4;
+            uint8_t src_b = src[0], src_g = src[1], src_r = src[2], src_a = src[3];
+            if (src_a > 0) {
+                uint8_t* dst = (uint8_t*)(row_pixels + (x + j) * 4);
+                if (src_a == 255) {
+                    // fully opaque - just copy
+                    dst[0] = src_r;  // our surface is RGBA
+                    dst[1] = src_g;
+                    dst[2] = src_b;
+                    dst[3] = 255;
+                } else {
+                    // alpha blend
+                    uint32_t inv_alpha = 255 - src_a;
+                    dst[0] = (dst[0] * inv_alpha + src_r * src_a) / 255;
+                    dst[1] = (dst[1] * inv_alpha + src_g * src_a) / 255;
+                    dst[2] = (dst[2] * inv_alpha + src_b * src_a) / 255;
+                    dst[3] = 255;
+                }
+            }
+        }
+    }
+}
+
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
+    // handle color emoji bitmaps (BGRA format)
+    if (bitmap->pixel_mode == FT_PIXEL_MODE_BGRA) {
+        draw_color_glyph(rdcon, bitmap, x, y);
+        return;
+    }
     int left = max(rdcon->block.clip.left, x);
     int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
     int top = max(rdcon->block.clip.top, y);
