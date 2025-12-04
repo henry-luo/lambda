@@ -66,7 +66,7 @@ DomElement* lambda_element_to_dom_element(Element* elem, DomDocument* doc) {
 
     // Build DOM tree with DomDocument
     DomElement* dom_elem = build_dom_tree_from_element(elem, doc, nullptr);
-    
+
     return dom_elem;
 }
 
@@ -299,13 +299,13 @@ protected:
         // <div id="main" class="container">
         //   <p class="text">Hello</p>
         // </div>
-        
+
         // Create a minimal Input for DOM document
         if (!doc) {
             Input* input = Input::create(pool);
             doc = dom_document_create(input);
         }
-        
+
         DomElement* div = dom_element_create(doc, "div", nullptr);
         dom_element_set_attribute(div, "id", "main");
         dom_element_set_attribute(div, "class", "container");
@@ -466,7 +466,7 @@ TEST_F(HtmlCssIntegrationTest, ApplySimpleCSSRule) {
     // Create DomDocument for standalone test
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
-    
+
     // Create a simple DOM element
     DomElement* div = dom_element_create(doc, "div", nullptr);
     dom_element_add_class(div, "box");
@@ -496,13 +496,13 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_InlineVsStylesheet) {
     const char* html = R"(
         <div class="box" style="color: red;"></div>
     )";
-    
+
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr);
-    
+
     Element* root_elem = get_root_element(input);
     ASSERT_NE(root_elem, nullptr);
-    
+
     DomElement* div = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(div, nullptr);
 
@@ -529,7 +529,7 @@ TEST_F(HtmlCssIntegrationTest, CascadeResolution_IDvsClass) {
     // Create DomDocument for standalone test
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
-    
+
     DomElement* div = dom_element_create(doc, "div", nullptr);
     dom_element_set_attribute(div, "id", "main");
     dom_element_add_class(div, "box");
@@ -1391,8 +1391,8 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
     printf("  Converted to DOM: %d (%.1f%%)\n", converted, 100.0 * converted / total);
     printf("  Files with CSS: %d (%.1f%%)\n", has_css, converted > 0 ? 100.0 * has_css / converted : 0);
 
-    EXPECT_GT(parsed, total * 0.8) << "At least 80% should parse successfully";
-    EXPECT_GT(converted, parsed * 0.8) << "At least 80% of parsed should convert";
+    EXPECT_GE(parsed, total * 0.8) << "At least 80% should parse successfully";
+    EXPECT_GE(converted, parsed * 0.8) << "At least 80% of parsed should convert";
 }
 
 // ============================================================================
@@ -1403,7 +1403,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
     // Create DomDocument for standalone test
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
-    
+
     DomElement* div = dom_element_create(doc, "div", nullptr);
 
     // Apply many properties to test AVL tree performance
@@ -1448,7 +1448,7 @@ TEST_F(HtmlCssIntegrationTest, AVLTree_PropertyOverride) {
     // Create DomDocument for standalone test
     Input* input = Input::create(pool);
     doc = dom_document_create(input);
-    
+
     DomElement* div = dom_element_create(doc, "div", nullptr);
 
     // Apply color with different specificities
