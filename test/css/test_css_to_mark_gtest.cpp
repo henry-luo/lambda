@@ -150,7 +150,7 @@ protected:
                 }
                 size_t hex_len = i - hex_start;
                 std::string hex = css.substr(hex_start, hex_len);
-                
+
                 // Convert to lowercase for comparison
                 for (char& c : hex) {
                     c = std::tolower(c);
@@ -318,14 +318,14 @@ protected:
     // Handles known keywords like currentColor, etc.
     std::string normalizeCssKeywords(const std::string& css) {
         std::string result = css;
-        
+
         // List of case-insensitive CSS keywords that might have different casing
         const std::vector<std::pair<std::string, std::string>> keywords = {
             {"currentColor", "currentcolor"},
             {"CurrentColor", "currentcolor"},
             {"CURRENTCOLOR", "currentcolor"},
         };
-        
+
         for (const auto& kw : keywords) {
             size_t pos = 0;
             while ((pos = result.find(kw.first, pos)) != std::string::npos) {
