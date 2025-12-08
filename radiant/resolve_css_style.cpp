@@ -2644,11 +2644,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_FLOAT: {
             log_debug("[CSS] Processing float property");
-            if (!block) break;
             if (!block->position) {
                 block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
             }
-
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum float_value = value->data.keyword;
                 if (float_value > 0) {
@@ -2693,7 +2691,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     block->scroller->overflow_x = overflow_value;
                     block->scroller->overflow_y = overflow_value;
                     log_debug("[CSS] Overflow: %s -> 0x%04X (both x and y)", css_enum_info(value->data.keyword)->name, overflow_value);
-                    
+
                     // Set has_clip for hidden/clip overflow values
                     // This enables clipping during rendering even when content doesn't overflow
                     if (overflow_value == CSS_VALUE_HIDDEN || overflow_value == CSS_VALUE_CLIP) {
@@ -2717,7 +2715,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (overflow_value > 0) {
                     block->scroller->overflow_x = overflow_value;
                     log_debug("[CSS] Overflow-x: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
-                    
+
                     // Set has_clip for hidden/clip overflow values
                     if (overflow_value == CSS_VALUE_HIDDEN || overflow_value == CSS_VALUE_CLIP) {
                         block->scroller->has_clip = true;
@@ -2739,7 +2737,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (overflow_value > 0) {
                     block->scroller->overflow_y = overflow_value;
                     log_debug("[CSS] Overflow-y: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
-                    
+
                     // Set has_clip for hidden/clip overflow values
                     if (overflow_value == CSS_VALUE_HIDDEN || overflow_value == CSS_VALUE_CLIP) {
                         block->scroller->has_clip = true;
