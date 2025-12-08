@@ -901,18 +901,16 @@ static void create_text_array_views(Input* input, ViewBlock* parent,
             double kerning = 0.0;
             if (item._type_id == LMD_TYPE_INT) {
                 kerning = -(double)item.int_val / 1000.0 * parser->state.font_size;
-            } else {
+            }
+            else {
                 // For float, need to dereference pointer
-                double* double_ptr = (double*)item.pointer;
-                if (double_ptr) {
-                    kerning = -*double_ptr / 1000.0 * parser->state.font_size;
-                }
+                double double_val = item.get_double();
+                kerning = -double_val / 1000.0 * parser->state.font_size;
             }
             x_offset += kerning;
         }
     }
-
-    log_debug("Processed TJ text array with %lld elements", text_array->length);
+    log_debug("Processed text array with %lld elements", text_array->length);
 }
 
 /**

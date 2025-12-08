@@ -94,7 +94,7 @@ std::string extract_css_from_html(Element* root) {
         for (int64_t i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (child_item.type_id() == LMD_TYPE_STRING) {
-                String* text = (String*)child_item.pointer;
+                String* text = child_item.get_string();
                 css_content += text->chars;
             }
         }
@@ -109,8 +109,9 @@ std::string extract_css_from_html(Element* root) {
         // Handle both typed and raw pointer items
         Element* child_elem = nullptr;
         if (child_item.type_id() == LMD_TYPE_ELEMENT) {
-            child_elem = (Element*)child_item.pointer;
-        } else if (child_item.type_id() == LMD_TYPE_RAW_POINTER && child_item.container) {
+            child_elem = child_item.element;
+        }
+        else if (child_item.type_id() == LMD_TYPE_RAW_POINTER && child_item.container) {
             // Check if it's an Element
             Element* potential_elem = (Element*)child_item.container;
             if (potential_elem->type_id == LMD_TYPE_ELEMENT) {
@@ -252,31 +253,21 @@ protected:
     // HTML parsing may produce a List containing DOCTYPE, comments, and the actual HTML element
     Element* get_root_element(Input* input) {
         if (!input) return nullptr;
-
-        void* root_ptr = (void*)input->root.pointer;
+        TypeId root_type = input->root.type_id();
 
         // Check if it's a List (may contain DOCTYPE, comments, and HTML element)
-        List* potential_list = (List*)root_ptr;
-        if (potential_list->type_id == LMD_TYPE_LIST) {
+        if (root_type == LMD_TYPE_LIST) {
+            List* potential_list = input->root.list;
             // Search for the first REAL Element (skip DOCTYPE, comments, etc.)
             for (int64_t i = 0; i < potential_list->length; i++) {
                 Item item = potential_list->items[i];
-
-                void* item_ptr = nullptr;
                 if (item.type_id() == LMD_TYPE_ELEMENT) {
-                    item_ptr = (void*)item.pointer;
-                } else if (item.type_id() == LMD_TYPE_RAW_POINTER) {
-                    item_ptr = item.container;
-                }
-
-                if (item_ptr) {
-                    Element* potential_elem = (Element*)item_ptr;
+                    Element* potential_elem = item.element;
                     if (potential_elem->type_id == LMD_TYPE_ELEMENT) {
                         // Check the tag name to skip DOCTYPE and comments
                         TypeElmt* elem_type = (TypeElmt*)potential_elem->type;
                         if (elem_type && elem_type->name.str) {
                             const char* tag_name = elem_type->name.str;
-
                             // Skip DOCTYPE declarations and comments - find actual HTML element
                             if (strcmp(tag_name, "!DOCTYPE") != 0 &&
                                 strcmp(tag_name, "!--") != 0) {
@@ -286,9 +277,10 @@ protected:
                     }
                 }
             }
-        } else if (potential_list->type_id == LMD_TYPE_ELEMENT) {
+        }
+        else if (root_type == LMD_TYPE_ELEMENT) {
             // Direct element (simpler HTML without DOCTYPE/comments)
-            return (Element*)root_ptr;
+            return input->root.element;
         }
 
         return nullptr;
@@ -328,7 +320,7 @@ TEST_F(HtmlCssIntegrationTest, ParseSimpleHTML) {
     // Parse HTML using actual Lambda parser
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -358,7 +350,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithAttributes) {
 
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     Element* root_elem = get_root_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
@@ -393,7 +385,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithInlineStyles) {
 
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     Element* root_elem = get_root_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
@@ -441,7 +433,7 @@ TEST_F(HtmlCssIntegrationTest, ExtractCSSFromStyleTag) {
 
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr);
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "Failed to parse HTML - root is NULL";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "Failed to parse HTML - root is NULL";
 
     Element* root_elem = get_root_element(input);
     ASSERT_EQ(root_elem->type_id, LMD_TYPE_ELEMENT) << "Root should be an element";
@@ -577,7 +569,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     // Step 1: Parse HTML
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "HTML parsing failed";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Step 2: Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -692,7 +684,7 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr) << "Failed to parse HTML file";
-    EXPECT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -705,10 +697,8 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
         if (root_list->length > 0) {
             Item first_item = root_list->items[0];
             printf("DEBUG: First item type_id=%d\n", first_item.type_id());
-            if (first_item.type_id() == LMD_TYPE_ELEMENT || first_item.type_id() == LMD_TYPE_RAW_POINTER) {
-                void* elem_ptr = (first_item.type_id() == LMD_TYPE_ELEMENT) ?
-                                 (void*)first_item.pointer : first_item.container;
-                Element* potential_elem = (Element*)elem_ptr;
+            if (first_item.type_id() == LMD_TYPE_ELEMENT) {
+                Element* potential_elem = first_item.element;
                 if (potential_elem && potential_elem->type_id == LMD_TYPE_ELEMENT) {
                     root_elem = potential_elem;
                     printf("DEBUG: Using first list item as root element\n");
@@ -736,7 +726,7 @@ TEST_F(HtmlCssIntegrationTest, LoadAndParseSampleHTML) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr) << "Failed to parse HTML file";
-    EXPECT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -799,7 +789,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
 
         Input* input = parse_html_string(html_content.c_str());
         ASSERT_NE(input, nullptr) << "Failed to parse " << test_files[i];
-        EXPECT_NE((void*)input->root.pointer, (void*)nullptr) << "No root for " << test_files[i];
+        EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root for " << test_files[i];
 
         processed++;
 

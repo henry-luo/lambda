@@ -71,7 +71,7 @@ static bool is_whitespace_eating_element(Item item) {
     TypeId type = get_type_id(item);
     if (type != LMD_TYPE_ELEMENT) return false;
 
-    Element* elem = (Element*)item.pointer;
+    Element* elem = item.element;
     if (!elem || !elem->type) return false;
 
     TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -905,14 +905,14 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
 
                 // Arguments are parsed as Element wrappers with tag "argument"
                 if (arg_type == LMD_TYPE_ELEMENT) {
-                    Element* arg_element = (Element*)first_arg.pointer;
+                    Element* arg_element = first_arg.element;
                     if (arg_element && arg_element->length > 0) {
                         // The first item in the argument element should be the environment name
                         Item content_item = arg_element->items[0];
                         TypeId content_type = get_type_id(content_item);
 
                         if (content_type == LMD_TYPE_STRING) {
-                            String* env_string = (String*)content_item.pointer;
+                            String* env_string = content_item.get_string();
                             if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
                                 env_name = env_string->chars;
                             }
@@ -921,7 +921,7 @@ static Item parse_latex_command(InputContext& ctx, const char **latex) {
                 }
                 // Legacy fallback: also check if it's directly a string (old behavior)
                 else if (arg_type == LMD_TYPE_STRING) {
-                    String* env_string = (String*)first_arg.pointer;
+                    String* env_string = first_arg.get_string();
                     if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
                         env_name = env_string->chars;
                     }
@@ -1603,7 +1603,7 @@ void parse_latex(Input* input, const char* latex_string) {
                                 Item prev_item = list->items[list->length - 2];
                                 TypeId prev_type = get_type_id(prev_item);
                                 if (prev_type == LMD_TYPE_STRING) {
-                                    String* prev_str = (String*)prev_item.pointer;
+                                    String* prev_str = prev_item.get_string();
                                     // Only add space if prev is exactly " "
                                     if (prev_str && prev_str->len == 1 && prev_str->chars[0] == ' ') {
                                         // There was a space before comment, allow space after
@@ -1641,14 +1641,7 @@ void parse_latex(Input* input, const char* latex_string) {
             // CRITICAL DEBUG: Check for invalid type values before adding to root
             TypeId elem_type = get_type_id(element);
             if (elem_type > LMD_TYPE_ERROR) {
-                printf("ERROR: Invalid type %d detected in parse_latex! Max valid type is %d\n", elem_type, LMD_TYPE_ERROR);
-                log_error("Element details - element.item=0x%llx, element.pointer=%llu", (unsigned long long)element.item, (unsigned long long)element.pointer);
-                printf("ERROR: Element count: %d\n", element_count);
-                printf("ERROR: Raw memory dump of Item:\n");
-                unsigned char* bytes = (unsigned char*)&element;
-                for (int j = 0; j < sizeof(Item); j++) {
-                    printf("  byte[%d] = 0x%02x\n", j, bytes[j]);
-                }
+                log_debug("ERROR: Invalid type %d detected in parse_latex! Max valid type is %d", elem_type, LMD_TYPE_ERROR);
                 break; // Stop parsing on invalid type
             }
 

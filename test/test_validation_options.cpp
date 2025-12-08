@@ -174,7 +174,7 @@ TEST_F(ValidationOptionsTest, TimeoutPreventsLongValidation) {
     // set very short timeout
     schema_validator_set_timeout(validator, 1);  // 1ms - may timeout immediately
 
-    Item int_item = {.int_val = 42, ._type = LMD_TYPE_INT};
+    Item int_item = {.int_val = 42, ._type_id = LMD_TYPE_INT};
     ConstItem item = *(ConstItem*)&int_item;
 
     // validate - may or may not timeout depending on system speed

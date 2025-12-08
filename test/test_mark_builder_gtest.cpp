@@ -41,7 +41,7 @@ TEST_F(MarkBuilderTest, CreateString) {
     Item str_item = builder.createStringItem("Hello, World!");
     ASSERT_EQ(get_type_id(str_item), LMD_TYPE_STRING);
 
-    String* str = (String*)str_item.pointer;
+    String* str = str_item.get_string();
     ASSERT_NE(str, nullptr);
     EXPECT_STREQ(str->chars, "Hello, World!");
 }
@@ -58,13 +58,10 @@ TEST_F(MarkBuilderTest, CreateInt) {
 // Test float creation
 TEST_F(MarkBuilderTest, CreateFloat) {
     MarkBuilder builder(input);
-
     Item float_item = builder.createFloat(3.14);
     EXPECT_EQ(get_type_id(float_item), LMD_TYPE_FLOAT);
-
-    double* val = (double*)float_item.pointer;
-    ASSERT_NE(val, nullptr);
-    EXPECT_DOUBLE_EQ(*val, 3.14);
+    double val = float_item.get_double();
+    EXPECT_DOUBLE_EQ(val, 3.14);
 }
 
 // Test boolean creation
@@ -95,7 +92,7 @@ TEST_F(MarkBuilderTest, CreateRange) {
     Item range_item = builder.createRange(1, 10);
     EXPECT_EQ(get_type_id(range_item), LMD_TYPE_RANGE);
 
-    Range* range = (Range*)range_item.pointer;
+    Range* range = range_item.range;
     ASSERT_NE(range, nullptr);
     EXPECT_EQ(range->start, 1);
     EXPECT_EQ(range->end, 10);
@@ -109,7 +106,7 @@ TEST_F(MarkBuilderTest, CreateEmptyRange) {
     Item range_item = builder.createRange(5, 3);  // end < start
     EXPECT_EQ(get_type_id(range_item), LMD_TYPE_RANGE);
 
-    Range* range = (Range*)range_item.pointer;
+    Range* range = range_item.range;
     ASSERT_NE(range, nullptr);
     EXPECT_EQ(range->start, 5);
     EXPECT_EQ(range->end, 3);
@@ -406,10 +403,10 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     Item name2 = builder.createNameItem("element");
     EXPECT_EQ(get_type_id(name1), LMD_TYPE_SYMBOL);
     EXPECT_EQ(get_type_id(name2), LMD_TYPE_SYMBOL);
-    
+
     // Extract actual String pointers
-    String* str_name1 = (String*)name1.pointer;
-    String* str_name2 = (String*)name2.pointer;
+    String* str_name1 = name1.get_string();
+    String* str_name2 = name2.get_string();
     EXPECT_EQ(str_name1, str_name2);  // Same instance due to pooling
 
     // Short symbols are pooled (≤32 chars)
@@ -417,9 +414,9 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     Item sym2 = builder.createSymbolItem("short");
     EXPECT_EQ(get_type_id(sym1), LMD_TYPE_SYMBOL);
     EXPECT_EQ(get_type_id(sym2), LMD_TYPE_SYMBOL);
-    
-    String* str_sym1 = (String*)sym1.pointer;
-    String* str_sym2 = (String*)sym2.pointer;
+
+    String* str_sym1 = sym1.get_string();
+    String* str_sym2 = sym2.get_string();
     EXPECT_EQ(str_sym1, str_sym2);  // Pooled
 
     // Long symbols not pooled (>32 chars)
@@ -428,7 +425,7 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     Item long2 = builder.createSymbolItem(long_sym);
     EXPECT_EQ(get_type_id(long1), LMD_TYPE_SYMBOL);
     EXPECT_EQ(get_type_id(long2), LMD_TYPE_SYMBOL);
-    EXPECT_NE(long1.pointer, long2.pointer);  // Different instances
+    EXPECT_NE(long1.symbol_ptr, long2.symbol_ptr);  // Different instances
 
     // Strings are never pooled (arena allocated)
     Item str1 = builder.createStringItem("test");
@@ -438,8 +435,8 @@ TEST_F(MarkBuilderTest, NameSymbolStringSeparation) {
     EXPECT_EQ(get_type_id(str1), LMD_TYPE_STRING);
     EXPECT_EQ(get_type_id(str2), LMD_TYPE_STRING);
 
-    String* s1 = (String*)str1.pointer;
-    String* s2 = (String*)str2.pointer;
+    String* s1 = str1.get_string();
+    String* s2 = str2.get_string();
     ASSERT_NE(s1, nullptr);
     ASSERT_NE(s2, nullptr);
 
@@ -479,7 +476,7 @@ TEST_F(MarkBuilderTest, NullAndEmptyStrings) {
     // Null string should return EMPTY_STRING sentinel (not actually empty)
     Item null_str = builder.createStringItem(nullptr);
     EXPECT_EQ(get_type_id(null_str), LMD_TYPE_STRING);
-    String* str = (String*)null_str.pointer;
+    String* str = null_str.get_string();
     ASSERT_NE(str, nullptr);
     // EMPTY_STRING is actually "lambda.nil" with length 10
     EXPECT_EQ(str->len, 10);
@@ -488,7 +485,7 @@ TEST_F(MarkBuilderTest, NullAndEmptyStrings) {
     // Empty string should also return EMPTY_STRING sentinel
     Item empty_str = builder.createStringItem("");
     EXPECT_EQ(get_type_id(empty_str), LMD_TYPE_STRING);
-    String* str2 = (String*)empty_str.pointer;
+    String* str2 = empty_str.get_string();
     ASSERT_NE(str2, nullptr);
     EXPECT_EQ(str2->len, 10);
     EXPECT_STREQ(str2->chars, "lambda.nil");
@@ -496,7 +493,7 @@ TEST_F(MarkBuilderTest, NullAndEmptyStrings) {
     // Zero-length string should also return EMPTY_STRING sentinel
     Item zero_len = builder.createStringItem("test", 0);
     EXPECT_EQ(get_type_id(zero_len), LMD_TYPE_STRING);
-    String* str3 = (String*)zero_len.pointer;
+    String* str3 = zero_len.get_string();
     ASSERT_NE(str3, nullptr);
     EXPECT_EQ(str3->len, 10);
     EXPECT_STREQ(str3->chars, "lambda.nil");
@@ -603,7 +600,7 @@ TEST_F(MarkBuilderTest, VeryLongString) {
     Item str_item = builder.createStringItem(long_str.c_str());
 
     EXPECT_EQ(get_type_id(str_item), LMD_TYPE_STRING);
-    String* str = (String*)str_item.pointer;
+    String* str = str_item.get_string();
     ASSERT_NE(str, nullptr);
     EXPECT_EQ(str->len, 10000);
 }
@@ -713,7 +710,7 @@ TEST_F(MarkBuilderTest, CreateStringWithLength) {
     const char* source = "Hello, World! Extra text";
     Item str_item = builder.createStringItem(source, 13); // Only "Hello, World!"
 
-    String* str = (String*)str_item.pointer;
+    String* str = str_item.get_string();
     ASSERT_NE(str, nullptr);
     EXPECT_EQ(str->len, 13);
     EXPECT_STREQ(str->chars, "Hello, World!");
@@ -725,17 +722,17 @@ TEST_F(MarkBuilderTest, StringsWithSpecialCharacters) {
 
     // Newlines, tabs, quotes
     Item str1 = builder.createStringItem("Line1\nLine2\tTabbed");
-    String* s1 = (String*)str1.pointer;
+    String* s1 = str1.get_string();
     EXPECT_STREQ(s1->chars, "Line1\nLine2\tTabbed");
 
     // Unicode
     Item str2 = builder.createStringItem("Hello 世界 🌍");
-    String* s2 = (String*)str2.pointer;
+    String* s2 = str2.get_string();
     EXPECT_STREQ(s2->chars, "Hello 世界 🌍");
 
     // Quotes and escapes
     Item str3 = builder.createStringItem("\"quoted\" and 'single'");
-    String* s3 = (String*)str3.pointer;
+    String* s3 = str3.get_string();
     EXPECT_STREQ(s3->chars, "\"quoted\" and 'single'");
 }
 
@@ -897,20 +894,19 @@ TEST_F(MarkBuilderTest, FloatSpecialValues) {
     MarkBuilder builder(input);
 
     Item inf_val = builder.createFloat(INFINITY);
-    double* inf_ptr = (double*)inf_val.pointer;
-    EXPECT_TRUE(std::isinf(*inf_ptr));
+    double inf_ptr = inf_val.get_double();
+    EXPECT_TRUE(std::isinf(inf_ptr));
 
     Item neg_inf = builder.createFloat(-INFINITY);
-    double* neg_inf_ptr = (double*)neg_inf.pointer;
-    EXPECT_TRUE(std::isinf(*neg_inf_ptr));
+    double neg_inf_ptr = neg_inf.get_double();
+    EXPECT_TRUE(std::isinf(neg_inf_ptr));
 
     Item nan_val = builder.createFloat(NAN);
-    double* nan_ptr = (double*)nan_val.pointer;
-    EXPECT_TRUE(std::isnan(*nan_ptr));
-
+    double nan_ptr = nan_val.get_double();
+    EXPECT_TRUE(std::isnan(nan_ptr));
     Item zero_val = builder.createFloat(0.0);
-    double* zero_ptr = (double*)zero_val.pointer;
-    EXPECT_DOUBLE_EQ(*zero_ptr, 0.0);
+    double zero_ptr = zero_val.get_double();
+    EXPECT_DOUBLE_EQ(zero_ptr, 0.0);
 }
 
 // Test empty string buffer usage
@@ -1255,13 +1251,13 @@ TEST_F(MarkBuilderTest, ComplexDocumentAllTagNamesPreserved) {
 
     // Verify first child (header)
     ASSERT_GE(article->length, 1);
-    Element* header = (Element*)article->items[0].pointer;
+    Element* header = article->items[0].element;
     TypeElmt* header_type = (TypeElmt*)header->type;
     EXPECT_EQ(strncmp(header_type->name.str, "header", 6), 0);
 
     // Verify header's first child (h1)
     ASSERT_GE(header->length, 1);
-    Element* h1 = (Element*)header->items[0].pointer;
+    Element* h1 = header->items[0].element;
     TypeElmt* h1_type = (TypeElmt*)h1->type;
     EXPECT_EQ(strncmp(h1_type->name.str, "h1", 2), 0);
 }
@@ -1409,27 +1405,27 @@ TEST_F(MarkBuilderTest, NestedDocumentSurvivesBuilderDestruction) {
     EXPECT_EQ(section->length, 3);
 
     // Verify first child (header)
-    Element* header = (Element*)section->items[0].pointer;
+    Element* header = section->items[0].element;
     ASSERT_NE(header, nullptr);
     TypeElmt* header_type = (TypeElmt*)header->type;
     EXPECT_EQ(strncmp(header_type->name.str, "header", 6), 0);
     EXPECT_EQ(header->length, 2);
 
     // Verify header's first child (h1)
-    Element* h1 = (Element*)header->items[0].pointer;
+    Element* h1 = header->items[0].element;
     ASSERT_NE(h1, nullptr);
     TypeElmt* h1_type = (TypeElmt*)h1->type;
     EXPECT_EQ(strncmp(h1_type->name.str, "h1", 2), 0);
 
     // Verify second child (article)
-    Element* article = (Element*)section->items[1].pointer;
+    Element* article = section->items[1].element;
     ASSERT_NE(article, nullptr);
     TypeElmt* article_type = (TypeElmt*)article->type;
     EXPECT_EQ(strncmp(article_type->name.str, "article", 7), 0);
     EXPECT_EQ(article->length, 2);
 
     // Verify third child (footer)
-    Element* footer = (Element*)section->items[2].pointer;
+    Element* footer = section->items[2].element;
     ASSERT_NE(footer, nullptr);
     TypeElmt* footer_type = (TypeElmt*)footer->type;
     EXPECT_EQ(strncmp(footer_type->name.str, "footer", 6), 0);
@@ -1469,7 +1465,7 @@ TEST_F(MarkBuilderTest, ArraySurvivesBuilderDestruction) {
     EXPECT_EQ(arr->items[2].int_val, 30);
 
     EXPECT_EQ(get_type_id(arr->items[3]), LMD_TYPE_STRING);
-    String* str = (String*)arr->items[3].pointer;
+    String* str = arr->items[3].get_string();
     EXPECT_STREQ(str->chars, "test");
 
     EXPECT_EQ(get_type_id(arr->items[4]), LMD_TYPE_BOOL);
@@ -1550,23 +1546,23 @@ TEST_F(MarkBuilderTest, ComplexMixedDocumentSurvivesBuilderDestruction) {
 
     // Verify h1
     EXPECT_EQ(get_type_id(root->items[0]), LMD_TYPE_ELEMENT);
-    Element* h1 = (Element*)root->items[0].pointer;
+    Element* h1 = root->items[0].element;
     TypeElmt* h1_type = (TypeElmt*)h1->type;
     EXPECT_EQ(strncmp(h1_type->name.str, "h1", 2), 0);
 
     // Verify array
     EXPECT_EQ(get_type_id(root->items[1]), LMD_TYPE_ARRAY);
-    Array* arr = (Array*)root->items[1].pointer;
+    Array* arr = root->items[1].array;
     EXPECT_EQ(arr->length, 3);
 
     // Verify map
     EXPECT_EQ(get_type_id(root->items[2]), LMD_TYPE_MAP);
-    Map* map = (Map*)root->items[2].pointer;
+    Map* map = root->items[2].map;
     ASSERT_NE(map, nullptr);
 
     // Verify paragraph with nested element
     EXPECT_EQ(get_type_id(root->items[3]), LMD_TYPE_ELEMENT);
-    Element* p = (Element*)root->items[3].pointer;
+    Element* p = root->items[3].element;
     TypeElmt* p_type = (TypeElmt*)p->type;
     EXPECT_EQ(strncmp(p_type->name.str, "p", 1), 0);
     EXPECT_GT(p->length, 0);
@@ -1620,7 +1616,7 @@ TEST_F(MarkBuilderTest, StringSurvivesBuilderDestruction) {
     // Builder is destroyed, verify string is still valid
     EXPECT_EQ(get_type_id(str_item), LMD_TYPE_STRING);
 
-    String* str = (String*)str_item.pointer;
+    String* str = str_item.get_string();
     ASSERT_NE(str, nullptr);
     EXPECT_STREQ(str->chars, "Hello from builder function");
 }
@@ -1658,11 +1654,11 @@ TEST_F(MarkBuilderTest, DocumentFragmentSurvivesBuilderDestruction) {
     }
 
     // Verify specific elements
-    Element* h1 = (Element*)fragment->items[0].pointer;
+    Element* h1 = fragment->items[0].element;
     TypeElmt* h1_type = (TypeElmt*)h1->type;
     EXPECT_EQ(strncmp(h1_type->name.str, "h1", 2), 0);
 
-    Element* hr = (Element*)fragment->items[3].pointer;
+    Element* hr = fragment->items[3].element;
     TypeElmt* hr_type = (TypeElmt*)hr->type;
     EXPECT_EQ(strncmp(hr_type->name.str, "hr", 2), 0);
 }
@@ -1706,7 +1702,7 @@ TEST_F(MarkBuilderTest, DeeplyNestedStructureSurvivesBuilderDestruction) {
 
         // Should have one child
         EXPECT_EQ(current->length, 1);
-        current = (Element*)current->items[0].pointer;
+        current = current->items[0].element;
     }
 
     // Verify innermost element

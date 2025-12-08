@@ -20,14 +20,14 @@ static void format_jsx_item_reader(StringBuf* sb, const ItemReader& item);
 // Utility function to get attribute value from element
 static String* get_jsx_attribute(Element* elem, const char* attr_name) {
     if (!elem || !elem->data) return NULL;
-    
+
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type) return NULL;
-    
+
     // Cast the element type to TypeMap to access attributes
     TypeMap* map_type = (TypeMap*)elem_type;
     if (!map_type->shape) return NULL;
-    
+
     // Iterate through shape entries to find the attribute
     ShapeEntry* field = map_type->shape;
     for (int i = 0; i < map_type->length && field; i++) {
@@ -46,39 +46,39 @@ static String* get_jsx_attribute(Element* elem, const char* attr_name) {
 // Check if element is a JS expression element
 static bool is_js_expression_element(Element* elem) {
     if (!elem) return false;
-    
+
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return false;
-    
+
     return elem_type->name.length == 2 && strncmp(elem_type->name.str, "js", 2) == 0;
 }
 
 // Format JS expression element: <js "expression"> -> {expression}
 static void format_js_expression_element(StringBuf* sb, Element* js_elem) {
     if (!js_elem || !is_js_expression_element(js_elem)) return;
-    
+
     stringbuf_append_char(sb, '{');
-    
+
     // Get the JS expression content from the element's children
     List* children = (List*)js_elem;
     if (children && children->items && children->length > 0) {
         Item first_child = children->items[0];
         if (first_child.item != ITEM_NULL && get_type_id(first_child) == LMD_TYPE_STRING) {
-            String* js_content = (String*)first_child.pointer;
+            String* js_content = first_child.get_string();
             // Add extra validation for String pointer
             if (js_content && js_content->len > 0 && js_content->len < 10000) {
                 stringbuf_append_str(sb, js_content->chars);
             }
         }
     }
-    
+
     stringbuf_append_char(sb, '}');
 }
 
 // Format JSX text content with proper escaping
 static void format_jsx_text_content(StringBuf* sb, String* text) {
     if (!text || text->len == 0 || text->len > 10000) return;
-    
+
     for (int i = 0; i < text->len; i++) {
         char c = text->chars[i];
         switch (c) {
@@ -107,9 +107,9 @@ static void format_jsx_text_content(StringBuf* sb, String* text) {
 // Format JSX attribute value
 static void format_jsx_attribute_value(StringBuf* sb, String* value) {
     if (!value || value->len == 0) return;
-    
+
     stringbuf_append_char(sb, '"');
-    
+
     for (int i = 0; i < value->len; i++) {
         char c = value->chars[i];
         switch (c) {
@@ -130,33 +130,33 @@ static void format_jsx_attribute_value(StringBuf* sb, String* value) {
                 break;
         }
     }
-    
+
     stringbuf_append_char(sb, '"');
 }
 
 // Format JSX attributes
 static void format_jsx_attributes(StringBuf* sb, Element* elem) {
     if (!elem || !elem->data) return;
-    
+
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type) return;
-    
+
     TypeMap* map_type = (TypeMap*)elem_type;
     if (!map_type->shape) return;
-    
+
     // Iterate through attributes
     ShapeEntry* field = map_type->shape;
     for (int i = 0; i < map_type->length && field; i++) {
         if (field->name) {
             const char* attr_name = field->name->str;
-            
+
             // Skip internal attributes and JSX type markers
             if (strcmp(attr_name, "is_component") == 0 ||
                 strcmp(attr_name, "self_closing") == 0) {
                 field = field->next;
                 continue;
             }
-            
+
             // Skip type attribute if it's an internal JSX type marker
             if (strcmp(attr_name, "type") == 0) {
                 void* data = ((char*)elem->data) + field->byte_offset;
@@ -168,12 +168,12 @@ static void format_jsx_attributes(StringBuf* sb, Element* elem) {
                     }
                 }
             }
-            
+
             stringbuf_append_char(sb, ' ');
             stringbuf_append_str(sb, attr_name);
-            
+
             void* data = ((char*)elem->data) + field->byte_offset;
-            
+
             if (field->type && field->type->type_id == LMD_TYPE_STRING) {
                 String* attr_value = *(String**)data;
                 if (attr_value && strcmp(attr_value->chars, "true") != 0) {
@@ -198,13 +198,13 @@ static void format_jsx_attributes(StringBuf* sb, Element* elem) {
 static void format_jsx_children(StringBuf* sb, Element* elem) {
     List* children = (List*)elem;
     if (!children || children->length == 0) return;
-    
+
     for (int i = 0; i < children->length; i++) {
         Item child = children->items[i];
         if (child.item == ITEM_NULL) continue;
-        
+
         if (get_type_id(child) == LMD_TYPE_STRING) {
-            String* text = (String*)child.pointer;
+            String* text = child.get_string();
             if (text) {
                 format_jsx_text_content(sb, text);
             }
@@ -231,47 +231,47 @@ static void format_jsx_fragment(StringBuf* sb, Element* elem) {
 // Format JSX element
 static void format_jsx_element(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
-    
+
     // Extract tag name from StrView
     char tag_name[256];
     int name_len = elem_type->name.length < 255 ? elem_type->name.length : 255;
     strncpy(tag_name, elem_type->name.str, name_len);
     tag_name[name_len] = '\0';
-    
+
     // Handle JSX fragment
     if (strcmp(tag_name, "jsx_fragment") == 0) {
         format_jsx_fragment(sb, elem);
         return;
     }
-    
+
     // Handle JS expression element
     if (is_js_expression_element(elem)) {
         format_js_expression_element(sb, elem);
         return;
     }
-    
+
     // Regular JSX element
     stringbuf_append_char(sb, '<');
     stringbuf_append_str(sb, tag_name);
-    
+
     // Format attributes
     format_jsx_attributes(sb, elem);
-    
+
     // Check if self-closing
     String* self_closing = get_jsx_attribute(elem, "self_closing");
     if (self_closing && strcmp(self_closing->chars, "true") == 0) {
         stringbuf_append_str(sb, " />");
         return;
     }
-    
+
     stringbuf_append_char(sb, '>');
-    
+
     // Format children
     format_jsx_children(sb, elem);
-    
+
     // Closing tag
     stringbuf_append_str(sb, "</");
     stringbuf_append_str(sb, tag_name);
@@ -281,9 +281,9 @@ static void format_jsx_element(StringBuf* sb, Element* elem) {
 // Format item (handles both elements and strings)
 static void format_jsx_item(StringBuf* sb, Item item) {
     if (item.item == ITEM_NULL) return;
-    
+
     TypeId type_id = get_type_id(item);
-    
+
     if (type_id == LMD_TYPE_STRING) {
         String* text = (String*)item.item;
         format_jsx_text_content(sb, text);
@@ -297,25 +297,25 @@ static void format_jsx_item(StringBuf* sb, Item item) {
 static void format_jsx_element_reader(StringBuf* sb, const ElementReader& elem) {
     const char* tag_name = elem.tagName();
     if (!tag_name) return;
-    
+
     // handle JSX fragment
     if (strcmp(tag_name, "jsx_fragment") == 0) {
         stringbuf_append_str(sb, "<>");
-        
+
         auto children = elem.children();
         ItemReader child;
         while (children.next(&child)) {
             format_jsx_item_reader(sb, child);
         }
-        
+
         stringbuf_append_str(sb, "</>");
         return;
     }
-    
+
     // handle JS expression element
     if (strcmp(tag_name, "js") == 0) {
         stringbuf_append_char(sb, '{');
-        
+
         auto children = elem.children();
         ItemReader child;
         if (children.next(&child) && child.isString()) {
@@ -324,18 +324,18 @@ static void format_jsx_element_reader(StringBuf* sb, const ElementReader& elem) 
                 stringbuf_append_str(sb, js_content->chars);
             }
         }
-        
+
         stringbuf_append_char(sb, '}');
         return;
     }
-    
+
     // regular JSX element
     stringbuf_append_char(sb, '<');
     stringbuf_append_str(sb, tag_name);
-    
+
     // format attributes - use underlying element for now
     format_jsx_attributes(sb, (Element*)elem.element());
-    
+
     // check if self-closing
     ItemReader self_closing_attr = elem.get_attr("self_closing");
     if (self_closing_attr.isString()) {
@@ -345,16 +345,16 @@ static void format_jsx_element_reader(StringBuf* sb, const ElementReader& elem) 
             return;
         }
     }
-    
+
     stringbuf_append_char(sb, '>');
-    
+
     // format children
     auto children = elem.children();
     ItemReader child;
     while (children.next(&child)) {
         format_jsx_item_reader(sb, child);
     }
-    
+
     // closing tag
     stringbuf_append_str(sb, "</");
     stringbuf_append_str(sb, tag_name);
@@ -364,7 +364,7 @@ static void format_jsx_element_reader(StringBuf* sb, const ElementReader& elem) 
 // MarkReader-based version: format item (handles both elements and strings)
 static void format_jsx_item_reader(StringBuf* sb, const ItemReader& item) {
     if (item.isNull()) return;
-    
+
     if (item.isString()) {
         String* text = item.asString();
         format_jsx_text_content(sb, text);
@@ -377,10 +377,10 @@ static void format_jsx_item_reader(StringBuf* sb, const ItemReader& item) {
 // Main JSX formatter entry point
 String* format_jsx(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
-    
+
     // use MarkReader API for type-safe traversal
     ItemReader root(root_item.to_const());
     format_jsx_item_reader(sb, root);
-    
+
     return stringbuf_to_string(sb);
 }

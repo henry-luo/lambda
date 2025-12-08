@@ -29,16 +29,18 @@ static void format_latex_value(StringBuf* sb, Item value) {
     TypeId type = get_type_id(value);
 
     if (type == LMD_TYPE_ELEMENT) {
-        format_latex_element(sb, (Element*)value.pointer, 0);
-    } else if (type == LMD_TYPE_STRING) {
+        format_latex_element(sb, value.element, 0);
+    }
+    else if (type == LMD_TYPE_STRING) {
         // Direct text content with safety checks
-        String* str = (String*)value.pointer;
+        String* str = (String*)value.string_ptr;
         if (str && str->chars && str->len > 0 && str->len < 65536) { // Reasonable size limit
             stringbuf_append_str_n(sb, str->chars, str->len);
         }
-    } else if (type == LMD_TYPE_ARRAY) {
+    }
+    else if (type == LMD_TYPE_ARRAY) {
         // Array of elements/values with safety checks
-        Array* arr = (Array*)value.pointer;
+        Array* arr = value.array;
         if (arr && arr->items && arr->length > 0 && arr->length < 10000) { // Reasonable size limit
             for (int i = 0; i < arr->length; i++) {
                 format_latex_value(sb, arr->items[i]);
@@ -47,14 +49,16 @@ static void format_latex_value(StringBuf* sb, Item value) {
                 }
             }
         }
-    } else if (type == LMD_TYPE_INT) {
+    }
+    else if (type == LMD_TYPE_INT) {
         // Integer values
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", value.int_val);
         stringbuf_append_str(sb, num_buf);
-    } else if (type == LMD_TYPE_FLOAT) {
+    }
+    else if (type == LMD_TYPE_FLOAT) {
         // Float values with safety check
-        double* dptr = (double*)value.pointer;
+        double* dptr = (double*)value.double_ptr;
         if (dptr) {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%.6g", *dptr);
@@ -62,7 +66,7 @@ static void format_latex_value(StringBuf* sb, Item value) {
         }
     } else if (type == LMD_TYPE_SYMBOL) {
         // Symbol values (like strings but handled as symbols) with safety check
-        String* str = (String*)value.pointer;
+        String* str = (String*)value.string_ptr;
         if (str && str->chars && str->len > 0 && str->len < 65536) {
             stringbuf_append_str_n(sb, str->chars, str->len);
         }
@@ -225,7 +229,7 @@ static void format_latex_document(StringBuf* sb, Element* document) {
             TypeId item_type = get_type_id(element_item);
 
             if (item_type == LMD_TYPE_ELEMENT) {
-                Element* elem = (Element*)element_item.pointer;
+                Element* elem = element_item.element;
                 if (elem && elem->type) {
                     TypeElmt* elmt_type = (TypeElmt*)elem->type;
 
@@ -289,10 +293,10 @@ static void format_latex_value_reader(LaTeXContext& ctx, const ItemReader& value
 static void format_latex_element_reader(LaTeXContext& ctx, const ElementReader& element, int depth) {
     const char* cmd_name = element.tagName();
     if (!cmd_name) return;
-    
+
     // get element for content access
     Element* elem = (Element*)element.element();
-    
+
     // handle specific LaTeX commands and environments
     if (strcmp(cmd_name, "documentclass") == 0 || strcmp(cmd_name, "usepackage") == 0 ||
         strcmp(cmd_name, "title") == 0 || strcmp(cmd_name, "author") == 0 || strcmp(cmd_name, "date") == 0 ||
@@ -338,7 +342,7 @@ String* format_latex(Pool *pool, Item item) {
 
     // use MarkReader API
     ItemReader root(item.to_const());
-    
+
     if (root.isArray()) {
         ArrayReader arr = root.asArray();
         auto items = arr.items();
@@ -352,7 +356,7 @@ String* format_latex(Pool *pool, Item item) {
     } else if (root.isElement()) {
         ElementReader element = root.asElement();
         const char* tag = element.tagName();
-        
+
         if (tag && (strcmp(tag, "document") == 0 || strcmp(tag, "article") == 0 ||
                     strcmp(tag, "book") == 0 || strcmp(tag, "latex_document") == 0)) {
             format_latex_document(sb, (Element*)element.element());
