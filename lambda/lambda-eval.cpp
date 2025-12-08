@@ -148,7 +148,7 @@ Item fn_normalize(Item str_item, Item type_item) {
         return ItemError;
     }
 
-    String* str = (String*)str_item.pointer;
+    String* str = str_item.get_string();
     if (!str || str->len == 0) {
         return str_item;  // Return empty string as-is
     }
@@ -157,7 +157,7 @@ Item fn_normalize(Item str_item, Item type_item) {
     int options = UTF8PROC_STABLE | UTF8PROC_COMPOSE;
 
     if (type_item._type_id == LMD_TYPE_STRING) {
-        String* type_str = (String*)type_item.pointer;
+        String* type_str = type_item.get_string();
         if (type_str && type_str->len > 0) {
             if (strncmp(type_str->chars, "nfd", 3) == 0) {
                 options = UTF8PROC_STABLE | UTF8PROC_DECOMPOSE;
@@ -196,9 +196,9 @@ Range* fn_to(Item item_a, Item item_b) {
     if ((item_a._type_id == LMD_TYPE_INT || item_a._type_id == LMD_TYPE_INT64 || item_a._type_id == LMD_TYPE_FLOAT) &&
         (item_b._type_id == LMD_TYPE_INT || item_b._type_id == LMD_TYPE_INT64 || item_b._type_id == LMD_TYPE_FLOAT)) {
         int64_t start = item_a._type_id == LMD_TYPE_INT ? item_a.int_val :
-            item_a._type_id == LMD_TYPE_INT64 ? *(int64_t*)item_a.pointer : (int64_t)*(double*)item_a.pointer;
+            item_a._type_id == LMD_TYPE_INT64 ? *(int64_t*)item_a.int64_ptr : (int64_t)*(double*)item_a.double_ptr;
         int64_t end = item_b._type_id == LMD_TYPE_INT ? item_b.int_val :
-            item_b._type_id == LMD_TYPE_INT64 ? *(int64_t*)item_b.pointer : (int64_t)*(double*)item_b.pointer;
+            item_b._type_id == LMD_TYPE_INT64 ? *(int64_t*)item_b.int64_ptr : (int64_t)*(double*)item_b.double_ptr;
         if (start > end) {
             // return empty range instead of NULL
             log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
@@ -290,26 +290,26 @@ Bool fn_eq(Item a_item, Item b_item) {
         return (a_item.int_val == b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT64) {
-        return (*(int64_t*)a_item.pointer == *(int64_t*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_int64() == b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_FLOAT) {
-        return (*(double*)a_item.pointer == *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_double() == b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
+        Decimal* dec_a = a_item.get_decimal();  Decimal* dec_b = b_item.get_decimal();
         int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
         if (cmp < 0) return BOOL_FALSE;
         else if (cmp > 0) return BOOL_FALSE;
         else return BOOL_TRUE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
-        DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
+        DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         // todo: do a normalized field comparison
-        return (*(uint64_t*)dt_a == *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
+        return (dt_a.int64_val == dt_b.int64_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
-        String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
         bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -348,24 +348,24 @@ Bool fn_lt(Item a_item, Item b_item) {
         return (a_item.int_val < b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT64) {
-        return (*(int64_t*)a_item.pointer < *(int64_t*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_int64() < b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_FLOAT) {
-        return (*(double*)a_item.pointer < *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_double() < b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
+        Decimal* dec_a = a_item.get_decimal();  Decimal* dec_b = b_item.get_decimal();
         int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
         return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
-        DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
+        DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         // todo: do a proper normalized field comparison
-        return (*(uint64_t*)dt_a < *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
+        return dt_a.int64_val < dt_b.int64_val ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
-        String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
         bool result = strcmp(str_a->chars, str_b->chars) < 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -399,24 +399,24 @@ Bool fn_gt(Item a_item, Item b_item) {
         return (a_item.int_val > b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_INT64) {
-        return (*(int64_t*)a_item.pointer > *(int64_t*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_int64() > b_item.get_int64()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_FLOAT) {
-        return (*(double*)a_item.pointer > *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (a_item.get_double() > b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
+        Decimal* dec_a = a_item.get_decimal();  Decimal* dec_b = b_item.get_decimal();
         int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
         return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DTIME) {
-        DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
+        DateTime dt_a = a_item.get_datetime();  DateTime dt_b = b_item.get_datetime();
         // todo: do a proper normalized field comparison
-        return (*(uint64_t*)dt_a > *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
+        return dt_a.int64_val > dt_b.int64_val ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_STRING || a_item._type_id == LMD_TYPE_SYMBOL ||
         a_item._type_id == LMD_TYPE_BINARY) {
-        String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
         bool result = strcmp(str_a->chars, str_b->chars) > 0;
         return result ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -481,7 +481,7 @@ Bool fn_in(Item a_item, Item b_item) {
     log_debug("fn_in");
     if (b_item._type_id) { // b is scalar
         if (b_item._type_id == LMD_TYPE_STRING && a_item._type_id == LMD_TYPE_STRING) {
-            String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+            String *str_a = a_item.get_string();  String *str_b = b_item.get_string();
             return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
         }
     }
@@ -544,9 +544,9 @@ String* fn_string(Item itm) {
     case LMD_TYPE_BOOL:
         return itm.bool_val ? &STR_TRUE : &STR_FALSE;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
-        return (String*)itm.pointer;
+        return itm.get_string();
     case LMD_TYPE_DTIME: {
-        DateTime *dt = (DateTime*)itm.pointer;
+        DateTime *dt = (DateTime*)itm.datetime_ptr;
         if (dt) {
             // Debug: Print the datetime precision and basic info
             log_debug("fn_string debug: DateTime precision=%d, hour=%d, minute=%d, second=%d, ms=%d",
@@ -642,14 +642,14 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_INT64: {
         char buf[32];
-        int64_t long_val = *(int64_t*)itm.pointer;
+        int64_t long_val = itm.get_int64();
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
     case LMD_TYPE_FLOAT: {
         char buf[32];
-        double dval = *(double*)itm.pointer;
+        double dval = itm.get_double();
         snprintf(buf, sizeof(buf), "%g", dval);
         int len = strlen(buf);
         return heap_strcpy(buf, len);
@@ -716,7 +716,7 @@ Item fn_input2(Item url, Item type) {
         log_debug("input url must be a string or symbol, got type %d", url._type_id);
         return ItemNull;  // todo: push error
     }
-    else { url_str = (String*)url.pointer; }
+    else { url_str = url.get_string(); }
     log_debug("input url: %s", url_str->chars);
 
     TypeId type_id = get_type_id(type);
@@ -726,7 +726,7 @@ Item fn_input2(Item url, Item type) {
     }
     else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         // Legacy behavior: type is a simple string/symbol
-        type_str = (String*)type.pointer;
+        type_str = type.get_string();
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("input type is a map");
@@ -741,7 +741,7 @@ Item fn_input2(Item url, Item type) {
         } else {
             TypeId type_value_type = get_type_id(input_type);
             if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
-                type_str = (String*)input_type.pointer;
+                type_str = input_type.get_string();
             }
             else {
         log_debug("input type must be a string or symbol, got type %d", type_value_type);
@@ -757,7 +757,7 @@ Item fn_input2(Item url, Item type) {
         } else {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
-                flavor_str = (String*)input_flavor.pointer;
+                flavor_str = input_flavor.get_string();
             }
             else {
                 log_debug("input flavor must be a string or symbol, got type %d", flavor_value_type);
@@ -799,12 +799,12 @@ String* fn_format2(Item item, Item type) {
     }
     else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
         // Legacy behavior: type is a simple string or symbol
-        type_str = (String*)type.pointer;
+        type_str = type.get_string();
     }
     else if (type_id == LMD_TYPE_MAP) {
         log_debug("format type is a map");
         // New behavior: type is a map with options
-        Map* options_map = (Map*)type.pointer;
+        Map* options_map = type.map;
 
         // Extract 'type' from map
         bool is_found;
@@ -814,7 +814,7 @@ String* fn_format2(Item item, Item type) {
         } else {
             TypeId type_value_type = get_type_id(format_type);
             if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
-                type_str = (String*)format_type.pointer;
+                type_str = format_type.get_string();
             }
             else {
                 log_debug("format type must be a string or symbol, got type %d", type_value_type);
@@ -830,7 +830,7 @@ String* fn_format2(Item item, Item type) {
         } else {
             TypeId flavor_value_type = get_type_id(format_flavor);
             if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
-                flavor_str = (String*)format_flavor.pointer;
+                flavor_str = format_flavor.get_string();
             }
             else {
                 log_debug("format flavor must be a string or symbol, got type %d", flavor_value_type);
@@ -867,10 +867,10 @@ Item fn_index(Item item, Item index_item) {
         index = index_item.int_val;
         break;
     case LMD_TYPE_INT64:
-        index = *(int64_t*)index_item.pointer;
+        index = index_item.get_int64();
         break;
     case LMD_TYPE_FLOAT: {
-        double dval = *(double*)index_item.pointer;
+        double dval = index_item.get_double();
         // check dval is an integer
         if (dval == (int64_t)dval) {
             index = (int64_t)dval;
@@ -905,7 +905,7 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_LIST: {
         // Handle built-in properties for List type
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-            String *key_str = (String*)key.pointer;
+            String *key_str = key.get_string();
             if (key_str && strcmp(key_str->chars, "length") == 0) {
                 List *list = item.list;
                 return {.item = i2it(list->length)};
@@ -955,7 +955,7 @@ int64_t fn_len(Item item) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         // returns the length of the string
         // todo: binary length
-        String *str = (String*)item.pointer;  // todo:: should return char length
+        String *str = item.get_string();  // todo:: should return char length
         size = str ? utf8_char_count(str->chars) : 0;
         break;
     }
@@ -985,7 +985,7 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         return ItemError;
     }
 
-    String* str = (String*)str_item.pointer;
+    String* str = str_item.get_string();
     if (!str || str->len == 0) {
         return str_item; // return empty string
     }
@@ -1042,8 +1042,8 @@ Item fn_contains(Item str_item, Item substr_item) {
         return ItemError;
     }
 
-    String* str = (String*)str_item.pointer;
-    String* substr = (String*)substr_item.pointer;
+    String* str = str_item.get_string();
+    String* substr = substr_item.get_string();
 
     if (!str || !substr) {
         return {.item = b2it(false)};

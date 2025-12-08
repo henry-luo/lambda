@@ -7,7 +7,7 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
         case LMD_TYPE_BOOL:
             return {.item = b2it(*(bool*)field_data)};
         case LMD_TYPE_INT:
-            return {.int_val = *(int*)field_data, ._type = LMD_TYPE_INT};
+            return {.int_val = *(int*)field_data, ._type_id = LMD_TYPE_INT};
         case LMD_TYPE_INT64:
             return {.item = l2it((int64_t*)field_data)};
         case LMD_TYPE_FLOAT:
@@ -37,14 +37,14 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
 // Common number formatting function
 void format_number(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
-    
+
     if (type == LMD_TYPE_INT) {
         int val = item.int_val;
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", val);
         stringbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_INT64) {
-        int64_t* lptr = (int64_t*)item.pointer;
+        int64_t* lptr = (int64_t*)item.int64_ptr;
         if (lptr) {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%" PRId64, *lptr);
@@ -54,7 +54,7 @@ void format_number(StringBuf* sb, Item item) {
         }
     } else if (type == LMD_TYPE_FLOAT) {
         // Double stored as pointer
-        double* dptr = (double*)item.pointer;
+        double* dptr = (double*)item.double_ptr;
         if (dptr) {
             char num_buf[32];
             // Check for special values
@@ -77,13 +77,13 @@ void format_number(StringBuf* sb, Item item) {
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
     if (!type) return NULL;
-    
+
     // If type is null, try to auto-detect from item type
     if (!type) {
         printf("Format type is null, using default\n");
         return NULL;
     }
-    
+
     // Helper function to build format type with flavor
     char format_type_with_flavor[256];
     if (flavor && flavor->chars && strlen(flavor->chars) > 0) {
@@ -92,11 +92,11 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
         strncpy(format_type_with_flavor, type->chars, sizeof(format_type_with_flavor) - 1);
         format_type_with_flavor[sizeof(format_type_with_flavor) - 1] = '\0';
     }
-    
+
     printf("Formatting with type: %s\n", format_type_with_flavor);
-    
+
     String* result = NULL;
-    
+
     if (strcmp(type->chars, "json") == 0) {
         result = format_json(pool, item);
     }

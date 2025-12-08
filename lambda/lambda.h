@@ -75,25 +75,18 @@ typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
+typedef struct Decimal Decimal;
 
 /*
 * The C verion of Lambda Item and data structures are defined primarily for MIR JIT ciompiler
 */
 
 // only define DateTime if not already defined by lib/datetime.h
-#ifndef _DATETIME_DEFINED_
-#ifdef __cplusplus
-#include "../lib/datetime.h"
-#else
-typedef uint64_t DateTime;
-#endif
-#define _DATETIME_DEFINED_
-#endif
-typedef struct Decimal Decimal;
-
 #ifndef __cplusplus
+typedef uint64_t DateTime;
 typedef uint64_t Item;
 #else
+#include "../lib/datetime.h"
 typedef struct Item Item;
 #endif
 
@@ -106,6 +99,9 @@ typedef struct String {
 } String;
 #define STRING_STRUCT_DEFINED
 #endif
+
+typedef String Symbol;  // Symbol is just a String
+typedef String Binary;  // Binary is just a String
 
 // Array and List struct defintions needed for for-loop
 struct Container {

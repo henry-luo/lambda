@@ -122,7 +122,7 @@ void parse_csv(Input* input, const char* csv_string) {
                 for (size_t i = 0; i < headers->length; i++) {
                     Item existing = headers->items[i];
                     if (existing.item != ITEM_NULL) {
-                        String* existing_str = (String*)existing.pointer;
+                        String* existing_str = existing.get_string();
                         if (existing_str && strcmp(existing_str->chars, field->chars) == 0) {
                             ctx.addWarning("Duplicate header name '%s' at column %d", field->chars, field_num);
                         }
@@ -171,7 +171,7 @@ void parse_csv(Input* input, const char* csv_string) {
                 if (field_index < headers->length) {
                     Item header_item = headers->items[field_index];
                     if (header_item.item != ITEM_NULL) {
-                        String* key = (String*)header_item.pointer;
+                        String* key = header_item.get_string();
                         if (key && key != &EMPTY_STRING) {
                             // Add field to map - handles NULL and empty strings appropriately
                             if (field == &EMPTY_STRING || !field) {

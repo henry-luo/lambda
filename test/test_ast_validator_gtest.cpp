@@ -133,10 +133,7 @@ protected:
     ConstItem create_test_float(double value) {
         double* float_ptr = (double*)pool_calloc(test_pool, sizeof(double));
         *float_ptr = value;
-
-        Item item;
-        item.pointer = (uint64_t)float_ptr;
-        item._type_id = LMD_TYPE_FLOAT;
+        Item item = {.item = d2it(float_ptr)};
         return item.to_const();
     }
 
@@ -505,9 +502,7 @@ TEST_F(AstValidatorTest, InvalidTypeNotInUnion) {
 
     double* float_ptr = (double*)pool_calloc(test_pool, sizeof(double));
     *float_ptr = 3.14;
-    Item item_mut;
-    item_mut.pointer = (uint64_t)float_ptr;
-    item_mut._type_id = LMD_TYPE_FLOAT;
+    Item item_mut = {.item = d2it(float_ptr)};
     ConstItem item = item_mut.to_const();
 
     SchemaValidator* ctx = validator;

@@ -453,7 +453,7 @@ static std::string serialize_expr_item(Item item) {
     TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_STRING) {
-        String* str = (String*)item.pointer;
+        String* str = item.get_string();
         if (str && str->len > 0) {
             return std::string(str->chars, str->len);
         }
@@ -461,7 +461,7 @@ static std::string serialize_expr_item(Item item) {
     }
 
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (!elem || !elem->type) return "";
 
         TypeElmt* elem_type = (TypeElmt*)elem->type;
@@ -672,7 +672,7 @@ static std::string extract_argument_string(Element* elem, int arg_index = 0) {
 
     // Direct string
     if (child_type == LMD_TYPE_STRING) {
-        String* str = (String*)child.pointer;
+        String* str = child.get_string();
         if (str && str->len > 0) {
             return std::string(str->chars, str->len);
         }
@@ -681,7 +681,7 @@ static std::string extract_argument_string(Element* elem, int arg_index = 0) {
 
     // Argument element wrapping a string
     if (child_type == LMD_TYPE_ELEMENT) {
-        Element* child_elem = (Element*)child.pointer;
+        Element* child_elem = child.element;
         if (child_elem && child_elem->type) {
             TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
             StrView child_name = child_elmt_type->name;
@@ -691,7 +691,7 @@ static std::string extract_argument_string(Element* elem, int arg_index = 0) {
                     Item inner = child_elem->items[0];
                     TypeId inner_type = get_type_id(inner);
                     if (inner_type == LMD_TYPE_STRING) {
-                        String* str = (String*)inner.pointer;
+                        String* str = inner.get_string();
                         if (str && str->len > 0) {
                             return std::string(str->chars, str->len);
                         }
@@ -714,7 +714,7 @@ static int extract_argument_int(Element* elem, int arg_index = 0) {
 
     // Direct string containing number
     if (child_type == LMD_TYPE_STRING) {
-        String* str = (String*)child.pointer;
+        String* str = child.get_string();
         if (str && str->len > 0) {
             return atoi(str->chars);
         }
@@ -723,7 +723,7 @@ static int extract_argument_int(Element* elem, int arg_index = 0) {
 
     // Argument element
     if (child_type == LMD_TYPE_ELEMENT) {
-        Element* child_elem = (Element*)child.pointer;
+        Element* child_elem = child.element;
         if (child_elem && child_elem->type) {
             TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
             StrView child_name = child_elmt_type->name;
@@ -744,7 +744,7 @@ static Element* extract_argument_element(Element* elem, int arg_index = 0) {
     TypeId child_type = get_type_id(child);
 
     if (child_type == LMD_TYPE_ELEMENT) {
-        Element* child_elem = (Element*)child.pointer;
+        Element* child_elem = child.element;
         if (child_elem && child_elem->type) {
             TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
             StrView child_name = child_elmt_type->name;
@@ -765,7 +765,7 @@ static bool unwrap_and_process_argument(StringBuf* html_buf, Element* elem, Pool
         Item first_child = elem->items[0];
         TypeId child_type = get_type_id(first_child);
         if (child_type == LMD_TYPE_ELEMENT) {
-            Element* child_elem = (Element*)first_child.pointer;
+            Element* child_elem = first_child.element;
             if (child_elem && child_elem->type) {
                 TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
                 StrView child_name = child_elmt_type->name;
@@ -1304,7 +1304,6 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
     // CRITICAL DEBUG: Check for invalid type values
     if (type > LMD_TYPE_ERROR) {
         printf("ERROR: Invalid type %d detected in process_latex_element! Max valid type is %d\n", type, LMD_TYPE_ERROR);
-        log_error("Item details - item.item=0x%llx, item.pointer=%llu", (unsigned long long)item.item, (unsigned long long)item.pointer);
         printf("ERROR: Stack trace: depth=%d\n", depth);
         return;
     }
@@ -1347,7 +1346,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                 Item child = list->items[i];
                 TypeId child_type = get_type_id(child);
                 if (child_type == LMD_TYPE_ELEMENT) {
-                    Element* child_elem = (Element*)child.pointer;
+                    Element* child_elem = child.element;
                     TypeElmt* child_type_info = (TypeElmt*)child_elem->type;
                     StrView child_name = child_type_info->name;
                     if ((child_name.length == 5 && strncmp(child_name.str, "group", 5) == 0) ||
@@ -1668,7 +1667,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             if (elem->length > 0 && elem->items) {
                 Item spacing_item = elem->items[0];
                 if (get_type_id(spacing_item) == LMD_TYPE_STRING) {
-                    String* spacing_str = (String*)spacing_item.pointer;
+                    String* spacing_str = spacing_item.get_string();
                     if (spacing_str && spacing_str->len > 0) {
                         // Output <br> with spacing style
                         double pixels = latex_dim_to_pixels(spacing_str->chars);
@@ -1726,7 +1725,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             if (elem->items && elem->length > 0) {
                 Item content_item = elem->items[0];
                 if (content_item.type_id() == LMD_TYPE_STRING) {
-                    String* str = (String*)content_item.pointer;
+                    String* str = content_item.get_string();
                     if (str && str->chars) {
                         // Use append_escaped_text to properly escape HTML entities
                         append_escaped_text(html_buf, str->chars);
@@ -1744,7 +1743,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             for (size_t i = 0; i < elem->length; i++) {
                 Item child = elem->items[i];
                 if (get_type_id(child) == LMD_TYPE_STRING) {
-                    String* str = (String*)child.pointer;
+                    String* str = child.get_string();
                     stringbuf_append_str_n(html_buf, str->chars, str->len);
                 }
             }
@@ -1793,12 +1792,12 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             if (elem->items && elem->length > 0) {
                 Item arg_item = elem->items[0];
                 if (get_type_id(arg_item) == LMD_TYPE_ELEMENT) {
-                    Element* arg_elem = (Element*)arg_item.pointer;
+                    Element* arg_elem = arg_item.element;
                     // Extract dimension from argument
                     if (arg_elem->items && arg_elem->length > 0) {
                         Item dim_item = arg_elem->items[0];
                         if (get_type_id(dim_item) == LMD_TYPE_STRING) {
-                            String* dim_str = (String*)dim_item.pointer;
+                            String* dim_str = dim_item.get_string();
                             if (dim_str && dim_str->len > 0) {
                                 // Convert LaTeX dimension to pixels
                                 double pixels = latex_dim_to_pixels(dim_str->chars);
@@ -1957,7 +1956,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
     }
     else if (type == LMD_TYPE_STRING) {
         // Handle text content with ligature conversion
-        String* str = (String*)item.pointer;
+        String* str = item.get_string();
         if (str && str->len > 0) {
             // Skip space if buffer already ends with a space (collapse multiple spaces)
             if (str->len == 1 && str->chars[0] == ' ') {
@@ -2143,14 +2142,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
 
             // CRITICAL DEBUG: Check for invalid type values
             if (item_type > LMD_TYPE_ERROR) {
-                printf("ERROR: Invalid type %d detected in process_element_content! Max valid type is %d\n", item_type, LMD_TYPE_ERROR);
-                log_error("Item details - item.item=0x%llx, item.pointer=%llu", (unsigned long long)content_item.item, (unsigned long long)content_item.pointer);
-                printf("ERROR: Element index: %d, elem->length: %lld\n", i, elem->length);
-                printf("ERROR: Raw memory dump of Item:\n");
-                unsigned char* bytes = (unsigned char*)&content_item;
-                for (int j = 0; j < sizeof(Item); j++) {
-                    printf("  byte[%d] = 0x%02x\n", j, bytes[j]);
-                }
+                log_error("ERROR: Invalid type %d detected in process_element_content! Max valid type is %d", item_type, LMD_TYPE_ERROR);
                 continue; // Skip processing this invalid item
             }
 
@@ -2165,7 +2157,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             bool is_textblock = false;
             bool is_noindent = false;
             if (item_type == LMD_TYPE_ELEMENT) {
-                Element* elem_ptr = (Element*)content_item.pointer;
+                Element* elem_ptr = content_item.element;
                 if (elem_ptr && elem_ptr->type) {
                     StrView elem_name = ((TypeElmt*)elem_ptr->type)->name;
                     // printf("DEBUG: Element name: '%.*s' (length: %zu)\n", (int)elem_name.length, elem_name.str, elem_name.length);
@@ -2209,7 +2201,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             // Handle paragraph wrapping logic
             if (is_textblock) {
                 // Process textblock: text + parbreak
-                Element* textblock_elem = (Element*)content_item.pointer;
+                Element* textblock_elem = content_item.element;
                 // printf("DEBUG: Processing textblock with length: %lld\n", textblock_elem ? textblock_elem->length : -1);
                 if (textblock_elem && textblock_elem->items && textblock_elem->length >= 1) {
                     // Process the text part
@@ -2273,7 +2265,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                     if (textblock_elem->length >= 2) {
                         Item parbreak_item = textblock_elem->items[1];
                         if (get_type_id(parbreak_item) == LMD_TYPE_ELEMENT) {
-                            Element* parbreak_elem = (Element*)parbreak_item.pointer;
+                            Element* parbreak_elem = parbreak_item.element;
                             if (parbreak_elem && parbreak_elem->type) {
                                 StrView parbreak_name = ((TypeElmt*)parbreak_elem->type)->name;
                                 if (parbreak_name.length == 8 && strncmp(parbreak_name.str, "parbreak", 8) == 0) {
@@ -2327,7 +2319,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Check if this is a list environment or alignment environment - set continue flag after processing
                 bool is_list_env = false;
                 if (item_type == LMD_TYPE_ELEMENT) {
-                    Element* block_elem = (Element*)content_item.pointer;
+                    Element* block_elem = content_item.element;
                     if (block_elem && block_elem->type) {
                         StrView bname = ((TypeElmt*)block_elem->type)->name;
                         if ((bname.length == 7 && strncmp(bname.str, "itemize", 7) == 0) ||
@@ -2367,7 +2359,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Skip whitespace-only text strings at the start of a new paragraph
                 if (is_text && need_new_paragraph) {
                     // printf("DEBUG: Checking text for whitespace at paragraph start, need_new_paragraph=%d\n", need_new_paragraph);
-                    String* str = (String*)content_item.pointer;
+                    String* str = content_item.get_string();
                     if (str && str->chars) {
                         // printf("DEBUG: Text content: '%s' (len=%d)\n", str->chars, (int)str->len);
                         // Check if string is whitespace-only
@@ -2462,12 +2454,12 @@ static void extract_text_recursive(StringBuf* buf, Element* elem, Pool* pool) {
         TypeId type = get_type_id(child);
 
         if (type == LMD_TYPE_STRING) {
-            String* str = (String*)child.pointer;
+            String* str = child.get_string();
             if (str && str->chars) {
                 stringbuf_append_str(buf, str->chars);
             }
         } else if (type == LMD_TYPE_ELEMENT) {
-            Element* child_elem = (Element*)child.pointer;
+            Element* child_elem = child.element;
             extract_text_recursive(buf, child_elem, pool);
         }
     }
@@ -2622,7 +2614,7 @@ static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, 
     if (elem->items && elem->length > 0) {
         TypeId content_type = get_type_id(elem->items[0]);
         if (content_type == LMD_TYPE_STRING) {
-            String* env_name = (String*)elem->items[0].pointer;
+            String* env_name = elem->items[0].get_string();
             if (env_name && env_name->chars && env_name->len > 0) {
                 if (strcmp(env_name->chars, "document") == 0) {
                     doc_state.in_document = true;
@@ -2743,7 +2735,7 @@ static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int 
             TypeId child_type = get_type_id(child);
 
             if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child.pointer;
+                Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView child_name = ((TypeElmt*)child_elem->type)->name;
                     if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
@@ -2770,7 +2762,7 @@ static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, in
             TypeId child_type = get_type_id(child);
 
             if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child.pointer;
+                Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView child_name = ((TypeElmt*)child_elem->type)->name;
                     if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
@@ -2800,7 +2792,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
             TypeId child_type = get_type_id(child);
 
             if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child.pointer;
+                Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView child_name = ((TypeElmt*)child_elem->type)->name;
                     if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
@@ -2811,7 +2803,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
                         if (child_elem->items && child_elem->length > 0) {
                             Item first = child_elem->items[0];
                             if (get_type_id(first) == LMD_TYPE_ELEMENT) {
-                                Element* first_elem = (Element*)first.pointer;
+                                Element* first_elem = first.element;
                                 if (first_elem && first_elem->type) {
                                     StrView name = ((TypeElmt*)first_elem->type)->name;
                                     if (name.length == 5 && strncmp(name.str, "label", 5) == 0) {
@@ -2830,7 +2822,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
                                 Item lbl_child = label_elem->items[j];
                                 TypeId lbl_type = get_type_id(lbl_child);
                                 if (lbl_type == LMD_TYPE_STRING) {
-                                    String* str = (String*)lbl_child.pointer;
+                                    String* str = lbl_child.get_string();
                                     if (str && str->len > 0) {
                                         append_escaped_text(html_buf, str->chars);
                                     }
@@ -2851,7 +2843,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
                             TypeId content_type = get_type_id(content);
 
                             if (content_type == LMD_TYPE_STRING) {
-                                String* str = (String*)content.pointer;
+                                String* str = content.get_string();
                                 if (str && str->len > 0) {
                                     if (!in_paragraph) {
                                         stringbuf_append_str(html_buf, "<p>");
@@ -2861,7 +2853,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
                                     append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
                                 }
                             } else if (content_type == LMD_TYPE_ELEMENT) {
-                                Element* content_elem = (Element*)content.pointer;
+                                Element* content_elem = content.element;
                                 if (content_elem && content_elem->type) {
                                     StrView name = ((TypeElmt*)content_elem->type)->name;
 
@@ -2882,7 +2874,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
                                             TypeId tb_type = get_type_id(tb_child);
 
                                             if (tb_type == LMD_TYPE_STRING) {
-                                                String* str = (String*)tb_child.pointer;
+                                                String* str = tb_child.get_string();
                                                 if (str && str->len > 0) {
                                                     if (!in_paragraph) {
                                                         stringbuf_append_str(html_buf, "<p>");
@@ -2892,7 +2884,7 @@ static void process_description(StringBuf* html_buf, Element* elem, Pool* pool, 
                                                     append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
                                                 }
                                             } else if (tb_type == LMD_TYPE_ELEMENT) {
-                                                Element* tb_elem = (Element*)tb_child.pointer;
+                                                Element* tb_elem = tb_child.element;
                                                 if (tb_elem && tb_elem->type) {
                                                     StrView tb_name = ((TypeElmt*)tb_elem->type)->name;
                                                     if ((tb_name.length == 8 && strncmp(tb_name.str, "parbreak", 8) == 0) ||
@@ -3070,7 +3062,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
         Item first_child = elem->items[0];
         TypeId first_type = get_type_id(first_child);
         if (first_type == LMD_TYPE_ELEMENT) {
-            Element* first_elem = (Element*)first_child.pointer;
+            Element* first_elem = first_child.element;
             if (first_elem && first_elem->type) {
                 StrView name = ((TypeElmt*)first_elem->type)->name;
                 if (name.length == 5 && strncmp(name.str, "label", 5) == 0) {
@@ -3093,7 +3085,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
             Item label_child = label_elem->items[i];
             TypeId child_type = get_type_id(label_child);
             if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)label_child.pointer;
+                Element* child_elem = label_child.element;
                 if (child_elem && child_elem->type) {
                     StrView name = ((TypeElmt*)child_elem->type)->name;
                     if ((name.length == 7 && strncmp(name.str, "itshape", 7) == 0) ||
@@ -3122,7 +3114,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
             TypeId child_type = get_type_id(label_child);
 
             if (child_type == LMD_TYPE_STRING) {
-                String* str = (String*)label_child.pointer;
+                String* str = label_child.get_string();
                 if (str && str->len > 0) {
                     // Check if we need to open a font span
                     if (has_font_commands && !font_span_open) {
@@ -3148,7 +3140,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
                     }
                 }
             } else if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)label_child.pointer;
+                Element* child_elem = label_child.element;
                 if (child_elem && child_elem->type) {
                     StrView name = ((TypeElmt*)child_elem->type)->name;
 
@@ -3210,7 +3202,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
             Item child = elem->items[i];
             TypeId child_type = get_type_id(child);
             if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child.pointer;
+                Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView name = ((TypeElmt*)child_elem->type)->name;
                     if ((name.length == 8 && strncmp(name.str, "parbreak", 8) == 0) ||
@@ -3232,7 +3224,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
             TypeId child_type = get_type_id(child);
 
             if (child_type == LMD_TYPE_STRING) {
-                String* str = (String*)child.pointer;
+                String* str = child.get_string();
                 if (str && str->len > 0) {
                     // Start paragraph if not in one
                     if (!in_paragraph) {
@@ -3244,7 +3236,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
                     append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
                 }
             } else if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child.pointer;
+                Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView name = ((TypeElmt*)child_elem->type)->name;
 
@@ -3287,7 +3279,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
                             TypeId tb_type = get_type_id(tb_child);
 
                             if (tb_type == LMD_TYPE_STRING) {
-                                String* str = (String*)tb_child.pointer;
+                                String* str = tb_child.get_string();
                                 if (str && str->len > 0) {
                                     if (!in_paragraph) {
                                         stringbuf_append_str(html_buf, "<p>");
@@ -3297,7 +3289,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
                                     append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
                                 }
                             } else if (tb_type == LMD_TYPE_ELEMENT) {
-                                Element* tb_elem = (Element*)tb_child.pointer;
+                                Element* tb_elem = tb_child.element;
                                 if (tb_elem && tb_elem->type) {
                                     StrView tb_name = ((TypeElmt*)tb_elem->type)->name;
                                     if ((tb_name.length == 8 && strncmp(tb_name.str, "parbreak", 8) == 0) ||
