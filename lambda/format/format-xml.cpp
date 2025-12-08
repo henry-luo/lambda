@@ -338,8 +338,6 @@ String* format_xml(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     XmlContext ctx(ctx_pool, sb);
 
-    printf("format_xml: root_item %p\n", (void*)root_item.pointer);
-
     ItemReader reader(root_item.to_const());
 
     // Check if we have a document structure with multiple children (XML declaration + root element)

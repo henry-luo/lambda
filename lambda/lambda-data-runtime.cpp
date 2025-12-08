@@ -41,15 +41,15 @@ Item array_get(Array *array, int index) {
     Item item = array->items[index];
     switch (item._type_id) {
     case LMD_TYPE_INT64: {
-        int64_t lval = *(int64_t*)item.pointer;
+        int64_t lval = item.get_int64();
         return push_l(lval); // need to push to num_stack, as long values are not ref counted
     }
     case LMD_TYPE_FLOAT: {
-        double dval = *(double*)item.pointer;
+        double dval = item.get_double();
         return push_d(dval); // need to push to num_stack, as float values are not ref counted
     }
     case LMD_TYPE_DTIME: {
-        DateTime dtval = *(DateTime*)item.pointer;
+        DateTime dtval = item.get_datetime();
         return push_k(dtval); // need to push to num_stack, as datetime values are not ref counted
     }
     default:
@@ -97,7 +97,7 @@ Item array_int_get(ArrayInt *array, int index) {
         return ItemNull;  // return null instead of error
     }
     int val = array->items[index];
-    Item item = (Item){.int_val = val, ._type = LMD_TYPE_INT};
+    Item item = (Item){.int_val = val, ._type_id = LMD_TYPE_INT};
     log_debug("array_int_get returning: type: %d, int_val: %d", item._type_id, item.int_val);
     return item;
 }
@@ -216,10 +216,10 @@ void array_float_set_item(ArrayFloat *arr, int index, Item value) {
     // Convert item to double based on its type
     switch (type_id) {
         case LMD_TYPE_FLOAT:
-            dval = *(double*)value.pointer;
+            dval = value.get_double();
             break;
         case LMD_TYPE_INT64:
-            dval = (double)(*(int64_t*)value.pointer);
+            dval = (double)(value.get_int64());
             break;
         case LMD_TYPE_INT:
             dval = (double)(value.int_val);
@@ -281,11 +281,11 @@ Item list_get(List *list, int index) {
     Item item = list->items[index];
     switch (item._type_id) {
     case LMD_TYPE_INT64: {
-        int64_t lval = *(int64_t*)item.pointer;
+        int64_t lval = item.get_int64();
         return push_l(lval);
     }
     case LMD_TYPE_FLOAT: {
-        double dval = *(double*)item.pointer;
+        double dval = item.get_double();
         return push_d(dval);
     }
     default:
@@ -402,7 +402,7 @@ Item map_get(Map* map, Item key) {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = ((String*)key.pointer)->chars;
+        key_str = key.get_string()->chars;
     } else {
         log_error("map_get: key must be string or symbol, got type %d", key._type_id);
         return ItemNull;  // only string or symbol keys are supported
@@ -446,7 +446,7 @@ Item elmt_get(Element* elmt, Item key) {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = ((String*)key.pointer)->chars;
+        key_str = key.get_string()->chars;
     } else {
         return ItemNull;  // only string or symbol keys are supported
     }
@@ -480,7 +480,7 @@ Item item_at(Item data, int index) {
         return list_get(data.element, index);
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
-        String *str = (String*)data.pointer;
+        String *str = data.get_string();
         if (index < 0 || index >= str->len) { return ItemNull; }
         // return a single character string
         char buf[2] = {str->chars[index], '\0'};

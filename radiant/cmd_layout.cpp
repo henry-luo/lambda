@@ -66,15 +66,12 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
         log_debug("No input or root available for DOCTYPE detection");
         return HTML5;
     }
-
     log_debug("Detecting HTML version from Lambda Element tree");
-
     // The input->root contains the full parsed tree including DOCTYPE
     // It's typically a List containing multiple items (DOCTYPE, html element, etc.)
     TypeId root_type = get_type_id(input->root);
-
     if (root_type == LMD_TYPE_LIST) {
-        List* root_list = (List*)input->root.pointer;
+        List* root_list = input->root.list;
         log_debug("Examining root list with %lld items", root_list->length);
 
         // Search through the list for DOCTYPE element
@@ -83,7 +80,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
             TypeId item_type = get_type_id(item);
 
             if (item_type == LMD_TYPE_ELEMENT) {
-                Element* elem = (Element*)item.pointer;
+                Element* elem = item.element;
                 TypeElmt* type = (TypeElmt*)elem->type;
 
                 // Check for DOCTYPE element (case-insensitive)
@@ -94,7 +91,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                     if (elem->length > 0) {
                         Item first_child = elem->items[0];
                         if (get_type_id(first_child) == LMD_TYPE_STRING) {
-                            String* doctype_content = (String*)first_child.pointer;
+                            String* doctype_content = (String*)first_child.string_ptr;
                             const char* content = doctype_content->chars;
 
                             log_debug("DOCTYPE content: '%s'", content);
@@ -219,7 +216,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
         TypeId child_type_id = get_type_id(child_item);
 
         if (child_type_id == LMD_TYPE_ELEMENT) {
-            Element* html_child = (Element*)child_item.pointer;
+            Element* html_child = child_item.element;
 
             // Skip HTML comments and DOCTYPE - they are stored as DomComment nodes
             // in the DOM tree, not DomElement, so we just skip them here.
@@ -268,20 +265,16 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
  */
 Element* get_html_root_element(Input* input) {
     if (!input) return nullptr;
-
-    void* root_ptr = (void*)input->root.pointer;
-    if (!root_ptr) return nullptr;
-
-    List* root_list = (List*)root_ptr;
-
-    // If root is a list, search for HTML element
-    if (root_list->type_id == LMD_TYPE_LIST) {
+    TypeId root_type = get_type_id(input->root);
+    if (root_type == LMD_TYPE_LIST) {
+        // root is a list, search for HTML element
+        List* root_list = input->root.list;
         for (int64_t i = 0; i < root_list->length; i++) {
             Item item = root_list->items[i];
             TypeId item_type = get_type_id(item);
 
             if (item_type == LMD_TYPE_ELEMENT) {
-                Element* elem = (Element*)item.pointer;
+                Element* elem = item.element;
                 TypeElmt* type = (TypeElmt*)elem->type;
 
                 // Skip DOCTYPE and comments (case-insensitive for DOCTYPE)
@@ -291,10 +284,13 @@ Element* get_html_root_element(Input* input) {
                 }
             }
         }
-    } else if (root_list->type_id == LMD_TYPE_ELEMENT) {
-        return (Element*)root_ptr;
     }
-
+    else if (root_type == LMD_TYPE_ELEMENT) {
+        return input->root.element;
+    }
+    else {
+        log_debug("Unexpected root type_id=%d in input", root_type);
+    }
     return nullptr;
 }
 
@@ -325,7 +321,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_linked_stylesheets((Element*)child_item.pointer, engine, base_path, pool);
+            collect_linked_stylesheets(child_item.element, engine, base_path, pool);
         }
     }
 }
@@ -349,7 +345,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
             log_debug("[CSS] <style> child[%lld] type_id=%d", i, type_id);
 
             if (type_id == LMD_TYPE_STRING) {
-                String* css_text = (String*)child_item.pointer;
+                String* css_text = (String*)child_item.string_ptr;
                 log_debug("[CSS] Found STRING child: ptr=%p, len=%d", (void*)css_text, css_text ? css_text->len : -1);
                 if (css_text && css_text->len > 0) {
                     // Log first non-whitespace content
@@ -379,7 +375,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_inline_styles_to_list((Element*)child_item.pointer, engine, pool, stylesheets, count);
+            collect_inline_styles_to_list(child_item.element, engine, pool, stylesheets, count);
         }
     }
 }
@@ -401,7 +397,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* css_text = (String*)child_item.pointer;
+                String* css_text = (String*)child_item.string_ptr;
                 if (css_text && css_text->len > 0) {
                     log_debug("[CSS] Found <style> element with %d bytes of CSS", css_text->len);
 
@@ -420,7 +416,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_inline_styles((Element*)child_item.pointer, engine, pool);
+            collect_inline_styles(child_item.element, engine, pool);
         }
     }
 }
@@ -683,7 +679,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     // Detect HTML version from the original input tree (contains DOCTYPE)
     int detected_version = HTML5;  // Default fallback
-    if (input && input->root.pointer) {
+    if (input) {
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
         log_debug("[Lambda CSS] Detected HTML version: %d", detected_version);
     }

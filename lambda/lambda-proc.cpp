@@ -57,7 +57,7 @@ Item pn_fetch(Item url, Item options) {
         log_debug("fetch url must be a string or symbol, got type %d", url._type_id);
         return ItemError;
     }
-    url_str = (String*)url.pointer;
+    url_str = url.get_string();
 
     // Parse options parameter (similar to JS fetch options)
     FetchConfig config = {
@@ -76,7 +76,7 @@ Item pn_fetch(Item url, Item options) {
     // Helper to create Item from string literal
     auto create_string_item = [](const char* str) -> Item {
         String* string = heap_strcpy((char*)str, strlen(str));
-        return (Item){.pointer = (uint64_t)(uintptr_t)string, ._type_id = LMD_TYPE_STRING};
+        return (Item){.item = s2it(string)};
     };
 
     // Parse options if provided
@@ -88,7 +88,7 @@ Item pn_fetch(Item url, Item options) {
         Item method_key = create_string_item("method");
         Item method_item = map_get(options_map, method_key);
         if (method_item.item && (method_item._type_id == LMD_TYPE_STRING || method_item._type_id == LMD_TYPE_SYMBOL)) {
-            String* method_str = (String*)method_item.pointer;
+            String* method_str = method_item.get_string();
             config.method = method_str->chars;
         }
 
@@ -97,7 +97,7 @@ Item pn_fetch(Item url, Item options) {
         Item body_item = map_get(options_map, body_key);
         if (body_item.item) {
             if (body_item._type_id == LMD_TYPE_STRING || body_item._type_id == LMD_TYPE_SYMBOL) {
-                String* body_str = (String*)body_item.pointer;
+                String* body_str = body_item.get_string();
                 config.body = body_str->chars;
                 config.body_size = body_str->len;
             } else {
@@ -298,7 +298,7 @@ Item pn_cmd(Item cmd, Item args) {
         return ItemError;
     }
 
-    String* cmd_str = (String*)cmd.pointer;
+    String* cmd_str = cmd.get_string();
     if (!cmd_str || cmd_str->len == 0) {
         log_debug("pn_cmd: command string is empty");
         return ItemError;

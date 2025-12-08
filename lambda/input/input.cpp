@@ -114,16 +114,16 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         *(int64_t*)field_ptr = value.int_val;
         break;
     case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = *(int64_t*)value.pointer;
+        *(int64_t*)field_ptr = value.get_int64();
         break;
     case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = *(double*)value.pointer;
+        *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = *(DateTime*)value.pointer;
+        *(DateTime*)field_ptr = value.get_datetime();
         break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
-        *(String**)field_ptr = (String*)value.pointer;
+        *(String**)field_ptr = value.get_string();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
@@ -145,13 +145,13 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         case LMD_TYPE_INT:
             titem.int_val = item.int_val;  break;
         case LMD_TYPE_INT64:
-            titem.long_val = *(int64_t*)item.pointer;  break;
+            titem.long_val = item.get_int64();  break;
         case LMD_TYPE_FLOAT:
-            titem.double_val = *(double*)item.pointer;  break;
+            titem.double_val = item.get_double();  break;
         case LMD_TYPE_DTIME:
-            titem.datetime_val = *(DateTime*)item.pointer;  break;
+            titem.datetime_val = item.get_datetime();  break;
         case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-            String *str = (String*)item.pointer;
+            String *str = item.get_string();
             titem.string = str;
             break;
         }
@@ -221,16 +221,16 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         *(int64_t*)field_ptr = value.int_val;
         break;
     case LMD_TYPE_INT64:
-        *(int64_t*)field_ptr = *(int64_t*)value.pointer;
+        *(int64_t*)field_ptr = value.get_int64();
         break;
     case LMD_TYPE_FLOAT:
-        *(double*)field_ptr = *(double*)value.pointer;
+        *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_DTIME:
-        *(DateTime*)field_ptr = *(DateTime*)value.pointer;
+        *(DateTime*)field_ptr = value.get_datetime();
         break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
-        *(String**)field_ptr = (String*)value.pointer;
+        *(String**)field_ptr = value.get_string();
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {

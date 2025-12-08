@@ -634,7 +634,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_TABLE) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
-                        block->display.outer, block->display.inner, block->node_name());
+                    block->display.outer, block->display.inner, block->node_name());
                 layout_table(lycon, block, block->display);
                 return;
             }

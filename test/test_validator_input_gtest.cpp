@@ -79,13 +79,12 @@ protected:
         str->len = len;
         str->ref_cnt = 0;
         strcpy(str->chars, value);
-
-        Item item = {.pointer = (uint64_t)(uintptr_t)str, ._type_id = LMD_TYPE_STRING};
+        Item item = {.item = s2it(str)};
         return *(ConstItem*)&item;
     }
 
     ConstItem create_int(int value) {
-        Item item = {.int_val = value, ._type = LMD_TYPE_INT};
+        Item item = {.int_val = value, ._type_id = LMD_TYPE_INT};
         return *(ConstItem*)&item;
     }
 

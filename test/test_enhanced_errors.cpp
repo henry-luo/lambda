@@ -55,7 +55,7 @@ TEST_F(EnhancedErrorsTest, TypeMismatchErrorWithSuggestions) {
     Type* string_type = (Type*)pool_calloc(pool, sizeof(Type));
     string_type->type_id = LMD_TYPE_STRING;
 
-    Item int_item = {.int_val = 42, ._type = LMD_TYPE_INT};
+    Item int_item = {.int_val = 42, ._type_id = LMD_TYPE_INT};
 
     PathSegment* path = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
     path->type = PATH_FIELD;

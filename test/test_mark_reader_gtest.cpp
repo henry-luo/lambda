@@ -104,10 +104,9 @@ TEST_F(MarkReaderTest, ItemReaderBool) {
 TEST_F(MarkReaderTest, ItemReaderTypeMismatch) {
     Item str_item = builder->createStringItem("test");
     ItemReader reader(str_item.to_const());
-
     // Type mismatches should return defaults
     EXPECT_EQ(reader.asInt(), 0);
-    EXPECT_EQ(reader.asFloat(), 0.0);
+    EXPECT_TRUE(isnan(reader.asFloat()));
     EXPECT_FALSE(reader.asBool());
 }
 

@@ -10,7 +10,7 @@ typedef struct Item {
         struct {
             int int_val: 32;
             uint32_t _24: 24;
-            uint32_t _type: 8;
+            uint32_t _type_id: 8;
         };
         struct {
             uint64_t bool_val: 8;
@@ -18,9 +18,32 @@ typedef struct Item {
         };
         // uses the high byte to tag the item/pointer, defined for little-endian
         struct {
-            // don't use pointer to access containers like list, map, element, use direct container* instead
-            uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
-            uint64_t _type_id : 8;
+            uint64_t int64_ptr: 56;  // tagged pointer to long value
+            uint64_t _8_l: 8;
+        };
+        struct {
+            uint64_t double_ptr: 56;  // tagged pointer to double value
+            uint64_t _8_d: 8;
+        };
+        struct {
+            uint64_t decimal_ptr: 56;  // tagged pointer to decimal value
+            uint64_t _8_c: 8;
+        };
+        struct {
+            uint64_t string_ptr: 56;  // tagged pointer to String
+            uint64_t _8_s: 8;
+        };
+        struct {
+            uint64_t symbol_ptr: 56;  // tagged pointer to Symbol
+            uint64_t _8_y: 8;
+        };
+        struct {
+            uint64_t datetime_ptr: 56;  // tagged pointer to Datetime
+            uint64_t _8_k: 8;
+        };
+        struct {
+            uint64_t binary_ptr: 56;  // tagged pointer to Binary
+            uint64_t _8_x: 8;
         };
         // raw 64-bit value
         uint64_t item;
@@ -50,6 +73,15 @@ typedef struct Item {
     }
 
     inline ConstItem to_const() const;
+
+    // get raw value out of an Item
+    inline double get_double() const{ return *(double*)this->double_ptr; }
+    inline int64_t get_int64() const { return *(int64_t*)this->int64_ptr; }
+    inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
+    inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
+    inline String* get_string() const { return (String*)this->string_ptr; }
+    inline String* get_symbol() const { return (String*)this->symbol_ptr; }
+    inline String* get_binary() const{ return (String*)this->binary_ptr; }
 } Item;
 
 // const read-only item
@@ -83,7 +115,7 @@ struct ConstItem {
 
     inline String* string() const {
         Item* itm = (Item*)this;
-        return (itm->_type_id == LMD_TYPE_STRING) ? (String*)itm->pointer : nullptr;
+        return (itm->_type_id == LMD_TYPE_STRING) ? (String*)itm->string_ptr : nullptr;
     }
 };
 
