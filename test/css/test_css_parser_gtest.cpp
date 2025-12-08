@@ -2,6 +2,7 @@
 #include "../../lambda/input/css/css_tokenizer.hpp"
 #include "../../lambda/input/css/css_value_parser.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/input/css/css_engine.hpp"
 #include "../../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
@@ -71,4 +72,75 @@ TEST_F(CssParserTest, ParseMultipleRules) {
 TEST_F(CssParserTest, ParseInvalidCSS) {
     const char* css = "invalid { css } syntax";
     validateTokenization(css, 3); // Should still tokenize even if semantically invalid
+}
+
+// ============================================================================
+// CSS Engine Stylesheet Parsing Tests
+// ============================================================================
+
+class CssEngineParserTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    CssEngine* engine;
+
+    void SetUp() override {
+        pool = pool_create();
+        ASSERT_NE(pool, nullptr) << "Failed to create memory pool";
+        engine = css_engine_create(pool);
+        ASSERT_NE(engine, nullptr) << "Failed to create CSS engine";
+    }
+
+    void TearDown() override {
+        if (engine) {
+            css_engine_destroy(engine);
+        }
+        if (pool) {
+            pool_destroy(pool);
+        }
+    }
+};
+
+TEST_F(CssEngineParserTest, ParseEmptyStylesheet) {
+    const char* css = "";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL";
+    EXPECT_EQ(stylesheet->rule_count, 0) << "Empty stylesheet should have 0 rules";
+}
+
+TEST_F(CssEngineParserTest, ParseWhitespaceOnlyStylesheet) {
+    const char* css = "   \n\t  \r\n  ";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL";
+    EXPECT_EQ(stylesheet->rule_count, 0) << "Whitespace-only stylesheet should have 0 rules";
+}
+
+TEST_F(CssEngineParserTest, ParseSimpleStyleRule) {
+    const char* css = "body { color: red; }";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL";
+    EXPECT_GT(stylesheet->rule_count, 0) << "Should have at least 1 rule";
+
+    if (stylesheet->rule_count > 0) {
+        CssRule* rule = stylesheet->rules[0];
+        ASSERT_NE(rule, nullptr) << "Rule should not be NULL";
+    }
+}
+
+TEST_F(CssEngineParserTest, ParseMultipleRules) {
+    const char* css = "body { color: red; } div { margin: 10px; }";
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL";
+    EXPECT_GE(stylesheet->rule_count, 1) << "Should have at least 1 rule";
+}
+
+TEST_F(CssEngineParserTest, ParseInvalidCSS) {
+    const char* css = "body { color: ; }"; // Missing value
+    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, nullptr);
+
+    // Should still create a stylesheet even with invalid CSS
+    ASSERT_NE(stylesheet, nullptr) << "Stylesheet should not be NULL even with invalid CSS";
 }
