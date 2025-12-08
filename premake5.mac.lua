@@ -5171,7 +5171,7 @@ project "test_css_tokenizer_unit"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_tokenizer_unit.cpp",
+        "test/css/test_css_tokenizer_unit.cpp",
     }
     
     includedirs {
@@ -5273,7 +5273,7 @@ project "test_css_parser_unit"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_parser_unit.cpp",
+        "test/css/test_css_parser_unit.cpp",
     }
     
     includedirs {
@@ -5375,7 +5375,7 @@ project "test_css_engine_unit"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_engine_unit.cpp",
+        "test/css/test_css_engine_unit.cpp",
     }
     
     includedirs {
@@ -5477,7 +5477,7 @@ project "test_css_engine_negative"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_engine_negative.cpp",
+        "test/css/test_css_engine_negative.cpp",
     }
     
     includedirs {
@@ -5579,7 +5579,7 @@ project "test_css_formatter_unit"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_formatter_unit.cpp",
+        "test/css/test_css_formatter_unit.cpp",
     }
     
     includedirs {
@@ -5681,7 +5681,7 @@ project "test_css_roundtrip_unit"
     targetextension ".exe"
     
     files {
-        "test/css/unit/test_css_roundtrip_unit.cpp",
+        "test/css/test_css_roundtrip_unit.cpp",
     }
     
     includedirs {

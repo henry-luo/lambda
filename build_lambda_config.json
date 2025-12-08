@@ -1666,7 +1666,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_css_tokenizer_unit.cpp",
+            "source": "test/css/test_css_tokenizer_unit.cpp",
             "name": "CSS Tokenizer Unit Tests (Comprehensive)",
             "dependencies": [
               "lambda-input-full"
@@ -1680,7 +1680,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_css_parser_unit.cpp",
+            "source": "test/css/test_css_parser_unit.cpp",
             "name": "CSS Parser Unit Tests (Comprehensive)",
             "dependencies": [
               "lambda-input-full"
@@ -1694,7 +1694,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_css_engine_unit.cpp",
+            "source": "test/css/test_css_engine_unit.cpp",
             "name": "CSS Engine Unit Tests (Comprehensive)",
             "dependencies": [
               "lambda-input-full"
@@ -1708,7 +1708,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_css_engine_negative.cpp",
+            "source": "test/css/test_css_engine_negative.cpp",
             "name": "CSS Engine Negative Tests (Error Handling)",
             "dependencies": [
               "lambda-input-full"
@@ -1722,7 +1722,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_dom_element_print.cpp",
+            "source": "test/css/test_dom_element_print.cpp",
             "name": "DOM Element Print Tests",
             "dependencies": [
               "lambda-input-full"
@@ -1749,7 +1749,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_css_formatter_unit.cpp",
+            "source": "test/css/test_css_formatter_unit.cpp",
             "name": "CSS Formatter Unit Tests",
             "dependencies": [
               "lambda-input-full"
@@ -1763,7 +1763,7 @@
             "icon": "🎨"
           },
           {
-            "source": "test/css/unit/test_css_roundtrip_unit.cpp",
+            "source": "test/css/test_css_roundtrip_unit.cpp",
             "name": "CSS Roundtrip Unit Tests (Parse→Format→Parse)",
             "dependencies": [
               "lambda-input-full"
