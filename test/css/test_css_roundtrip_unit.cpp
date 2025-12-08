@@ -19,7 +19,7 @@
  */
 
 #include <gtest/gtest.h>
-#include "../helpers/css_test_helpers.hpp"
+#include "helpers/css_test_helpers.hpp"
 
 extern "C" {
 #include "lambda/input/css/css_formatter.hpp"
