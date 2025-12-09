@@ -12,7 +12,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-DomDocument* load_html_doc(Url* base, const char* doc_url);
+DomDocument* load_html_doc(Url* base, const char* doc_url, int viewport_width, int viewport_height);
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -729,9 +729,11 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         } else {
             save_surface_to_png(rdcon.ui_context->surface, output_file);
         }
-    } else {
-        save_surface_to_png(rdcon.ui_context->surface, "output.png");
     }
+    // Commented out debug PNG saving - uncomment if you need to debug rendering
+    // else {
+    //     save_surface_to_png(rdcon.ui_context->surface, "output.png");
+    // }
 
     render_clean_up(&rdcon);
     if (uicon->document->state) {
