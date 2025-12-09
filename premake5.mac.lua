@@ -328,6 +328,7 @@ project "lambda"
         "radiant/ui_context.cpp",
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
+        "radiant/block_context.cpp",
         "radiant/layout_inline.cpp",
         "radiant/layout_text.cpp",
         "radiant/layout_positioned.cpp",
