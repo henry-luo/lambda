@@ -313,11 +313,19 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
 // Calculate final cell height from content, padding, border
 static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, ViewTable* table,
                                   float content_height, float explicit_height) {
-    if (explicit_height > 0) {
+    // CSS 2.1 §17.5.3: Cell height includes content, padding, and border
+    // The CSS 'height' property sets the content height (content-box) or total height (border-box)
+
+    // Check box-sizing mode
+    bool is_border_box = (tcell->blk && tcell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+
+    if (explicit_height > 0 && is_border_box) {
+        // In border-box mode, explicit height already includes padding and border
         return explicit_height;
     }
 
-    float cell_height = content_height;
+    // Start with content height or explicit height (whichever applies)
+    float cell_height = (explicit_height > 0) ? explicit_height : content_height;
 
     // Add padding
     if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
