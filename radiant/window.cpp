@@ -7,12 +7,14 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
+#include <strings.h>  // for strcasecmp
 #include "../lib/log.h"
 #include "layout.hpp"
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
-DomDocument* load_html_doc(Url* base, char* doc_filename);
+DomDocument* load_html_doc(Url* base, char* doc_filename, int viewport_width, int viewport_height);
+DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
@@ -20,16 +22,90 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
-// Forward declaration for internal function
-int window_main_with_file(const char* html_file);
+// Document format detection
+typedef enum {
+    DOC_FORMAT_UNKNOWN,
+    DOC_FORMAT_HTML,
+    DOC_FORMAT_MARKDOWN,
+    DOC_FORMAT_XML,
+    DOC_FORMAT_RST
+} DocFormat;
+
+// Detect document format from file extension
+static DocFormat detect_doc_format(const char* filename) {
+    if (!filename) return DOC_FORMAT_UNKNOWN;
+    
+    const char* ext = strrchr(filename, '.');
+    if (!ext) return DOC_FORMAT_UNKNOWN;
+    
+    ext++; // skip the '.'
+    
+    if (strcasecmp(ext, "html") == 0 || strcasecmp(ext, "htm") == 0) {
+        return DOC_FORMAT_HTML;
+    } else if (strcasecmp(ext, "md") == 0 || strcasecmp(ext, "markdown") == 0) {
+        return DOC_FORMAT_MARKDOWN;
+    } else if (strcasecmp(ext, "xml") == 0) {
+        return DOC_FORMAT_XML;
+    } else if (strcasecmp(ext, "rst") == 0) {
+        return DOC_FORMAT_RST;
+    }
+    
+    return DOC_FORMAT_UNKNOWN;
+}
+
+// Load document based on detected format
+static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool) {
+    DocFormat format = detect_doc_format(filename);
+    
+    switch (format) {
+        case DOC_FORMAT_HTML:
+            log_debug("Loading as HTML document");
+            return load_html_doc(base_url, (char*)filename, width, height);
+            
+        case DOC_FORMAT_MARKDOWN: {
+            log_debug("Loading as Markdown document");
+            Url* doc_url = url_parse_with_base(filename, base_url);
+            if (!doc_url) {
+                log_error("Failed to parse document URL: %s", filename);
+                return NULL;
+            }
+            DomDocument* doc = load_markdown_doc(doc_url, width, height, pool);
+            return doc;
+        }
+        
+        case DOC_FORMAT_XML:
+            log_warn("XML format not yet implemented, treating as HTML");
+            return load_html_doc(base_url, (char*)filename, width, height);
+            
+        case DOC_FORMAT_RST:
+            log_warn("RST format not yet implemented");
+            return NULL;
+            
+        default:
+            log_error("Unknown document format for file: %s", filename);
+            return NULL;
+    }
+}
+
+// Get human-readable format name for window title
+static const char* get_format_name(const char* filename) {
+    DocFormat format = detect_doc_format(filename);
+    switch (format) {
+        case DOC_FORMAT_HTML: return "HTML";
+        case DOC_FORMAT_MARKDOWN: return "Markdown";
+        case DOC_FORMAT_XML: return "XML";
+        case DOC_FORMAT_RST: return "RST";
+        default: return "Document";
+    }
+}
 
 // Window dimensions
 bool do_redraw = false;
 UiContext ui_context;
 
-DomDocument* show_html_doc(Url* base, char* doc_url) {
+DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height) {
     log_debug("Showing HTML document %s", doc_url);
-    DomDocument* doc = load_html_doc(base, doc_url);
+    DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height);
     ui_context.document = doc;
     // layout html doc
     if (doc->root) {
@@ -250,7 +326,7 @@ int run_layout(const char* html_file) {
 
     // Load HTML document
     log_debug("Loading HTML document...");
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, ui_context.window_width, ui_context.window_height);
     if (!doc) {
         log_error("Error: Could not load HTML file: %s", html_file);
         url_destroy(cwd);
@@ -272,9 +348,8 @@ int run_layout(const char* html_file) {
     return 0;
 }
 
-// Internal function that accepts an optional HTML file to display
-int view_html_in_window(const char* html_file) {
-    // Original GUI mode
+// Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
+int view_doc_in_window(const char* doc_file) {
     log_init_wrapper();
     ui_context_init(&ui_context, false);
     GLFWwindow* window = ui_context.window;
@@ -302,27 +377,60 @@ int view_html_in_window(const char* html_file) {
     glfwGetFramebufferSize(window, &width, &height);
     framebuffer_size_callback(window, width, height);
 
-    // set up the FPS
-    double lastTime = glfwGetTime();
-    double deltaTime = 0.0;
-    int frames = 0;
-
     Url* cwd = get_current_dir();
     if (cwd) {
-        // Use provided HTML file or default to test file
-        const char* file_to_load = html_file ? html_file : "test/html/index.html";
-        DomDocument* doc = show_html_doc(cwd, (char*)file_to_load);
+        // Use provided document file or default to test HTML file
+        const char* file_to_load = doc_file ? doc_file : "test/html/index.html";
+        
+        log_debug("Loading document: %s", file_to_load);
+        
+        // Create memory pool for document loading
+        Pool* pool = pool_create();
+        if (!pool) {
+            log_error("Failed to create memory pool for document");
+            url_destroy(cwd);
+            ui_context_cleanup(&ui_context);
+            return -1;
+        }
+        
+        // Load document based on file extension
+        DomDocument* doc = load_doc_by_format(file_to_load, cwd, width, height, pool);
+        if (!doc) {
+            log_error("Failed to load document: %s", file_to_load);
+            pool_destroy(pool);
+            url_destroy(cwd);
+            ui_context_cleanup(&ui_context);
+            return -1;
+        }
+        
+        ui_context.document = doc;
+        
+        // Layout document
+        if (doc->root) {
+            layout_html_doc(&ui_context, doc, false);
+        }
+        
+        // Render document
+        if (doc && doc->view_tree) {
+            render_html_doc(&ui_context, doc->view_tree, NULL);
+        }
+        
         url_destroy(cwd);
-
-        // Set custom window title if HTML file was provided
-        if (html_file && doc) {
+        
+        // Set custom window title with format name
+        if (doc_file) {
             char title[512];
-            snprintf(title, sizeof(title), "Lambda HTML Viewer - %s", html_file);
+            const char* format_name = get_format_name(file_to_load);
+            snprintf(title, sizeof(title), "Lambda %s Viewer - %s", format_name, file_to_load);
             glfwSetWindowTitle(window, title);
         }
     }
 
-    // main loop
+    // Main loop
+    double lastTime = glfwGetTime();
+    double deltaTime = 0.0;
+    int frames = 0;
+    
     while (!glfwWindowShouldClose(window)) {
         // calculate deltaTime
         double currentTime = glfwGetTime();
@@ -344,114 +452,13 @@ int view_html_in_window(const char* html_file) {
         frames++;
     }
 
-    log_info("End of app");
-    ui_context_cleanup(&ui_context);
-    log_cleanup();
-    return 0;
-}
-
-// Function to load and view markdown documents
-// Similar to view_html_in_window but parses markdown first
-int view_markdown_in_window(const char* markdown_file) {
-    log_init_wrapper();
-    ui_context_init(&ui_context, false);
-    GLFWwindow* window = ui_context.window;
-    if (!window) {
-        ui_context_cleanup(&ui_context);
-        return -1;
-    }
-
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);  // enable vsync
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
-
-    glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
-    glfwSetKeyCallback(window, key_callback);
-    glfwSetCharCallback(window, character_callback);
-    glfwSetCursorPosCallback(window, cursor_position_callback);
-    glfwSetMouseButtonCallback(window, mouse_button_callback);
-    glfwSetScrollCallback(window, scroll_callback);
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetWindowRefreshCallback(window, window_refresh_callback);
-
-    glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
-
-    int width, height;
-    glfwGetFramebufferSize(window, &width, &height);
-    framebuffer_size_callback(window, width, height);
-
-    Url* cwd = get_current_dir();
-    if (cwd && markdown_file) {
-        log_debug("Loading markdown file: %s", markdown_file);
-        
-        Pool* pool = pool_create();
-        if (!pool) {
-            log_error("Failed to create memory pool for markdown");
-            url_destroy(cwd);
-            ui_context_cleanup(&ui_context);
-            return -1;
-        }
-        
-        // Parse markdown file URL
-        Url* markdown_url = url_parse_with_base(markdown_file, cwd);
-        if (!markdown_url) {
-            log_error("Failed to parse markdown URL: %s", markdown_file);
-            pool_destroy(pool);
-            url_destroy(cwd);
-            ui_context_cleanup(&ui_context);
-            return -1;
-        }
-        
-        // Load markdown document (parses markdown, builds DOM, applies CSS)
-        DomDocument* doc = load_markdown_doc(markdown_url, width, height, pool);
-        if (!doc) {
-            log_error("Failed to load markdown document: %s", markdown_file);
-            pool_destroy(pool);
-            url_destroy(cwd);
-            ui_context_cleanup(&ui_context);
-            return -1;
-        }
-        
-        ui_context.document = doc;
-        
-        // Layout markdown doc
-        if (doc->root) {
-            layout_html_doc(&ui_context, doc, false);
-        }
-        
-        // Render markdown doc
-        if (doc && doc->view_tree) {
-            render_html_doc(&ui_context, doc->view_tree, NULL);
-        }
-        
-        url_destroy(cwd);
-        
-        // Set custom window title
-        char title[512];
-        snprintf(title, sizeof(title), "Lambda Markdown Viewer - %s", markdown_file);
-        glfwSetWindowTitle(window, title);
-        
-        // Main loop
-        while (!glfwWindowShouldClose(window)) {
-            double currentTime = glfwGetTime();
-            
-            glfwPollEvents();
-            
-            if (do_redraw) {
-                window_refresh_callback(window);
-            }
-            
-            glfwWaitEventsTimeout(1.0 / 60.0);
-        }
-    }
-
-    log_info("End of markdown viewer");
+    log_info("End of document viewer");
     ui_context_cleanup(&ui_context);
     log_cleanup();
     return 0;
 }
 
 int window_main(int argc, char* argv[]) {
-    // render the default index.html
-    return view_html_in_window(NULL);
+    // render the default index.html using unified viewer
+    return view_doc_in_window(NULL);
 }

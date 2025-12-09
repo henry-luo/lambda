@@ -372,7 +372,7 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
 
     // Load HTML document
     log_debug("Loading HTML document: %s", html_file);
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
     if (!doc) {
         log_debug("Could not load HTML file: %s", html_file);
         url_destroy(cwd);
