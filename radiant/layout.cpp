@@ -471,10 +471,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // Don't pre-set html->height - let it be determined by content (auto height)
     // The viewport height will be used for scrollbar calculations via scroller->viewport_height
     lycon->doc->view_tree->root = (View*)html;  lycon->elmt = elmt;
-    // default html styles
-    html->scroller = alloc_scroll_prop(lycon);
-    html->scroller->overflow_x = CSS_VALUE_AUTO;
-    html->scroller->overflow_y = CSS_VALUE_AUTO;
+
     // html->scroller->viewport_height = lycon->ui_context->window_height;  // For scrollbar calculations
     lycon->block.given_width = lycon->ui_context->window_width;
     // Don't set given_height - let html use auto (content-based) height
