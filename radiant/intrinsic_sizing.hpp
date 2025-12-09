@@ -23,15 +23,15 @@
  * (due to text wrapping).
  */
 struct IntrinsicSizeCache {
-    int min_content_width;   // -1 means not computed
-    int max_content_width;   // -1 means not computed
+    float min_content_width;   // -1 means not computed
+    float max_content_width;   // -1 means not computed
 
     // Height depends on width, so we cache per-width
     // Simple fixed-size cache for common widths
     struct HeightCacheEntry {
-        int width;
-        int min_height;
-        int max_height;
+        float width;
+        float min_height;
+        float max_height;
         bool valid;
     };
     static constexpr int HEIGHT_CACHE_SIZE = 4;
@@ -49,7 +49,7 @@ struct IntrinsicSizeCache {
         }
     }
 
-    int get_min_height_for_width(int width) const {
+    float get_min_height_for_width(float width) const {
         for (int i = 0; i < HEIGHT_CACHE_SIZE; i++) {
             if (height_cache[i].valid && height_cache[i].width == width) {
                 return height_cache[i].min_height;
@@ -58,7 +58,7 @@ struct IntrinsicSizeCache {
         return -1;
     }
 
-    int get_max_height_for_width(int width) const {
+    float get_max_height_for_width(float width) const {
         for (int i = 0; i < HEIGHT_CACHE_SIZE; i++) {
             if (height_cache[i].valid && height_cache[i].width == width) {
                 return height_cache[i].max_height;
@@ -67,7 +67,7 @@ struct IntrinsicSizeCache {
         return -1;
     }
 
-    void set_height_for_width(int width, int min_h, int max_h) {
+    void set_height_for_width(float width, float min_h, float max_h) {
         // Find empty slot or oldest entry to replace
         for (int i = 0; i < HEIGHT_CACHE_SIZE; i++) {
             if (!height_cache[i].valid) {
@@ -114,7 +114,7 @@ struct TextIntrinsicWidths {
  * @param node DOM node to measure
  * @return Min-content width in pixels
  */
-int calculate_min_content_width(LayoutContext* lycon, DomNode* node);
+float calculate_min_content_width(LayoutContext* lycon, DomNode* node);
 
 /**
  * Calculate max-content width for any DOM node.
@@ -128,7 +128,7 @@ int calculate_min_content_width(LayoutContext* lycon, DomNode* node);
  * @param node DOM node to measure
  * @return Max-content width in pixels
  */
-int calculate_max_content_width(LayoutContext* lycon, DomNode* node);
+float calculate_max_content_width(LayoutContext* lycon, DomNode* node);
 
 /**
  * Calculate min-content height for a DOM node at a specific width.
@@ -141,7 +141,7 @@ int calculate_max_content_width(LayoutContext* lycon, DomNode* node);
  * @param width Available width for layout
  * @return Min-content height in pixels
  */
-int calculate_min_content_height(LayoutContext* lycon, DomNode* node, int width);
+float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width);
 
 /**
  * Calculate max-content height for a DOM node at a specific width.
@@ -153,7 +153,7 @@ int calculate_min_content_height(LayoutContext* lycon, DomNode* node, int width)
  * @param width Available width for layout
  * @return Max-content height in pixels
  */
-int calculate_max_content_height(LayoutContext* lycon, DomNode* node, int width);
+float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width);
 
 /**
  * Calculate fit-content width.
@@ -166,7 +166,7 @@ int calculate_max_content_height(LayoutContext* lycon, DomNode* node, int width)
  * @param available_width Available width constraint
  * @return Fit-content width in pixels
  */
-int calculate_fit_content_width(LayoutContext* lycon, DomNode* node, int available_width);
+float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width);
 
 // ============================================================================
 // Low-Level Measurement Helpers
