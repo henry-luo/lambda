@@ -1335,7 +1335,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 }
             }
 
-            Blockbox saved_block = lycon->block;
+            BlockContext saved_block = lycon->block;
             Linebox saved_line = lycon->line;
 
             int caption_width = lycon->line.right - lycon->line.left;
@@ -1649,7 +1649,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     // No need to clear text rectangles - this is the first and only layout pass!
 
     // Save layout context to restore later
-    Blockbox saved_block = lycon->block;
+    BlockContext saved_block = lycon->block;
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
     FontBox saved_font = lycon->font;
@@ -1793,7 +1793,7 @@ static float measure_cell_intrinsic_width(LayoutContext* lycon, ViewTableCell* c
     if (!cell_elem->first_child) return 20.0f; // Empty cell minimum
 
     // Save current layout context
-    Blockbox saved_block = lycon->block;
+    BlockContext saved_block = lycon->block;
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
     bool saved_measuring = lycon->is_measuring;
@@ -1913,7 +1913,7 @@ static float measure_cell_minimum_width(LayoutContext* lycon, ViewTableCell* cel
     if (!cell_elem->first_child) return 16.0f; // Empty cell
 
     // Save current layout context
-    Blockbox saved_block = lycon->block;
+    BlockContext saved_block = lycon->block;
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
     bool saved_measuring = lycon->is_measuring;

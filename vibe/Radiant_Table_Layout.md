@@ -96,7 +96,7 @@ Per CSS 2.1 table model, define display mapping and insertion of anonymous boxes
 
 - Steps:
   1. **Dispatch**: Extend `layout_flow_node()` to detect table display and call `layout_table()`.
-  2. **Table box sizing**: Determine table available width from parent like a block-level box (`Blockbox` mechanics, `box-sizing` honored). Content width is initially unknown.
+  2. **Table box sizing**: Determine table available width from parent like a block-level box (`BlockContext` mechanics, `box-sizing` honored). Content width is initially unknown.
   3. **Column discovery**: From first row (`tr`) or from explicit `colgroup`/`col` widths, infer the number of columns and initial preferred widths per column.
   4. **Intrinsic width collection (auto layout)**:
      - For each cell, perform a child layout pass constrained to an upper bound (infinite or parent constraint) to obtain the cell min-content and max-content widths (approximation acceptable in MVP: use measured child width after normal flow as both min/max to simplify).

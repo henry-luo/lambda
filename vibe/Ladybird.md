@@ -32,7 +32,7 @@ struct LayoutState {
 // Radiant directly modifies view objects during layout
 typedef struct LayoutContext {
     View* view;
-    Blockbox block;  // current state embedded in context
+    BlockContext block;  // current state embedded in context
     Linebox line;
     // ...
 } LayoutContext;

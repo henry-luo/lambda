@@ -68,7 +68,7 @@ struct LayoutContext {
     ViewGroup* view;         // Current view being processed
     DomElement* elmt;        // Current DOM element
 
-    Blockbox block;          // Block formatting context state
+    BlockContext block;          // Block formatting context state
     Linebox line;            // Inline formatting context state
     FontBox font;            // Current font state
 
@@ -80,12 +80,12 @@ struct LayoutContext {
 };
 ```
 
-### 2.2 Blockbox (Block Formatting Context)
+### 2.2 BlockContext (Block Formatting Context)
 
 Tracks vertical layout state:
 
 ```cpp
-struct Blockbox {
+struct BlockContext {
     float content_width;     // Available content width
     float content_height;    // Current content height
     float advance_y;         // Current vertical position
@@ -191,7 +191,7 @@ switch (display.inner) {
 **Entry:** `layout_block_content()` in `layout_block.cpp`
 
 **Algorithm:**
-1. Initialize Blockbox with container width
+1. Initialize BlockContext with container width
 2. For each child:
    - If block-level: stack vertically, advance `advance_y`
    - If inline-level: delegate to inline layout
@@ -390,7 +390,7 @@ GridProp* alloc_grid_prop(LayoutContext* lycon);
 
 | File | Purpose |
 |------|---------|
-| `layout.hpp` | Core structures (LayoutContext, Blockbox, Linebox) |
+| `layout.hpp` | Core structures (LayoutContext, BlockContext, Linebox) |
 | `view.hpp` | View hierarchy, property structures, type enums |
 | `layout.cpp` | Common layout utilities (line height, style resolution) |
 | `layout_block.cpp` | Block layout algorithm, layout dispatch |

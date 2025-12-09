@@ -2,7 +2,7 @@
  * BlockContext - Unified Block Formatting Context Implementation
  *
  * This module implements the unified BlockContext API that combines:
- * - Layout state management (from Blockbox)
+ * - Layout state management (from BlockContext)
  * - Float tracking and positioning (from FloatContext + BlockFormattingContext)
  * - BFC hierarchy management
  *

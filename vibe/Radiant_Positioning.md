@@ -10,7 +10,7 @@ This document outlines the implementation plan for CSS float, absolute, and rela
 Based on analysis of `layout_text.cpp` and `layout_block.cpp`, Radiant uses:
 
 1. **Block Layout Context (`LayoutContext`)**:
-   - `Blockbox` manages block-level positioning and dimensions
+   - `BlockContext` manages block-level positioning and dimensions
    - `Linebox` handles inline flow and text positioning
    - `advance_y` tracks vertical progression through document flow
 

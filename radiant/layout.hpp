@@ -47,7 +47,7 @@ typedef struct FloatAvailableSpace {
  * BlockContext - Unified Block Formatting Context
  *
  * Combines the functionality of:
- * - Blockbox (layout state)
+ * - BlockContext (layout state)
  * - FloatContext (legacy float management)
  * - BlockFormattingContext (new BFC system)
  *
@@ -63,7 +63,7 @@ typedef struct FloatAvailableSpace {
  */
 typedef struct BlockContext {
     // =========================================================================
-    // Layout State (from Blockbox)
+    // Layout State (from BlockContext)
     // =========================================================================
     float content_width;        // Computed content width for inner content
     float content_height;       // Computed content height for inner content
@@ -116,9 +116,6 @@ typedef struct BlockContext {
     Pool* pool;                 // Memory pool for float allocations
 } BlockContext;
 
-// Backwards compatibility alias
-typedef BlockContext Blockbox;
-
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
     float effective_left;             // float-adjusted left bound
@@ -148,7 +145,7 @@ typedef enum LineFillStatus {
 } LineFillStatus;
 
 // Stacking context for absolute/fixed positioned elements
-// typedef struct StackingBox : Blockbox {
+// typedef struct StackingBox : BlockContext {
 //     ViewBlock* establishing_element;  // element that creates the context
 //     int z_index;                     // z-index of this context
 //     struct StackingBox* parent;       // parent stacking context
