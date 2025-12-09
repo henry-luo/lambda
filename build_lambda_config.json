@@ -2143,6 +2143,17 @@
             "requires_nodejs": true,
             "requires_lambda_exe": true,
             "icon": "🎨"
+          },
+          {
+            "source": "test/test_view_cmd_gtest.cpp",
+            "name": "Lambda View Command Tests",
+            "dependencies": [],
+            "binary": "test_view_cmd_gtest.exe",
+            "libraries": [
+              "gtest"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "👁️"
           }
         ],
         "type": "layout",
