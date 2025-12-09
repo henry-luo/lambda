@@ -1,0 +1,433 @@
+/**
+ * GitHub-like Markdown Stylesheet
+ * For Lambda markdown document viewer
+ * Based on GitHub's markdown rendering styles
+ */
+
+/* Base document styling */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    color: #24292f;
+    background-color: #ffffff;
+    padding: 32px;
+    max-width: 980px;
+    margin: 0 auto;
+    word-wrap: break-word;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: #24292f;
+}
+
+h1 {
+    font-size: 2em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #d0d7de;
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+h2 {
+    font-size: 1.5em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #d0d7de;
+}
+
+h3 {
+    font-size: 1.25em;
+}
+
+h4 {
+    font-size: 1em;
+}
+
+h5 {
+    font-size: 0.875em;
+}
+
+h6 {
+    font-size: 0.85em;
+    color: #57606a;
+}
+
+/* Paragraphs */
+p {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+/* Links */
+a {
+    color: #0969da;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+a:visited {
+    color: #8250df;
+}
+
+/* Lists */
+ul, ol {
+    margin-top: 0;
+    margin-bottom: 16px;
+    padding-left: 2em;
+}
+
+ul {
+    list-style-type: disc;
+}
+
+ol {
+    list-style-type: decimal;
+}
+
+li {
+    margin-top: 0.25em;
+}
+
+li > p {
+    margin-top: 16px;
+}
+
+li + li {
+    margin-top: 0.25em;
+}
+
+/* Nested lists */
+ul ul,
+ul ol,
+ol ol,
+ol ul {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Code */
+code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 85%;
+    background-color: rgba(175, 184, 193, 0.2);
+    padding: 0.2em 0.4em;
+    border-radius: 6px;
+}
+
+/* Code blocks */
+pre {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 85%;
+    line-height: 1.45;
+    background-color: #f6f8fa;
+    padding: 16px;
+    overflow: auto;
+    border-radius: 6px;
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+pre code {
+    background-color: transparent;
+    padding: 0;
+    border-radius: 0;
+    font-size: 100%;
+    display: block;
+}
+
+/* Blockquotes */
+blockquote {
+    margin: 0 0 16px 0;
+    padding: 0 1em;
+    color: #57606a;
+    border-left: 0.25em solid #d0d7de;
+}
+
+blockquote > :first-child {
+    margin-top: 0;
+}
+
+blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+/* Horizontal rules */
+hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: #d0d7de;
+    border: 0;
+}
+
+/* Tables */
+table {
+    border-spacing: 0;
+    border-collapse: collapse;
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow: auto;
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+table th,
+table td {
+    padding: 6px 13px;
+    border: 1px solid #d0d7de;
+}
+
+table th {
+    font-weight: 600;
+    background-color: #f6f8fa;
+}
+
+table tr {
+    background-color: #ffffff;
+    border-top: 1px solid #d0d7de;
+}
+
+table tr:nth-child(2n) {
+    background-color: #f6f8fa;
+}
+
+/* Images */
+img {
+    max-width: 100%;
+    height: auto;
+    box-sizing: content-box;
+    background-color: #ffffff;
+}
+
+/* Strong/Bold */
+strong, b {
+    font-weight: 600;
+}
+
+/* Emphasis/Italic */
+em, i {
+    font-style: italic;
+}
+
+/* Strikethrough */
+del, s {
+    text-decoration: line-through;
+}
+
+/* Task lists */
+input[type="checkbox"] {
+    margin: 0 0.2em 0.25em -1.6em;
+    vertical-align: middle;
+}
+
+/* Definition lists */
+dl {
+    padding: 0;
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+dt {
+    padding: 0;
+    margin-top: 16px;
+    font-size: 1em;
+    font-style: italic;
+    font-weight: 600;
+}
+
+dd {
+    padding: 0 16px;
+    margin-bottom: 16px;
+}
+
+/* Keyboard elements */
+kbd {
+    display: inline-block;
+    padding: 3px 5px;
+    font-size: 11px;
+    line-height: 10px;
+    color: #24292f;
+    vertical-align: middle;
+    background-color: #f6f8fa;
+    border: 1px solid rgba(175, 184, 193, 0.2);
+    border-radius: 6px;
+    box-shadow: inset 0 -1px 0 rgba(175, 184, 193, 0.2);
+}
+
+/* Abbreviations */
+abbr[title] {
+    border-bottom: 1px dotted #57606a;
+    text-decoration: none;
+    cursor: help;
+}
+
+/* Mark/Highlight */
+mark {
+    background-color: #fff8c5;
+    color: #24292f;
+}
+
+/* Small text */
+small {
+    font-size: 90%;
+}
+
+/* Subscript and superscript */
+sub, sup {
+    font-size: 75%;
+    line-height: 0;
+    position: relative;
+    vertical-align: baseline;
+}
+
+sup {
+    top: -0.5em;
+}
+
+sub {
+    bottom: -0.25em;
+}
+
+/* Details/Summary */
+details {
+    display: block;
+    margin-bottom: 16px;
+}
+
+summary {
+    display: list-item;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+/* GitHub-specific: Mentions, issue references */
+.user-mention,
+.issue-reference {
+    color: #0969da;
+    font-weight: 600;
+}
+
+/* GitHub-specific: Labels */
+.label {
+    display: inline-block;
+    padding: 0 7px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
+    border-radius: 2em;
+    border: 1px solid transparent;
+}
+
+/* Math blocks (if supported) */
+.math-block {
+    display: block;
+    overflow: auto;
+    margin: 16px 0;
+    padding: 16px;
+    background-color: #f6f8fa;
+    border-radius: 6px;
+}
+
+.math-inline {
+    font-family: "Latin Modern Math", "STIX Two Math", "Cambria Math", serif;
+}
+
+/* Footnotes */
+.footnote-ref {
+    font-size: 75%;
+    vertical-align: super;
+}
+
+.footnotes {
+    font-size: 85%;
+    color: #57606a;
+    border-top: 1px solid #d0d7de;
+    margin-top: 32px;
+    padding-top: 16px;
+}
+
+.footnotes ol {
+    padding-left: 1.6em;
+}
+
+/* Alerts/Admonitions (GitHub-style) */
+.alert {
+    padding: 16px;
+    margin-bottom: 16px;
+    border-left: 4px solid;
+    border-radius: 6px;
+}
+
+.alert-note {
+    background-color: #ddf4ff;
+    border-color: #0969da;
+}
+
+.alert-tip {
+    background-color: #dafbe1;
+    border-color: #1a7f37;
+}
+
+.alert-important {
+    background-color: #f6e4ff;
+    border-color: #8250df;
+}
+
+.alert-warning {
+    background-color: #fff8c5;
+    border-color: #9a6700;
+}
+
+.alert-caution {
+    background-color: #ffebe9;
+    border-color: #cf222e;
+}
+
+/* Syntax highlighting placeholders */
+.token.comment { color: #6a737d; }
+.token.string { color: #032f62; }
+.token.keyword { color: #d73a49; }
+.token.function { color: #6f42c1; }
+.token.number { color: #005cc5; }
+.token.operator { color: #d73a49; }
+.token.class-name { color: #6f42c1; }
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    body {
+        padding: 16px;
+    }
+    
+    table {
+        display: block;
+        width: 100%;
+        overflow-x: auto;
+    }
+}
+
+/* Print styles */
+@media print {
+    body {
+        background-color: white;
+        color: black;
+        max-width: none;
+    }
+    
+    a {
+        color: black;
+        text-decoration: underline;
+    }
+    
+    pre, code {
+        border: 1px solid #d0d7de;
+    }
+}
