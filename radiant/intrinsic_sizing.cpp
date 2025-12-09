@@ -44,8 +44,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
         longest_word = fmax(longest_word, current_word);
 
-        result.min_content = (int)ceilf(longest_word);
-        result.max_content = (int)roundf(total_width);
+        result.min_content = longest_word;
+        result.max_content = total_width;
         return result;
     }
 
@@ -66,13 +66,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             current_word = 0.0f;
             prev_glyph = 0;
 
-            // Add space width to total
+            // Use the same space_width as layout_text.cpp for consistency
+            // This is pre-calculated in font.cpp using FT_Load_Char with FT_LOAD_NO_HINTING
             float space_width = 4.0f;  // Default fallback
             if (lycon->font.style && lycon->font.style->space_width > 0) {
                 space_width = lycon->font.style->space_width;
-            } else if (lycon->font.ft_face && lycon->font.ft_face->size) {
-                // Estimate from max_advance
-                space_width = lycon->font.ft_face->size->metrics.max_advance / 64.0f * 0.25f;
             }
             total_width += space_width;
             continue;
@@ -114,10 +112,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     // Don't forget the last word
     longest_word = fmax(longest_word, current_word);
 
-    result.min_content = (int)ceilf(longest_word);   // Round up for min to prevent overflow
-    result.max_content = (int)roundf(total_width);
+    result.min_content = longest_word;   // Keep float precision
+    result.max_content = total_width;    // Keep float precision
 
-    log_debug("measure_text_intrinsic_widths: len=%zu, min=%d, max=%d",
+    log_debug("measure_text_intrinsic_widths: len=%zu, min=%.2f, max=%.2f",
               length, result.min_content, result.max_content);
 
     return result;
