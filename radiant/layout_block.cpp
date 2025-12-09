@@ -270,7 +270,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, value, value_len);
             log_debug("load iframe doc src: %s", src->str);
-            doc = load_html_doc(lycon->ui_context->document->url, src->str, 
+            doc = load_html_doc(lycon->ui_context->document->url, src->str,
                 lycon->ui_context->window_width, lycon->ui_context->window_height);
             strbuf_free(src);
             if (!doc) {
@@ -932,11 +932,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_b
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         }
     }
-    else { // derive from parent block height
-        if (block->bound) {
-            content_height = pa_block->content_height - block->bound->margin.top - block->bound->margin.bottom;
-        }
-        else { content_height = pa_block->content_height; }
+    else { // auto height - will be determined by content
+        // Don't inherit parent's content_height for auto height blocks
+        // The height will be finalized after content is laid out in finalize_block_flow
+        content_height = 0;  // Initial value, will be updated during layout
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
             content_height = adjust_min_max_height(block, content_height);
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
