@@ -729,9 +729,11 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         } else {
             save_surface_to_png(rdcon.ui_context->surface, output_file);
         }
-    } else {
-        save_surface_to_png(rdcon.ui_context->surface, "output.png");
     }
+    // Commented out debug PNG saving - uncomment if you need to debug rendering
+    // else {
+    //     save_surface_to_png(rdcon.ui_context->surface, "output.png");
+    // }
 
     render_clean_up(&rdcon);
     if (uicon->document->state) {
