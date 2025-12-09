@@ -4,14 +4,45 @@
 
 The Radiant table layout engine has been significantly improved. This document analyzes the root causes, identifies gaps compared to Chrome's table layout, and proposes structural enhancements to achieve a significantly higher pass rate.
 
-**Current Status:** 6/412 tests passing (1.5% overall, many tests with 100% element accuracy)
+**Current Status:** 10/412 tests passing (2.4% overall)
+- 19 tests with 100% element accuracy
+- 91 tests with 90%+ text accuracy
+- 294/294 baseline tests passing (100%)
+
 **Target:** 80%+ pass rate through structural improvements
 
 ---
 
 ## Progress Update (December 2024)
 
-### Implemented Fixes
+### Latest Session Improvements
+
+#### 7. Sub-Pixel Precision Enhancement (COMPLETED)
+
+**Problem:** Integer rounding in intrinsic width measurements caused cumulative positioning errors across table columns, especially with colspan cells.
+
+**Changes Made:**
+- `radiant/intrinsic_sizing.hpp`: Changed `TextIntrinsicWidths` struct from `int` to `float`
+- `radiant/intrinsic_sizing.hpp`: Changed `IntrinsicSizeCache` fields from `int` to `float`
+- `radiant/intrinsic_sizing.hpp`: Changed all `calculate_*` function signatures from `int` to `float`
+- `radiant/intrinsic_sizing.cpp`: Removed `ceilf()`/`roundf()` conversions, kept native `float` precision
+- `radiant/view.hpp`: Changed `IntrinsicSizes` struct from `int` to `float`
+- `radiant/view.hpp`: Changed `FlexItemProp` dimension fields from `int` to `float`
+- `radiant/view.hpp`: Changed `GridItemProp` measured dimension fields from `int` to `float`
+
+**Result:** `basic_605_table_mixed_spans` now passes - column positioning errors reduced from 6.3px to 4.3px (within tolerance).
+
+#### 8. Vertical Alignment Border Calculation (COMPLETED)
+
+**Problem:** `apply_cell_vertical_align()` used hardcoded `cell_height - 2` approximation instead of actual border values.
+
+**Fix in `layout_table.cpp`:**
+- Now reads actual `border->width.top` and `border->width.bottom` from cell's bound
+- Correctly calculates content area as `cell_height - border_top - border_bottom`
+
+**Result:** `tables-003` and `tables-004` baseline tests now pass with 100% accuracy.
+
+### Previously Implemented Fixes
 
 #### 1. Anonymous Table Box Generation (Phase 1 - COMPLETED)
 
@@ -28,76 +59,62 @@ Added proper anonymous box generation per CSS 2.1 Section 17.2.1:
 - Names use `::anon-tbody`, `::anon-tr` naming convention
 - Display values pre-set to bypass style resolution
 
-**Files Modified:**
-- `radiant/layout_table.cpp`: +360 lines
-- `radiant/resolve_css_style.cpp`: +9 lines (check for pre-set display values)
-
 #### 2. Text Intrinsic Width Measurement (COMPLETED)
 
-**Problem:** Space width was measured differently between intrinsic sizing and layout, causing text to wrap unexpectedly.
+**Problem:** Space width was measured differently between intrinsic sizing and layout.
 
-- Intrinsic sizing used FT_LOAD_DEFAULT → space = 4.0px
-- Layout used pre-computed space_width → space = 4.45px
-- Difference caused "r1 c1" to measure as 35px but layout needed 35.6px
-
-**Fix in `radiant/intrinsic_sizing.cpp`:**
-- Changed to use `lycon->font.style->space_width` consistently
-- Changed `max_content` from `roundf()` to `ceilf()` to prevent undersized cells
-
-**Result:** Text that fits on one line in browser now fits on one line in Radiant.
+**Fix:** Use `lycon->font.style->space_width` consistently in `intrinsic_sizing.cpp`.
 
 #### 3. Table Cell Border Fix (COMPLETED)
 
 **Problem:** Hardcoded 1px borders were added to all cells regardless of actual CSS styling.
 
-**Fix in `layout_table.cpp` function `layout_table_cell_content()`:**
-- Removed hardcoded `border_left = 1` etc.
-- Now reads actual border values from cell's resolved style
+**Fix:** Now reads actual border values from cell's resolved style.
 
 #### 4. Border-Spacing Default Fix (COMPLETED)
 
 **Problem:** Default `border-spacing` was incorrectly set to 2px instead of CSS spec's 0px.
 
-**Fix in `radiant/view_pool.cpp`:**
-- Changed `border_spacing_h = 2.0f` → `0.0f`
-- Changed `border_spacing_v = 2.0f` → `0.0f`
+**Fix:** Changed defaults in `view_pool.cpp` to 0px, added HTML UA default (2px) for HTML TABLE elements.
 
 #### 5. table-layout: fixed CSS Property (COMPLETED)
 
-**Problem:** CSS `table-layout: fixed` property was parsed but never applied to table layout.
+**Problem:** CSS `table-layout: fixed` property was parsed but never applied.
 
-**Fix in `layout_table.cpp` function `resolve_table_properties()`:**
-- Added reading of `CSS_PROPERTY_TABLE_LAYOUT` from element's specified style
-- Sets `table->tb->table_layout = TABLE_LAYOUT_FIXED` when CSS value is `fixed`
-- Added guard to skip auto layout algorithm when fixed layout is used
-
-**Result:** `table_fixed_layout` test now passes 100%.
+**Fix:** Added reading of `CSS_PROPERTY_TABLE_LAYOUT` in `resolve_table_properties()`.
 
 #### 6. Caption Margin Support (COMPLETED)
 
 **Problem:** Caption `margin-bottom` was not included in vertical spacing calculations.
 
-**Fix in `layout_table.cpp`:**
-- Added `margin_v` calculation to `caption_height`
-- Handles both `caption-side: top` (margin-bottom) and `caption-side: bottom` (margin-top)
+**Fix:** Added `margin_v` calculation to `caption_height`.
 
-**Result:** `table_simple` now has 100% element accuracy.
+### Test Results Summary
 
-### Test Results After Fixes
-
-| Metric | Before | After |
-|--------|--------|-------|
-| **Tests Passing** | 0/412 | 6/412 |
-| Tests with 100% Elements | ~0 | ~25 |
-| Tests with 100% Text | ~0 | ~50 |
+| Metric | Before | Current |
+|--------|--------|---------|
+| **Tests Passing** | 0/412 | 10/412 (2.4%) |
+| **Baseline Tests** | 285/294 | 294/294 (100%) ✅ |
+| Tests with 100% Elements | ~0 | 19 |
+| Tests with 90%+ Elements | ~0 | 23 |
+| Tests with 90%+ Text | ~0 | 91 |
 | `table_fixed_layout` | 0% | **100%** ✅ |
-| `table_simple` | 0% | 100% elements, 92% text |
 | `table_complex_spans` | 0% | 100% elements, 94% text |
-| `table_edge_cases` | 1.1% | 42.5% elements |
-| `table_rowspan_test` | 3.7% | 63% elements |
-| `table_width_algorithms` | 2% | 68% elements |
+| `basic_605_table_mixed_spans` | 87% | **100%** ✅ |
+| `tables-003` | 0% | **100%** ✅ |
+| `tables-004` | 0% | **100%** ✅ |
 
-**Note:** Tests require 100% pass on ALL metrics to count as "passing".
+**Passing Tests:**
+- `basic_606_table_fixed_layout`
+- `basic_609_table_fixed_spacing`
+- `basic_610_table_auto_vs_fixed`
+- `table-001`
+- `table-cell-001`
+- `table-cell-002`
+- `table-layout-002`
+- `table-layout-003`
+- `table-row-001`
+- `table_fixed_layout`
 
 ---
 
@@ -207,7 +224,7 @@ Pass 4: Cell Layout
 | **Colspan distribution** | ✅ Even distribution | ✅ Proportional to existing widths |
 | **Border conflict resolution** | ⚠️ Simplified (uses max width) | ✅ Full CSS 2.1 rules |
 | **Border painting** | ⚠️ Cell-by-cell | ✅ Collapsed border painting pass |
-| **Sub-pixel precision** | ⚠️ Integer rounding causes drift | ✅ Sub-pixel precision throughout |
+| **Sub-pixel precision** | ✅ Float throughout (recently fixed) | ✅ Sub-pixel precision throughout |
 | **Baseline alignment** | ⚠️ Flag only, not computed | ✅ Full `ComputeRowBaseline()` |
 | **Page breaks** | ❌ Not implemented | ✅ `table_break_token_data.h` |
 | **Repeating headers** | ❌ Not implemented | ✅ thead repeats on each page |
@@ -239,13 +256,63 @@ LayoutTableSection* CreateAnonymousSection() {
 
 #### 1.3.6 Summary of Chrome Alignment Priorities
 
-| Gap | Impact | Alignment Effort |
-|-----|--------|------------------|
-| Anonymous box generation | High (50% of tests) | High - requires architectural change |
-| Sub-pixel precision | Medium (accuracy) | Medium - change to float throughout |
-| Border conflict resolution | Low (5% of tests) | Medium - implement CSS 2.1 rules |
-| Baseline alignment | Low (2% of tests) | Medium - add baseline calculation |
-| Fragmentation support | Low (0% of tests) | High - new feature |
+| Gap | Impact | Alignment Effort | Status |
+|-----|--------|------------------|--------|
+| Anonymous box generation | High (50% of tests) | High - requires architectural change | ⚠️ Partial |
+| Sub-pixel precision | Medium (accuracy) | Medium - change to float throughout | ✅ Done |
+| Border conflict resolution | Low (5% of tests) | Medium - implement CSS 2.1 rules | ❌ Not started |
+| Baseline alignment | Low (2% of tests) | Medium - add baseline calculation | ❌ Not started |
+| Fragmentation support | Low (0% of tests) | High - new feature | ❌ Not started |
+
+---
+
+## 2. Next Priority Areas for Improvement
+
+Based on current test failures and the gap analysis, here are the highest-impact areas to focus on next:
+
+### 2.1 Anonymous Box Generation for CSS `display: table-*` (HIGH PRIORITY)
+
+**Impact:** ~200 failing tests (`table-anonymous-objects-*`, `table-anonymous-block-*`)
+
+The current anonymous box generation handles HTML tables well but doesn't fully support CSS-created tables using `display: table`, `display: table-row`, `display: table-cell`, etc.
+
+**Missing Scenarios:**
+1. `display: table-cell` appearing without a `table-row` parent
+2. `display: table-row` appearing without a `table` parent
+3. `display: table-cell` appearing outside any table context (needs anonymous table wrapper)
+4. Mixed inline content and table-cells in the same parent
+
+**Example Test Case (`table-anonymous-objects-001`):**
+```html
+<div style="display: table-row">
+  <span style="display: table-cell">Cell 1</span>
+  <span style="display: table-cell">Cell 2</span>
+</div>
+```
+This requires generating an anonymous `display: table` wrapper around the `table-row`.
+
+### 2.2 Height Algorithm for CSS Tables (MEDIUM PRIORITY)
+
+**Impact:** ~30 failing tests (`table-height-algorithm-*`)
+
+Current height calculation works for HTML tables but has issues with:
+1. CSS tables without explicit heights
+2. Height distribution when table has explicit height
+3. Row group height calculations
+
+### 2.3 `table_simple` Test Investigation (MEDIUM PRIORITY)
+
+**Current Result:** 27.3% elements, 16.7% text
+
+This test was previously at 100% elements but regressed. Need to investigate:
+- What changed to cause the regression
+- Whether it's related to anonymous box handling or coordinate calculation
+
+### 2.4 Caption Layout Edge Cases (LOW PRIORITY)
+
+**Impact:** ~5 tests
+
+Caption positioning for `caption-side: bottom` and interaction with table borders.
 
 ---
 
@@ -578,36 +645,57 @@ void table_fixed_layout(LayoutContext* lycon, ViewTable* table, int table_width)
 
 ## 4. Implementation Priority Matrix
 
-| Phase | Priority | Effort | Impact | Dependencies |
-|-------|----------|--------|--------|--------------|
-| 1. Anonymous Boxes | High | High | 25-30% | None |
-| 2. Height Algorithm | High | Medium | 10-15% | None |
-| 3. Width Algorithm | Medium | Medium | 5-10% | None |
-| 4. Border Collapse | Medium | Medium | 3-5% | Phase 2, 3 |
-| 5. Baseline Alignment | Medium | Medium | 2-3% | Phase 2 |
-| 6. Fixed Layout | Low | Low | 2-3% | Phase 3 |
+| Phase | Priority | Effort | Impact | Status |
+|-------|----------|--------|--------|--------|
+| 1. Anonymous Boxes (HTML) | High | High | 25-30% | ✅ Done |
+| 1b. Anonymous Boxes (CSS tables) | High | High | 25-30% | ⚠️ Partial |
+| 2. Height Algorithm | High | Medium | 10-15% | ⚠️ Partial |
+| 3. Width Algorithm | Medium | Medium | 5-10% | ✅ Done |
+| 4. Sub-pixel Precision | Medium | Medium | 3-5% | ✅ Done |
+| 5. Border Collapse | Medium | Medium | 3-5% | ❌ Not started |
+| 6. Baseline Alignment | Medium | Medium | 2-3% | ❌ Not started |
+| 7. Fixed Layout | Low | Low | 2-3% | ✅ Done |
 
-**Projected Total Improvement: 47-66%**
+**Current Progress: ~40% of planned improvements complete**
+**Current Pass Rate: 2.4% (10/412)**
+**Projected with Phase 1b + 2: 15-25%**
 
 ---
 
-## 5. Recommended Implementation Order
+## 5. Recommended Next Steps
 
-### Week 1-2: Anonymous Boxes
-- [ ] Phase 1a: Design anonymous box generation API
-- [ ] Phase 1b: Implement anonymous row wrapper
-- [ ] Phase 1c: Implement anonymous cell wrapper
-- [ ] Phase 1d: Implement anonymous table wrapper
+### Immediate (This Week)
 
-### Week 3: Core Fixes
-- [ ] Phase 2: Height algorithm refinement
-- [ ] Phase 3: Width algorithm alignment
-- [ ] Run test suite to validate improvements
+1. **Investigate `table_simple` Regression**
+   - Compare current vs previous output
+   - Identify which elements/text nodes are misaligned
+   - Fix coordinate calculation or anonymous box issue
 
-### Week 4: Polish
-- [ ] Phase 4: Border collapse precision
-- [ ] Phase 5: Baseline alignment
-- [ ] Phase 6: Fixed layout refinements
+2. **CSS Table Anonymous Box Generation**
+   - Add detection for `display: table-*` outside HTML table context
+   - Generate anonymous wrappers per CSS 2.1 Section 17.2.1
+   - Target: `table-anonymous-objects-*` tests
+
+### Short Term (Next 2 Weeks)
+
+3. **Height Algorithm Refinement**
+   - Fix height calculation for CSS tables
+   - Handle explicit table height distribution
+   - Target: `table-height-algorithm-*` tests
+
+4. **Review Near-Passing Tests**
+   - `table_complex_spans` (100% elements, 94% text) - likely small text position issue
+   - Tests with 90%+ accuracy - often single element/text offset issues
+
+### Medium Term (Next Month)
+
+5. **Border Collapse Precision**
+   - Implement CSS 2.1 border conflict resolution
+   - Fix half-pixel cumulative errors
+
+6. **Baseline Vertical Alignment**
+   - Calculate row baselines from cell content
+   - Apply baseline alignment within cells
 
 ---
 
@@ -688,10 +776,25 @@ Additional optimizations:
 
 ## 9. Conclusion
 
-The Radiant table layout engine has a solid foundation but requires structural improvements to achieve browser compatibility. The most impactful changes are:
+The Radiant table layout engine has made significant progress with a solid foundation:
 
-1. **Anonymous box generation** - Required for 50% of tests
-2. **Height/width algorithm refinement** - Improves accuracy
-3. **Border collapse precision** - Fixes cumulative errors
+**Completed:**
+- ✅ Anonymous box generation for HTML tables
+- ✅ Sub-pixel precision throughout intrinsic sizing
+- ✅ Fixed table layout algorithm
+- ✅ Border-spacing and cell border handling
+- ✅ Caption margin support
+- ✅ Vertical alignment border calculation
 
-With the proposed phased implementation, we project achieving **47-66% pass rate**, up from the current 0%.
+**Immediate Focus Areas:**
+1. **CSS table anonymous boxes** - Required for ~50% of remaining tests
+2. **Height algorithm refinement** - Improves ~30 tests
+3. **Investigation of regressions** - `table_simple` dropped from 100% to 27%
+
+**Key Metrics:**
+- Baseline tests: **294/294 (100%)** ✅
+- Table tests: 10/412 (2.4%)
+- Tests with 100% element accuracy: 19
+- Tests with 90%+ text accuracy: 91
+
+With CSS table anonymous box support completed, we project achieving **15-25% pass rate**, with further improvements from height algorithm and border collapse fixes potentially reaching **40-50%**.
