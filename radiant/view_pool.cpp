@@ -36,10 +36,9 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
             table->tb = (TableProp*)alloc_prop(lycon, sizeof(TableProp));
             // Initialize defaults
             table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
-            // CRITICAL FIX: Set CSS default border-spacing to 2px
-            // CSS 2.1 spec: initial value for border-spacing is 2px
-            table->tb->border_spacing_h = 2.0f;
-            table->tb->border_spacing_v = 2.0f;
+            // CSS 2.1 Section 17.6.1: initial value for border-spacing is 0
+            table->tb->border_spacing_h = 0.0f;
+            table->tb->border_spacing_v = 0.0f;
             table->tb->border_collapse = false; // default is separate borders
             // Initialize anonymous box flags (CSS 2.1 Section 17.2.1)
             table->tb->is_annoy_tbody = 0;

@@ -44,8 +44,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
         longest_word = fmax(longest_word, current_word);
 
-        result.min_content = (int)ceilf(longest_word);
-        result.max_content = (int)roundf(total_width);
+        result.min_content = longest_word;
+        result.max_content = total_width;
         return result;
     }
 
@@ -66,13 +66,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             current_word = 0.0f;
             prev_glyph = 0;
 
-            // Add space width to total
+            // Use the same space_width as layout_text.cpp for consistency
+            // This is pre-calculated in font.cpp using FT_Load_Char with FT_LOAD_NO_HINTING
             float space_width = 4.0f;  // Default fallback
             if (lycon->font.style && lycon->font.style->space_width > 0) {
                 space_width = lycon->font.style->space_width;
-            } else if (lycon->font.ft_face && lycon->font.ft_face->size) {
-                // Estimate from max_advance
-                space_width = lycon->font.ft_face->size->metrics.max_advance / 64.0f * 0.25f;
             }
             total_width += space_width;
             continue;
@@ -114,10 +112,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     // Don't forget the last word
     longest_word = fmax(longest_word, current_word);
 
-    result.min_content = (int)ceilf(longest_word);   // Round up for min to prevent overflow
-    result.max_content = (int)roundf(total_width);
+    result.min_content = longest_word;   // Keep float precision
+    result.max_content = total_width;    // Keep float precision
 
-    log_debug("measure_text_intrinsic_widths: len=%zu, min=%d, max=%d",
+    log_debug("measure_text_intrinsic_widths: len=%zu, min=%.2f, max=%.2f",
               length, result.min_content, result.max_content);
 
     return result;
@@ -299,7 +297,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 // Main API Implementation
 // ============================================================================
 
-int calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
+float calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
     if (!node) return 0;
 
     // Handle text nodes directly
@@ -321,7 +319,7 @@ int calculate_min_content_width(LayoutContext* lycon, DomNode* node) {
     return sizes.min_content;
 }
 
-int calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
+float calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
     if (!node) return 0;
 
     // Handle text nodes directly
@@ -343,13 +341,13 @@ int calculate_max_content_width(LayoutContext* lycon, DomNode* node) {
     return sizes.max_content;
 }
 
-int calculate_min_content_height(LayoutContext* lycon, DomNode* node, int width) {
+float calculate_min_content_height(LayoutContext* lycon, DomNode* node, float width) {
     // For block containers, min-content height == max-content height
     // (CSS Sizing Level 3: https://www.w3.org/TR/css-sizing-3/#min-content-block-size)
     return calculate_max_content_height(lycon, node, width);
 }
 
-int calculate_max_content_height(LayoutContext* lycon, DomNode* node, int width) {
+float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float width) {
     if (!node) return 0;
 
     // For text nodes, estimate based on line height
@@ -359,7 +357,7 @@ int calculate_max_content_height(LayoutContext* lycon, DomNode* node, int width)
         if (lycon->font.style && lycon->font.style->font_size > 0) {
             line_height = lycon->font.style->font_size * 1.2f;  // Typical line-height
         }
-        return (int)ceilf(line_height);
+        return line_height;
     }
 
     // For elements, we'd need to do a full layout pass
@@ -367,35 +365,35 @@ int calculate_max_content_height(LayoutContext* lycon, DomNode* node, int width)
     DomElement* element = node->as_element();
     if (!element) return 0;
 
-    int height = 0;
+    float height = 0;
 
     // Sum heights of block-level children, or take max for inline
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        int child_height = calculate_max_content_height(lycon, child, width);
+        float child_height = calculate_max_content_height(lycon, child, width);
         height += child_height;  // Simplified: assume all block-level
     }
 
     // Add padding
     ViewBlock* view = (ViewBlock*)element;
     if (view->bound) {
-        if (view->bound->padding.top >= 0) height += (int)view->bound->padding.top;
-        if (view->bound->padding.bottom >= 0) height += (int)view->bound->padding.bottom;
+        if (view->bound->padding.top >= 0) height += view->bound->padding.top;
+        if (view->bound->padding.bottom >= 0) height += view->bound->padding.bottom;
 
         if (view->bound->border) {
-            height += (int)(view->bound->border->width.top + view->bound->border->width.bottom);
+            height += view->bound->border->width.top + view->bound->border->width.bottom;
         }
     }
 
     return height;
 }
 
-int calculate_fit_content_width(LayoutContext* lycon, DomNode* node, int available_width) {
-    int min_content = calculate_min_content_width(lycon, node);
-    int max_content = calculate_max_content_width(lycon, node);
+float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width) {
+    float min_content = calculate_min_content_width(lycon, node);
+    float max_content = calculate_max_content_width(lycon, node);
 
     // fit-content = clamp(min-content, available, max-content)
     // = min(max-content, max(min-content, available))
-    return min(max_content, max(min_content, available_width));
+    return fminf(max_content, fmaxf(min_content, available_width));
 }
 
 // ============================================================================

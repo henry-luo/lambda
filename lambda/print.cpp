@@ -404,23 +404,23 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_INT64: {
-        int64_t long_val = *(int64_t*)item.pointer;
+        int64_t long_val = item.get_int64();
         log_debug("print int64: %" PRId64, long_val);
         strbuf_append_format(strbuf, "%" PRId64, long_val);
         break;
     }
     case LMD_TYPE_FLOAT: {
-        double num = *(double*)item.pointer;
+        double num = item.get_double();
         print_double(strbuf, num);
         break;
     }
     case LMD_TYPE_DECIMAL: {
-        Decimal *decimal = (Decimal*)item.pointer;
+        Decimal *decimal = item.get_decimal();
         print_decimal(strbuf, decimal);
         break;
     }
     case LMD_TYPE_STRING: {
-        String *string = (String*)item.pointer;
+        String *string = item.get_string();
         if (string && string->chars) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
@@ -438,7 +438,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_SYMBOL: {
-        String *string = (String*)item.pointer;
+        String *string = item.get_string();
         if (string && string->chars) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
@@ -456,7 +456,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_DTIME: {
-        DateTime *dt = (DateTime*)item.pointer;
+        DateTime *dt = (DateTime*)item.datetime_ptr;
         if (dt) {
             strbuf_append_str(strbuf, "t'");
             datetime_format_lambda(strbuf, dt);
@@ -468,7 +468,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_BINARY: {
-        String *string = (String*)item.pointer;
+        String *string = item.get_string();
         if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
         else strbuf_append_str(strbuf, "b''");
         break;

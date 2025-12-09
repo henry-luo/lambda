@@ -55,7 +55,7 @@ static int count_elements_by_tag(Item item, const char* tag_name) {
     int count = 0;
 
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type->name.str && elmt_type->name.length > 0) {
@@ -72,7 +72,7 @@ static int count_elements_by_tag(Item item, const char* tag_name) {
             count += count_elements_by_tag(list->items[i], tag_name);
         }
     } else if (type == LMD_TYPE_LIST || type == LMD_TYPE_ARRAY) {
-        List* list = (List*)item.pointer;
+        List* list = item.list;
         if (list) {
             for (int64_t i = 0; i < list->length; i++) {
                 count += count_elements_by_tag(list->items[i], tag_name);

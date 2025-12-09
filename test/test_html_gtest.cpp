@@ -128,7 +128,7 @@ protected:
         }
 
         if (get_type_id(item) == LMD_TYPE_STRING) {
-            String* str = (String*)item.pointer;
+            String* str = item.get_string();
             if (str) {
                 return std::string(str->chars, str->len);
             }
@@ -2704,7 +2704,7 @@ TEST_F(HtmlParserTest, Phase6FormattingMultipleSiblings) {
         for (int64_t i = attr_count; i < p_list->length; i++) {
             Item child = p_list->items[i];
             if (get_type_id(child) == LMD_TYPE_ELEMENT) {
-                Element* elem = (Element*)child.pointer;
+                Element* elem = child.element;
                 const char* tag = getElementTagName(elem);
                 if (strcmp(tag, "b") == 0) bold_count++;
                 if (strcmp(tag, "i") == 0) italic_count++;

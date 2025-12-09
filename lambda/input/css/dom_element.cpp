@@ -1478,7 +1478,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item new_string_item = editor.builder()->createStringItem(new_content);
 
-    if (!new_string_item.pointer || get_type_id(new_string_item) != LMD_TYPE_STRING) {
+    if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
         log_error("dom_text_set_content: failed to create string");
         return false;
     }
@@ -1496,7 +1496,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     }
 
     // Update DomText to point to new String
-    text_node->native_string = (String*)new_string_item.pointer;
+    text_node->native_string = new_string_item.get_string();
     text_node->text = text_node->native_string->chars;
     text_node->length = text_node->native_string->len;
 
@@ -1525,7 +1525,7 @@ int64_t dom_text_get_child_index(DomText* text_node) {
     // Scan parent's children to find matching native_string
     for (int64_t i = 0; i < parent_elem->length; i++) {
         Item item = parent_elem->items[i];
-        if (get_type_id(item) == LMD_TYPE_STRING && (String*)item.pointer == text_node->native_string) {
+        if (get_type_id(item) == LMD_TYPE_STRING && item.get_string() == text_node->native_string) {
             log_debug("dom_text_get_child_index: found at index %lld", i);
             return i;
         }
@@ -1613,8 +1613,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     // Create String item via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item string_item = editor.builder()->createStringItem(text_content);
-
-    if (!string_item.pointer || get_type_id(string_item) != LMD_TYPE_STRING) {
+    if (get_type_id(string_item) != LMD_TYPE_STRING) {
         log_error("dom_element_append_text: failed to create string");
         return nullptr;
     }
@@ -1631,10 +1630,7 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
     }
 
     // Create DomText wrapper with Lambda backing
-    DomText* text_node = dom_text_create(
-        (String*)string_item.pointer,
-        parent
-    );
+    DomText* text_node = dom_text_create(string_item.get_string(), parent);
 
     if (!text_node) {
         log_error("dom_element_append_text: failed to create DomText");
@@ -1728,7 +1724,7 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
     if (native_element->length > 0) {
         Item first_item = native_element->items[0];
         if (get_type_id(first_item) == LMD_TYPE_STRING) {
-            String* content_str = (String*)first_item.pointer;
+            String* content_str = first_item.get_string();
             comment_node->content = content_str->chars;  // Reference, not copy
             comment_node->length = content_str->len;
         }
@@ -1806,7 +1802,7 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Item new_string_item = editor.builder()->createStringItem(new_content);
 
-    if (!new_string_item.pointer || get_type_id(new_string_item) != LMD_TYPE_STRING) {
+    if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
         log_error("dom_comment_set_content: failed to create string");
         return false;
     }
@@ -1835,7 +1831,7 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
 
     // Update DomComment to point to new String
     comment_node->native_element = result.element;
-    String* new_string = (String*)new_string_item.pointer;
+    String* new_string = new_string_item.get_string();
     comment_node->content = new_string->chars;
     comment_node->length = new_string->len;
     log_debug("dom_comment_set_content: updated content to '%s'", new_content);
@@ -2106,7 +2102,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
         log_debug("  Child %lld: type=%d", i, child_type);
         if (child_type == LMD_TYPE_ELEMENT) {
             // element node - recursively build
-            Element* child_elem = (Element*)child_item.pointer;
+            Element* child_elem = child_item.element;
             TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
@@ -2161,7 +2157,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
         } else if (child_type == LMD_TYPE_STRING) {
             // Text node - create DomText that references Lambda String
-            String* text_str = (String*)child_item.pointer;
+            String* text_str = child_item.get_string();
             if (text_str && text_str->len > 0) {
                 // Create text node (preserves Lambda String reference)
                 DomText* text_node = dom_text_create(text_str, dom_elem);
@@ -2198,7 +2194,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             }
         } else if (child_type == LMD_TYPE_SYMBOL) {
             // Symbol node (HTML entity or emoji) - create DomText with symbol type
-            String* symbol_str = (String*)child_item.pointer;
+            String* symbol_str = child_item.get_string();
             if (symbol_str && symbol_str->len > 0) {
                 // Create symbol text node (will be resolved at render time)
                 DomText* text_node = dom_text_create_symbol(symbol_str, dom_elem);

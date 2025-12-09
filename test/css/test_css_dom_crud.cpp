@@ -284,7 +284,7 @@ TEST_F(DomIntegrationTest, SetAttribute_SpaceSeparatedClasses) {
 
     // Test setting multiple space-separated classes
     EXPECT_TRUE(dom_element_set_attribute(element, "class", "foo bar baz"));
-    
+
     // Verify all three classes were parsed and added
     EXPECT_TRUE(dom_element_has_class(element, "foo"));
     EXPECT_TRUE(dom_element_has_class(element, "bar"));
@@ -293,13 +293,13 @@ TEST_F(DomIntegrationTest, SetAttribute_SpaceSeparatedClasses) {
 
     // Test with extra whitespace (spaces, tabs, newlines)
     EXPECT_TRUE(dom_element_set_attribute(element, "class", "  alpha  \t\tbeta\n\ngamma  "));
-    
+
     // Verify all three classes were parsed correctly
     EXPECT_TRUE(dom_element_has_class(element, "alpha"));
     EXPECT_TRUE(dom_element_has_class(element, "beta"));
     EXPECT_TRUE(dom_element_has_class(element, "gamma"));
     EXPECT_EQ(element->class_count, 3);
-    
+
     // Old classes should be replaced
     EXPECT_FALSE(dom_element_has_class(element, "foo"));
     EXPECT_FALSE(dom_element_has_class(element, "bar"));
@@ -969,8 +969,8 @@ TEST_F(DomIntegrationTest, DomText_CreateBacked_Basic) {
     ASSERT_EQ(parent->native_element->length, 1);
     Item child = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
-    EXPECT_EQ((String*)child.pointer, text->native_string);
-    EXPECT_STREQ(((String*)child.pointer)->chars, "Hello World");
+    EXPECT_EQ(child.get_string(), text->native_string);
+    EXPECT_STREQ(child.get_string()->chars, "Hello World");
 }
 
 TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
@@ -990,8 +990,8 @@ TEST_F(DomIntegrationTest, DomText_SetContentBacked_UpdatesLambda) {
     ASSERT_GE(idx, 0);
     Item child = parent->native_element->items[idx];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
-    EXPECT_STREQ(((String*)child.pointer)->chars, "Updated");
-    EXPECT_EQ(((String*)child.pointer)->len, 7u);
+    EXPECT_STREQ(child.get_string()->chars, "Updated");
+    EXPECT_EQ(child.get_string()->len, 7u);
 }
 
 TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
@@ -1010,7 +1010,7 @@ TEST_F(DomIntegrationTest, DomText_RemoveBacked_UpdatesLambda) {
     EXPECT_EQ(parent->native_element->length, 1);
     Item remaining = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
-    EXPECT_STREQ(((String*)remaining.pointer)->chars, "Second");
+    EXPECT_STREQ(remaining.get_string()->chars, "Second");
 
     // Verify text2 index updated
     EXPECT_EQ(dom_text_get_child_index(text2), 0);
@@ -1033,16 +1033,16 @@ TEST_F(DomIntegrationTest, DomText_MultipleOperations_MaintainsSync) {
     EXPECT_TRUE(dom_text_set_content(text2, "TWO"));
 
     // Verify all strings
-    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
-    EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "TWO");
-    EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Three");
+    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "One");
+    EXPECT_STREQ(parent->native_element->items[1].get_string()->chars, "TWO");
+    EXPECT_STREQ(parent->native_element->items[2].get_string()->chars, "Three");
 
     // Remove middle text
     EXPECT_TRUE(dom_text_remove(text2));
 
     EXPECT_EQ(parent->native_element->length, 2);
-    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "One");
-    EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "Three");
+    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "One");
+    EXPECT_STREQ(parent->native_element->items[1].get_string()->chars, "Three");
 
     // Verify indices updated
     EXPECT_EQ(dom_text_get_child_index(text1), 0);
@@ -1093,8 +1093,8 @@ TEST_F(DomIntegrationTest, DomText_MixedChildren_ElementsAndText) {
     EXPECT_TRUE(dom_text_set_content(text2, "AFTER"));
 
     // Verify Lambda tree updated
-    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "BEFORE");
-    EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "AFTER");
+    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "BEFORE");
+    EXPECT_STREQ(parent->native_element->items[2].get_string()->chars, "AFTER");
 }
 
 TEST_F(DomIntegrationTest, DomText_ChildIndexTracking_WithRemoval) {
@@ -1136,7 +1136,7 @@ TEST_F(DomIntegrationTest, DomText_EmptyString_Backed) {
     // Verify Lambda String updated
     Item child = parent->native_element->items[0];
     EXPECT_EQ(get_type_id(child), LMD_TYPE_STRING);
-    String* str = (String*)child.pointer;
+    String* str = child.get_string();
     EXPECT_EQ(str->len, 1u);
     EXPECT_STREQ(str->chars, " ");
 }
@@ -1159,7 +1159,7 @@ TEST_F(DomIntegrationTest, DomText_LongString_Backed) {
 
     // Verify Lambda
     int64_t idx = dom_text_get_child_index(text);
-    EXPECT_STREQ(((String*)parent->native_element->items[idx].pointer)->chars, longer);
+    EXPECT_STREQ(parent->native_element->items[idx].get_string()->chars, longer);
 }
 
 TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
@@ -1179,7 +1179,7 @@ TEST_F(DomIntegrationTest, DomText_SequentialUpdates_Backed) {
 
     // Verify Lambda has latest
     Item child = parent->native_element->items[0];
-    EXPECT_STREQ(((String*)child.pointer)->chars, "Final");
+    EXPECT_STREQ(child.get_string()->chars, "Final");
 }
 
 TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
@@ -1200,10 +1200,10 @@ TEST_F(DomIntegrationTest, DomText_RemoveFromMiddle_UpdatesIndices) {
 
     // Verify structure
     EXPECT_EQ(parent->native_element->length, 4);
-    EXPECT_STREQ(((String*)parent->native_element->items[0].pointer)->chars, "Text0");
-    EXPECT_STREQ(((String*)parent->native_element->items[1].pointer)->chars, "Text1");
-    EXPECT_STREQ(((String*)parent->native_element->items[2].pointer)->chars, "Text3");  // Shifted
-    EXPECT_STREQ(((String*)parent->native_element->items[3].pointer)->chars, "Text4");  // Shifted
+    EXPECT_STREQ(parent->native_element->items[0].get_string()->chars, "Text0");
+    EXPECT_STREQ(parent->native_element->items[1].get_string()->chars, "Text1");
+    EXPECT_STREQ(parent->native_element->items[2].get_string()->chars, "Text3");  // Shifted
+    EXPECT_STREQ(parent->native_element->items[3].get_string()->chars, "Text4");  // Shifted
 
     // Verify indices updated
     EXPECT_EQ(dom_text_get_child_index(texts[0]), 0);
@@ -1244,7 +1244,7 @@ TEST_F(DomIntegrationTest, DomComment_CreateBacked) {
     TypeElmt* type = (TypeElmt*)comment->native_element->type;
     EXPECT_STREQ(type->name.str, "!--");
     EXPECT_EQ(comment->native_element->length, 1);
-    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, " Test comment ");
+    EXPECT_STREQ(comment->native_element->items[0].get_string()->chars, " Test comment ");
 }
 
 TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
@@ -1259,7 +1259,7 @@ TEST_F(DomIntegrationTest, DomComment_SetContentBacked_UpdatesLambda) {
     EXPECT_EQ(comment->length, 7u);
 
     // Verify Lambda updated
-    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Updated");
+    EXPECT_STREQ(comment->native_element->items[0].get_string()->chars, "Updated");
 }
 
 TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
@@ -1278,7 +1278,7 @@ TEST_F(DomIntegrationTest, DomComment_RemoveBacked_UpdatesLambda) {
     EXPECT_EQ(parent->native_element->length, 1);
     TypeElmt* remaining_type = (TypeElmt*)parent->native_element->items[0].element->type;
     EXPECT_STREQ(remaining_type->name.str, "!--");
-    EXPECT_STREQ(((String*)parent->native_element->items[0].element->items[0].pointer)->chars, " Second ");
+    EXPECT_STREQ(parent->native_element->items[0].element->items[0].get_string()->chars, " Second ");
 }
 
 TEST_F(DomIntegrationTest, DomComment_MixedChildren_ElementsTextAndComments) {
@@ -1352,7 +1352,7 @@ TEST_F(DomIntegrationTest, DomComment_LongComment_Backed) {
     EXPECT_EQ(comment->length, strlen(long_comment));
 
     // Verify Lambda backing
-    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, long_comment);
+    EXPECT_STREQ(comment->native_element->items[0].get_string()->chars, long_comment);
 }
 
 TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
@@ -1372,7 +1372,7 @@ TEST_F(DomIntegrationTest, DomComment_MultipleUpdates_Backed) {
     EXPECT_STREQ(comment->content, "Final");
 
     // Verify Lambda has latest
-    EXPECT_STREQ(((String*)comment->native_element->items[0].pointer)->chars, "Final");
+    EXPECT_STREQ(comment->native_element->items[0].get_string()->chars, "Final");
 }
 
 TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
@@ -1392,11 +1392,11 @@ TEST_F(DomIntegrationTest, DomComment_RemoveFromMiddle_UpdatesStructure) {
 
     TypeElmt* type0 = (TypeElmt*)parent->native_element->items[0].element->type;
     EXPECT_STREQ(type0->name.str, "!--");
-    EXPECT_STREQ(((String*)parent->native_element->items[0].element->items[0].pointer)->chars, " C1 ");
+    EXPECT_STREQ(parent->native_element->items[0].element->items[0].get_string()->chars, " C1 ");
 
     TypeElmt* type1 = (TypeElmt*)parent->native_element->items[1].element->type;
     EXPECT_STREQ(type1->name.str, "!--");
-    EXPECT_STREQ(((String*)parent->native_element->items[1].element->items[0].pointer)->chars, " C3 ");
+    EXPECT_STREQ(parent->native_element->items[1].element->items[0].get_string()->chars, " C3 ");
 }
 
 TEST_F(DomIntegrationTest, DomComment_IsBacked_DetectsCorrectly) {
@@ -1528,12 +1528,12 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
     // Verify first child is text1
     Item child0 = root->native_element->items[0];
     EXPECT_EQ(get_type_id(child0), LMD_TYPE_STRING);
-    EXPECT_STREQ(((String*)child0.pointer)->chars, "Greetings ");
+    EXPECT_STREQ(child0.get_string()->chars, "Greetings ");
 
     // Verify second child is text2
     Item child1 = root->native_element->items[1];
     EXPECT_EQ(get_type_id(child1), LMD_TYPE_STRING);
-    EXPECT_STREQ(((String*)child1.pointer)->chars, "Universe!");
+    EXPECT_STREQ(child1.get_string()->chars, "Universe!");
 
     // Verify third child is comment
     Item child2 = root->native_element->items[2];
@@ -1542,7 +1542,7 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
     TypeElmt* comment_type = (TypeElmt*)comment_elem->type;
     EXPECT_STREQ(comment_type->name.str, "!--");
     EXPECT_EQ(comment_elem->length, 1);
-    EXPECT_STREQ(((String*)comment_elem->items[0].pointer)->chars, " modified comment ");
+    EXPECT_STREQ(comment_elem->items[0].get_string()->chars, " modified comment ");
 
     // 10. DELETE OPERATIONS: Test removal of text and comment nodes
     printf("\n=== Testing Deletions ===\n");
@@ -1583,7 +1583,7 @@ TEST_F(DomIntegrationTest, ComprehensiveCRUD_AllOperationsWithFormatValidation) 
         Item remaining = root->native_element->items[0];
         EXPECT_EQ(get_type_id(remaining), LMD_TYPE_STRING);
         if (get_type_id(remaining) == LMD_TYPE_STRING) {
-            EXPECT_STREQ(((String*)remaining.pointer)->chars, "Greetings ");
+            EXPECT_STREQ(remaining.get_string()->chars, "Greetings ");
         }
     }
 }
@@ -1633,12 +1633,11 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
     EXPECT_TRUE(dom_text_set_content(t3, "UpdatedText3"));
 
     // Verify Lambda tree has all updates
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "UpdatedText1");
-    EXPECT_STREQ(((String*)root->native_element->items[1].element->items[0].pointer)->chars, " UpdatedComment1 ");
-    EXPECT_STREQ(((String*)root->native_element->items[2].pointer)->chars, "UpdatedText2");
-    EXPECT_STREQ(((String*)root->native_element->items[3].element->items[0].pointer)->chars, " UpdatedComment2 ");
-    EXPECT_STREQ(((String*)root->native_element->items[4].pointer)->chars, "UpdatedText3");
-
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "UpdatedText1");
+    EXPECT_STREQ(root->native_element->items[1].element->items[0].get_string()->chars, " UpdatedComment1 ");
+    EXPECT_STREQ(root->native_element->items[2].get_string()->chars, "UpdatedText2");
+    EXPECT_STREQ(root->native_element->items[3].element->items[0].get_string()->chars, " UpdatedComment2 ");
+    EXPECT_STREQ(root->native_element->items[4].get_string()->chars, "UpdatedText3");
     // Remove alternating nodes (c1, t2, c2)
     EXPECT_TRUE(dom_comment_remove(c1));
     EXPECT_TRUE(dom_text_remove(t2));
@@ -1646,8 +1645,8 @@ TEST_F(DomIntegrationTest, CRUD_InterleavedTextAndComments) {
 
     // Verify final structure: T1 T3
     EXPECT_EQ(root->native_element->length, 2);
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "UpdatedText1");
-    EXPECT_STREQ(((String*)root->native_element->items[1].pointer)->chars, "UpdatedText3");
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "UpdatedText1");
+    EXPECT_STREQ(root->native_element->items[1].get_string()->chars, "UpdatedText3");
 
     // Verify DOM traversal
     node = root->first_child;
@@ -1698,8 +1697,8 @@ TEST_F(DomIntegrationTest, CRUD_NestedElements_WithMixedContent) {
     EXPECT_TRUE(dom_comment_set_content(child_comment, " Updated child comment "));
 
     // Verify updates in Lambda tree
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "Updated root text ");
-    EXPECT_STREQ(((String*)child->native_element->items[0].pointer)->chars, "Updated child text");
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Updated root text ");
+    EXPECT_STREQ(child->native_element->items[0].get_string()->chars, "Updated child text");
 
     // Remove content from child
     EXPECT_TRUE(dom_text_remove(child_text));
@@ -1753,7 +1752,7 @@ TEST_F(DomIntegrationTest, CRUD_BulkOperations_ManyNodes) {
     for (int i = 0; i < COUNT; i += 2) {
         char expected[50];
         snprintf(expected, sizeof(expected), "Updated Item %d", i);
-        EXPECT_STREQ(((String*)root->native_element->items[i * 2].pointer)->chars, expected);
+        EXPECT_STREQ(root->native_element->items[i * 2].get_string()->chars, expected);
     }
 
     // Remove every third node (text or comment)
@@ -1814,9 +1813,9 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     EXPECT_TRUE(dom_element_has_class(root, "featured"));
     EXPECT_TRUE(dom_element_has_class(root, "highlighted"));
 
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "Updated Title");
-    EXPECT_STREQ(((String*)root->native_element->items[1].element->items[0].pointer)->chars, " === ");
-    EXPECT_STREQ(((String*)root->native_element->items[2].pointer)->chars, "Updated body text");
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Updated Title");
+    EXPECT_STREQ(root->native_element->items[1].element->items[0].get_string()->chars, " === ");
+    EXPECT_STREQ(root->native_element->items[2].get_string()->chars, "Updated body text");
 
     // Remove attributes and content
     EXPECT_TRUE(dom_element_remove_attribute(root, "data-priority"));
@@ -1826,7 +1825,7 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     // Verify removals
     EXPECT_EQ(dom_element_get_attribute(root, "data-priority"), nullptr);
     EXPECT_EQ(root->native_element->length, 1);
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "Updated body text");
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Updated body text");
 }
 
 TEST_F(DomIntegrationTest, CRUD_EmptyToFull_FullToEmpty) {
@@ -1864,7 +1863,7 @@ TEST_F(DomIntegrationTest, CRUD_EmptyToFull_FullToEmpty) {
     DomText* t3 = dom_element_append_text(root, "Refilled");
     EXPECT_EQ(root->native_element->length, 1);
     EXPECT_EQ(root->first_child, (DomNode*)t3);
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "Refilled");
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "Refilled");
 }
 
 TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
@@ -1886,7 +1885,7 @@ TEST_F(DomIntegrationTest, CRUD_UpdateExistingTextMultipleTimes) {
         EXPECT_STREQ(text->text, buf);
 
         // Verify Lambda String updated (new String created each time)
-        EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, buf);
+        EXPECT_STREQ(root->native_element->items[0].get_string()->chars, buf);
 
         // String pointer should change (new String allocated)
         EXPECT_NE(text->native_string, original_string);
@@ -1938,8 +1937,8 @@ TEST_F(DomIntegrationTest, CRUD_RemoveFirstMiddleLast) {
     EXPECT_EQ(root->native_element->length, 2);
 
     // Verify final structure: T1, T3
-    EXPECT_STREQ(((String*)root->native_element->items[0].pointer)->chars, "T1");
-    EXPECT_STREQ(((String*)root->native_element->items[1].pointer)->chars, "T3");
+    EXPECT_STREQ(root->native_element->items[0].get_string()->chars, "T1");
+    EXPECT_STREQ(root->native_element->items[1].get_string()->chars, "T3");
 
     node = root->first_child;
     EXPECT_EQ(node, (DomNode*)t1);

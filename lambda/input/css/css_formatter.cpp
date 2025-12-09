@@ -85,11 +85,18 @@ static void append_space(CssFormatter* formatter) {
 }
 
 // Helper function to determine if a property uses comma-separated lists
+// NOTE: box-shadow and text-shadow use SPACE separation within each shadow
+//       Multiple shadows are represented by comma markers stored in the value list
+// NOTE: transform and filter use SPACE separation between functions
 static bool property_uses_comma_separated_list(CssPropertyId property_id) {
     switch (property_id) {
-        // Properties that use comma-separated lists
+        // Properties that use comma-separated lists for multiple values
         case CSS_PROPERTY_FONT_FAMILY:
         case CSS_PROPERTY_BACKGROUND_IMAGE:
+        case CSS_PROPERTY_BACKGROUND:
+        case CSS_PROPERTY_BACKGROUND_POSITION:
+        case CSS_PROPERTY_BACKGROUND_SIZE:
+        case CSS_PROPERTY_BACKGROUND_REPEAT:
         case CSS_PROPERTY_TRANSITION:
         case CSS_PROPERTY_TRANSITION_PROPERTY:
         case CSS_PROPERTY_TRANSITION_DURATION:
@@ -104,15 +111,8 @@ static bool property_uses_comma_separated_list(CssPropertyId property_id) {
         case CSS_PROPERTY_ANIMATION_DIRECTION:
         case CSS_PROPERTY_ANIMATION_FILL_MODE:
         case CSS_PROPERTY_ANIMATION_PLAY_STATE:
-        case CSS_PROPERTY_BOX_SHADOW:
-        case CSS_PROPERTY_TEXT_SHADOW:
-        case CSS_PROPERTY_BACKGROUND:
-        case CSS_PROPERTY_BACKGROUND_POSITION:
-        case CSS_PROPERTY_BACKGROUND_SIZE:
-        case CSS_PROPERTY_BACKGROUND_REPEAT:
-        case CSS_PROPERTY_TRANSFORM:
-        case CSS_PROPERTY_FILTER:
             return true;
+        // box-shadow, text-shadow, transform, filter use SPACE separation
         default:
             return false;
     }
@@ -120,29 +120,60 @@ static bool property_uses_comma_separated_list(CssPropertyId property_id) {
 
 static const char* unit_to_string(CssUnit unit) {
     switch (unit) {
+        // Absolute units
         case CSS_UNIT_PX: return "px";
-        case CSS_UNIT_EM: return "em";
-        case CSS_UNIT_REM: return "rem";
-        case CSS_UNIT_PERCENT: return "%";
-        case CSS_UNIT_VW: return "vw";
-        case CSS_UNIT_VH: return "vh";
         case CSS_UNIT_CM: return "cm";
         case CSS_UNIT_MM: return "mm";
         case CSS_UNIT_IN: return "in";
         case CSS_UNIT_PT: return "pt";
         case CSS_UNIT_PC: return "pc";
+        case CSS_UNIT_Q: return "Q";
+        // Font-relative units
+        case CSS_UNIT_EM: return "em";
+        case CSS_UNIT_REM: return "rem";
         case CSS_UNIT_EX: return "ex";
+        case CSS_UNIT_CAP: return "cap";
         case CSS_UNIT_CH: return "ch";
+        case CSS_UNIT_IC: return "ic";
+        case CSS_UNIT_LH: return "lh";
+        case CSS_UNIT_RLH: return "rlh";
+        // Viewport units
+        case CSS_UNIT_VW: return "vw";
+        case CSS_UNIT_VH: return "vh";
+        case CSS_UNIT_VI: return "vi";
+        case CSS_UNIT_VB: return "vb";
         case CSS_UNIT_VMIN: return "vmin";
         case CSS_UNIT_VMAX: return "vmax";
+        case CSS_UNIT_PERCENT: return "%";
+        // Angle units
         case CSS_UNIT_DEG: return "deg";
         case CSS_UNIT_RAD: return "rad";
         case CSS_UNIT_GRAD: return "grad";
         case CSS_UNIT_TURN: return "turn";
+        // Time units
         case CSS_UNIT_S: return "s";
         case CSS_UNIT_MS: return "ms";
+        // Flex units
         case CSS_UNIT_FR: return "fr";
+        // Resolution units
+        case CSS_UNIT_DPI: return "dpi";
+        case CSS_UNIT_DPCM: return "dpcm";
+        case CSS_UNIT_DPPX: return "dppx";
         default: return "";
+    }
+}
+
+// Helper function to format numbers cleanly (without unnecessary trailing zeros)
+static void format_number_clean(StringBuf* output, double value) {
+    // Check if the value is an integer
+    if (value == (int64_t)value) {
+        // Integer - output without decimal
+        stringbuf_append_format(output, "%d", (int)value);
+    } else {
+        // Decimal - output with appropriate precision
+        char num_buf[32];
+        snprintf(num_buf, sizeof(num_buf), "%.6g", value);
+        stringbuf_append_str(output, num_buf);
     }
 }
 
@@ -180,16 +211,17 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
 
         case CSS_VALUE_TYPE_LENGTH:
             // Format number with unit
-            stringbuf_append_format(formatter->output, "%.2f", value->data.length.value);
+            format_number_clean(formatter->output, value->data.length.value);
             stringbuf_append_str(formatter->output, unit_to_string(value->data.length.unit));
             break;
 
         case CSS_VALUE_TYPE_NUMBER:
-            stringbuf_append_format(formatter->output, "%.2f", value->data.number.value);
+            format_number_clean(formatter->output, value->data.number.value);
             break;
 
         case CSS_VALUE_TYPE_PERCENTAGE:
-            stringbuf_append_format(formatter->output, "%.2f%%", value->data.percentage.value);
+            format_number_clean(formatter->output, value->data.percentage.value);
+            stringbuf_append_str(formatter->output, "%");
             break;
 
         case CSS_VALUE_TYPE_COLOR:
@@ -210,8 +242,12 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                         stringbuf_append_format(formatter->output, "#%02X%02X%02X", r, g, b);
                     }
                 } else {
-                    stringbuf_append_format(formatter->output, "rgba(%d, %d, %d, %.2f)",
-                        r, g, b, a / 255.0);
+                    // Format RGBA with clean numbers
+                    double alpha = a / 255.0;
+                    stringbuf_append_str(formatter->output, "rgba(");
+                    stringbuf_append_format(formatter->output, "%d, %d, %d, ", r, g, b);
+                    format_number_clean(formatter->output, alpha);
+                    stringbuf_append_str(formatter->output, ")");
                 }
             } else if (value->data.color.type == CSS_COLOR_HSL) {
                 if (value->data.color.data.components) {
@@ -221,9 +257,23 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
                     double a = value->data.color.data.components->component4;
 
                     if (a >= 1.0) {
-                        stringbuf_append_format(formatter->output, "hsl(%.1f, %.1f%%, %.1f%%)", h, s * 100, l * 100);
+                        stringbuf_append_str(formatter->output, "hsl(");
+                        format_number_clean(formatter->output, h);
+                        stringbuf_append_str(formatter->output, ", ");
+                        format_number_clean(formatter->output, s * 100);
+                        stringbuf_append_str(formatter->output, "%, ");
+                        format_number_clean(formatter->output, l * 100);
+                        stringbuf_append_str(formatter->output, "%)");
                     } else {
-                        stringbuf_append_format(formatter->output, "hsla(%.1f, %.1f%%, %.1f%%, %.2f)", h, s * 100, l * 100, a);
+                        stringbuf_append_str(formatter->output, "hsla(");
+                        format_number_clean(formatter->output, h);
+                        stringbuf_append_str(formatter->output, ", ");
+                        format_number_clean(formatter->output, s * 100);
+                        stringbuf_append_str(formatter->output, "%, ");
+                        format_number_clean(formatter->output, l * 100);
+                        stringbuf_append_str(formatter->output, "%, ");
+                        format_number_clean(formatter->output, a);
+                        stringbuf_append_str(formatter->output, ")");
                     }
                 } else {
                     stringbuf_append_str(formatter->output, "hsl(0, 0%, 0%)");
@@ -260,20 +310,42 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             if (value->data.function && value->data.function->name) {
                 stringbuf_append_str(formatter->output, value->data.function->name);
                 stringbuf_append_str(formatter->output, "(");
-                // Format function arguments
+                // Format function arguments (comma-separated at top level, space-separated within)
                 for (size_t i = 0; i < (size_t)value->data.function->arg_count; i++) {
                     if (i > 0) {
                         stringbuf_append_str(formatter->output, ", ");
                     }
                     if (value->data.function->args && value->data.function->args[i]) {
-                        // Save current output, format arg value, restore
-                        StringBuf* temp = formatter->output;
-                        formatter->output = stringbuf_new(formatter->pool);
-                        css_format_value(formatter, value->data.function->args[i]);
-                        String* formatted_str = stringbuf_to_string(formatter->output);
-                        formatter->output = temp;
-                        if (formatted_str && formatted_str->chars) {
-                            stringbuf_append_str(formatter->output, formatted_str->chars);
+                        CssValue* arg = value->data.function->args[i];
+
+                        // If the argument is a list, format it with space separators
+                        // (not commas, since commas separate function arguments, not list items within an argument)
+                        if (arg->type == CSS_VALUE_TYPE_LIST && arg->data.list.values) {
+                            for (size_t j = 0; j < arg->data.list.count; j++) {
+                                if (j > 0) {
+                                    stringbuf_append_str(formatter->output, " ");
+                                }
+                                if (arg->data.list.values[j]) {
+                                    StringBuf* temp = formatter->output;
+                                    formatter->output = stringbuf_new(formatter->pool);
+                                    css_format_value(formatter, arg->data.list.values[j]);
+                                    String* formatted_str = stringbuf_to_string(formatter->output);
+                                    formatter->output = temp;
+                                    if (formatted_str && formatted_str->chars) {
+                                        stringbuf_append_str(formatter->output, formatted_str->chars);
+                                    }
+                                }
+                            }
+                        } else {
+                            // Single value argument - format normally
+                            StringBuf* temp = formatter->output;
+                            formatter->output = stringbuf_new(formatter->pool);
+                            css_format_value(formatter, arg);
+                            String* formatted_str = stringbuf_to_string(formatter->output);
+                            formatter->output = temp;
+                            if (formatted_str && formatted_str->chars) {
+                                stringbuf_append_str(formatter->output, formatted_str->chars);
+                            }
                         }
                     }
                 }
@@ -329,6 +401,39 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
 // Declaration Formatting
 // ============================================================================
 
+const char* css_format_declaration_full(CssFormatter* formatter, CssDeclaration* decl) {
+    if (!formatter || !decl || !decl->value) return NULL;
+
+    // Don't reset buffer - append to existing content
+
+    // Get property name - prefer stored name, fall back to lookup
+    const char* property_name = decl->property_name;
+    if (!property_name) {
+        property_name = css_property_get_name(decl->property_id);
+    }
+    if (!property_name) {
+        property_name = "<unknown-property>";
+    }
+
+    stringbuf_append_str(formatter->output, property_name);
+    stringbuf_append_str(formatter->output, ":");
+    append_space(formatter);
+
+    // Format value - use temporary buffer with property context
+    StringBuf* temp = formatter->output;
+    formatter->output = stringbuf_new(formatter->pool);
+    css_format_value_with_property(formatter, decl->value, decl->property_id);
+    String* value_str = stringbuf_to_string(formatter->output);
+    formatter->output = temp;
+
+    if (value_str && value_str->chars) {
+        stringbuf_append_str(formatter->output, value_str->chars);
+    }
+    String* result = stringbuf_to_string(formatter->output);
+    return (result && result->chars) ? result->chars : "";
+}
+
+// Legacy function for backward compatibility
 const char* css_format_declaration(CssFormatter* formatter, CssPropertyId property_id, CssValue* value) {
     if (!formatter || !value) return NULL;
 
@@ -451,9 +556,32 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         if (simple->attribute.name) {
                             stringbuf_append_str(formatter->output, simple->attribute.name);
                             if (simple->attribute.value) {
-                                stringbuf_append_str(formatter->output, "=\"");
+                                // Use the correct operator based on type
+                                switch (simple->type) {
+                                    case CSS_SELECTOR_ATTR_CONTAINS:
+                                        stringbuf_append_str(formatter->output, "~=\"");
+                                        break;
+                                    case CSS_SELECTOR_ATTR_BEGINS:
+                                        stringbuf_append_str(formatter->output, "^=\"");
+                                        break;
+                                    case CSS_SELECTOR_ATTR_ENDS:
+                                        stringbuf_append_str(formatter->output, "$=\"");
+                                        break;
+                                    case CSS_SELECTOR_ATTR_SUBSTRING:
+                                        stringbuf_append_str(formatter->output, "*=\"");
+                                        break;
+                                    case CSS_SELECTOR_ATTR_LANG:
+                                        stringbuf_append_str(formatter->output, "|=\"");
+                                        break;
+                                    default:  // CSS_SELECTOR_ATTR_EXACT
+                                        stringbuf_append_str(formatter->output, "=\"");
+                                        break;
+                                }
                                 stringbuf_append_str(formatter->output, simple->attribute.value);
                                 stringbuf_append_str(formatter->output, "\"");
+                                if (simple->attribute.case_insensitive) {
+                                    stringbuf_append_str(formatter->output, " i");
+                                }
                             }
                         }
                         stringbuf_append_str(formatter->output, "]");
@@ -485,6 +613,20 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                             stringbuf_append_str(formatter->output, "(");
                             stringbuf_append_str(formatter->output, simple->value);
                             stringbuf_append_str(formatter->output, ")");
+                        }
+                        break;
+                    case CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC:
+                        // Generic pseudo-element - use stored name with ::
+                        stringbuf_append_str(formatter->output, "::");
+                        if (simple->value) {
+                            stringbuf_append_str(formatter->output, simple->value);
+                        }
+                        break;
+                    case CSS_SELECTOR_PSEUDO_GENERIC:
+                        // Generic pseudo-class - use stored name with :
+                        stringbuf_append_str(formatter->output, ":");
+                        if (simple->value) {
+                            stringbuf_append_str(formatter->output, simple->value);
                         }
                         break;
                     default:
@@ -546,7 +688,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
             }
 
             // Format declaration
-            const char* decl_str = css_format_declaration(formatter, decl->property_id, decl->value);
+            const char* decl_str = css_format_declaration_full(formatter, decl);
             if (decl_str) {
                 stringbuf_append_str(formatter->output, decl_str);
             }

@@ -1037,7 +1037,7 @@ void parse_html_impl(Input* input, const char* html_string) {
                 if (child_type_id == LMD_TYPE_NULL) continue;  // Skip moved items
                 if (child_type_id == LMD_TYPE_STRING) {
                     // Skip whitespace-only strings
-                    String* str = (String*)child.pointer;
+                    String* str = child.get_string();
                     bool is_whitespace = true;
                     for (size_t j = 0; j < str->len; j++) {
                         if (!isspace(str->chars[j])) {

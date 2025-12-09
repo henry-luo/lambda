@@ -343,40 +343,40 @@ struct GridItemProp {
     bool is_grid_auto_placed;
 
     // Measured dimensions (from multipass measurement phase)
-    int measured_width;          // Content-based width (from measure pass)
-    int measured_height;         // Content-based height (from measure pass)
-    int measured_min_width;      // Minimum content width (longest word)
-    int measured_max_width;      // Maximum content width (no wrapping)
-    int measured_min_height;     // Minimum content height
-    int measured_max_height;     // Maximum content height
+    float measured_width;          // Content-based width (from measure pass)
+    float measured_height;         // Content-based height (from measure pass)
+    float measured_min_width;      // Minimum content width (longest word)
+    float measured_max_width;      // Maximum content width (no wrapping)
+    float measured_min_height;     // Minimum content height
+    float measured_max_height;     // Maximum content height
     bool has_measured_size;      // Whether measurement pass has been done
 };
 
 // Intrinsic size type (shared by flex and grid layout)
 typedef struct {
-    int min_content;  // Minimum content width (longest word/element)
-    int max_content;  // Maximum content width (no wrapping)
+    float min_content;  // Minimum content width (longest word/element)
+    float max_content;  // Maximum content width (no wrapping)
 } IntrinsicSizes;
 
 // FlexItemProp definition (needed by flex.hpp)
 typedef struct FlexItemProp {
-    int flex_basis;  // -1 for auto
+    float flex_basis;  // -1 for auto
     float flex_grow;
     float flex_shrink;
     CssEnum align_self;  // AlignType
     int order;
     float aspect_ratio;
-    int baseline_offset;
+    float baseline_offset;
 
     // Intrinsic sizing cache (computed during measurement phase)
     IntrinsicSizes intrinsic_width;   // min_content and max_content widths
     IntrinsicSizes intrinsic_height;  // min_content and max_content heights
 
     // Resolved constraints (computed from BlockProp given_min/max values)
-    int resolved_min_width;    // Resolved min-width (including auto = min-content)
-    int resolved_max_width;    // Resolved max-width (INT_MAX if none)
-    int resolved_min_height;   // Resolved min-height (including auto = min-content)
-    int resolved_max_height;   // Resolved max-height (INT_MAX if none)
+    float resolved_min_width;    // Resolved min-width (including auto = min-content)
+    float resolved_max_width;    // Resolved max-width (FLT_MAX if none)
+    float resolved_min_height;   // Resolved min-height (including auto = min-content)
+    float resolved_max_height;   // Resolved max-height (FLT_MAX if none)
 
     // Flags for percentage values and measurement state
     int flex_basis_is_percent : 1;

@@ -167,10 +167,10 @@ int64_t it2l(Item itm) {
         return itm.int_val;
     }
     else if (itm._type_id == LMD_TYPE_INT64) {
-        return *(int64_t*)itm.pointer;
+        return itm.get_int64();
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
-        return (int64_t)*(double*)itm.pointer;
+        return (int64_t)itm.get_double();
     }
     log_debug("invalid type %d", itm._type_id);
     // todo: push error
@@ -182,13 +182,13 @@ double it2d(Item itm) {
         return itm.int_val;
     }
     else if (itm._type_id == LMD_TYPE_INT64) {
-        return *(int64_t*)itm.pointer;
+        return itm.get_int64();
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
-        return *(double*)itm.pointer;
+        return itm.get_double();
     }
     else if (itm._type_id == LMD_TYPE_DECIMAL) {
-        Decimal* dec = (Decimal*)itm.pointer;
+        Decimal* dec = itm.get_decimal();
         char* endptr;
         char* dec_str = mpd_to_sci(dec->dec_val, 0);
         double val = strtod(dec_str, &endptr);
@@ -215,11 +215,11 @@ bool it2b(Item itm) {
         return itm.int_val != 0;
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
-        double d = *(double*)itm.pointer;
+        double d = itm.get_double();
         return !isnan(d) && d != 0.0;
     }
     else if (itm._type_id == LMD_TYPE_STRING) {
-        String* str = (String*)itm.pointer;
+        String* str = itm.get_string();
         return str && str->len > 0;
     }
     // Objects are truthy
@@ -231,10 +231,10 @@ int it2i(Item itm) {
         return itm.int_val;
     }
     else if (itm._type_id == LMD_TYPE_INT64) {
-        return (int)*(int64_t*)itm.pointer;
+        return (int)itm.get_int64();
     }
     else if (itm._type_id == LMD_TYPE_FLOAT) {
-        return (int)*(double*)itm.pointer;
+        return (int)itm.get_double();
     }
     else if (itm._type_id == LMD_TYPE_BOOL) { // should bool be convertible to int?
         return itm.bool_val ? 1 : 0;
@@ -244,7 +244,7 @@ int it2i(Item itm) {
 
 String* it2s(Item itm) {
     if (itm._type_id == LMD_TYPE_STRING) {
-        return (String*)itm.pointer;
+        return itm.get_string();
     }
     // For other types, we'd need to convert to string
     // For now, return a default string
@@ -262,14 +262,14 @@ void expand_list(List *list, Arena* arena = nullptr) {
     log_debug("expand list:: %p, length: %ld, extra: %ld, capacity: %ld", list, list->length, list->extra, list->capacity);
     log_item({.list = list}, "list to expand");
     list->capacity = list->capacity ? list->capacity * 2 : 8;
-    
+
     // Determine which allocator to use
     Item* old_items = list->items;
     bool use_arena = (arena != nullptr && old_items != nullptr && arena_owns(arena, old_items));
-    
+
     if (use_arena) {
         // Use arena realloc for arena-allocated buffers (MarkBuilder path)
-        list->items = (Item*)arena_realloc(arena, list->items, 
+        list->items = (Item*)arena_realloc(arena, list->items,
                                            (list->capacity/2) * sizeof(Item),
                                            list->capacity * sizeof(Item));
         log_debug("arena_realloc used for list expansion");
@@ -278,7 +278,7 @@ void expand_list(List *list, Arena* arena = nullptr) {
         list->items = (Item*)realloc(list->items, list->capacity * sizeof(Item));
         log_debug("C heap realloc used for list expansion");
     }
-    
+
     // copy extra items to the end of the list
     if (list->extra) {
         memcpy(list->items + (list->capacity - list->extra),
@@ -287,9 +287,8 @@ void expand_list(List *list, Arena* arena = nullptr) {
         // and is stored in the list extra slots, need to update the pointer
         for (int i = 0; i < list->length; i++) {
             Item itm = list->items[i];
-            if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_INT64 ||
-                itm._type_id == LMD_TYPE_DTIME) {
-                Item* old_pointer = (Item*)itm.pointer;
+            if (itm._type_id == LMD_TYPE_FLOAT || itm._type_id == LMD_TYPE_INT64 || itm._type_id == LMD_TYPE_DTIME) {
+                Item* old_pointer = (Item*)itm.double_ptr;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
                     int offset = old_items + list->capacity/2 - old_pointer;
@@ -338,25 +337,25 @@ void array_set(Array* arr, int index, Item itm) {
     switch (type_id) {
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
-        *dval = *(double*)itm.pointer;  arr->items[index] = {.item = d2it(dval)};
+        *dval = itm.get_double();  arr->items[index] = {.item = d2it(dval)};
         arr->extra++;
         log_debug("array set float: %lf", *dval);
         break;
     }
     case LMD_TYPE_INT64: {
         int64_t* ival = (int64_t*)(arr->items + (arr->capacity - arr->extra - 1));
-        *ival = *(int64_t*)itm.pointer;  arr->items[index] = {.item = l2it(ival)};
+        *ival = itm.get_int64();  arr->items[index] = {.item = l2it(ival)};
         arr->extra++;
         break;
     }
     case LMD_TYPE_DTIME:  {
         DateTime* dtval = (DateTime*)(arr->items + (arr->capacity - arr->extra - 1));
-        *dtval = *(DateTime*)itm.pointer;  arr->items[index] = {.item = k2it(dtval)};
+        *dtval = itm.get_datetime();  arr->items[index] = {.item = k2it(dtval)};
         arr->extra++;
         break;
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-        String *str = (String*)itm.pointer;
+        String *str = itm.get_string();
         str->ref_cnt++;
         break;
     }
@@ -430,8 +429,8 @@ void list_push(List *list, Item item) {
             Item prev_item = list->items[list->length - 1];
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
                 log_debug("list_push: merging strings");
-                String *prev_str = (String*)prev_item.pointer;
-                String *new_str = (String*)item.pointer;
+                String *prev_str = prev_item.get_string();
+                String *new_str = item.get_string();
                 // merge the two strings
                 size_t new_len = prev_str->len + new_str->len;
                 String *merged_str;
@@ -469,12 +468,12 @@ void list_push(List *list, Item item) {
     list->items[list->length++] = item;
     switch (item._type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-        String *str = (String*)item.pointer;
+        String *str = (String*)item.get_string();
         str->ref_cnt++;
         break;
     }
     case LMD_TYPE_DECIMAL: {
-        Decimal *dval = (Decimal*)item.pointer;
+        Decimal *dval = item.get_decimal();
         if (dval && dval->dec_val) {
             char *buf = mpd_to_sci(dval->dec_val, 1);
             if (buf) free(buf);
@@ -486,7 +485,7 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
-        *dval = *(double*)item.pointer;
+        *dval = item.get_double();
         list->items[list->length-1] = {.item = d2it(dval)};
         list->extra++;
         log_debug("list_push: float value: %f", *dval);
@@ -494,14 +493,14 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_INT64: {
         int64_t* ival = (int64_t*)(list->items + (list->capacity - list->extra - 1));
-        *ival = *(int64_t*)item.pointer;  list->items[list->length-1] = {.item = l2it(ival)};
+        *ival = item.get_int64();  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
         log_debug("list_push: int64 value: %ld", *ival);
         break;
     }
     case LMD_TYPE_DTIME:  {
         DateTime* dtval = (DateTime*)(list->items + (list->capacity - list->extra - 1));
-        DateTime dt = *dtval = *(DateTime*)item.pointer;  list->items[list->length-1] = {.item = k2it(dtval)};
+        DateTime dt = *dtval = item.get_datetime();  list->items[list->length-1] = {.item = k2it(dtval)};
         StrBuf *strbuf = strbuf_new();
         datetime_format_lambda(strbuf, &dt);
         log_debug("list_push: pushed datetime value: %s", strbuf->str);
@@ -605,13 +604,13 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_INT:
                     titem.int_val = item.int_val;  break;
                 case LMD_TYPE_INT64:
-                    titem.long_val = *(int64_t*)item.pointer;  break;
+                    titem.long_val = item.get_int64();  break;
                 case LMD_TYPE_FLOAT:
-                    titem.double_val = *(double*)item.pointer;  break;
+                    titem.double_val = item.get_double();  break;
                 case LMD_TYPE_DTIME:
-                    titem.datetime_val = *(DateTime*)item.pointer;  break;
+                    titem.datetime_val = item.get_datetime();  break;
                 case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-                    String *str = (String*)item.pointer;
+                    String *str = item.get_string();
                     titem.string = str;  str->ref_cnt++;
                     break;
                 }
@@ -781,7 +780,7 @@ ConstItem Map::get(const Item key) const {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = ((String*)key.pointer)->chars;
+        key_str = key.get_string()->chars;
     } else {
         log_error("map_get_const: key must be string or symbol, got type %d", key._type_id);
         return null_result;  // only string or symbol keys are supported
@@ -836,7 +835,7 @@ ConstItem Element::get_attr(const Item key) const {
     bool is_found;
     char *key_str = NULL;
     if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
-        key_str = ((String*)key.pointer)->chars;
+        key_str = key.get_string()->chars;
     } else {
         return null_result;  // only string or symbol keys are supported
     }

@@ -391,23 +391,6 @@ static const CssEnumInfo css_value_definitions[] = {
     {"vertical-lr", 11, CSS_VALUE_VERTICAL_LR, CSS_VALUE_GROUP_WRITING_MODE},
     {"sideways-rl", 11, CSS_VALUE_SIDEWAYS_RL, CSS_VALUE_GROUP_WRITING_MODE},
     {"sideways-lr", 11, CSS_VALUE_SIDEWAYS_LR, CSS_VALUE_GROUP_WRITING_MODE},
-    // Custom values added from Lambda CSS resolve
-    {"contain", 7, CSS_VALUE_CONTAIN, CSS_VALUE_GROUP_BGROUND_SIZE},
-    {"cover", 5, CSS_VALUE_COVER, CSS_VALUE_GROUP_BGROUND_SIZE},
-    {"local", 5, CSS_VALUE_LOCAL, CSS_VALUE_GROUP_BGROUND_ATTACHMENT},
-    {"padding-box", 11, CSS_VALUE_PADDING_BOX, CSS_VALUE_GROUP_BOX_MODEL},
-    {"multiply", 8, CSS_VALUE_MULTIPLY, CSS_VALUE_GROUP_BGROUND_BLEND},
-    {"overlay", 7, CSS_VALUE_OVERLAY, CSS_VALUE_GROUP_BGROUND_BLEND},
-    {"round", 5, CSS_VALUE_ROUND, CSS_VALUE_GROUP_BGROUND_REPEAT},
-    {"space", 5, CSS_VALUE_SPACE, CSS_VALUE_GROUP_BGROUND_REPEAT},
-    {"collapse-table", 14, CSS_VALUE_COLLAPSE_TABLE, CSS_VALUE_GROUP_BORDER_COLLAPSE},  // Use different name to avoid conflict with CSS_VALUE_COLLAPSE
-    {"separate", 8, CSS_VALUE_SEPARATE, CSS_VALUE_GROUP_BORDER_COLLAPSE},
-    {"hide", 4, CSS_VALUE_HIDE, CSS_VALUE_GROUP_EMPTY_CELLS},
-    {"show", 4, CSS_VALUE_SHOW, CSS_VALUE_GROUP_EMPTY_CELLS},
-    {"fit-content", 11, CSS_VALUE_FIT_CONTENT, CSS_VALUE_GROUP_SIZE},
-    {"fr", 2, CSS_VALUE_FR, CSS_VALUE_GROUP_MISC},
-    {"dense", 5, CSS_VALUE_DENSE, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
-    // List style types
     {"disc", 4, CSS_VALUE_DISC, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
     {"circle", 6, CSS_VALUE_CIRCLE, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
     {"square", 6, CSS_VALUE_SQUARE, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
@@ -416,26 +399,33 @@ static const CssEnumInfo css_value_definitions[] = {
     {"upper-roman", 11, CSS_VALUE_UPPER_ROMAN, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
     {"lower-alpha", 11, CSS_VALUE_LOWER_ALPHA, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
     {"upper-alpha", 11, CSS_VALUE_UPPER_ALPHA, CSS_VALUE_GROUP_LIST_STYLE_TYPE},
-    // Flex layout
     {"space-evenly", 12, CSS_VALUE_SPACE_EVENLY, CSS_VALUE_GROUP_FLEX_JUSTIFY},
+    {"contain", 7, CSS_VALUE_CONTAIN, CSS_VALUE_GROUP_BGROUND_SIZE},
+    {"cover", 5, CSS_VALUE_COVER, CSS_VALUE_GROUP_BGROUND_SIZE},
+    {"local", 5, CSS_VALUE_LOCAL, CSS_VALUE_GROUP_BGROUND_ATTACHMENT},
+    {"padding-box", 11, CSS_VALUE_PADDING_BOX, CSS_VALUE_GROUP_BOX_MODEL},
+    {"multiply", 8, CSS_VALUE_MULTIPLY, CSS_VALUE_GROUP_BGROUND_BLEND},
+    {"overlay", 7, CSS_VALUE_OVERLAY, CSS_VALUE_GROUP_BGROUND_BLEND},
+    {"round", 5, CSS_VALUE_ROUND, CSS_VALUE_GROUP_BGROUND_REPEAT},
+    {"space", 5, CSS_VALUE_SPACE, CSS_VALUE_GROUP_BGROUND_REPEAT},
+    {"collapse-table", 14, CSS_VALUE_COLLAPSE_TABLE, CSS_VALUE_GROUP_BORDER_COLLAPSE},
+    {"separate", 8, CSS_VALUE_SEPARATE, CSS_VALUE_GROUP_BORDER_COLLAPSE},
+    {"hide", 4, CSS_VALUE_HIDE, CSS_VALUE_GROUP_EMPTY_CELLS},
+    {"show", 4, CSS_VALUE_SHOW, CSS_VALUE_GROUP_EMPTY_CELLS},
+    {"fit-content", 11, CSS_VALUE_FIT_CONTENT, CSS_VALUE_GROUP_SIZE},
+    {"fr", 2, CSS_VALUE_FR, CSS_VALUE_GROUP_MISC},
+    {"dense", 5, CSS_VALUE_DENSE, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 
-
+static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);
 
 const CssEnumInfo* css_enum_info(CssEnum id) {
-    // Support both standard and custom value IDs
-    if (id < CSS_VALUE__LAST_ENTRY) {
+    // Direct indexing - array is ordered to match enum values
+    if (id >= 0 && id < (int)css_value_definitions_count) {
         return &css_value_definitions[id];
     }
-    // For custom values beyond CSS_VALUE__LAST_ENTRY, calculate index
-    if (id >= CSS_VALUE_CONTAIN && id <= CSS_VALUE_DENSE) {
-        size_t custom_index = CSS_VALUE__LAST_ENTRY + (id - CSS_VALUE_CONTAIN);
-        if (custom_index < sizeof(css_value_definitions) / sizeof(css_value_definitions[0])) {
-            return &css_value_definitions[custom_index];
-        }
-    }
-    return css_value_definitions; // return _undef for unknown IDs
+    return &css_value_definitions[0]; // return _undef for unknown IDs
 }
 
 // hash function for CSS keyword strings (case-insensitive)
@@ -465,13 +455,12 @@ CssEnum css_enum_by_name(const char* name) {
     if (!name) return CSS_VALUE__UNDEF;
 
     static HashMap* keyword_cache = NULL;
-    static const size_t table_size = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);
 
     // initialize hashmap on first use
     if (!keyword_cache) {
         keyword_cache = hashmap_new(
             sizeof(const char*),  // key is pointer to string
-            table_size,           // initial capacity
+            css_value_definitions_count,  // initial capacity
             0, 0,                 // seeds (0 means random)
             css_keyword_hash,
             css_keyword_compare,
@@ -480,7 +469,7 @@ CssEnum css_enum_by_name(const char* name) {
         );
 
         // populate hashmap with all keywords
-        for (size_t i = 0; i < table_size; i++) {
+        for (size_t i = 0; i < css_value_definitions_count; i++) {
             const char* keyword = css_value_definitions[i].name;
             hashmap_set(keyword_cache, &keyword);
         }
@@ -491,7 +480,7 @@ CssEnum css_enum_by_name(const char* name) {
     if (result) {
         // find index in table to get the unique value
         const char* found_name = *result;
-        for (size_t i = 0; i < table_size; i++) {
+        for (size_t i = 0; i < css_value_definitions_count; i++) {
             if (css_value_definitions[i].name == found_name) {
                 return css_value_definitions[i].enum_id;
             }

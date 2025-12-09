@@ -25,11 +25,11 @@ static const char* get_element_type_name(Element* elem) {
     if (!elem || !elem->type) return NULL;
     TypeElmt* type = (TypeElmt*)elem->type;
     if (type->name.length == 0) return NULL;
-    
+
     // Create a null-terminated string from StrView
     static char type_name_buffer[256];
     if (type->name.length >= sizeof(type_name_buffer)) return NULL;
-    
+
     strncpy(type_name_buffer, type->name.str, type->name.length);
     type_name_buffer[type->name.length] = '\0';
     return type_name_buffer;
@@ -40,37 +40,36 @@ static String* get_first_string_content(Element* elem) {
     if (!elem) return NULL;
     List* list = (List*)elem;
     if (list->length == 0) return NULL;
-    
+
     Item first_item = list->items[0];
     TypeId type = get_type_id(first_item);
-    
     if (type == LMD_TYPE_STRING) {
-        return (String*)first_item.pointer;
-    } else if (type == LMD_TYPE_ELEMENT) {
-        Element* child_elem = (Element*)first_item.pointer;
+        return first_item.get_string();
+    }
+    else if (type == LMD_TYPE_ELEMENT) {
+        Element* child_elem = first_item.element;
         return get_first_string_content(child_elem);
     }
-    
     return NULL;
 }
 
 // Format a heading element
 static void format_heading(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     int level = 1;  // default level
     String* title = NULL;
     String* todo = NULL;
     String* tags = NULL;
-    
+
     // Extract level, TODO, title, and tags from children
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "level") == 0) {
                 String* level_str = get_first_string_content(child);
                 if (level_str) {
@@ -85,49 +84,49 @@ static void format_heading(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     // Output heading with appropriate number of stars
     for (int i = 0; i < level; i++) {
         append_string(sb, "*");
     }
     append_string(sb, " ");
-    
+
     // Add TODO keyword if present
     if (todo) {
         append_string(sb, todo->chars);
         append_string(sb, " ");
     }
-    
+
     // Add title
     if (title) {
         append_string(sb, title->chars);
     }
-    
+
     // Add tags if present
     if (tags) {
         append_string(sb, " ");
         append_string(sb, tags->chars);
     }
-    
+
     append_string(sb, "\n");
 }
 
 // Format a paragraph element with inline formatting
 static void format_paragraph(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         TypeId child_type_id = get_type_id(child_item);
-        
         if (child_type_id == LMD_TYPE_STRING) {
-            String* str = (String*)child_item.pointer;
+            String* str = child_item.get_string();
             if (str && str != &EMPTY_STRING) {
                 append_string(sb, str->chars);
             }
-        } else if (child_type_id == LMD_TYPE_ELEMENT) {
-            Element* child_elem = (Element*)child_item.pointer;
+        }
+        else if (child_type_id == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child_item.element;
             format_inline_element(sb, child_elem);
         }
     }
@@ -137,16 +136,16 @@ static void format_paragraph(StringBuf* sb, Element* elem) {
 // Format inline elements (bold, italic, links, etc.)
 static void format_inline_element(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     const char* type_name = get_element_type_name(elem);
     if (!type_name) return;
-    
+
     if (strcmp(type_name, "plain_text") == 0) {
         List* list = (List*)elem;
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -158,7 +157,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -171,7 +170,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -184,7 +183,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -197,7 +196,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -210,7 +209,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -223,7 +222,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
@@ -232,17 +231,17 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         append_string(sb, "_");
     } else if (strcmp(type_name, "link") == 0) {
         append_string(sb, "[[");
-        
+
         String* url = NULL;
         String* description = NULL;
-        
+
         List* list = (List*)elem;
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = (Element*)child_item.pointer;
+                Element* child = child_item.element;
                 const char* child_type = get_element_type_name(child);
-                
+
                 if (child_type && strcmp(child_type, "url") == 0) {
                     url = get_first_string_content(child);
                 } else if (child_type && strcmp(child_type, "description") == 0) {
@@ -250,36 +249,36 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
                 }
             }
         }
-        
+
         if (url) {
             append_string(sb, url->chars);
         }
-        
+
         if (description) {
             append_string(sb, "][");
             append_string(sb, description->chars);
         }
-        
+
         append_string(sb, "]]");
     } else if (strcmp(type_name, "footnote_reference") == 0) {
         // Format footnote reference: [fn:name]
         append_string(sb, "[fn:");
-        
+
         String* name = NULL;
         List* list = (List*)elem;
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = (Element*)child_item.pointer;
+                Element* child = child_item.element;
                 const char* child_type = get_element_type_name(child);
-                
+
                 if (child_type && strcmp(child_type, "name") == 0) {
                     name = get_first_string_content(child);
                     break;
                 }
             }
         }
-        
+
         if (name) {
             append_string(sb, name->chars);
         }
@@ -287,17 +286,17 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
     } else if (strcmp(type_name, "inline_footnote") == 0) {
         // Format inline footnote: [fn:name:definition] or [fn::definition]
         append_string(sb, "[fn:");
-        
+
         String* name = NULL;
         Element* definition_elem = NULL;
-        
+
         List* list = (List*)elem;
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = (Element*)child_item.pointer;
+                Element* child = child_item.element;
                 const char* child_type = get_element_type_name(child);
-                
+
                 if (child_type && strcmp(child_type, "name") == 0) {
                     name = get_first_string_content(child);
                 } else if (child_type && strcmp(child_type, "definition") == 0) {
@@ -305,24 +304,24 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
                 }
             }
         }
-        
+
         if (name && strlen(name->chars) > 0) {
             append_string(sb, name->chars);
         }
         append_string(sb, ":");
-        
+
         if (definition_elem) {
             // Format the definition content (may contain inline formatting)
             List* def_list = (List*)definition_elem;
             for (long i = 0; i < def_list->length; i++) {
                 Item def_item = def_list->items[i];
                 if (get_type_id(def_item) == LMD_TYPE_STRING) {
-                    String* str = (String*)def_item.pointer;
+                    String* str = def_item.get_string();
                     if (str && str != &EMPTY_STRING) {
                         append_string(sb, str->chars);
                     }
                 } else if (get_type_id(def_item) == LMD_TYPE_ELEMENT) {
-                    Element* def_child = (Element*)def_item.pointer;
+                    Element* def_child = def_item.element;
                     format_inline_element(sb, def_child);
                 }
             }
@@ -331,22 +330,22 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
     } else if (strcmp(type_name, "inline_math") == 0) {
         // Format inline math: $content$
         String* raw_content = NULL;
-        
+
         // Look for raw_content element
         List* list = (List*)elem;
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = (Element*)child_item.pointer;
+                Element* child = child_item.element;
                 const char* child_type = get_element_type_name(child);
-                
+
                 if (child_type && strcmp(child_type, "raw_content") == 0) {
                     raw_content = get_first_string_content(child);
                     break;
                 }
             }
         }
-        
+
         // Determine delimiter based on content (could be $ or \(...\))
         bool use_latex_style = false;
         if (raw_content && raw_content->chars) {
@@ -355,7 +354,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
                 use_latex_style = true;
             }
         }
-        
+
         if (use_latex_style) {
             append_string(sb, "\\(");
             if (raw_content) {
@@ -372,22 +371,22 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
     } else if (strcmp(type_name, "display_math") == 0) {
         // Format display math: $$content$$ or \[...\]
         String* raw_content = NULL;
-        
+
         // Look for raw_content element
         List* list = (List*)elem;
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child = (Element*)child_item.pointer;
+                Element* child = child_item.element;
                 const char* child_type = get_element_type_name(child);
-                
+
                 if (child_type && strcmp(child_type, "raw_content") == 0) {
                     raw_content = get_first_string_content(child);
                     break;
                 }
             }
         }
-        
+
         // Determine delimiter based on content
         bool use_latex_style = false;
         if (raw_content && raw_content->chars) {
@@ -396,7 +395,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
                 use_latex_style = true;
             }
         }
-        
+
         if (use_latex_style) {
             append_string(sb, "\\[");
             if (raw_content) {
@@ -418,7 +417,7 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child_item.pointer;
+                Element* child_elem = child_item.element;
                 format_inline_element(sb, child_elem);
             }
         }
@@ -428,12 +427,12 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (get_type_id(child_item) == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
             } else if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child_item.pointer;
+                Element* child_elem = child_item.element;
                 format_inline_element(sb, child_elem);
             }
         }
@@ -443,12 +442,12 @@ static void format_inline_element(StringBuf* sb, Element* elem) {
 // Format a list item element
 static void format_list_item(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_STRING) {
-            String* str = (String*)child_item.pointer;
+            String* str = child_item.get_string();
             if (str && str != &EMPTY_STRING) {
                 append_string(sb, str->chars);
             }
@@ -460,23 +459,23 @@ static void format_list_item(StringBuf* sb, Element* elem) {
 // Format a code block element
 static void format_code_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     String* language = NULL;
-    
+
     // Extract language and content
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "language") == 0) {
                 language = get_first_string_content(child);
             }
         }
     }
-    
+
     // Output BEGIN_SRC
     append_string(sb, "#+BEGIN_SRC");
     if (language) {
@@ -484,14 +483,14 @@ static void format_code_block(StringBuf* sb, Element* elem) {
         append_string(sb, language->chars);
     }
     append_string(sb, "\n");
-    
+
     // Output content lines
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "content") == 0) {
                 String* content = get_first_string_content(child);
                 if (content) {
@@ -501,7 +500,7 @@ static void format_code_block(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     // Output END_SRC
     append_string(sb, "#+END_SRC\n");
 }
@@ -509,24 +508,24 @@ static void format_code_block(StringBuf* sb, Element* elem) {
 // Format a quote block element
 static void format_quote_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     // Output BEGIN_QUOTE
     append_string(sb, "#+BEGIN_QUOTE\n");
-    
+
     // Output content paragraphs
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "paragraph") == 0) {
                 format_paragraph(sb, child);
             }
         }
     }
-    
+
     // Output END_QUOTE
     append_string(sb, "#+END_QUOTE\n");
 }
@@ -534,16 +533,16 @@ static void format_quote_block(StringBuf* sb, Element* elem) {
 // Format an example block element
 static void format_example_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     append_string(sb, "#+BEGIN_EXAMPLE\n");
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "content") == 0) {
                 String* content = get_first_string_content(child);
                 if (content) {
@@ -553,23 +552,23 @@ static void format_example_block(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     append_string(sb, "#+END_EXAMPLE\n");
 }
 
 // Format a verse block element
 static void format_verse_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     append_string(sb, "#+BEGIN_VERSE\n");
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "content") == 0) {
                 String* content = get_first_string_content(child);
                 if (content) {
@@ -579,67 +578,67 @@ static void format_verse_block(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     append_string(sb, "#+END_VERSE\n");
 }
 
 // Format a center block element
 static void format_center_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     append_string(sb, "#+BEGIN_CENTER\n");
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "paragraph") == 0) {
                 format_paragraph(sb, child);
             }
         }
     }
-    
+
     append_string(sb, "#+END_CENTER\n");
 }
 
 // Format a drawer element
 static void format_drawer(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     String* drawer_name = NULL;
-    
+
     // Extract drawer name first
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "name") == 0) {
                 drawer_name = get_first_string_content(child);
                 break;
             }
         }
     }
-    
+
     // Output drawer start
     append_string(sb, ":");
     if (drawer_name) {
         append_string(sb, drawer_name->chars);
     }
     append_string(sb, ":\n");
-    
+
     // Output content lines
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "content") == 0) {
                 String* content = get_first_string_content(child);
                 if (content) {
@@ -649,7 +648,7 @@ static void format_drawer(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     // Output drawer end
     append_string(sb, ":END:\n");
 }
@@ -657,18 +656,18 @@ static void format_drawer(StringBuf* sb, Element* elem) {
 // Format a scheduling element (SCHEDULED, DEADLINE, CLOSED)
 static void format_scheduling(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     String* keyword = NULL;
     String* timestamp = NULL;
-    
+
     // Extract keyword and timestamp
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "keyword") == 0) {
                 keyword = get_first_string_content(child);
             } else if (child_type && strcmp(child_type, "timestamp") == 0) {
@@ -676,7 +675,7 @@ static void format_scheduling(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     // Output scheduling line
     append_string(sb, "  "); // Indent
     if (keyword) {
@@ -698,7 +697,7 @@ static void format_scheduling(StringBuf* sb, Element* elem) {
 // Format a timestamp element
 static void format_timestamp(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     String* timestamp = get_first_string_content(elem);
     if (timestamp) {
         append_string(sb, timestamp->chars);
@@ -708,18 +707,18 @@ static void format_timestamp(StringBuf* sb, Element* elem) {
 // Format a footnote definition element
 static void format_footnote_definition(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     String* name = NULL;
     Element* content_elem = NULL;
-    
+
     // Extract footnote name and content
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* child = (Element*)child_item.pointer;
+            Element* child = child_item.element;
             const char* child_type = get_element_type_name(child);
-            
+
             if (child_type && strcmp(child_type, "name") == 0) {
                 name = get_first_string_content(child);
             } else if (child_type && strcmp(child_type, "content") == 0) {
@@ -727,43 +726,43 @@ static void format_footnote_definition(StringBuf* sb, Element* elem) {
             }
         }
     }
-    
+
     // Format as [fn:name] content
     append_string(sb, "[fn:");
     if (name) {
         append_string(sb, name->chars);
     }
     append_string(sb, "] ");
-    
+
     // Format the content (may contain inline formatting)
     if (content_elem) {
         List* content_list = (List*)content_elem;
         for (long i = 0; i < content_list->length; i++) {
             Item content_item = content_list->items[i];
             if (get_type_id(content_item) == LMD_TYPE_STRING) {
-                String* str = (String*)content_item.pointer;
+                String* str = content_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
             } else if (get_type_id(content_item) == LMD_TYPE_ELEMENT) {
-                Element* content_child = (Element*)content_item.pointer;
+                Element* content_child = content_item.element;
                 format_inline_element(sb, content_child);
             }
         }
     }
-    
+
     append_string(sb, "\n");
 }
 
 // Format a directive element
 static void format_directive(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_STRING) {
-            String* str = (String*)child_item.pointer;
+            String* str = child_item.get_string();
             if (str && str != &EMPTY_STRING) {
                 append_string(sb, str->chars);
             }
@@ -775,12 +774,12 @@ static void format_directive(StringBuf* sb, Element* elem) {
 // Format a table cell element
 static void format_table_cell(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_STRING) {
-            String* str = (String*)child_item.pointer;
+            String* str = child_item.get_string();
             if (str && str != &EMPTY_STRING) {
                 append_string(sb, str->chars);
             }
@@ -791,16 +790,16 @@ static void format_table_cell(StringBuf* sb, Element* elem) {
 // Format a table row element
 static void format_table_row(StringBuf* sb, Element* elem, bool is_header) {
     if (!elem) return;
-    
+
     append_string(sb, "|");
-    
+
     List* list = (List*)elem;
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* cell = (Element*)child_item.pointer;
+            Element* cell = child_item.element;
             const char* cell_type = get_element_type_name(cell);
-            
+
             if (cell_type && strcmp(cell_type, "table_cell") == 0) {
                 append_string(sb, " ");
                 format_table_cell(sb, cell);
@@ -809,7 +808,7 @@ static void format_table_row(StringBuf* sb, Element* elem, bool is_header) {
         }
     }
     append_string(sb, "\n");
-    
+
     // If this is a header row, add separator
     if (is_header) {
         append_string(sb, "|");
@@ -826,17 +825,17 @@ static void format_table_row(StringBuf* sb, Element* elem, bool is_header) {
 // Format a table element
 static void format_table(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     List* list = (List*)elem;
     bool first_row = true;
-    
+
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            Element* row = (Element*)child_item.pointer;
+            Element* row = child_item.element;
             const char* row_type = get_element_type_name(row);
-            
-            if (row_type && (strcmp(row_type, "table_row") == 0 || 
+
+            if (row_type && (strcmp(row_type, "table_row") == 0 ||
                             strcmp(row_type, "table_header_row") == 0)) {
                 bool is_header = (strcmp(row_type, "table_header_row") == 0) || first_row;
                 format_table_row(sb, row, is_header);
@@ -849,10 +848,10 @@ static void format_table(StringBuf* sb, Element* elem) {
 // Format an org element based on its type
 static void format_org_element(StringBuf* sb, Element* elem) {
     if (!elem) return;
-    
+
     const char* type_name = get_element_type_name(elem);
     if (!type_name) return;
-    
+
     if (strcmp(type_name, "heading") == 0) {
         format_heading(sb, elem);
     } else if (strcmp(type_name, "paragraph") == 0) {
@@ -899,14 +898,14 @@ static void format_org_element(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             TypeId child_type = get_type_id(child_item);
-            
+
             if (child_type == LMD_TYPE_STRING) {
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str != &EMPTY_STRING) {
                     append_string(sb, str->chars);
                 }
             } else if (child_type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child_item.pointer;
+                Element* child_elem = child_item.element;
                 format_org_element(sb, child_elem);
             }
         }
@@ -916,10 +915,10 @@ static void format_org_element(StringBuf* sb, Element* elem) {
 // Format a text or element item
 static void format_org_text(StringBuf* sb, Item item) {
     if (item.item == ITEM_NULL) return;
-    
+
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_STRING) {
-        String* str = (String*)item.pointer;
+        String* str = item.get_string();
         if (str && str != &EMPTY_STRING) {
             append_string(sb, str->chars);
         }
@@ -946,19 +945,19 @@ static void format_org_text_reader(OrgContext& ctx, const ItemReader& item) {
 // Main Org formatting function
 void format_org(StringBuf* sb, Item root_item) {
     if (!sb || root_item.item == ITEM_NULL) return;
-    
+
     // Create context for org formatting
     Pool* pool = pool_create();
     OrgContext ctx(pool, sb);
-    
+
     // Use MarkReader API
     ItemReader root(root_item.to_const());
-    
+
     if (root.isElement()) {
         ElementReader elem = root.asElement();
         Element* raw_elem = const_cast<Element*>(elem.element());
         const char* type_name = get_element_type_name(raw_elem);
-        
+
         if (type_name && strcmp(type_name, "org_document") == 0) {
             // Format document children
             List* list = (List*)raw_elem;
@@ -974,18 +973,18 @@ void format_org(StringBuf* sb, Item root_item) {
         // Fallback for other types
         format_org_text_reader(ctx, root);
     }
-    
+
     pool_destroy(pool);
 }
 
 // String version of the formatter
 String* format_org_string(Pool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) return NULL;
-    
+
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
-    
+
     format_org(sb, root_item);
-    
+
     return stringbuf_to_string(sb);
 }
