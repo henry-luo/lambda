@@ -64,6 +64,7 @@ static inline bool should_break_line(LayoutContext* lycon, float current_x, floa
 void update_line_for_bfc_floats(LayoutContext* lycon) {
     // Find the BFC root for this layout context
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
+
     if (!bfc) {
         // No BFC - effective bounds same as normal bounds
         lycon->line.effective_left = lycon->line.left;
@@ -72,25 +73,36 @@ void update_line_for_bfc_floats(LayoutContext* lycon) {
         return;
     }
 
-    // Get current block
-    ViewBlock* current_block = (ViewBlock*)lycon->view;
-    if (!current_block || !current_block->is_block()) {
+    // Get current view
+    ViewBlock* current_view = (ViewBlock*)lycon->view;
+    if (!current_view || !current_view->is_block()) {
         lycon->line.effective_left = lycon->line.left;
         lycon->line.effective_right = lycon->line.right;
         lycon->line.has_float_intrusion = false;
         return;
     }
 
-    // Calculate current Y position for float query
-    float current_y = lycon->block.advance_y;
+    // Use cached BFC offset from BlockContext
+    float offset_x = lycon->block.bfc_offset_x;
+    float offset_y = lycon->block.bfc_offset_y;
+
+    float current_y_local = lycon->block.advance_y;
+    float current_y_bfc = current_y_local + offset_y;
     float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
 
-    // Query available space at this Y using BlockContext API
-    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y, line_height);
+    log_debug("  DEBUG: line adjustment, y_local=%.1f, offset_y=%.1f, y_bfc=%.1f",
+        current_y_local, offset_y, current_y_bfc);
+
+    // Query available space at this Y using BlockContext API (in BFC coordinates)
+    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, line_height);
+
+    // Convert from BFC coordinates to local coordinates
+    float local_space_left = space.left - offset_x;
+    float local_space_right = space.right - offset_x;
 
     // Clamp to block's content area
-    float local_left = fmax(space.left, lycon->line.left);
-    float local_right = fmin(space.right, lycon->line.right);
+    float local_left = fmax(local_space_left, lycon->line.left);
+    float local_right = fmin(local_space_right, lycon->line.right);
 
     // Update effective bounds
     if (local_left > lycon->line.left || local_right < lycon->line.right) {
@@ -103,8 +115,8 @@ void update_line_for_bfc_floats(LayoutContext* lycon) {
             lycon->line.advance_x = lycon->line.effective_left;
         }
 
-        log_debug("[BlockContext] Line adjusted for floats: effective (%.1f, %.1f), y=%.1f",
-                  lycon->line.effective_left, lycon->line.effective_right, current_y);
+        log_debug("[BlockContext] Line adjusted for floats: effective (%.1f, %.1f), y_bfc=%.1f",
+                  lycon->line.effective_left, lycon->line.effective_right, current_y_bfc);
     } else {
         lycon->line.effective_left = lycon->line.left;
         lycon->line.effective_right = lycon->line.right;

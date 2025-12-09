@@ -50,6 +50,10 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->establishing_element = element;
     ctx->is_bfc_root = (element != nullptr);
 
+    // BFC offset is 0 for BFC root (coordinates are relative to itself)
+    ctx->bfc_offset_x = 0;
+    ctx->bfc_offset_y = 0;
+
     // Calculate origin from element's content area
     if (element) {
         ctx->origin_x = element->x;
@@ -177,6 +181,31 @@ BlockContext* block_context_find_bfc(BlockContext* ctx) {
     // If no explicit BFC root found, return the context itself
     // (it may be the implicit root)
     return ctx;
+}
+
+void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* offset_x, float* offset_y) {
+    if (!view || !bfc || !offset_x || !offset_y) {
+        if (offset_x) *offset_x = 0;
+        if (offset_y) *offset_y = 0;
+        return;
+    }
+
+    ViewBlock* bfc_elem = bfc->establishing_element;
+    float ox = 0, oy = 0;
+
+    // Walk up from view to BFC establishing element
+    // Simply accumulate x/y positions since view->x is already relative to parent's content area
+    // (border and padding are NOT added because child x/y already accounts for parent's content area)
+    ViewElement* walker = view;
+
+    while (walker && walker != bfc_elem) {
+        ox += walker->x;
+        oy += walker->y;
+        walker = walker->parent_view();
+    }
+
+    *offset_x = ox;
+    *offset_y = oy;
 }
 
 // ============================================================================
