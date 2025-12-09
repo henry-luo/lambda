@@ -2,7 +2,6 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
-#include "layout_bfc.hpp"
 #include "font_face.h"
 
 #include <ft2build.h>
