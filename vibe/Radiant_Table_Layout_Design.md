@@ -202,7 +202,7 @@ struct LayoutContext {
     View* prev_view;
     View* view;              // Current view being processed
 
-    Blockbox block;          // Block formatting context
+    BlockContext block;          // Block formatting context
     Linebox line;            // Inline formatting context
     FontBox font;            // Current font for text measurement
 

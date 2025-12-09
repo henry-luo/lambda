@@ -183,7 +183,7 @@ struct LayoutContext {
     ViewGroup* parent;          // Current parent View
     View* prev_view;            // Previous sibling
 
-    Blockbox block;             // Block formatting context
+    BlockContext block;             // Block formatting context
     Linebox line;               // Inline formatting context
     FontBox font;               // Current font information
 

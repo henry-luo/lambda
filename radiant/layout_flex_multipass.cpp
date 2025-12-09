@@ -16,7 +16,7 @@ bool has_auto_margins(ViewBlock* item);
 void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container);
 
 // External function for laying out absolute positioned children
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
 // External function for printing view tree
 extern void print_view_block(ViewBlock* block, StrBuf* buf, int indent);
@@ -50,7 +50,7 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 log_debug("Found absolute positioned child: %s", child->node_name());
 
                 // Save parent context
-                Blockbox pa_block = lycon->block;
+                BlockContext pa_block = lycon->block;
                 Linebox pa_line = lycon->line;
 
                 // Set up lycon->block dimensions from the child's CSS

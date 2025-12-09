@@ -16,7 +16,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void line_init(LayoutContext* lycon, float left, float right);
 void line_break(LayoutContext* lycon);
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display);
 
 // Forward declarations for static functions
@@ -432,7 +432,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
              grid_item->x, grid_item->y);
 
     // Save parent context
-    Blockbox pa_block = lycon->block;
+    BlockContext pa_block = lycon->block;
     Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;
 
@@ -562,7 +562,7 @@ void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container) {
                 log_debug("Found absolute positioned child: %s", child->node_name());
 
                 // Save parent context
-                Blockbox pa_block = lycon->block;
+                BlockContext pa_block = lycon->block;
                 Linebox pa_line = lycon->line;
 
                 // Set up lycon->block dimensions from the child's CSS
