@@ -2007,6 +2007,18 @@
         "category": "baseline",
         "tests": [
           {
+            "source": "test/test_layout_baseline_gtest.cpp",
+            "name": "Layout Baseline Tests (Node.js Wrapper)",
+            "dependencies": [],
+            "binary": "test_layout_baseline_gtest.exe",
+            "libraries": [
+              "gtest"
+            ],
+            "requires_nodejs": true,
+            "requires_lambda_exe": true,
+            "icon": "🎨"
+          },
+          {
             "source": "test/test_lambda_gtest.cpp",
             "name": "Lambda Runtime Tests",
             "dependencies": [],
