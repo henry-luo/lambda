@@ -3490,7 +3490,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             float table_border_right = table->bound->border->width.right;
             float table_border_top = table->bound->border->width.top;
             float table_border_bottom = table->bound->border->width.bottom;
-            
+
             // Add half of collapsed borders to table dimensions (for border-box reporting)
             table_border_width = (int)(table_border_left / 2.0f + table_border_right / 2.0f + 0.5f);
             table_border_height = (int)(table_border_top / 2.0f + table_border_bottom / 2.0f + 0.5f);
