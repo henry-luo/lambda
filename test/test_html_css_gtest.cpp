@@ -1451,13 +1451,13 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
         "test/layout/data/grid/grid_001_basic_layout.html",
         "test/layout/data/grid/grid_003_span_cells.html",
 
-        // Table samples
-        "test/layout/data/table/table_001_basic_table.html",
-        "test/layout/data/table/table_simple.html",
+        // Table samples (moved to baseline)
+        "test/layout/data/baseline/table_001_basic_table.html",
+        "test/layout/data/baseline/table_simple.html",
 
-        // Position samples
-        "test/layout/data/position/position_001_float_left.html",
-        "test/layout/data/position/position_007_absolute_basic.html",
+        // Position samples (moved to baseline)
+        "test/layout/data/baseline/position_001_float_left.html",
+        "test/layout/data/baseline/position_007_absolute_basic.html",
 
         // Box samples
         "test/layout/data/box/box_004_borders.html",
