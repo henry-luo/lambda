@@ -2025,7 +2025,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
         // Check for HTML <caption> tag OR CSS display: table-caption
         DisplayValue child_display = resolve_display_value((void*)child);
-        bool is_caption = (child->tag() == HTM_TAG_CAPTION) || 
+        bool is_caption = (child->tag() == HTM_TAG_CAPTION) ||
                          (child_display.inner == CSS_VALUE_TABLE_CAPTION);
         if (is_caption) {
             caption = child;
