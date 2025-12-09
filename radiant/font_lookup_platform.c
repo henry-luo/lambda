@@ -36,7 +36,7 @@
 char* find_font_path_platform(const char* font_name) {
     if (!font_name) return NULL;
     
-    log_debug("Attempting macOS font lookup for: %s", font_name);
+    // log_debug("Attempting macOS font lookup for: %s", font_name);  // Too verbose
     
     // Hardcoded mappings for common Chinese fonts on macOS
     // PingFang SC is typically in .ttc files with different naming
@@ -219,6 +219,6 @@ char* find_font_path_fallback(const char* font_name) {
         return NULL;
     }
     
-    log_debug("Attempting platform-specific font lookup for: %s", font_name);
+    // log_debug("Attempting platform-specific font lookup for: %s", font_name);  // Too verbose
     return find_font_path_platform(font_name);
 }

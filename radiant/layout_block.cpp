@@ -270,7 +270,8 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, value, value_len);
             log_debug("load iframe doc src: %s", src->str);
-            doc = load_html_doc(lycon->ui_context->document->url, src->str);
+            doc = load_html_doc(lycon->ui_context->document->url, src->str, 
+                lycon->ui_context->window_width, lycon->ui_context->window_height);
             strbuf_free(src);
             if (!doc) {
                 log_debug("failed to load iframe document");
