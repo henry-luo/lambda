@@ -6,12 +6,6 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style.hpp"
 
-// Forward declaration for FloatContext (legacy, being replaced by BFC)
-struct FloatContext;
-
-// Forward declaration for Block Formatting Context
-struct BlockFormattingContext;
-
 typedef struct StyleContext {
     struct StyleElement* parent;
     struct StyleNode* prev_node;
@@ -19,18 +13,105 @@ typedef struct StyleContext {
     void *css_parser;  // Placeholder for future CSS parser if needed
 } StyleContext;
 
-typedef struct Blockbox {
-    float content_width, content_height;  // computed content width and height for the inner content of the block
-    float advance_y;  // advance_y includes padding.top and border.top of current block
-    float max_width, max_height;  // max content width and height (without padding)
-    float line_height;
-    float init_ascender;  // initial ascender of the line at start of the line
-    float init_descender;  // initial descender of the line at start of the line
-    float lead_y; // leading space when line height is greater than font size
-    CssEnum text_align;
-    float given_width, given_height;  // specified width and height by css or html attributes
-    struct Blockbox* pa_block;  // parent block
-} Blockbox;
+/**
+ * FloatBox - Represents a positioned floating element
+ * Tracks both the element position and its margin box for proper space calculations.
+ */
+typedef struct FloatBox {
+    ViewBlock* element;         // The floating element
+
+    // Margin box bounds (outer bounds including margins)
+    float margin_box_top;
+    float margin_box_bottom;
+    float margin_box_left;
+    float margin_box_right;
+
+    // Border box bounds (element position and size)
+    float x, y, width, height;
+
+    CssEnum float_side;         // CSS_VALUE_LEFT or CSS_VALUE_RIGHT
+    struct FloatBox* next;      // Linked list for multiple floats
+} FloatBox;
+
+/**
+ * FloatAvailableSpace - Result of space query at a given Y coordinate
+ */
+typedef struct FloatAvailableSpace {
+    float left;                 // Left edge of available space
+    float right;                // Right edge of available space
+    bool has_left_float;        // True if a left float intrudes at this Y
+    bool has_right_float;       // True if a right float intrudes at this Y
+} FloatAvailableSpace;
+
+/**
+ * BlockContext - Unified Block Formatting Context
+ *
+ * Combines the functionality of:
+ * - Blockbox (layout state)
+ * - FloatContext (legacy float management)
+ * - BlockFormattingContext (new BFC system)
+ *
+ * Per CSS 2.2 Section 9.4.1, a BFC is established by:
+ * - Root element
+ * - Floats (float != none)
+ * - Absolutely positioned elements
+ * - Inline-blocks
+ * - Table cells/captions
+ * - Overflow != visible
+ * - display: flow-root
+ * - Flex/Grid items
+ */
+typedef struct BlockContext {
+    // =========================================================================
+    // Layout State (from Blockbox)
+    // =========================================================================
+    float content_width;        // Computed content width for inner content
+    float content_height;       // Computed content height for inner content
+    float advance_y;            // Current vertical position (includes padding.top + border.top)
+    float max_width;            // Maximum content width encountered
+    float max_height;           // Maximum content height encountered
+    float line_height;          // Current line height
+    float init_ascender;        // Initial ascender at line start
+    float init_descender;       // Initial descender at line start
+    float lead_y;               // Leading space when line_height > font size
+    CssEnum text_align;         // Text alignment
+    float given_width;          // CSS specified width (-1 if auto)
+    float given_height;         // CSS specified height (-1 if auto)
+
+    // =========================================================================
+    // BFC Hierarchy
+    // =========================================================================
+    struct BlockContext* parent;           // Parent block context
+    ViewBlock* establishing_element;       // Element that established this BFC (if any)
+    bool is_bfc_root;                      // True if this context establishes a new BFC
+
+    // BFC coordinate origin (absolute position of content area top-left)
+    float origin_x;
+    float origin_y;
+
+    // =========================================================================
+    // Float Management (unified from FloatContext + BlockFormattingContext)
+    // =========================================================================
+    FloatBox* left_floats;      // Linked list of left floats (head)
+    FloatBox* left_floats_tail; // Tail for O(1) append
+    FloatBox* right_floats;     // Linked list of right floats (head)
+    FloatBox* right_floats_tail;// Tail for O(1) append
+    int left_float_count;
+    int right_float_count;
+    float lowest_float_bottom;  // Optimization: track lowest float edge
+
+    // Content area bounds (for float calculations)
+    float float_left_edge;      // Left edge of content area (usually 0)
+    float float_right_edge;     // Right edge of content area
+
+    // =========================================================================
+    // Memory
+    // =========================================================================
+    Pool* pool;                 // Memory pool for float allocations
+} BlockContext;
+
+// Backwards compatibility alias
+typedef BlockContext Blockbox;
 
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -94,14 +175,11 @@ typedef struct LayoutContext {
     View* view;  // current view
     DomNode* elmt;  // current dom element, used before the view is created
 
-    Blockbox block;  // current blockbox
+    BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
     FontBox font;  // current font style
     float root_font_size;
     // StackingBox* stacking;  // current stacking context for positioned elements
-    struct FloatContext* current_float_context;  // Current float context for this layout (legacy)
-    struct BlockFormattingContext* bfc;  // Current Block Formatting Context
-    bool owns_bfc;  // True if this layout created the BFC
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
 
@@ -122,6 +200,76 @@ typedef struct LayoutContext {
     // and should not create permanent view structures or modify the main layout tree
     bool is_measuring;
 } LayoutContext;
+
+// ============================================================================
+// BlockContext API - Unified Block Formatting Context Functions
+// ============================================================================
+
+/**
+ * Initialize a BlockContext for an element
+ * Sets up layout state and float tracking
+ */
+void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool);
+
+/**
+ * Reset BlockContext for a new BFC
+ * Clears float lists but keeps layout state
+ */
+void block_context_reset_floats(BlockContext* ctx);
+
+/**
+ * Check if an element establishes a new BFC
+ * Per CSS 2.2 Section 9.4.1
+ */
+bool block_context_establishes_bfc(ViewBlock* block);
+
+/**
+ * Add a positioned float to the BlockContext
+ */
+void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
+
+/**
+ * Position and add a float at the current layout position
+ * Implements CSS 2.2 Section 9.5.1 Rules
+ */
+void block_context_position_float(BlockContext* ctx, ViewBlock* float_elem, float current_y);
+
+/**
+ * Get available horizontal space at a given Y coordinate
+ * @param ctx The block context
+ * @param y Y coordinate relative to content area
+ * @param height Height of the line/element being placed
+ * @return Available space bounds adjusted for floats
+ */
+FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height);
+
+/**
+ * Find the lowest Y where a given width is available
+ */
+float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y);
+
+/**
+ * Find Y position to clear floats
+ * @param clear_type CSS_VALUE_LEFT, CSS_VALUE_RIGHT, or CSS_VALUE_BOTH
+ */
+float block_context_clear_y(BlockContext* ctx, CssEnum clear_type);
+
+/**
+ * Allocate a FloatBox from the pool
+ */
+FloatBox* block_context_alloc_float_box(BlockContext* ctx);
+
+/**
+ * Find the BFC root for a given BlockContext
+ * Walks up the parent chain to find the nearest BFC-establishing BlockContext
+ * @param ctx The starting block context
+ * @return The BFC root BlockContext, or NULL if none found
+ */
+BlockContext* block_context_find_bfc(BlockContext* ctx);
+
+// ============================================================================
+// Property Allocation
+// ============================================================================
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
 FontProp* alloc_font_prop(LayoutContext* lycon);

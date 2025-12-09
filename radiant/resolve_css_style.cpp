@@ -625,22 +625,22 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                    property == CSS_PROPERTY_MAX_HEIGHT || property == CSS_PROPERTY_TOP ||
                    property == CSS_PROPERTY_BOTTOM) {
             // height-related properties: percentage relative to parent HEIGHT
-            if (lycon->block.pa_block) {
-                log_debug("percentage height calculation: %.2f%% of parent height %d = %.2f",
-                       percentage, lycon->block.pa_block->content_height,
-                       percentage * lycon->block.pa_block->content_height / 100.0);
-                result = percentage * lycon->block.pa_block->content_height / 100.0;
+            if (lycon->block.parent) {
+                log_debug("percentage height calculation: %.2f%% of parent height %.1f = %.2f",
+                       percentage, lycon->block.parent->content_height,
+                       percentage * lycon->block.parent->content_height / 100.0);
+                result = percentage * lycon->block.parent->content_height / 100.0;
             } else {
                 log_debug("percentage height value %.2f%% without parent context", percentage);
                 result = 0.0f;
             }
         } else {
             // width-related and other properties: percentage relative to parent width
-            if (lycon->block.pa_block) {
-                log_debug("percentage calculation: %.2f%% of parent width %d = %.2f",
-                       percentage, lycon->block.pa_block->content_width,
-                       percentage * lycon->block.pa_block->content_width / 100.0);
-                result = percentage * lycon->block.pa_block->content_width / 100.0;
+            if (lycon->block.parent) {
+                log_debug("percentage calculation: %.2f%% of parent width %.1f = %.2f",
+                       percentage, lycon->block.parent->content_width,
+                       percentage * lycon->block.parent->content_width / 100.0);
+                result = percentage * lycon->block.parent->content_width / 100.0;
             } else {
                 log_debug("percentage value %.2f%% without parent context", percentage);
                 result = 0.0f;

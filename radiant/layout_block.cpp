@@ -4,7 +4,6 @@
 #include "layout_flex_multipass.hpp"
 #include "layout_grid_multipass.hpp"
 #include "layout_positioned.hpp"
-#include "layout_bfc.hpp"
 #include "intrinsic_sizing.hpp"
 #include "grid.hpp"
 
@@ -17,7 +16,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
-void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line);
+void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
 // ============================================================================
 // Pseudo-element (::before/::after) Layout Support
@@ -205,7 +204,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         }
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {
-            lycon->block.pa_block->max_width = max(lycon->block.pa_block->max_width, flow_width);
+            if (lycon->block.parent) lycon->block.parent->max_width = max(lycon->block.parent->max_width, flow_width);
         }
         else if (block->scroller->overflow_x == CSS_VALUE_SCROLL ||
             block->scroller->overflow_x == CSS_VALUE_AUTO) {
@@ -229,7 +228,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             }
             block->scroller->has_vt_overflow = true;
             if (block->scroller->overflow_y == CSS_VALUE_VISIBLE) {
-                lycon->block.pa_block->max_height = max(lycon->block.pa_block->max_height, block->y + flow_height);
+                if (lycon->block.parent) lycon->block.parent->max_height = max(lycon->block.parent->max_height, block->y + flow_height);
             }
             else if (block->scroller->overflow_y == CSS_VALUE_SCROLL || block->scroller->overflow_y == CSS_VALUE_AUTO) {
                 block->scroller->has_vt_scroll = true;
@@ -495,15 +494,17 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         }
     }
 
-    // Initialize float context if needed (for float positioning)
-    if (!lycon->current_float_context && parent_block) {
-        lycon->current_float_context = float_context_create(parent_block);
-        log_debug("[FLOAT PRE-SCAN] Created float context for parent block %s",
+    // Float context is now unified in BlockContext - no need to create separate context
+    if (!lycon->block.establishing_element && parent_block) {
+        // Initialize BlockContext for float tracking if not already done
+        lycon->block.establishing_element = parent_block;
+        lycon->block.float_right_edge = parent_block->content_width > 0 ? parent_block->content_width : parent_block->width;
+        log_debug("[FLOAT PRE-SCAN] Initialized BlockContext for parent block %s",
                   parent_block->node_name());
     }
 
-    if (!lycon->current_float_context) {
-        log_debug("[FLOAT PRE-SCAN] No float context available, cannot pre-scan");
+    if (!lycon->block.establishing_element) {
+        log_debug("[FLOAT PRE-SCAN] No establishing element available, cannot pre-scan");
         return;
     }
 
@@ -539,13 +540,12 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
     // After pre-scanning floats, adjust the current line bounds for the floats we just laid out
     // This is critical: the first line needs to start AFTER the float, not at x=0
     //
-    // Note: We can't use adjust_line_for_floats() here because lycon->view is not set to the
-    // current block yet. Instead, directly query float space at y=0 and update line bounds.
-    if (lycon->current_float_context) {
+    // Use unified BlockContext for float space queries
+    if (lycon->block.left_float_count > 0 || lycon->block.right_float_count > 0) {
         log_debug("[FLOAT PRE-SCAN] Adjusting initial line bounds for pre-scanned floats");
 
         float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
-        FloatAvailableSpace space = float_space_at_y(lycon->current_float_context, 0.0f, line_height);
+        FloatAvailableSpace space = block_context_space_at_y(&lycon->block, 0.0f, line_height);
 
         if (space.has_left_float) {
             // Left float intrudes - adjust effective_left and advance_x
@@ -779,7 +779,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
 
-void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_block, Linebox *pa_line) {
+void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
     // CSS 2.2 9.5: For floats appearing after inline content, position at bottom of current line
@@ -800,15 +800,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_b
     log_debug("block init position (%s): x=%f, y=%f, pa_block.advance_y=%f, display: outer=%d, inner=%d",
         block->node_name(), block->x, block->y, pa_block->advance_y, block->display.outer, block->display.inner);
 
-    // Check if this block establishes a new BFC
-    BlockFormattingContext* parent_bfc = lycon->bfc;
-    BlockFormattingContext* new_bfc = create_bfc_if_needed(block, lycon->pool, parent_bfc);
-    if (new_bfc) {
-        lycon->bfc = new_bfc;
-        lycon->owns_bfc = true;
-        log_debug("[BFC] Block %s establishes new BFC", block->node_name());
-    } else {
-        lycon->owns_bfc = false;
+    // Check if this block establishes a new BFC using unified BlockContext
+    bool establishes_bfc = block_context_establishes_bfc(block);
+    if (establishes_bfc) {
+        lycon->block.is_bfc_root = true;
+        lycon->block.establishing_element = block;
+        // Reset float lists for new BFC
+        block_context_reset_floats(&lycon->block);
+        log_debug("[BlockContext] Block %s establishes new BFC", block->node_name());
     }
 
     uintptr_t elmt_name = block->tag();
@@ -847,7 +846,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_b
                 else { // both width and height unspecified
                     if (img->format == IMAGE_FORMAT_SVG) {
                         // scale to parent block width
-                        lycon->block.given_width = lycon->block.pa_block->content_width;
+                        lycon->block.given_width = lycon->block.parent ? lycon->block.parent->content_width : 0;
                         lycon->block.given_height = lycon->block.given_width * h / w;
                     }
                     else { // use image intrinsic dimensions
@@ -905,7 +904,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_b
         }
     }
     else { // derive from parent block width
-        log_debug("Deriving from parent: pa_block.content_width=%.2f", pa_block->content_width);
+        log_debug("Deriving from parent: pa_block->content_width=%.2f", pa_block->content_width);
         if (block->bound) {
             content_width = pa_block->content_width
                 - (block->bound->margin.left_type == CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
@@ -1080,36 +1079,35 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_b
     log_debug("BFC check for %s: creates_bfc=%d, scroller=%p, overflow_x=%d",
         block->node_name(), creates_bfc, block->scroller, block->scroller ? block->scroller->overflow_x : -1);
 
-    if (creates_bfc) {
-        // Try new BFC system first
-        if (lycon->bfc && lycon->bfc->establishing_element == block) {
-            float max_float_bottom = lycon->bfc->lowest_float_bottom;
+    if (creates_bfc || lycon->block.is_bfc_root) {
+        // Check unified BlockContext for float containment
+        if (lycon->block.establishing_element == block) {
+            float max_float_bottom = lycon->block.lowest_float_bottom;
             float content_bottom = block->y + block->height;
-            log_debug("[BFC] Height expansion check: max_float_bottom=%.1f, content_bottom=%.1f",
+            log_debug("[BlockContext] Height expansion check: max_float_bottom=%.1f, content_bottom=%.1f",
                       max_float_bottom, content_bottom);
             if (max_float_bottom > content_bottom - block->y) {
                 float old_height = block->height;
                 block->height = max_float_bottom;
-                log_debug("[BFC] Height expanded: old=%.1f, new=%.1f", old_height, block->height);
+                log_debug("[BlockContext] Height expanded: old=%.1f, new=%.1f", old_height, block->height);
             }
         }
 
-        // Also check legacy FloatContext
-        FloatContext* float_ctx = get_current_float_context(lycon);
-        log_debug("BFC %s: float_ctx=%p, container=%p, this_block=%p",
-            block->node_name(), float_ctx, float_ctx ? float_ctx->container : nullptr, block);
-        if (float_ctx && float_ctx->container == block) {
+        // Also check for floats in block context
+        log_debug("BFC %s: left_float_count=%d, right_float_count=%d",
+            block->node_name(), lycon->block.left_float_count, lycon->block.right_float_count);
+        if (lycon->block.establishing_element == block) {
             // Find the maximum bottom of all floated children
             float max_float_bottom = 0;
-            log_debug("BFC %s: checking left floats, head=%p", block->node_name(), float_ctx->left.head);
-            for (FloatBox* fb = float_ctx->left.head; fb; fb = fb->next) {
+            log_debug("BFC %s: checking left floats", block->node_name());
+            for (FloatBox* fb = lycon->block.left_floats; fb; fb = fb->next) {
                 log_debug("BFC left float: margin_box_bottom=%.1f", fb->margin_box_bottom);
                 if (fb->margin_box_bottom > max_float_bottom) {
                     max_float_bottom = fb->margin_box_bottom;
                 }
             }
-            log_debug("BFC %s: checking right floats, head=%p", block->node_name(), float_ctx->right.head);
-            for (FloatBox* fb = float_ctx->right.head; fb; fb = fb->next) {
+            log_debug("BFC %s: checking right floats", block->node_name());
+            for (FloatBox* fb = lycon->block.right_floats; fb; fb = fb->next) {
                 log_debug("BFC right float: margin_box_bottom=%.1f", fb->margin_box_bottom);
                 if (fb->margin_box_bottom > max_float_bottom) {
                     max_float_bottom = fb->margin_box_bottom;
@@ -1135,26 +1133,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, Blockbox *pa_b
         }
     }
 
-    // Apply CSS float layout using BFC or legacy FloatContext
+    // Apply CSS float layout using BlockContext
+    // IMPORTANT: Floats must be added to the PARENT's BlockContext (pa_block),
+    // not lycon->block which is the float element's own context
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
 
-        // For now, always use legacy FloatContext to maintain backward compatibility
-        // BFC float positioning will be enabled later after further testing
+        // Position the float using the parent's BlockContext
+        // layout_float_element uses block_context_find_bfc which walks up parent chain
         layout_float_element(lycon, block);
 
-        // Also add to BFC for future line adjustments (parallel tracking)
-        if (lycon->bfc) {
-            lycon->bfc->add_float(block);
-            log_debug("[BFC] Float added to BFC (legacy positioned)");
-        }
+        // Add float to parent's BlockContext (the BFC container)
+        // pa_block is the parent's context that was saved before entering this function
+        block_context_add_float(pa_block, block);
+        log_debug("[BlockContext] Float added to parent context");
     }
 
-    // Restore parent BFC if we created a new one
-    if (lycon->owns_bfc && lycon->bfc && lycon->bfc->parent_bfc) {
-        lycon->bfc = lycon->bfc->parent_bfc;
-        lycon->owns_bfc = false;
-    }
+    // Restore parent BFC if we created a new one - handled by block.parent in calling code
 }
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
@@ -1194,9 +1189,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
     // save parent context
-    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
+    BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
-    lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
+    lycon->block.parent = &pa_block;  lycon->elmt = elmt;
     log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->node_name());
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
