@@ -846,6 +846,68 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     return (View*)text_nodes[text_node_count - 1].text;
 }
 
+// Helper to check if an element is an anonymous table element (e.g., ::anon-tbody, ::anon-tr)
+// Anonymous elements are created by the layout engine and don't exist in the browser's DOM
+static bool is_anonymous_element(ViewBlock* block) {
+    if (!block) return false;
+    const char* name = block->node_name();
+    // Anonymous elements have tag names starting with "::" (e.g., "::anon-tbody", "::anon-tr")
+    return name && name[0] == ':' && name[1] == ':';
+}
+
+// Forward declaration for recursive calls
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio);
+
+// Helper to print children, skipping anonymous wrapper elements
+static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio, bool* first_child) {
+    View* child = ((ViewElement*)block)->first_child;
+    while (child) {
+        if (child->view_type == RDT_VIEW_NONE) {  // skip the view
+            child = child->next_sibling;
+            continue;
+        }
+
+        // For anonymous elements, skip the wrapper but process its children
+        if (child->is_block() && is_anonymous_element((ViewBlock*)child)) {
+            log_debug("JSON: Skipping anonymous element %s, processing its children", child->node_name());
+            print_children_json((ViewBlock*)child, buf, indent, pixel_ratio, first_child);
+            child = child->next();
+            continue;
+        }
+
+        if (!*first_child) { strbuf_append_str(buf, ",\n"); }
+        *first_child = false;
+
+        if (child->is_block()) {
+            print_block_json((ViewBlock*)child, buf, indent, pixel_ratio);
+        }
+        else if (child->view_type == RDT_VIEW_TEXT) {
+            // Use combined text printing to merge consecutive text nodes
+            View* last_text = print_combined_text_json((ViewText*)child, buf, indent, pixel_ratio);
+            child = last_text;  // Skip to the last text node (loop will advance to next)
+        }
+        else if (child->view_type == RDT_VIEW_BR) {
+            print_br_json(child, buf, indent, pixel_ratio);
+        }
+        else if (child->view_type == RDT_VIEW_INLINE) {
+            print_inline_json((ViewSpan*)child, buf, indent, pixel_ratio);
+        }
+        else {
+            // Handle other view types
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "{\n");
+            strbuf_append_char_n(buf, ' ', indent + 2);
+            strbuf_append_str(buf, "\"type\": ");
+            append_json_string(buf, child->view_name());
+            strbuf_append_str(buf, "\n");
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_str(buf, "}");
+        }
+
+        child = child->next();
+    }
+}
+
 // Recursive JSON generation for view blocks
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio) {
     if (!block) {
@@ -1342,43 +1404,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
 
-    View* child = ((ViewElement*)block)->first_child;
     bool first_child = true;
-    while (child) {
-        if (child->view_type == RDT_VIEW_NONE) {  // skip the view
-            child = child->next_sibling;  continue;
-        }
-        if (!first_child) { strbuf_append_str(buf, ",\n"); }
-        first_child = false;
-
-        if (child->is_block()) {
-            print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
-        }
-        else if (child->view_type == RDT_VIEW_TEXT) {
-            // Use combined text printing to merge consecutive text nodes
-            View* last_text = print_combined_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
-            child = last_text;  // Skip to the last text node (loop will advance to next)
-        }
-        else if (child->view_type == RDT_VIEW_BR) {
-            print_br_json(child, buf, indent + 4, pixel_ratio);
-        }
-        else if (child->view_type == RDT_VIEW_INLINE) {
-            print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
-        }
-        else {
-            // Handle other view types
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "{\n");
-            strbuf_append_char_n(buf, ' ', indent + 6);
-            strbuf_append_str(buf, "\"type\": ");
-            append_json_string(buf, child->view_name());
-            strbuf_append_str(buf, "\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_str(buf, "}");
-        }
-
-        child = child->next();
-    }
+    print_children_json(block, buf, indent + 4, pixel_ratio, &first_child);
 
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
