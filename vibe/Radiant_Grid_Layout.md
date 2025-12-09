@@ -238,7 +238,7 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     log_debug("Layout grid item content for %p\n", grid_item);
 
     // Save current context
-    Blockbox pa_block = lycon->block;
+    BlockContext pa_block = lycon->block;
     Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;
     ViewGroup* pa_parent = lycon->parent;
