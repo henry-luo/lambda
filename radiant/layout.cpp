@@ -467,16 +467,18 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
     ViewBlock* html = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, elmt);
-    html->width = lycon->block.content_width;  
-    html->height = lycon->ui_context->window_height;  // Constrain to viewport height for scrollbars
+    html->width = lycon->block.content_width;
+    // Don't pre-set html->height - let it be determined by content (auto height)
+    // The viewport height will be used for scrollbar calculations via scroller->viewport_height
     lycon->doc->view_tree->root = (View*)html;  lycon->elmt = elmt;
     // default html styles
     html->scroller = alloc_scroll_prop(lycon);
     html->scroller->overflow_x = CSS_VALUE_AUTO;
     html->scroller->overflow_y = CSS_VALUE_AUTO;
+    // html->scroller->viewport_height = lycon->ui_context->window_height;  // For scrollbar calculations
     lycon->block.given_width = lycon->ui_context->window_width;
-    // Set height to viewport height to enable scrollbars when content overflows
-    lycon->block.given_height = lycon->ui_context->window_height;
+    // Don't set given_height - let html use auto (content-based) height
+    lycon->block.given_height = -1;  // -1 means auto height
     html->position = alloc_position_prop(lycon);
 
     // Create the initial Block Formatting Context for the root element
