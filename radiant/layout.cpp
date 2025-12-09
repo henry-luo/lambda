@@ -455,27 +455,28 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.content_width = lycon->ui_context->window_width;
-    // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
-    // This matches browser behavior where HTML element fits content, not viewport
-    lycon->block.content_height = 0;  // Will be calculated based on content
+    // Set root element height to viewport to enable scrollbars when content overflows
+    lycon->block.content_height = lycon->ui_context->window_height;
     lycon->block.advance_y = 0;  lycon->block.line_height = -1;
     lycon->block.text_align = CSS_VALUE_LEFT;
 
-    // Set available space to viewport dimensions (width definite, height indefinite for content-sizing)
+    // Set available space to viewport dimensions
     lycon->available_space = AvailableSpace::make_width_definite(lycon->ui_context->window_width);
 
     line_init(lycon, 0, lycon->block.content_width);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
     ViewBlock* html = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, elmt);
-    html->width = lycon->block.content_width;  html->height = lycon->block.content_height;
+    html->width = lycon->block.content_width;  
+    html->height = lycon->ui_context->window_height;  // Constrain to viewport height for scrollbars
     lycon->doc->view_tree->root = (View*)html;  lycon->elmt = elmt;
     // default html styles
     html->scroller = alloc_scroll_prop(lycon);
     html->scroller->overflow_x = CSS_VALUE_AUTO;
     html->scroller->overflow_y = CSS_VALUE_AUTO;
     lycon->block.given_width = lycon->ui_context->window_width;
-    lycon->block.given_height = -1;  // -1 means auto-size to content, instead of setting to viewport height
+    // Set height to viewport height to enable scrollbars when content overflows
+    lycon->block.given_height = lycon->ui_context->window_height;
     html->position = alloc_position_prop(lycon);
 
     // Create the initial Block Formatting Context for the root element
