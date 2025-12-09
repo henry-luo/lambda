@@ -94,8 +94,8 @@ struct IntrinsicSizeCache {
  * Contains both min-content (longest word) and max-content (full line) widths.
  */
 struct TextIntrinsicWidths {
-    int min_content;  // Width of longest unbreakable segment (word)
-    int max_content;  // Width of entire text without wrapping
+    float min_content;  // Width of longest unbreakable segment (word)
+    float max_content;  // Width of entire text without wrapping
 };
 
 // ============================================================================

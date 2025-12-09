@@ -370,10 +370,38 @@ class RadiantLayoutTester {
     /**
      * Filter out non-layout elements but keep text nodes for unified comparison
      */
-    filterForComparison(children) {
+    /**
+     * Flatten children by unwrapping CSS anonymous boxes
+     * Anonymous boxes (like ::anon-tbody) exist only for layout purposes
+     * and should not affect DOM structure comparison
+     */
+    flattenAnonymousBoxes(children) {
         if (!Array.isArray(children)) return [];
 
-        return children.filter(child => {
+        const flattened = [];
+        for (const child of children) {
+            if (!child || !child.node) continue;
+
+            // If this is an anonymous box, include its children instead
+            if (child.type === 'element' && child.node.tag && child.node.tag.startsWith('::')) {
+                // Get all children of the anonymous box and flatten them recursively
+                const anonChildren = this.getAllChildren(child.node, true);
+                const flattenedAnonChildren = this.flattenAnonymousBoxes(anonChildren);
+                flattened.push(...flattenedAnonChildren);
+            } else {
+                flattened.push(child);
+            }
+        }
+        return flattened;
+    }
+
+    filterForComparison(children, isRadiant = false) {
+        if (!Array.isArray(children)) return [];
+
+        // First flatten anonymous boxes for Radiant nodes
+        let processedChildren = isRadiant ? this.flattenAnonymousBoxes(children) : children;
+
+        return processedChildren.filter(child => {
             if (!child || !child.node) return false;
 
             // Keep text nodes for comparison
@@ -706,8 +734,9 @@ class RadiantLayoutTester {
         }
 
         // Get all children (elements + text nodes) in document order
-        const radiantChildren = this.filterForComparison(this.getAllChildren(radiantNode, true));
-        const browserChildren = this.filterForComparison(this.getAllChildren(browserNode, false));
+        // Pass isRadiant=true for radiant nodes to flatten anonymous boxes
+        const radiantChildren = this.filterForComparison(this.getAllChildren(radiantNode, true), true);
+        const browserChildren = this.filterForComparison(this.getAllChildren(browserNode, false), false);
 
         const maxChildren = Math.max(radiantChildren.length, browserChildren.length);
 

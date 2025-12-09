@@ -275,6 +275,15 @@ DisplayValue resolve_display_value(void* child) {
 
         log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->node_name());
 
+        // Check if element already has display set directly (anonymous elements, pre-resolved)
+        // This handles CSS 2.1 anonymous table objects created by layout
+        if (dom_elem && dom_elem->display.inner != CSS_VALUE_NONE &&
+            dom_elem->display.inner != 0 && dom_elem->styles_resolved) {
+            log_debug("[CSS] Using pre-set display from element: outer=%d, inner=%d",
+                dom_elem->display.outer, dom_elem->display.inner);
+            return dom_elem->display;
+        }
+
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
             StyleTree* style_tree = dom_elem->specified_style;

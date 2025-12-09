@@ -283,6 +283,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // list item: display list-item handled elsewhere
         break;
     // ========== Table elements ==========
+    case HTM_TAG_TABLE:
+        // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)
+        // This is applied at the TableProp level in layout_table.cpp, not here in block props
+        // We just need to ensure the view is created properly
+        break;
     case HTM_TAG_TH:
         // font-weight: bold;  text-align: center;  vertical-align: middle;
         log_debug("apply default TH styles");
