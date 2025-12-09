@@ -96,7 +96,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         // Load glyph and get advance width
-        if (FT_Load_Glyph(lycon->font.ft_face, glyph_index, FT_LOAD_DEFAULT) == 0) {
+        // IMPORTANT: Use FT_LOAD_NO_HINTING to match layout_text.cpp and font.cpp behavior
+        // Different load flags give different advance widths, causing measurement/layout mismatch
+        FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
+        if (FT_Load_Glyph(lycon->font.ft_face, glyph_index, load_flags) == 0) {
             float advance = lycon->font.ft_face->glyph->advance.x / 64.0f + kerning;
             current_word += advance;
             total_width += advance;
