@@ -464,7 +464,10 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->available_space = AvailableSpace::make_width_definite(lycon->ui_context->window_width);
 
     line_init(lycon, 0, lycon->block.content_width);
-    Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
+
+    // Initialize parent block context - save current state
+    BlockContext saved_block = lycon->block;
+    lycon->block.parent = &saved_block;
 
     ViewBlock* html = (ViewBlock*)set_view(lycon, RDT_VIEW_BLOCK, elmt);
     html->width = lycon->block.content_width;
@@ -480,20 +483,15 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     // Create the initial Block Formatting Context for the root element
     // CSS 2.2: The root element establishes the initial BFC
-    // We create it directly here since the HTML element is the root
     html->content_width = lycon->ui_context->window_width;
     Pool* layout_pool = lycon->doc->view_tree->pool;
-    log_debug("[BFC] About to create root BFC, pool=%p, html=%p", (void*)layout_pool, (void*)html);
-    BlockFormattingContext* root_bfc = (BlockFormattingContext*)pool_calloc(layout_pool, sizeof(BlockFormattingContext));
-    log_debug("[BFC] pool_calloc returned: %p", (void*)root_bfc);
-    if (root_bfc) {
-        root_bfc->init(html, layout_pool);
-        lycon->bfc = root_bfc;
-        lycon->owns_bfc = true;
-        log_debug("[BFC] Created root BFC for HTML element (width=%.1f)", html->content_width);
-    } else {
-        log_error("[BFC] Failed to allocate root BFC!");
-    }
+    log_debug("[BlockContext] Initializing root BFC for HTML element");
+
+    // Initialize the unified BlockContext for the root element
+    block_context_init(&lycon->block, html, layout_pool);
+    lycon->block.content_width = lycon->ui_context->window_width;
+    lycon->block.float_right_edge = lycon->ui_context->window_width;
+    log_debug("[BlockContext] Root BFC created (width=%.1f)", html->content_width);
 
     // resolve CSS style
     log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->node_name());
@@ -617,14 +615,13 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &lycon->font, default_font);
 
-    // Initialize float context to NULL - will be created when needed
-    lycon->current_float_context = NULL;
-    log_debug("DEBUG: Layout context initialized with NULL float context");
+    // BlockContext floats are already initialized to NULL in memset
+    log_debug("DEBUG: Layout context initialized");
 }
 
 void layout_cleanup(LayoutContext* lycon) {
-    // Clean up float context if it exists
-    cleanup_float_context(lycon);
+    // BlockContext cleanup - floats are pool-allocated, no explicit cleanup needed
+    (void)lycon;
 }
 
 void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {

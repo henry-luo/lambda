@@ -9,6 +9,8 @@ This document analyzes the current state of Radiant's block layout implementatio
 
 The analysis identifies key issues preventing test success and proposes targeted improvements.
 
+**Key Refactoring:** Unify `Blockbox`, `FloatContext`, and `BlockFormattingContext` into a single `BlockContext` structure.
+
 ---
 
 ## 1. Current Architecture Overview
@@ -30,14 +32,87 @@ layout_block() → layout_block_content() → setup_inline() → layout_block_in
                                             finalize_block_flow()
 ```
 
-### 1.2 Key Data Structures
+### 1.2 Current Data Structures (To Be Unified)
 
-| Structure | Purpose | Issues Identified |
-|-----------|---------|-------------------|
-| `Blockbox` | Block formatting context state | Margin collapsing needs refinement |
-| `Linebox` | Inline formatting state | Float integration incomplete |
-| `BlockFormattingContext` | BFC for floats (new system) | Parallel with legacy FloatContext |
-| `FloatContext` | Legacy float positioning | Needs full replacement |
+| Structure                | Purpose                        | Issues Identified                  |
+| ------------------------ | ------------------------------ | ---------------------------------- |
+| `Blockbox`               | Block formatting context state | Margin collapsing needs refinement |
+| `Linebox`                | Inline formatting state        | Float integration incomplete       |
+| `BlockFormattingContext` | BFC for floats (new system)    | Parallel with legacy FloatContext  |
+| `FloatContext`           | Legacy float positioning       | Needs full replacement             |
+
+### 1.3 Proposed Unified Structure: `BlockContext`
+
+The three block-related structures will be unified into a single `BlockContext`:
+
+```cpp
+/**
+ * BlockContext - Unified Block Formatting Context
+ *
+ * Combines the functionality of:
+ * - Blockbox (layout state)
+ * - FloatContext (legacy float management)
+ * - BlockFormattingContext (new BFC system)
+ *
+ * Per CSS 2.2 Section 9.4.1, a BFC is established by:
+ * - Root element
+ * - Floats (float != none)
+ * - Absolutely positioned elements
+ * - Inline-blocks
+ * - Table cells/captions
+ * - Overflow != visible
+ * - display: flow-root
+ * - Flex/Grid items
+ */
+typedef struct BlockContext {
+    // =========================================================================
+    // Layout State (from Blockbox)
+    // =========================================================================
+    float content_width;        // Computed content width for inner content
+    float content_height;       // Computed content height for inner content
+    float advance_y;            // Current vertical position (includes padding.top + border.top)
+    float max_width;            // Maximum content width encountered
+    float max_height;           // Maximum content height encountered
+    float line_height;          // Current line height
+    float init_ascender;        // Initial ascender at line start
+    float init_descender;       // Initial descender at line start
+    float lead_y;               // Leading space when line_height > font size
+    CssEnum text_align;         // Text alignment
+    float given_width;          // CSS specified width (-1 if auto)
+    float given_height;         // CSS specified height (-1 if auto)
+
+    // =========================================================================
+    // BFC Hierarchy
+    // =========================================================================
+    struct BlockContext* parent;           // Parent block context
+    ViewBlock* establishing_element;       // Element that established this BFC (if any)
+    bool is_bfc_root;                      // True if this context establishes a new BFC
+
+    // =========================================================================
+    // Float Management (unified from FloatContext + BlockFormattingContext)
+    // =========================================================================
+    FloatBox* left_floats;      // Linked list of left floats
+    FloatBox* right_floats;     // Linked list of right floats
+    int left_float_count;
+    int right_float_count;
+    float lowest_float_bottom;  // Optimization: track lowest float edge
+
+    // Content area bounds (for float calculations)
+    float float_left_edge;      // Left edge of content area
+    float float_right_edge;     // Right edge of content area
+
+    // =========================================================================
+    // Memory
+    // =========================================================================
+    Pool* pool;                 // Memory pool for float allocations
+} BlockContext;
+```
+
+**Benefits of unification:**
+1. Single source of truth for block state
+2. No parallel tracking of floats
+3. BFC hierarchy naturally represented via `parent` pointer
+4. Simpler API: `lycon->block` handles everything
 
 ---
 
@@ -131,9 +206,90 @@ This causes incorrect float positioning when estimates are wrong.
 
 ## 3. Proposed Improvements
 
-### 3.1 Priority 1: Implement Block-in-Inline (Anonymous Block Boxes)
+### 3.1 Priority 0: Unify Block Context (Foundation)
+
+**Estimated Impact:** Enables all other improvements + cleaner codebase
+
+#### 3.1.1 New Unified `BlockContext` Structure
+
+Replace `Blockbox`, `FloatContext`, and `BlockFormattingContext` with unified `BlockContext`.
+
+**File changes:**
+
+1. **`layout.hpp`** - Replace `Blockbox` definition:
+```cpp
+// OLD:
+typedef struct Blockbox { ... } Blockbox;
+struct FloatContext;
+struct BlockFormattingContext;
+
+// NEW:
+typedef struct BlockContext { ... } BlockContext;
+```
+
+2. **`LayoutContext`** - Simplify members:
+```cpp
+// OLD:
+struct LayoutContext {
+    Blockbox block;
+    struct FloatContext* current_float_context;
+    struct BlockFormattingContext* bfc;
+    bool owns_bfc;
+    ...
+};
+
+// NEW:
+struct LayoutContext {
+    BlockContext block;  // Unified block context
+    ...
+};
+```
+
+3. **Delete files:**
+   - `layout_bfc.hpp` → Merged into `layout.hpp`
+   - `layout_bfc.cpp` → Merged into `layout_block.cpp` or new `block_context.cpp`
+   - Float functions in `layout_positioned.hpp/cpp` → Merged
+
+#### 3.1.2 BlockContext API
+
+```cpp
+// Lifecycle
+void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool);
+void block_context_push(LayoutContext* lycon);  // Save current, create child
+void block_context_pop(LayoutContext* lycon);   // Restore parent
+
+// BFC Detection
+bool block_context_is_bfc_root(BlockContext* ctx);
+bool block_context_establishes_bfc(ViewBlock* block);
+
+// Float Management
+void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
+void block_context_position_float(BlockContext* ctx, ViewBlock* float_elem, float current_y);
+FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height);
+float block_context_clear_y(BlockContext* ctx, CssEnum clear_type);
+
+// Layout State
+void block_context_advance_y(BlockContext* ctx, float delta);
+void block_context_update_max_width(BlockContext* ctx, float width);
+```
+
+#### 3.1.3 Migration Steps
+
+1. **Create `BlockContext` in `layout.hpp`** with all fields
+2. **Update `LayoutContext`** to use `BlockContext block`
+3. **Migrate float functions** from `layout_positioned.cpp` and `layout_bfc.cpp`
+4. **Search & replace** across all files:
+   - `lycon->block.` → (already correct, just type changes)
+   - `lycon->current_float_context` → `&lycon->block`
+   - `lycon->bfc` → `&lycon->block`
+5. **Remove** deprecated files/structures
+6. **Test** incrementally
+
+### 3.2 Priority 1: Implement Block-in-Inline (Anonymous Block Boxes)
 
 **Estimated Impact:** 90+ tests
+
+Per CSS 2.2 Section 9.2.1.1, when a block-level element is inside an inline element, the inline box must be broken around the block, with the inline portions enclosed in anonymous block boxes.
 
 **Implementation approach:**
 
@@ -173,22 +329,18 @@ void layout_inline_with_block_detection(LayoutContext* lycon, DomElement* inline
 **Files to modify:**
 - `layout_inline.cpp` - Add block detection
 - `layout_block.cpp` - Add anonymous block creation
-- `view.hpp` - Add anonymous block view type
+- `view.hpp` - Add anonymous block view type (`RDT_VIEW_ANONYMOUS_BLOCK`)
 
-### 3.2 Priority 2: Fix BFC Establishment Detection
+### 3.3 Priority 2: Fix BFC Establishment Detection
 
 **Estimated Impact:** 15+ tests
 
-**Current code (incomplete):**
-```cpp
-bool creates_bfc = block->scroller &&
-    (block->scroller->overflow_x != CSS_VALUE_VISIBLE ||
-     block->scroller->overflow_y != CSS_VALUE_VISIBLE);
-```
+With unified `BlockContext`, BFC detection becomes simpler:
 
-**Required (CSS 2.2 Section 9.4.1):**
 ```cpp
-bool creates_bfc(ViewBlock* block) {
+bool block_context_establishes_bfc(ViewBlock* block) {
+    // CSS 2.2 Section 9.4.1 - Block formatting contexts
+
     // 1. Root element (html)
     if (!block->parent) return true;
 
@@ -215,43 +367,109 @@ bool creates_bfc(ViewBlock* block) {
     // 7. Display: flow-root
     if (block->display.inner == CSS_VALUE_FLOW_ROOT) return true;
 
-    // 8. Flex/Grid items
-    // (handled separately)
+    // 8. Flex/Grid containers
+    if (block->display.inner == CSS_VALUE_FLEX ||
+        block->display.inner == CSS_VALUE_GRID) return true;
 
     return false;
 }
 ```
 
-### 3.3 Priority 3: Unify Float Context Systems
+**Integration with BlockContext:**
+```cpp
+void layout_block_content(LayoutContext* lycon, ViewBlock* block, ...) {
+    // Check if this block establishes a new BFC
+    if (block_context_establishes_bfc(block)) {
+        lycon->block.is_bfc_root = true;
+        lycon->block.establishing_element = block;
+        // Reset float lists for new BFC
+        lycon->block.left_floats = NULL;
+        lycon->block.right_floats = NULL;
+    }
+    // ... rest of layout
+}
+```
+
+### 3.4 Priority 3: Unified Float Management
 
 **Estimated Impact:** 10+ tests
 
-Current state: Two parallel float systems (`FloatContext` and `BlockFormattingContext`).
+With `BlockContext`, float management is simplified - no more dual tracking:
 
-**Proposed solution:** Complete migration to `BlockFormattingContext`:
-
-1. **Remove dual tracking:**
 ```cpp
-// Current (layout_block.cpp:1130-1135)
-layout_float_element(lycon, block);  // Legacy
-if (lycon->bfc) {
-    lycon->bfc->add_float(block);   // New - parallel tracking
+// Single entry point for float positioning
+void block_context_position_float(BlockContext* ctx, ViewBlock* element, float current_y) {
+    if (!element || !element->position) return;
+
+    CssEnum side = element->position->float_prop;
+    if (side != CSS_VALUE_LEFT && side != CSS_VALUE_RIGHT) return;
+
+    // Get element dimensions including margins
+    float margin_l = element->bound ? element->bound->margin.left : 0;
+    float margin_r = element->bound ? element->bound->margin.right : 0;
+    float margin_t = element->bound ? element->bound->margin.top : 0;
+    float total_width = element->width + margin_l + margin_r;
+
+    // CSS 2.2 Rules: Float top >= current line Y
+    float min_y = fmax(0, current_y);
+
+    // Find Y where float fits horizontally
+    float y = block_context_find_y_for_width(ctx, total_width, min_y);
+
+    // Get available space at that Y
+    FloatAvailableSpace space = block_context_space_at_y(ctx, y, element->height);
+
+    // Position the float
+    if (side == CSS_VALUE_LEFT) {
+        element->x = space.left + margin_l;
+    } else {
+        element->x = space.right - element->width - margin_r;
+    }
+    element->y = y + margin_t;
+
+    // Add to float list
+    block_context_add_float(ctx, element);
 }
 
-// Proposed: Use only BFC
-if (lycon->bfc) {
-    bfc_position_float(lycon->bfc, block);
+// Space query - used by inline layout to adjust line bounds
+FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height) {
+    FloatAvailableSpace space = {
+        .left = ctx->float_left_edge,
+        .right = ctx->float_right_edge,
+        .has_left_float = false,
+        .has_right_float = false
+    };
+
+    // Check left floats
+    for (FloatBox* fb = ctx->left_floats; fb; fb = fb->next) {
+        if (float_intersects_y_range(fb, y, y + height)) {
+            if (fb->margin_box_right > space.left) {
+                space.left = fb->margin_box_right;
+                space.has_left_float = true;
+            }
+        }
+    }
+
+    // Check right floats
+    for (FloatBox* fb = ctx->right_floats; fb; fb = fb->next) {
+        if (float_intersects_y_range(fb, y, y + height)) {
+            if (fb->margin_box_left < space.right) {
+                space.right = fb->margin_box_left;
+                space.has_right_float = true;
+            }
+        }
+    }
+
+    return space;
 }
 ```
 
-2. **Migrate float space queries:**
-```cpp
-// Replace float_space_at_y() with bfc->space_at_y()
-```
+**Remove deprecated code:**
+- `layout_float_element()` → `block_context_position_float()`
+- `float_space_at_y()` → `block_context_space_at_y()`
+- `prescan_and_layout_floats()` → Simplify with accurate measurement
 
-3. **Remove legacy FloatContext entirely**
-
-### 3.4 Priority 4: Inline-Block Baseline Calculation
+### 3.5 Priority 4: Inline-Block Baseline Calculation
 
 **Estimated Impact:** 25+ tests
 
@@ -275,7 +493,7 @@ float calculate_inline_block_baseline(ViewBlock* block) {
 }
 ```
 
-### 3.5 Priority 5: Margin Collapsing Edge Cases
+### 3.6 Priority 5: Margin Collapsing Edge Cases
 
 **Estimated Impact:** 10+ tests
 
@@ -305,14 +523,24 @@ if (is_empty_block(block) &&
 
 ## 4. Implementation Roadmap
 
-### Phase 1: Foundation (Week 1-2)
-- [ ] Implement `creates_bfc()` helper function
-- [ ] Unify float context (migrate to BFC only)
-- [ ] Fix float pre-scanning heuristics with accurate measurement
+### Phase 0: BlockContext Unification (Week 1)
+- [ ] Define `BlockContext` struct in `layout.hpp`
+- [ ] Update `LayoutContext` to use `BlockContext block`
+- [ ] Migrate float functions into `BlockContext` methods
+- [ ] Remove `FloatContext` and `BlockFormattingContext`
+- [ ] Update all references: `lycon->bfc`, `lycon->current_float_context`
+- [ ] Delete `layout_bfc.hpp`, `layout_bfc.cpp`
+- [ ] Clean up float code in `layout_positioned.hpp/cpp`
+
+### Phase 1: BFC & Float Fixes (Week 2)
+- [ ] Implement `block_context_establishes_bfc()`
+- [ ] Fix float pre-scanning with accurate measurement
+- [ ] BFC height expansion to contain floats
 
 ### Phase 2: Block-in-Inline (Week 3-4)
 - [ ] Design anonymous block data structures
 - [ ] Implement inline splitting algorithm
+- [ ] Add `RDT_VIEW_ANONYMOUS_BLOCK` view type
 - [ ] Add tests for block-in-inline scenarios
 
 ### Phase 3: Inline-Block & Baseline (Week 5)
@@ -343,16 +571,32 @@ make layout test=float-001                            # Basic float
 
 | Milestone | Tests Passing | Target Date |
 |-----------|---------------|-------------|
-| Phase 1 complete | 30/252 (12%) | Week 2 |
-| Phase 2 complete | 120/252 (48%) | Week 4 |
-| Phase 3 complete | 180/252 (71%) | Week 5 |
-| Phase 4 complete | 220/252 (87%) | Week 6 |
+| Phase 0 complete (BlockContext) | 10/252 (4%) | Week 1 |
+| Phase 1 complete (BFC/Floats) | 40/252 (16%) | Week 2 |
+| Phase 2 complete (Block-in-Inline) | 130/252 (52%) | Week 4 |
+| Phase 3 complete (Inline-Block) | 190/252 (75%) | Week 5 |
+| Phase 4 complete (Refinements) | 220/252 (87%) | Week 6 |
 
 ---
 
 ## 6. Code Quality Notes
 
-### 6.1 Current Code Observations
+### 6.1 Files Changed in Refactoring
+
+| File | Changes |
+|------|---------|
+| `layout.hpp` | Replace `Blockbox` with `BlockContext`, remove forward decls |
+| `layout_block.cpp` | Update all `lycon->block` usage, remove BFC/FloatContext code |
+| `layout_inline.cpp` | Add block-in-inline detection, use `BlockContext` for floats |
+| `layout_text.cpp` | Use `BlockContext` for line adjustment |
+| `layout_positioned.hpp/cpp` | Remove `FloatContext` definition, keep positioning functions |
+| `layout_bfc.hpp/cpp` | **DELETE** - merged into `BlockContext` |
+| `layout_table.cpp` | Update `Blockbox` → `BlockContext` references |
+| `layout_flex_*.cpp` | Update `Blockbox` → `BlockContext` references |
+| `layout_grid_*.cpp` | Update `Blockbox` → `BlockContext` references |
+| `resolve_css_style.cpp` | Update `lycon->block.pa_block` → `lycon->block.parent` |
+
+### 6.2 Current Code Observations
 
 **Strengths:**
 - Clear separation between layout phases
@@ -360,15 +604,25 @@ make layout test=float-001                            # Basic float
 - Memory pool usage for allocations
 
 **Areas for improvement:**
-- Duplicate float handling code (legacy + BFC)
+- ~~Duplicate float handling code (legacy + BFC)~~ → Fixed by unification
 - Magic numbers in float pre-scanning
 - Complex conditional chains for BFC detection
 
-### 6.2 Recommended Refactoring
+### 6.3 Recommended Naming Convention
 
-1. **Extract BFC logic to `layout_bfc.cpp`** - Currently split across multiple files
-2. **Create `anonymous_box.cpp`** - For block-in-inline handling
-3. **Add `baseline.cpp`** - Centralize baseline calculations
+```cpp
+// BlockContext methods use block_context_ prefix
+void block_context_init(...);
+void block_context_add_float(...);
+FloatAvailableSpace block_context_space_at_y(...);
+
+// Or as C++ methods if preferred
+struct BlockContext {
+    void init(...);
+    void add_float(...);
+    FloatAvailableSpace space_at_y(...);
+};
+```
 
 ---
 
@@ -376,8 +630,34 @@ make layout test=float-001                            # Basic float
 
 - [CSS 2.2 Section 9.2.1.1](https://www.w3.org/TR/CSS22/visuren.html#anonymous-block-level) - Anonymous block boxes
 - [CSS 2.2 Section 9.4.1](https://www.w3.org/TR/CSS22/visuren.html#block-formatting) - Block formatting contexts
+- [CSS 2.2 Section 9.5.1](https://www.w3.org/TR/CSS22/visuren.html#float-position) - Float positioning
 - [CSS 2.2 Section 10.6.7](https://www.w3.org/TR/CSS22/visudet.html#root-height) - Auto heights for BFC
 - [CSS 2.2 Section 10.8.1](https://www.w3.org/TR/CSS22/visudet.html#line-height) - Inline-block baseline
+
+---
+
+## Appendix A: Before/After Structure Comparison
+
+### Before (Current)
+```
+LayoutContext
+├── Blockbox block           // Layout state
+├── FloatContext* current_float_context  // Legacy float system
+├── BlockFormattingContext* bfc          // New float system (parallel!)
+├── bool owns_bfc
+└── Linebox line
+```
+
+### After (Proposed)
+```
+LayoutContext
+├── BlockContext block       // Unified: layout state + floats + BFC
+│   ├── content_width, advance_y, ...  // Layout state
+│   ├── left_floats, right_floats      // Float lists
+│   ├── is_bfc_root, establishing_element  // BFC info
+│   └── parent                          // BFC hierarchy
+└── Linebox line
+```
 
 ---
 
