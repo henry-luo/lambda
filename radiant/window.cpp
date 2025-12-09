@@ -350,6 +350,107 @@ int view_html_in_window(const char* html_file) {
     return 0;
 }
 
+// Function to load and view markdown documents
+// Similar to view_html_in_window but parses markdown first
+int view_markdown_in_window(const char* markdown_file) {
+    log_init_wrapper();
+    ui_context_init(&ui_context, false);
+    GLFWwindow* window = ui_context.window;
+    if (!window) {
+        ui_context_cleanup(&ui_context);
+        return -1;
+    }
+
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);  // enable vsync
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
+
+    glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
+    glfwSetKeyCallback(window, key_callback);
+    glfwSetCharCallback(window, character_callback);
+    glfwSetCursorPosCallback(window, cursor_position_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetWindowRefreshCallback(window, window_refresh_callback);
+
+    glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
+
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+    framebuffer_size_callback(window, width, height);
+
+    Url* cwd = get_current_dir();
+    if (cwd && markdown_file) {
+        log_debug("Loading markdown file: %s", markdown_file);
+        
+        Pool* pool = pool_create();
+        if (!pool) {
+            log_error("Failed to create memory pool for markdown");
+            url_destroy(cwd);
+            ui_context_cleanup(&ui_context);
+            return -1;
+        }
+        
+        // Parse markdown file URL
+        Url* markdown_url = url_parse_with_base(markdown_file, cwd);
+        if (!markdown_url) {
+            log_error("Failed to parse markdown URL: %s", markdown_file);
+            pool_destroy(pool);
+            url_destroy(cwd);
+            ui_context_cleanup(&ui_context);
+            return -1;
+        }
+        
+        // Load markdown document (parses markdown, builds DOM, applies CSS)
+        DomDocument* doc = load_markdown_doc(markdown_url, width, height, pool);
+        if (!doc) {
+            log_error("Failed to load markdown document: %s", markdown_file);
+            pool_destroy(pool);
+            url_destroy(cwd);
+            ui_context_cleanup(&ui_context);
+            return -1;
+        }
+        
+        ui_context.document = doc;
+        
+        // Layout markdown doc
+        if (doc->root) {
+            layout_html_doc(&ui_context, doc, false);
+        }
+        
+        // Render markdown doc
+        if (doc && doc->view_tree) {
+            render_html_doc(&ui_context, doc->view_tree, NULL);
+        }
+        
+        url_destroy(cwd);
+        
+        // Set custom window title
+        char title[512];
+        snprintf(title, sizeof(title), "Lambda Markdown Viewer - %s", markdown_file);
+        glfwSetWindowTitle(window, title);
+        
+        // Main loop
+        while (!glfwWindowShouldClose(window)) {
+            double currentTime = glfwGetTime();
+            
+            glfwPollEvents();
+            
+            if (do_redraw) {
+                window_refresh_callback(window);
+            }
+            
+            glfwWaitEventsTimeout(1.0 / 60.0);
+        }
+    }
+
+    log_info("End of markdown viewer");
+    ui_context_cleanup(&ui_context);
+    log_cleanup();
+    return 0;
+}
+
 int window_main(int argc, char* argv[]) {
     // render the default index.html
     return view_html_in_window(NULL);
