@@ -825,6 +825,143 @@ DomDocument* load_html_doc(Url *base, char* doc_url) {
 }
 
 /**
+ * Load markdown document with Lambda CSS system
+ * Parses markdown, applies GitHub-style CSS, builds DOM tree, returns DomDocument for layout
+ *
+ * @param markdown_url URL to markdown file
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return DomDocument structure with Lambda CSS DOM, ready for layout
+ */
+DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool) {
+    if (!markdown_url || !pool) {
+        log_error("load_markdown_doc: invalid parameters");
+        return nullptr;
+    }
+
+    char* markdown_filepath = url_to_local_path(markdown_url);
+    log_debug("[Lambda Markdown] Loading markdown document: %s", markdown_filepath);
+
+    // Step 1: Parse markdown with Lambda parser
+    char* markdown_content = read_text_file(markdown_filepath);
+    if (!markdown_content) {
+        log_error("Failed to read markdown file: %s", markdown_filepath);
+        return nullptr;
+    }
+
+    // Create type string for markdown
+    String* type_str = (String*)malloc(sizeof(String) + 9);
+    type_str->len = 8;
+    strcpy(type_str->chars, "markdown");
+
+    // Parse markdown to Lambda Element tree
+    Input* input = input_from_source(markdown_content, markdown_url, type_str, nullptr);
+    free(markdown_content);
+
+    if (!input) {
+        log_error("Failed to parse markdown file: %s", markdown_filepath);
+        return nullptr;
+    }
+
+    // Get root element from parsed markdown
+    Element* markdown_root = nullptr;
+    TypeId root_type = get_type_id(input->root);
+    if (root_type == LMD_TYPE_ELEMENT) {
+        markdown_root = input->root.element;
+    } else if (root_type == LMD_TYPE_LIST) {
+        // Markdown parser may return list, find first element
+        List* root_list = input->root.list;
+        for (int64_t i = 0; i < root_list->length; i++) {
+            Item item = root_list->items[i];
+            if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+                markdown_root = item.element;
+                break;
+            }
+        }
+    }
+
+    if (!markdown_root) {
+        log_error("Failed to get markdown root element");
+        return nullptr;
+    }
+
+    log_debug("[Lambda Markdown] Parsed markdown root element");
+
+    // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
+    log_debug("[Lambda Markdown] Building DomElement tree from markdown");
+    DomDocument* dom_doc = dom_document_create(input);
+    if (!dom_doc) {
+        log_error("Failed to create DomDocument");
+        return nullptr;
+    }
+
+    DomElement* dom_root = build_dom_tree_from_element(markdown_root, dom_doc, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DomElement tree from markdown");
+        dom_document_destroy(dom_doc);
+        return nullptr;
+    }
+
+    log_debug("[Lambda Markdown] Built DomElement tree: root=%p", (void*)dom_root);
+
+    // Step 3: Initialize CSS engine
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine");
+        return nullptr;
+    }
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 4: Load markdown.css stylesheet
+    // Determine the path to markdown.css (relative to executable)
+    const char* css_filename = "lambda/input/markdown.css";
+    log_debug("[Lambda Markdown] Loading default markdown stylesheet: %s", css_filename);
+
+    CssStylesheet* markdown_stylesheet = nullptr;
+    char* css_content = read_text_file(css_filename);
+    if (css_content) {
+        size_t css_len = strlen(css_content);
+        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        if (css_pool_copy) {
+            strcpy(css_pool_copy, css_content);
+            free(css_content);
+            markdown_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+            if (markdown_stylesheet) {
+                log_debug("[Lambda Markdown] Loaded markdown stylesheet with %zu rules",
+                        markdown_stylesheet->rule_count);
+            } else {
+                log_warn("Failed to parse markdown.css");
+            }
+        } else {
+            free(css_content);
+        }
+    } else {
+        log_warn("Failed to load markdown.css file: %s", css_filename);
+        log_warn("Continuing without stylesheet - markdown will use browser defaults");
+    }
+
+    // Step 5: Apply CSS cascade to DOM tree
+    if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
+        log_debug("[Lambda Markdown] Applying CSS cascade...");
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        apply_stylesheet_to_dom_tree(dom_root, markdown_stylesheet, matcher, pool, css_engine);
+        log_debug("[Lambda Markdown] CSS cascade complete");
+    }
+
+    // Step 6: Populate DomDocument structure
+    dom_doc->root = dom_root;
+    dom_doc->html_root = markdown_root;
+    dom_doc->html_version = HTML5;  // Treat markdown as HTML5
+    dom_doc->url = markdown_url;
+    dom_doc->view_tree = nullptr;  // Will be created during layout
+    dom_doc->state = nullptr;
+
+    log_debug("[Lambda Markdown] Document loaded and styled");
+    return dom_doc;
+}
+
+/**
  * Parse command-line arguments
  */
 struct LayoutOptions {
