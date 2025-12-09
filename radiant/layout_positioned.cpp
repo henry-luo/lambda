@@ -752,34 +752,39 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     log_debug("Float positioning: using parent_ctx->content_width=%.1f", parent_content_width);
 
     // Get the current Y position of this float
-    float current_y = block->y;
-    if (block->bound) {
-        current_y -= block->bound->margin.top;  // Remove margin that was already applied
-    }
-
-    // Query available horizontal space at this Y position using BlockContext API
-    float total_height = block->height + (block->bound ?
-        block->bound->margin.top + block->bound->margin.bottom : 0);
-    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y, total_height);
-
-    log_debug("Float positioning: current_y=%.1f, available space left=%.1f, right=%.1f, content_offset_x=%.1f, parent_content_width=%.1f",
-              current_y, space.left, space.right, content_offset_x, parent_content_width);
-
     // Calculate parent's position in BFC coordinates for coordinate conversion
     // This is needed because float space queries return BFC-relative coordinates,
     // but we position floats relative to their immediate parent
     float parent_x_in_bfc = 0;
+    float parent_y_in_bfc = 0;
     if (parent_view) {
         // Walk up the view tree to accumulate parent positions relative to BFC
         ViewElement* v = parent_view;
         while (v && v != bfc->establishing_element) {
             parent_x_in_bfc += v->x;
+            parent_y_in_bfc += v->y;
             ViewElement* pv = v->parent_view();
             if (!pv) break;
             v = pv;
         }
     }
-    log_debug("Float parent_x_in_bfc=%.1f", parent_x_in_bfc);
+    log_debug("Float parent_in_bfc=(%.1f, %.1f)", parent_x_in_bfc, parent_y_in_bfc);
+
+    // Get the current Y position of this float
+    float current_y = block->y;
+    if (block->bound) {
+        current_y -= block->bound->margin.top;  // Remove margin that was already applied
+    }
+    // Convert to BFC coordinates for the space query
+    float current_y_bfc = current_y + parent_y_in_bfc;
+
+    // Query available horizontal space at this Y position using BlockContext API
+    float total_height = block->height + (block->bound ?
+        block->bound->margin.top + block->bound->margin.bottom : 0);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, current_y_bfc, total_height);
+
+    log_debug("Float positioning: current_y=%.1f, available space left=%.1f, right=%.1f, content_offset_x=%.1f, parent_content_width=%.1f",
+              current_y_bfc, space.left, space.right, content_offset_x, parent_content_width);
 
     if (block->position->float_prop == CSS_VALUE_LEFT) {
         // Left float: position at left edge of available space
@@ -841,107 +846,69 @@ void adjust_line_for_floats(LayoutContext* lycon) {
         return;
     }
 
-    // Get the current view being laid out - may not be a block
+    // Get the current view being laid out
     View* current_view = lycon->view;
     if (!current_view) {
         log_debug("adjust_line_for_floats: early exit - no current_view");
         return;
     }
 
-    // Check if current block is inside the BFC establishing element
-    ViewBlock* container = bfc->establishing_element;
-
-    // Find the view's position relative to the container
-    // Walk up the parent chain to find relationship to container
-    // IMPORTANT: If we encounter a floated element on the way up,
-    // skip adjustment - lines inside floats don't adjust for parent's floats
-    float block_offset_x = 0;
-    float block_offset_y = 0;
-
+    // Check if we're inside a floated element - if so, skip adjustment
+    // (lines inside floats don't adjust for parent's float context)
     ViewElement* ancestor = (ViewElement*)current_view;
+    ViewBlock* container = bfc->establishing_element;
     bool found_container = false;
     while (ancestor) {
         if (ancestor == container) {
             found_container = true;
             break;
         }
-        // Check if this ancestor is a floated block - if so, we're inside a float
-        // and should NOT adjust for the parent's float context
         if (ancestor->is_block()) {
             ViewBlock* block = (ViewBlock*)ancestor;
             if (block->position && element_has_float(block)) {
-                // We're inside a floated element, don't adjust lines
-                log_debug("Skipping float adjustment: inside floated element %s at (%d, %d)",
-                          block->node_name(), (int)block->x, (int)block->y);
+                log_debug("Skipping float adjustment: inside floated element %s",
+                          block->node_name());
                 return;
-            }
-            block_offset_x += block->x;
-            block_offset_y += block->y;
-            // Add border and padding
-            if (block->bound) {
-                if (block->bound->border) {
-                    block_offset_x += block->bound->border->width.left;
-                    block_offset_y += block->bound->border->width.top;
-                }
-                block_offset_x += block->bound->padding.left;
-                block_offset_y += block->bound->padding.top;
             }
         }
         ancestor = ancestor->parent_view();
     }
 
     if (!found_container) {
-        // Current view is not inside the BFC establishing element
-        log_debug("adjust_line_for_floats: early exit - view not inside container");
+        log_debug("adjust_line_for_floats: early exit - view not inside BFC");
         return;
     }
 
-    // Find the containing block for coordinate calculations
-    ViewBlock* containing_block = nullptr;
-    ViewElement* search = (ViewElement*)current_view;
-    while (search && !containing_block) {
-        if (search->is_block()) {
-            containing_block = (ViewBlock*)search;
-        } else {
-            search = search->parent_view();
-        }
-    }
-    if (!containing_block) {
-        log_debug("adjust_line_for_floats: early exit - no containing_block");
-        return;
-    }
+    // Use cached BFC offset from BlockContext
+    float block_offset_x = lycon->block.bfc_offset_x;
+    float block_offset_y = lycon->block.bfc_offset_y;
 
-    // Convert current line Y to container-relative coordinates
-    float line_top_container = block_offset_y + lycon->block.advance_y;
+    // Convert current line Y to BFC coordinates
+    float line_top_bfc = block_offset_y + lycon->block.advance_y;
     float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
 
-    log_debug("Adjusting line for floats: local_y=%.1f, container_y=%.1f, height=%.1f, offset=(%.1f, %.1f)",
-              lycon->block.advance_y, line_top_container, line_height, block_offset_x, block_offset_y);
+    log_debug("Adjusting line for floats: local_y=%.1f, bfc_y=%.1f, height=%.1f, offset=(%.1f, %.1f)",
+              lycon->block.advance_y, line_top_bfc, line_height, block_offset_x, block_offset_y);
 
     // Query available space at current line position using BlockContext API
-    FloatAvailableSpace space = block_context_space_at_y(bfc, line_top_container, line_height);
+    FloatAvailableSpace space = block_context_space_at_y(bfc, line_top_bfc, line_height);
 
-    // If there's no float intrusion at this Y position, skip adjustment entirely
-    // This is critical for cleared elements that are positioned below floats
+    // If there's no float intrusion at this Y position, skip adjustment
     if (!space.has_left_float && !space.has_right_float) {
         log_debug("No float intrusion at this Y position, skipping adjustment");
         return;
     }
 
-    // Convert available space from container-relative to local block coordinates
-    float local_left = space.left - containing_block->x;
-    float local_right = space.right - containing_block->x;
-
-    // The effective bounds should be in the same coordinate system as line.left/right
-    float new_effective_left = local_left;
-    float new_effective_right = local_right;
+    // Convert available space from BFC coordinates to local block coordinates
+    float local_left = space.left - block_offset_x;
+    float local_right = space.right - block_offset_x;
 
     // Clamp to the current block's line bounds
-    new_effective_left = max(new_effective_left, lycon->line.left);
-    new_effective_right = min(new_effective_right, lycon->line.right);
+    float new_effective_left = max(local_left, lycon->line.left);
+    float new_effective_right = min(local_right, lycon->line.right);
 
-    log_debug("Float adjustment: space=(%.1f, %.1f), block_x=%.1f, local=(%.1f, %.1f), new_effective=(%.1f, %.1f)",
-              space.left, space.right, containing_block->x, local_left, local_right,
+    log_debug("Float adjustment: space=(%.1f, %.1f), local=(%.1f, %.1f), effective=(%.1f, %.1f)",
+              space.left, space.right, local_left, local_right,
               new_effective_left, new_effective_right);
 
     // Apply the float intrusion to effective bounds
@@ -950,7 +917,6 @@ void adjust_line_for_floats(LayoutContext* lycon) {
                   lycon->line.effective_left, new_effective_left);
         lycon->line.effective_left = new_effective_left;
         lycon->line.has_float_intrusion = true;
-        // Also update advance_x if we're at line start
         if (lycon->line.is_line_start && lycon->line.advance_x < new_effective_left) {
             lycon->line.advance_x = new_effective_left;
         }

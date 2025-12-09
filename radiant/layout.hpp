@@ -89,6 +89,12 @@ typedef struct BlockContext {
     float origin_x;
     float origin_y;
 
+    // Offset from BFC origin to this block's border-box origin
+    // Used to convert between BFC coordinates and local coordinates
+    // Calculated once when entering a block, avoids repeated parent-chain walks
+    float bfc_offset_x;
+    float bfc_offset_y;
+
     // =========================================================================
     // Float Management (unified from FloatContext + BlockFormattingContext)
     // =========================================================================
@@ -260,12 +266,28 @@ float block_context_clear_y(BlockContext* ctx, CssEnum clear_type);
 FloatBox* block_context_alloc_float_box(BlockContext* ctx);
 
 /**
+ * Update line effective bounds for BFC floats
+ * Adjusts line.effective_left and line.effective_right based on floats at current Y
+ */
+void update_line_for_bfc_floats(LayoutContext* lycon);
+
+/**
  * Find the BFC root for a given BlockContext
  * Walks up the parent chain to find the nearest BFC-establishing BlockContext
  * @param ctx The starting block context
  * @return The BFC root BlockContext, or NULL if none found
  */
 BlockContext* block_context_find_bfc(BlockContext* ctx);
+
+/**
+ * Calculate the offset from BFC origin to a view's border-box origin
+ * This is used to convert between BFC coordinates and local coordinates
+ * @param view The view to calculate offset for
+ * @param bfc The BFC root context
+ * @param offset_x Output: X offset from BFC to view's border-box
+ * @param offset_y Output: Y offset from BFC to view's border-box
+ */
+void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* offset_x, float* offset_y);
 
 // ============================================================================
 // Property Allocation
