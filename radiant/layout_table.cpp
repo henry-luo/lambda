@@ -711,8 +711,10 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     cell->td->col_index = -1;
     cell->td->row_index = -1;
     cell->td->is_empty = is_cell_empty(cell) ? 1 : 0;  // Check if cell has no content
-    // CSS 2.1: Default vertical-align for table cells is 'middle'
-    cell->td->vertical_align = TableCellProp::CELL_VALIGN_MIDDLE;
+    // CSS 2.1: Default vertical-align is 'baseline' (initial value)
+    // HTML TD/TH elements get 'middle' via UA stylesheet (set in resolve_htm_style.cpp)
+    // For CSS display:table-cell, baseline alignment positions single-line text at top
+    cell->td->vertical_align = TableCellProp::CELL_VALIGN_BASELINE;
     if (!cellNode->is_element()) return;
 
     if (cellNode->node_type == DOM_NODE_ELEMENT) {
@@ -1609,6 +1611,15 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     Blockbox saved_block = lycon->block;
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
+    FontBox saved_font = lycon->font;
+
+    // CRITICAL: Set up the cell's font before laying out content
+    // This ensures text uses the cell's font-size (e.g., 14px) instead of parent's (e.g., 16px)
+    if (tcell->font) {
+        setup_font(lycon->ui_context, &lycon->font, tcell->font);
+        log_debug("Table cell font setup: family=%s, size=%.1f",
+            tcell->font->family ? tcell->font->family : "default", tcell->font->font_size);
+    }
 
     // Calculate cell border and padding offsets from actual CSS style
     // Content area starts AFTER border and padding
@@ -1704,6 +1715,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->block = saved_block;
     lycon->line = saved_line;
     lycon->elmt = saved_elmt;
+    lycon->font = saved_font;
 }
 
 // Measure cell's intrinsic content width (Preferred Content Width - PCW)
