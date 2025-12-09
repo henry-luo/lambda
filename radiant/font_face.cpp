@@ -1,5 +1,6 @@
 #include "font_face.h"
 #include "layout.hpp"
+#include "../lib/font_config.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -330,7 +331,20 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     // Fall back to system fonts if no @font-face match
     clog_debug(font_log, "No @font-face match found, falling back to system fonts for: %s", family_name);
     if (is_fallback) *is_fallback = true;
-    return load_styled_font(uicon, family_name, style);
+    
+    // Early-exit optimization: Check if font family exists in database before expensive lookups
+    ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_name);
+    bool family_exists = (family_matches && family_matches->length > 0);
+    
+    if (family_exists) {
+        arraylist_free(family_matches);
+        return load_styled_font(uicon, family_name, style);
+    } else {
+        // Font doesn't exist in database - skip expensive platform lookup
+        clog_info(font_log, "Font family '%s' not in database, skipping platform lookup", family_name);
+        if (family_matches) arraylist_free(family_matches);
+        return NULL;
+    }
 }
 
 // Enhanced font matching (basic implementation)
