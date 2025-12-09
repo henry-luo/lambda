@@ -810,7 +810,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return dom_doc;
 }
 
-DomDocument* load_html_doc(Url *base, char* doc_url) {
+DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height) {
     Pool* pool = pool_create();
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -820,7 +820,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url) {
         pool_destroy(pool);
         return NULL;
     }
-    DomDocument* doc = load_lambda_html_doc(full_url, NULL, 0, 0, pool);
+    DomDocument* doc = load_lambda_html_doc(full_url, NULL, viewport_width, viewport_height, pool);
     return doc;
 }
 

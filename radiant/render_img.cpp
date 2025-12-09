@@ -11,7 +11,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-DomDocument* load_html_doc(Url* base, char* doc_url);
+DomDocument* load_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height);
 
 // Save surface to PNG using libpng
 void save_surface_to_png(ImageSurface* surface, const char* filename) {
@@ -163,7 +163,7 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     }
 
     // Load and layout the HTML document
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
     if (!doc) {
         log_debug("Failed to load HTML document: %s", html_file);
         ui_context_cleanup(&ui_context);
@@ -215,7 +215,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     }
 
     // Load and layout the HTML document
-    DomDocument* doc = load_html_doc(cwd, (char*)html_file);
+    DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
     if (!doc) {
         log_debug("Failed to load HTML document: %s", html_file);
         ui_context_cleanup(&ui_context);

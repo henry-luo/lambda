@@ -57,10 +57,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 // JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width = 1200, int viewport_height = 800);
 
-// PDF viewer functions from radiant (cmd_view_pdf.cpp)
+// Document viewer functions from radiant
 extern int view_pdf_in_window(const char* pdf_file);
-extern int view_html_in_window(const char* html_file);
-extern int view_markdown_in_window(const char* markdown_file);
+extern int view_doc_in_window(const char* doc_file);  // Unified viewer for HTML, Markdown, XML, RST, etc.
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -1018,21 +1017,25 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Document Viewer v1.0\n\n");
-            printf("Usage: %s view [file.pdf|file.html|file.md]\n", argv[0]);
+            printf("Usage: %s view [document_file]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'view' command opens a document in an interactive window.\n");
-            printf("  Supports PDF, HTML, and Markdown documents with full rendering.\n");
+            printf("  Supports multiple document formats with full rendering and styling.\n");
             printf("  If no file is specified, opens test/html/index.html by default.\n");
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             printf("  .html      HyperText Markup Language\n");
+            printf("  .htm       HyperText Markup Language (alternative extension)\n");
             printf("  .md        Markdown (with GitHub-like styling)\n");
             printf("  .markdown  Markdown (with GitHub-like styling)\n");
+            printf("  .xml       Extensible Markup Language (treated as HTML)\n");
+            printf("  .rst       reStructuredText (planned support)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
-            printf("  %s view page.html                # View HTML in browser window\n", argv[0]);
+            printf("  %s view page.html                # View HTML document\n", argv[0]);
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
+            printf("  %s view config.xml               # View XML document\n", argv[0]);
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
@@ -1064,15 +1067,15 @@ int main(int argc, char *argv[]) {
         if (ext && strcmp(ext, ".pdf") == 0) {
             log_info("Opening PDF file: %s", filename);
             exit_code = view_pdf_in_window(filename);
-        } else if (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0)) {
-            log_info("Opening HTML file: %s", filename);
-            exit_code = view_html_in_window(filename);
-        } else if (ext && (strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0)) {
-            log_info("Opening Markdown file: %s", filename);
-            exit_code = view_markdown_in_window(filename);
+        } else if (ext && (strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
+                          strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
+                          strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0)) {
+            // Use unified document viewer for HTML, Markdown, XML, RST, etc.
+            log_info("Opening document file: %s", filename);
+            exit_code = view_doc_in_window(filename);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .md, .markdown\n");
+            printf("Supported formats: .pdf, .html, .htm, .md, .markdown, .xml, .rst\n");
             log_finish();
             return 1;
         }
