@@ -406,7 +406,21 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     // If @font-face loading failed, fall back to original method
     if (!fbox->ft_face) {
-        fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
+        // Early-exit optimization: Check if font family exists in database before expensive lookups
+        ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_to_load);
+        bool family_exists = (family_matches && family_matches->length > 0);
+        int match_count = family_matches ? family_matches->length : 0;
+        
+        if (family_exists) {
+            // Family exists in database - do full styled lookup (weight, style matching)
+            log_debug("Font family '%s' exists in database (%d matches), doing styled lookup", family_to_load, match_count);
+            arraylist_free(family_matches);
+            fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
+        } else {
+            // Family doesn't exist in database - skip expensive platform lookup, go straight to fallbacks
+            log_debug("Font family '%s' not in database, skipping styled lookup (early-exit)", family_to_load);
+            if (family_matches) arraylist_free(family_matches);
+        }
     }
     
     // If font loading failed, try fallback fonts
