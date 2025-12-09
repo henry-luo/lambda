@@ -4,6 +4,7 @@
 #include "../lib/log.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include <vector>
 
 /*
  * RADIANT TABLE LAYOUT ENGINE
@@ -80,15 +81,18 @@ ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
         }
     }
 
-    // If no more rows in current group, try next row group
+    // If no more rows in current group, try next row group or direct rows
     ViewBlock* parent = (ViewBlock*)current->parent;
     if (parent && parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-        // Find next row group
-        for (ViewBlock* next_group = (ViewBlock*)parent->next_sibling; next_group; next_group = (ViewBlock*)next_group->next_sibling) {
-            if (next_group->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                ViewTableRowGroup* group = (ViewTableRowGroup*)next_group;
+        // Find next row group or direct row after this group
+        for (ViewBlock* next_item = (ViewBlock*)parent->next_sibling; next_item; next_item = (ViewBlock*)next_item->next_sibling) {
+            if (next_item->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                ViewTableRowGroup* group = (ViewTableRowGroup*)next_item;
                 ViewTableRow* row = group->first_row();
                 if (row) return row;
+            } else if (next_item->view_type == RDT_VIEW_TABLE_ROW) {
+                // Found a direct row after row groups
+                return (ViewTableRow*)next_item;
             }
         }
     }
@@ -96,7 +100,28 @@ ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
     return nullptr;
 }
 
-ViewTableRow* ViewTableRowGroup::first_row() {
+// Get section type from tag/display for visual ordering (CSS 2.1 Section 17.2)
+TableSectionType ViewTableRowGroup::get_section_type() const {
+    // Check HTML tag first
+    uintptr_t tag = tag_id;
+    if (tag == HTM_TAG_THEAD) return TABLE_SECTION_THEAD;
+    if (tag == HTM_TAG_TFOOT) return TABLE_SECTION_TFOOT;
+    if (tag == HTM_TAG_TBODY) return TABLE_SECTION_TBODY;
+
+    // For CSS table elements (div with display: table-footer-group), resolve display
+    // Note: The element's display field may not be set, so we resolve it fresh
+    DisplayValue resolved = resolve_display_value((void*)this);
+
+    if (resolved.inner == CSS_VALUE_TABLE_HEADER_GROUP) {
+        return TABLE_SECTION_THEAD;
+    }
+    if (resolved.inner == CSS_VALUE_TABLE_FOOTER_GROUP) {
+        return TABLE_SECTION_TFOOT;
+    }
+
+    // Default to TBODY for table-row-group and anonymous groups
+    return TABLE_SECTION_TBODY;
+}ViewTableRow* ViewTableRowGroup::first_row() {
     for (ViewBlock* child = (ViewBlock*)first_child; child; child = (ViewBlock*)child->next_sibling) {
         if (child->view_type == RDT_VIEW_TABLE_ROW) {
             return (ViewTableRow*)child;
@@ -1338,6 +1363,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
              display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
              display.inner == CSS_VALUE_TABLE_FOOTER_GROUP) {
         // Row group - mark and recurse
+        // NOTE: Section type is determined at runtime via get_section_type() method
         ViewTableRowGroup* group = (ViewTableRowGroup*)set_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, node);
         if (group) {
             lycon->view = (View*)group;
@@ -1995,9 +2021,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     ViewBlock* caption = nullptr;
     int caption_height = 0;
 
-    // Find and position caption
+    // Find and position caption - check both HTML tag and CSS display property
     for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
-        if (child->tag() == HTM_TAG_CAPTION) {
+        // Check for HTML <caption> tag OR CSS display: table-caption
+        DisplayValue child_display = resolve_display_value((void*)child);
+        bool is_caption = (child->tag() == HTM_TAG_CAPTION) || 
+                         (child_display.inner == CSS_VALUE_TABLE_CAPTION);
+        if (is_caption) {
             caption = child;
             // Caption height = content height + padding + border + margin
             if (caption->height > 0) {
@@ -2849,7 +2879,55 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Global row index for tracking row positions across all row groups
     int global_row_index = 0;
 
+    // =========================================================================
+    // CSS 2.1 Section 17.2: Visual ordering of row groups
+    // Row groups must be rendered in order: THEAD → TBODY → TFOOT
+    // regardless of their order in the DOM source.
+    // Collect all row groups and sort them by section type before layout.
+    // =========================================================================
+
+    // First pass: collect row groups and direct rows, grouped by section type
+    std::vector<ViewBlock*> thead_groups;
+    std::vector<ViewBlock*> tbody_groups;
+    std::vector<ViewBlock*> tfoot_groups;
+    std::vector<ViewBlock*> direct_rows;
+
     for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+            ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+            switch (group->get_section_type()) {
+                case TABLE_SECTION_THEAD:
+                    thead_groups.push_back(child);
+                    break;
+                case TABLE_SECTION_TFOOT:
+                    tfoot_groups.push_back(child);
+                    break;
+                case TABLE_SECTION_TBODY:
+                default:
+                    tbody_groups.push_back(child);
+                    break;
+            }
+        } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+            // Direct rows are treated as part of tbody
+            direct_rows.push_back(child);
+        }
+    }
+
+    // Build ordered list: THEAD → TBODY (with direct rows interleaved) → TFOOT
+    // The comment about direct_rows being handled separately is outdated - they need to go before TFOOT
+    std::vector<ViewBlock*> ordered_elements;
+    for (auto* g : thead_groups) ordered_elements.push_back(g);
+    for (auto* g : tbody_groups) ordered_elements.push_back(g);
+    // Direct rows are part of the implicit tbody section - must come before TFOOT
+    for (auto* r : direct_rows) ordered_elements.push_back(r);
+    for (auto* g : tfoot_groups) ordered_elements.push_back(g);
+
+    log_debug("Row group ordering: %zu thead, %zu tbody, %zu direct rows, %zu tfoot (total %zu)",
+              thead_groups.size(), tbody_groups.size(), direct_rows.size(), tfoot_groups.size(),
+              ordered_elements.size());
+
+    // Process elements in visual order (THEAD groups → TBODY groups → direct rows → TFOOT groups)
+    for (ViewBlock* child : ordered_elements) {
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             int group_start_y = current_y;
 
@@ -3020,7 +3098,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             //        child->x, child->y, child->width, child->height);
         }
         else if (child->view_type == RDT_VIEW_TABLE_ROW) {
-            // Handle direct table rows (relative to table)
+            // Handle direct table rows (part of implicit tbody, positioned with other tbody content)
             ViewTableRow* trow = (ViewTableRow*)child;
 
             // CSS 2.1 §17.5.5: Check for visibility: collapse
@@ -3066,9 +3144,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (height_for_row > row_height) {
                     row_height = height_for_row;
                 }
-            }
-
-            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
+            }            // CSS 2.1 §17.5.3: Check for explicit CSS height on the row
             float explicit_row_height = 0.0f;
             if (trow->is_element()) {
                 DomElement* row_elem = trow->as_element();
@@ -3088,22 +3164,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Use the larger of content height and explicit CSS height
             if (explicit_row_height > row_height) {
                 row_height = explicit_row_height;
-                log_debug("Using explicit row height %.1fpx instead of content height", row_height);
             }
 
-            // Apply fixed layout height if specified
-            if (table->tb->fixed_row_height > 0) {
-                apply_fixed_row_height(lycon, trow, table->tb->fixed_row_height);
-            } else {
-                trow->height = row_height;
-                // Also apply height to all cells in the row
-                for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
-                    if (tcell->height < row_height) {
-                        tcell->height = row_height;
-                        // Re-apply vertical alignment with correct cell height
-                        float content_height = measure_cell_content_height(lycon, tcell);
-                        apply_cell_vertical_align(tcell, tcell->height, content_height);
-                    }
+            // Apply row height
+            trow->height = row_height;
+
+            // Apply height to all cells in the row
+            for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                if (tcell->height < row_height) {
+                    tcell->height = row_height;
+                    float content_height = measure_cell_content_height(lycon, tcell);
+                    apply_cell_vertical_align(tcell, tcell->height, content_height);
                 }
             }
 
@@ -3117,13 +3188,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             current_y += trow->height;
 
-            // Add vertical border-spacing after each row (except last)
+            // Add vertical border-spacing after row (if not last)
             if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
                 current_y += table->tb->border_spacing_v;
                 log_debug("Added vertical spacing after direct row: +%dpx", table->tb->border_spacing_v);
             }
         }
-    }
+    }  // End of ordered elements loop
+
+    // NOTE: direct_rows are now processed in the main loop above as part of ordered_elements
 
     // =========================================================================
     // SECOND PASS: Fix rowspan cell heights and re-apply vertical alignment
