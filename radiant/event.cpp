@@ -4,7 +4,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
-DomDocument* show_html_doc(Url *base, char* doc_filename);
+DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 void to_repaint();
 
@@ -478,7 +478,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // load the new document
                         DomDocument* old_doc = block->embed->doc;
                         DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url);
+                            load_html_doc(evcon.ui_context->document->url, evcon.new_url,
+                                evcon.ui_context->window_width, evcon.ui_context->window_height);
                         if (new_doc && new_doc->html_root) {
                             layout_html_doc(evcon.ui_context, new_doc, false);
                             if (new_doc->view_tree && new_doc->view_tree->root) {
@@ -501,7 +502,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             else {
                 DomDocument* old_doc = evcon.ui_context->document;
                 // load the new document
-                evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url);
+                evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url,
+                    evcon.ui_context->window_width, evcon.ui_context->window_height);
                 free_document(old_doc);
             }
             to_repaint();
