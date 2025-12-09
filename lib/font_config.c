@@ -1762,12 +1762,13 @@ FontDatabaseResult font_database_find_best_match(FontDatabase* db, FontDatabaseC
     result.requires_synthesis = false;  // TODO: Implement synthesis detection
     result.synthetic_style = NULL;
     
-    if (best_font) {
-        log_debug("Best font match for '%s': %s (score: %.2f)", 
-            criteria->family_name, best_font->family_name, result.match_score);
-    } else {
-        log_debug("No font match found for: %s", criteria->family_name);
-    }
+    // Commented out verbose font matching logs - called very frequently during layout
+    // if (best_font) {
+    //     log_debug("Best font match for '%s': %s (score: %.2f)", 
+    //         criteria->family_name, best_font->family_name, result.match_score);
+    // } else {
+    //     log_debug("No font match found for: %s", criteria->family_name);
+    // }
     
     return result;
 }
