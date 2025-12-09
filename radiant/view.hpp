@@ -683,8 +683,19 @@ typedef struct ViewTable : ViewBlock {
     inline bool acts_as_row() { return tb && tb->is_annoy_tr; }
 } ViewTable;
 
+// CSS 2.1 Section 17.2: Row group types for visual ordering
+enum TableSectionType {
+    TABLE_SECTION_THEAD = 0,   // Header group - renders first
+    TABLE_SECTION_TBODY = 1,   // Body group - renders in middle (default)
+    TABLE_SECTION_TFOOT = 2    // Footer group - renders last
+};
+
 typedef struct ViewTableRowGroup : ViewBlock {
-    // Minimal metadata may be added later (e.g., group kind: thead/tbody/tfoot)
+    // NOTE: Do NOT add fields here - views share memory with DomElement!
+    // Section type is determined at runtime via get_section_type() method.
+
+    // Get section type from tag/display for visual ordering
+    TableSectionType get_section_type() const;
 
     // Get first row in this group
     ViewTableRow* first_row();
