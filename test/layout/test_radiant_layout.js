@@ -23,6 +23,7 @@ class RadiantLayoutTester {
         this.referenceDir = path.join(__dirname, 'reference');
         this.outputFile = '/tmp/view_tree.json';
         this.verbose = options.verbose || false;
+        this.json = options.json || false; // JSON output mode
         this.projectRoot = options.projectRoot || process.cwd();
     }
 
@@ -887,6 +888,7 @@ class RadiantLayoutTester {
      * Print hierarchical report to console
      */
     printReport(report) {
+        if (this.json) return; // Skip console output in JSON mode
         console.log(`\n📊 Test Case: ${report.testName}`);
         // Only show detailed statistics in verbose mode
         if (this.verbose) {
@@ -1049,8 +1051,10 @@ class RadiantLayoutTester {
             return [];
         }
 
-        console.log(`\n📂 Testing category: ${category}`);
-        console.log('=' .repeat(50));
+        if (!this.json) {
+            console.log(`\n📂 Testing category: ${category}`);
+            console.log('=' .repeat(50));
+        }
 
         const categoryDir = path.join(this.testDataDir, category);
 
@@ -1088,14 +1092,31 @@ class RadiantLayoutTester {
             }).length;
             const failed = results.length - successful;
 
-            console.log(`\n📋 Category Summary:`);
-            console.log(`   Total Tests: ${results.length}`);
-            console.log(`   ✅ Successful: ${successful}`);
-            if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
-            if (errorCount > 0) {
-                console.log(`   💥 Errors: ${errorCount}`);
-                console.log(`   📄 Files with errors:`);
-                errorFiles.forEach(file => console.log(`      - ${file}`));
+            if (this.json) {
+                // Output results as JSON for GTest integration
+                console.log(JSON.stringify({
+                    total: results.length,
+                    successful: successful,
+                    failed: failed,
+                    errors: errorCount,
+                    results: results.map(r => ({
+                        name: r.testName || r.testFile,
+                        passed: !r.error && (r.elementComparison?.passRate || 0) >= this.elementThreshold && (r.textComparison?.passRate || 100) >= this.textThreshold,
+                        elementPassRate: r.elementComparison?.passRate || 0,
+                        textPassRate: r.textComparison?.passRate || 100,
+                        error: r.error || null
+                    }))
+                }, null, 2));
+            } else {
+                console.log(`\n📋 Category Summary:`);
+                console.log(`   Total Tests: ${results.length}`);
+                console.log(`   ✅ Successful: ${successful}`);
+                if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
+                if (errorCount > 0) {
+                    console.log(`   💥 Errors: ${errorCount}`);
+                    console.log(`   📄 Files with errors:`);
+                    errorFiles.forEach(file => console.log(`      - ${file}`));
+                }
             }
 
             return results;
@@ -1213,12 +1234,28 @@ class RadiantLayoutTester {
         }).length;
         const failed = allResults.length - successful;
 
-        console.log(`\n🎯 OVERALL SUMMARY`);
-        console.log('==================');
-        console.log(`Total Tests: ${allResults.length}`);
-        console.log(`✅ Successful: ${successful}`);
-        console.log(`❌ Failed: ${failed}`);
-        console.log(`Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
+        if (this.json) {
+            // Output results as JSON for GTest integration
+            console.log(JSON.stringify({
+                total: allResults.length,
+                successful: successful,
+                failed: failed,
+                results: allResults.map(r => ({
+                    name: r.testName || r.testFile,
+                    passed: !r.error && (r.elementComparison?.passRate || 0) >= this.elementThreshold && (r.textComparison?.passRate || 100) >= this.textThreshold,
+                    elementPassRate: r.elementComparison?.passRate || 0,
+                    textPassRate: r.textComparison?.passRate || 100,
+                    error: r.error || null
+                }))
+            }, null, 2));
+        } else {
+            console.log(`\n🎯 OVERALL SUMMARY`);
+            console.log('==================');
+            console.log(`Total Tests: ${allResults.length}`);
+            console.log(`✅ Successful: ${successful}`);
+            console.log(`❌ Failed: ${failed}`);
+            console.log(`Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
+        }
 
         return allResults;
     }
@@ -1232,7 +1269,8 @@ async function main() {
     const options = {
         tolerance: 5.2,
         verbose: false,
-        engine: 'radiant' // default to radiant engine
+        engine: 'radiant', // default to radiant engine
+        json: false // JSON output mode
     };
 
     let category = null;
@@ -1283,6 +1321,9 @@ async function main() {
             case '--text-threshold':
                 options.textThreshold = parseFloat(args[++i]);
                 break;
+            case '--json':
+                options.json = true;
+                break;
             default:
                 console.error(`Unknown argument: ${arg}`);
                 showHelp = true;
@@ -1304,6 +1345,7 @@ Options:
   --element-threshold <pct> Element match threshold percentage (default: 80.0)
   --text-threshold <pct>   Text match threshold percentage (default: 70.0)
   --verbose, -v            Show detailed output
+  --json                   Output results in JSON format
   --radiant-exe <path>     Path to layout engine executable (default: ./lambda.exe)
   --help, -h               Show this help message
 
