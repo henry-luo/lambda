@@ -198,6 +198,21 @@ ViewTableCell* ViewTable::next_direct_cell(ViewTableCell* current) {
 // =============================================================================
 // Common operations for table cell layout to reduce code duplication.
 
+// Get parent table from a cell, traversing up through row and row group
+static ViewTable* get_parent_table(ViewTableCell* cell) {
+    if (!cell) return nullptr;
+
+    // Cell -> Row -> RowGroup/Table -> Table
+    DomNode* parent = cell->parent;
+    while (parent) {
+        if (parent->view_type == RDT_VIEW_TABLE) {
+            return (ViewTable*)parent;
+        }
+        parent = parent->parent;
+    }
+    return nullptr;
+}
+
 // Forward declaration for layout_table_cell_content (defined later in the file)
 static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell);
 
@@ -1647,6 +1662,10 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
             tcell->font->family ? tcell->font->family : "default", tcell->font->font_size);
     }
 
+    // Check if parent table uses border-collapse
+    ViewTable* parent_table = get_parent_table(tcell);
+    bool border_collapse = parent_table && parent_table->tb && parent_table->tb->border_collapse;
+
     // Calculate cell border and padding offsets from actual CSS style
     // Content area starts AFTER border and padding
     int border_left = 0;
@@ -1682,13 +1701,33 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
         padding_bottom = tcell->bound->padding.bottom >= 0 ? tcell->bound->padding.bottom : 0;
     }
 
-    // Calculate content area START position (offset from cell origin)
-    int content_start_x = border_left + padding_left;
-    int content_start_y = border_top + padding_top;
+    // In border-collapse mode, the cell width is the content width (column width),
+    // and borders are shared/collapsed with adjacent cells. Content starts at padding only.
+    // In separate mode, borders are part of the cell box and must be subtracted.
+    int content_start_x, content_start_y;
+    int content_width, content_height;
 
-    // Calculate content area dimensions (space available for content)
-    int content_width = cell->width - border_left - border_right - padding_left - padding_right;
-    int content_height = cell->height - border_top - border_bottom - padding_top - padding_bottom;
+    if (border_collapse) {
+        // Border-collapse: cell width is already the content area width
+        // Only add padding offset for content positioning
+        content_start_x = padding_left;
+        content_start_y = padding_top;
+        content_width = (int)cell->width - padding_left - padding_right;
+        content_height = (int)cell->height - padding_top - padding_bottom;
+        log_debug("Border-collapse cell content: cell=%dx%d, padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
+            (int)cell->width, (int)cell->height, padding_left, padding_right, padding_top, padding_bottom,
+            content_start_x, content_start_y, content_width, content_height);
+    } else {
+        // Separate borders: subtract borders from cell dimensions
+        content_start_x = border_left + padding_left;
+        content_start_y = border_top + padding_top;
+        content_width = (int)cell->width - border_left - border_right - padding_left - padding_right;
+        content_height = (int)cell->height - border_top - border_bottom - padding_top - padding_bottom;
+        log_debug("Separate-borders cell content: cell=%dx%d, border=(%d,%d), padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
+            (int)cell->width, (int)cell->height, border_left, border_top,
+            padding_left, padding_right, padding_top, padding_bottom,
+            content_start_x, content_start_y, content_width, content_height);
+    }
 
     // Ensure non-negative dimensions
     if (content_width < 0) content_width = 0;
@@ -2104,9 +2143,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (explicit_table_width > 0) {
                     table_content_width = explicit_table_width;
 
-                    // Subtract table border
-                    if (table->bound && table->bound->border) {
-                        table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+                    // In border-collapse mode, the table border is shared with cell borders
+                    // so we don't subtract it from content width. In separate mode, subtract it.
+                    if (!table->tb->border_collapse) {
+                        // Subtract table border only in separate mode
+                        if (table->bound && table->bound->border) {
+                            table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+                        }
                     }
 
                     // Subtract table padding
@@ -2114,12 +2157,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         table_content_width -= table->bound->padding.left + table->bound->padding.right;
                     }
 
-                    // Subtract border-spacing
+                    // Subtract border-spacing (only in separate mode)
                     if (!table->tb->border_collapse && table->tb->border_spacing_h > 0) {
                         table_content_width -= (columns + 1) * table->tb->border_spacing_h;
                     }
 
-                    log_debug("Table content width for cells: %dpx", table_content_width);
+                    log_debug("Table content width for cells: %dpx (border_collapse=%d)",
+                             table_content_width, table->tb->border_collapse);
                 }
             }
         }
@@ -2678,6 +2722,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                table_width, fixed_table_width);
         table_width = fixed_table_width;
         log_debug("Fixed layout override - using CSS width: %dpx", table_width);
+    }
+    // For auto layout with explicit CSS width in border-collapse mode,
+    // use the explicit width as-is (borders collapse into the table area)
+    // In separate border mode, the explicit width is content width, borders are added separately
+    else if (explicit_table_width > 0 && table->tb->border_collapse) {
+        log_debug("Border-collapse explicit width override - changing table_width from %.1f to %d",
+               table_width, explicit_table_width);
+        table_width = explicit_table_width;
     }
 
     log_debug("Final table width for layout: %dpx", table_width);
@@ -3412,17 +3464,46 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("Positioned caption at bottom: y=%d, caption_height=%d", (int)caption->y, caption_height);
     }
 
-    // CRITICAL FIX: Add table border to final dimensions
-    // Read actual table border widths
+    // Override calculated height with explicit CSS height if set (only in border-collapse mode)
+    // In border-collapse, the explicit height includes the collapsed borders
+    // In separate mode, the explicit height is content height, borders are added separately
+    if (explicit_css_height > 0 && table->tb->border_collapse) {
+        log_debug("Border-collapse explicit height override - changing final_table_height from %d to %d",
+               final_table_height, explicit_css_height);
+        final_table_height = explicit_css_height;
+    }
+
+    // CRITICAL FIX: Handle table border dimensions correctly for each border model
+    // In border-collapse mode, the table border overlaps with cell borders
+    // In separate mode, the table border is added around the table
     int table_border_width = 0;
     int table_border_height = 0;
 
     if (table->bound && table->bound->border) {
-        table_border_width = (int)(table->bound->border->width.left + table->bound->border->width.right);
-        table_border_height = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
-        log_debug("Using actual table border: width=%dpx (left=%.1f, right=%.1f), height=%dpx (top=%.1f, bottom=%.1f)",
-               table_border_width, table->bound->border->width.left, table->bound->border->width.right,
-               table_border_height, table->bound->border->width.top, table->bound->border->width.bottom);
+        if (table->tb->border_collapse) {
+            // Border-collapse: CSS 2.1 Section 17.6.2
+            // The table's border-box includes half of the collapsed outer borders.
+            // In collapse mode, the table border wins at outer edges (max of table/cell borders).
+            // getBoundingClientRect() returns the border-box which includes these half-borders.
+            // The collapsed border width added is half of the winning border on each side.
+            float table_border_left = table->bound->border->width.left;
+            float table_border_right = table->bound->border->width.right;
+            float table_border_top = table->bound->border->width.top;
+            float table_border_bottom = table->bound->border->width.bottom;
+
+            // Add half of collapsed borders to table dimensions (for border-box reporting)
+            table_border_width = (int)(table_border_left / 2.0f + table_border_right / 2.0f + 0.5f);
+            table_border_height = (int)(table_border_top / 2.0f + table_border_bottom / 2.0f + 0.5f);
+            log_debug("Border-collapse: adding half of collapsed borders to dimensions: width+%d, height+%d",
+                   table_border_width, table_border_height);
+        } else {
+            // Separate borders: add full table border
+            table_border_width = (int)(table->bound->border->width.left + table->bound->border->width.right);
+            table_border_height = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
+            log_debug("Separate borders: table border width=%dpx (left=%.1f, right=%.1f), height=%dpx (top=%.1f, bottom=%.1f)",
+                   table_border_width, table->bound->border->width.left, table->bound->border->width.right,
+                   table_border_height, table->bound->border->width.top, table->bound->border->width.bottom);
+        }
     }
 
     // Set final table dimensions including border
