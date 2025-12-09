@@ -238,6 +238,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_IN_RANGE,       // :in-range
     CSS_SELECTOR_PSEUDO_OUT_OF_RANGE,   // :out-of-range
     CSS_SELECTOR_PSEUDO_FULLSCREEN,     // :fullscreen
+    CSS_SELECTOR_PSEUDO_GENERIC,        // Generic unknown pseudo-class (uses value field)
 
     // Pseudo-elements
     CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE,     // ::before
@@ -258,6 +259,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_IMAGE_PAIR, // ::view-transition-image-pair
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_OLD, // ::view-transition-old
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_NEW, // ::view-transition-new
+    CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC,    // Generic unknown pseudo-element (uses value field)
 
     // Combinators
     CSS_SELECTOR_COMBINATOR_DESCENDANT,     // space

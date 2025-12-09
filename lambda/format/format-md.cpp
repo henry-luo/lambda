@@ -319,7 +319,7 @@ static void format_table_row(StringBuf* sb, Element* row, bool is_header) {
             stringbuf_append_char(sb, ' ');
             Item cell_item = row_list->items[i];
             if (get_type_id(cell_item) == LMD_TYPE_ELEMENT) {
-                Element* cell = (Element*)cell_item.pointer;
+                Element* cell = cell_item.element;
                 format_element_children(sb, cell);
             }
             stringbuf_append_str(sb, " |");
@@ -381,13 +381,13 @@ static bool element_contains_only_math(Element* elem, bool* only_display_math) {
             TypeId type = get_type_id(child_item);
 
             if (type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)child_item.pointer;
+                Element* child_elem = child_item.element;
                 if (!element_contains_only_math(child_elem, only_display_math)) {
                     return false;
                 }
             } else if (type == LMD_TYPE_STRING) {
                 // Check if it's just whitespace
-                String* str = (String*)child_item.pointer;
+                String* str = child_item.get_string();
                 if (str && str->chars) {
                     for (int j = 0; j < str->len; j++) {
                         if (!isspace(str->chars[j])) {
@@ -583,7 +583,7 @@ static void format_math_display(StringBuf* sb, Element* elem) {
 
         if (math_type == LMD_TYPE_STRING) {
             // Raw string content - output as-is
-            String* math_string = (String*)math_item.pointer;
+            String* math_string = math_item.get_string();
             if (math_string && math_string->len > 0) {
                 stringbuf_append_str(sb, "$$");
                 stringbuf_append_str_n(sb, math_string->chars, math_string->len);
@@ -630,7 +630,7 @@ static void format_math_code_block(StringBuf* sb, Element* elem) {
 
         if (math_type == LMD_TYPE_STRING) {
             // Raw string content - output as code block
-            String* math_string = (String*)math_item.pointer;
+            String* math_string = math_item.get_string();
             if (math_string && math_string->len > 0) {
                 stringbuf_append_str(sb, "```");
                 stringbuf_append_str(sb, language);
@@ -774,7 +774,7 @@ static void format_element_children_raw(StringBuf* sb, Element* elem) {
         TypeId type = get_type_id(child_item);
 
         if (type == LMD_TYPE_STRING) {
-            String* str = (String*)child_item.pointer;
+            String* str = child_item.get_string();
             if (str) {
                 format_raw_text_common(sb, str);
             }
@@ -837,7 +837,7 @@ static void format_element_children(StringBuf* sb, Element* elem) {
                 // For other blocks that don't add their own spacing, add blank line
                 TypeId current_type = get_type_id(child_item);
                 if (current_type == LMD_TYPE_ELEMENT) {
-                    Element* current_elem = (Element*)child_item.pointer;
+                    Element* current_elem = child_item.element;
                     TypeElmt* current_elem_type = (TypeElmt*)current_elem->type;
                     if (current_elem_type && current_elem_type->name.str) {
                         const char* tag_name = current_elem_type->name.str;
@@ -1204,12 +1204,12 @@ static void format_item(StringBuf* sb, Item item) {
 
     // Only debug when processing elements or strings that might contain math
     if (type == LMD_TYPE_STRING) {
-        String* str = (String*)item.pointer;
+        String* str = item.get_string();
         if (str && (strstr(str->chars, "frac") || strstr(str->chars, "[x") || strchr(str->chars, '$'))) {
             printf("DEBUG format_item: type=%d (STRING), text='%s'\n", type, str->chars);
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        printf("DEBUG format_item: type=%d (ELEMENT), pointer=%lu\n", type, item.pointer);
+        printf("DEBUG format_item: type=%d (ELEMENT), pointer=%lu\n", type, item.element);
     }
 
     switch (type) {
@@ -1217,7 +1217,7 @@ static void format_item(StringBuf* sb, Item item) {
         // Skip null items in markdown formatting
         break;
     case LMD_TYPE_STRING: {
-        String* str = (String*)item.pointer;
+        String* str = item.get_string();
         if (str) {
             // Check if this is the EMPTY_STRING and handle it specially
             if (str == &EMPTY_STRING) {
@@ -1238,7 +1238,7 @@ static void format_item(StringBuf* sb, Item item) {
         break;
     }
     case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)item.pointer;
+        Array* arr = item.array;
         if (arr && arr->length > 0) {
             for (long i = 0; i < arr->length; i++) {
                 format_item(sb, arr->items[i]);

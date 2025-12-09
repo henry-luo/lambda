@@ -16,17 +16,22 @@ extern "C" {
 // Represents date and time with timezone information
 // Total size: 64 bits (8 bytes) exactly
 typedef struct DateTime {
-    // All fields in a single 64-bit word for optimal packing
-    uint64_t year_month : 17;      // Packed: (year+4000)*16 + month, covers years -4000 to +4191
-    uint64_t day : 5;              // 0-31 (1-31 for days, 0 for invalid/unset)
-    uint64_t hour : 5;             // 0-31 (0-23 for hours, extra bits for validation)
-    uint64_t minute : 6;           // 0-63 (0-59 for minutes)
-    uint64_t second : 6;           // 0-63 (0-59 for seconds)
-    uint64_t millisecond : 10;     // 0-1023 (0-999 for milliseconds)
-    uint64_t tz_offset_biased : 11; // Timezone offset + 1024 bias, 0 = no timezone
-    uint64_t precision : 2;        // DateTimePrecision enum (2 bits = 4 possible values)
-    uint64_t format_hint : 2;      // Format hint + UTC flag (2 bits = 4 combinations)
-    // Total: 17+5+5+6+6+10+11+2+2 = 64 bits exactly
+    union {
+        struct {
+            // All fields in a single 64-bit word for optimal packing
+            uint64_t year_month : 17;      // Packed: (year+4000)*16 + month, covers years -4000 to +4191
+            uint64_t day : 5;              // 0-31 (1-31 for days, 0 for invalid/unset)
+            uint64_t hour : 5;             // 0-31 (0-23 for hours, extra bits for validation)
+            uint64_t minute : 6;           // 0-63 (0-59 for minutes)
+            uint64_t second : 6;           // 0-63 (0-59 for seconds)
+            uint64_t millisecond : 10;     // 0-1023 (0-999 for milliseconds)
+            uint64_t tz_offset_biased : 11; // Timezone offset + 1024 bias, 0 = no timezone
+            uint64_t precision : 2;        // DateTimePrecision enum (2 bits = 4 possible values)
+            uint64_t format_hint : 2;      // Format hint + UTC flag (2 bits = 4 combinations)
+            // Total: 17+5+5+6+6+10+11+2+2 = 64 bits exactly
+        };
+        uint64_t int64_val;
+    };
 } DateTime;
 
 #define _DATETIME_DEFINED_

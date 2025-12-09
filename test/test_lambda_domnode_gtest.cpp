@@ -96,14 +96,13 @@ protected:
 
     // Helper: Get HTML root element (skip DOCTYPE)
     Element* get_html_root_element(Input* input) {
-        void* root_ptr = (void*)input->root.pointer;
-        List* root_list = (List*)root_ptr;
-
-        if (root_list->type_id == LMD_TYPE_LIST) {
+        TypeId root_type = get_type_id(input->root);
+        if (root_type == LMD_TYPE_LIST) {
+            List* root_list = input->root.list;
             for (int64_t i = 0; i < root_list->length; i++) {
                 Item item = root_list->items[i];
                 if (item.type_id() == LMD_TYPE_ELEMENT) {
-                    Element* elem = (Element*)item.pointer;
+                    Element* elem = item.element;
                     TypeElmt* type = (TypeElmt*)elem->type;
 
                     // Skip DOCTYPE and comments
@@ -113,10 +112,10 @@ protected:
                     }
                 }
             }
-        } else if (root_list->type_id == LMD_TYPE_ELEMENT) {
-            return (Element*)root_ptr;
         }
-
+        else if (root_type == LMD_TYPE_ELEMENT) {
+            return input->root.element;
+        }
         return nullptr;
     }
 };
