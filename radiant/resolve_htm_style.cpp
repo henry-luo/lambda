@@ -14,10 +14,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->margin.bottom = block->bound->margin.left = 8 * lycon->ui_context->pixel_ratio;
         block->bound->margin.top_specificity = block->bound->margin.right_specificity =
             block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
-        // overflow: auto
-        if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
-        block->scroller->overflow_x = CSS_VALUE_AUTO;
-        block->scroller->overflow_y = CSS_VALUE_AUTO;
+        // overflow: visible (CSS default - no special overflow handling for body)
         break;
     }
     case HTM_TAG_H1:
