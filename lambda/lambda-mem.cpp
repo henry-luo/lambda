@@ -255,7 +255,7 @@ void free_container(Container* cont, bool clear_entry) {
             // free array items
             log_debug("freeing array items, length=%ld", arr->length);
             for (int j = 0; j < arr->length; j++) {
-                log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id(), arr->items[j].pointer);
+                log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id(), arr->items[j].item);
                 free_item(arr->items[j], clear_entry);
             }
             if (arr->items) {
@@ -334,13 +334,13 @@ void free_container(Container* cont, bool clear_entry) {
 
 void free_item(Item item, bool clear_entry) {
     if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL || item._type_id == LMD_TYPE_BINARY) {
-        String *str = (String*)item.pointer;
+        String *str = item.get_string();
         if (str && !str->ref_cnt) {
             pool_free(context->heap->pool, str);
         }
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
-        Decimal *dec = (Decimal*)item.pointer;
+        Decimal *dec = item.get_decimal();
         if (dec && !dec->ref_cnt) {
             pool_free(context->heap->pool, dec);
         }
@@ -392,14 +392,14 @@ void frame_end() {
         Item itm = {.item = *(uint64_t*)&data};
         if (itm._type_id == LMD_TYPE_STRING || itm._type_id == LMD_TYPE_SYMBOL ||
             itm._type_id == LMD_TYPE_BINARY) {
-            String *str = (String*)itm.pointer;
+            String *str = itm.get_string();
             if (str && !str->ref_cnt) {
                 log_debug("freeing heap string: %s", str->chars);
                 pool_free(context->heap->pool, (void*)str);
             }
         }
         else if (itm._type_id == LMD_TYPE_DECIMAL) {
-            Decimal *dec = (Decimal*)itm.pointer;
+            Decimal *dec = itm.get_decimal();
             if (dec && !dec->ref_cnt) {
                 log_debug("freeing heap decimal");
                 pool_free(context->heap->pool, (void*)dec);

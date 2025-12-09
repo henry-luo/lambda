@@ -30,6 +30,364 @@ int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_coun
     return pos;
 }
 
+// Forward declaration
+static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool);
+
+// Helper: Parse a CSS function with its arguments from tokens
+// Returns a CssValue of type CSS_VALUE_TYPE_FUNCTION
+// *pos should point to the CSS_TOKEN_FUNCTION token; on return, *pos points past the closing paren
+// CSS function arguments are comma-separated; each argument may contain multiple space-separated tokens
+static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+    if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
+    if (tokens[*pos].type != CSS_TOKEN_FUNCTION) return NULL;
+
+    // Get function name (strip trailing '(' if present)
+    const char* func_name = tokens[*pos].value;
+    if (!func_name && tokens[*pos].start && tokens[*pos].length > 0) {
+        char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+        if (name_buf) {
+            memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
+            name_buf[tokens[*pos].length] = '\0';
+            func_name = name_buf;
+        }
+    }
+
+    // Strip trailing '(' from function name if present
+    if (func_name) {
+        size_t func_len = strlen(func_name);
+        if (func_len > 0 && func_name[func_len - 1] == '(') {
+            char* clean_name = (char*)pool_calloc(pool, func_len);
+            if (clean_name) {
+                memcpy(clean_name, func_name, func_len - 1);
+                clean_name[func_len - 1] = '\0';
+                func_name = clean_name;
+            }
+        }
+    }
+
+    (*pos)++;  // Skip FUNCTION token
+
+    // Count arguments by counting top-level commas + 1 (or 0 if empty)
+    int arg_count = 0;
+    int paren_depth = 1;
+    int temp_pos = *pos;
+    bool has_content = false;
+
+    while (temp_pos < token_count && paren_depth > 0) {
+        CssTokenType t = tokens[temp_pos].type;
+        if (t == CSS_TOKEN_LEFT_PAREN || t == CSS_TOKEN_FUNCTION) {
+            paren_depth++;
+            has_content = true;
+        } else if (t == CSS_TOKEN_RIGHT_PAREN) {
+            paren_depth--;
+            if (paren_depth == 0) break;
+        } else if (paren_depth == 1 && t == CSS_TOKEN_COMMA) {
+            arg_count++;
+        } else if (t != CSS_TOKEN_WHITESPACE) {
+            has_content = true;
+        }
+        temp_pos++;
+    }
+
+    // If we have content, we have at least one argument (arg_count is the number of commas)
+    if (has_content) {
+        arg_count++;  // commas + 1 = number of arguments
+    }
+
+    // Create the function value
+    CssValue* func_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!func_value) return NULL;
+
+    func_value->type = CSS_VALUE_TYPE_FUNCTION;
+    func_value->data.function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
+    if (!func_value->data.function) return NULL;
+
+    func_value->data.function->name = func_name ? pool_strdup(pool, func_name) : "";
+    func_value->data.function->arg_count = arg_count;
+
+    if (arg_count > 0) {
+        func_value->data.function->args = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * arg_count);
+        if (!func_value->data.function->args) return NULL;
+    }
+
+    // Now parse the actual arguments - each argument spans until comma or closing paren
+    paren_depth = 1;
+    int arg_idx = 0;
+
+    while (*pos < token_count && paren_depth > 0 && arg_idx < arg_count) {
+        // Skip leading whitespace
+        while (*pos < token_count && tokens[*pos].type == CSS_TOKEN_WHITESPACE) {
+            (*pos)++;
+        }
+
+        if (*pos >= token_count) break;
+
+        CssTokenType t = tokens[*pos].type;
+
+        if (t == CSS_TOKEN_RIGHT_PAREN) {
+            paren_depth--;
+            if (paren_depth == 0) break;
+            (*pos)++;
+            continue;
+        }
+
+        // Collect tokens for this argument until we hit a top-level comma or closing paren
+        int arg_token_start = *pos;
+        int arg_token_count = 0;
+        int inner_paren = 0;
+
+        while (*pos < token_count) {
+            CssTokenType ct = tokens[*pos].type;
+
+            if (ct == CSS_TOKEN_LEFT_PAREN || ct == CSS_TOKEN_FUNCTION) {
+                inner_paren++;
+                arg_token_count++;
+                (*pos)++;
+            } else if (ct == CSS_TOKEN_RIGHT_PAREN) {
+                if (inner_paren > 0) {
+                    inner_paren--;
+                    arg_token_count++;
+                    (*pos)++;
+                } else {
+                    // End of function - don't consume this token
+                    break;
+                }
+            } else if (ct == CSS_TOKEN_COMMA && inner_paren == 0) {
+                // End of this argument
+                (*pos)++;  // consume the comma
+                break;
+            } else {
+                arg_token_count++;
+                (*pos)++;
+            }
+        }
+
+        // Now create a value for this argument
+        // If single token, create simple value; if multiple tokens, create a list value
+        if (arg_token_count == 0) {
+            // Empty argument - skip
+            continue;
+        }
+
+        // Count non-whitespace tokens in this argument
+        int value_count = 0;
+        for (int i = arg_token_start; i < arg_token_start + arg_token_count; i++) {
+            CssTokenType vt = tokens[i].type;
+            if (vt != CSS_TOKEN_WHITESPACE) {
+                // Functions count as one value but span multiple tokens
+                if (vt == CSS_TOKEN_FUNCTION) {
+                    value_count++;
+                    int nest = 1;
+                    i++;
+                    while (i < arg_token_start + arg_token_count && nest > 0) {
+                        if (tokens[i].type == CSS_TOKEN_LEFT_PAREN || tokens[i].type == CSS_TOKEN_FUNCTION) nest++;
+                        else if (tokens[i].type == CSS_TOKEN_RIGHT_PAREN) nest--;
+                        i++;
+                    }
+                    i--;  // will be incremented by for loop
+                } else {
+                    value_count++;
+                }
+            }
+        }
+
+        if (value_count == 1) {
+            // Single value - find and parse it
+            for (int i = arg_token_start; i < arg_token_start + arg_token_count; i++) {
+                if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+
+                if (tokens[i].type == CSS_TOKEN_FUNCTION) {
+                    int func_pos = i;
+                    func_value->data.function->args[arg_idx++] = css_parse_function_from_tokens(tokens, &func_pos, token_count, pool);
+                } else {
+                    func_value->data.function->args[arg_idx++] = css_parse_token_to_value(&tokens[i], pool);
+                }
+                break;
+            }
+        } else if (value_count > 1) {
+            // Multiple values - create a list
+            CssValue* list_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+            if (!list_value) continue;
+
+            list_value->type = CSS_VALUE_TYPE_LIST;
+            list_value->data.list.count = value_count;
+            list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
+            if (!list_value->data.list.values) continue;
+
+            int list_idx = 0;
+            for (int i = arg_token_start; i < arg_token_start + arg_token_count && list_idx < value_count; i++) {
+                if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+
+                if (tokens[i].type == CSS_TOKEN_FUNCTION) {
+                    int func_pos = i;
+                    CssValue* nested = css_parse_function_from_tokens(tokens, &func_pos, token_count, pool);
+                    if (nested) {
+                        list_value->data.list.values[list_idx++] = nested;
+                    }
+                    i = func_pos - 1;  // will be incremented by for loop
+                } else {
+                    CssValue* val = css_parse_token_to_value(&tokens[i], pool);
+                    if (val) {
+                        list_value->data.list.values[list_idx++] = val;
+                    }
+                }
+            }
+
+            func_value->data.function->args[arg_idx++] = list_value;
+        }
+    }
+
+    // Skip closing paren if present
+    if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+        (*pos)++;
+    }
+
+    return func_value;
+}
+
+// Helper: Parse a single token into a CssValue
+static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
+    if (!token || !pool) return NULL;
+
+    CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!value) return NULL;
+
+    switch (token->type) {
+        case CSS_TOKEN_IDENT: {
+            const char* token_val = token->value;
+            if (!token_val && token->start && token->length > 0) {
+                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                if (buf) {
+                    memcpy(buf, token->start, token->length);
+                    buf[token->length] = '\0';
+                    token_val = buf;
+                }
+            }
+
+            if (token_val) {
+                CssEnum enum_id = css_enum_by_name(token_val);
+                if (enum_id != CSS_VALUE__UNDEF) {
+                    value->type = CSS_VALUE_TYPE_KEYWORD;
+                    value->data.keyword = enum_id;
+                } else {
+                    value->type = CSS_VALUE_TYPE_CUSTOM;
+                    value->data.custom_property.name = pool_strdup(pool, token_val);
+                    value->data.custom_property.fallback = NULL;
+                }
+            }
+            break;
+        }
+
+        case CSS_TOKEN_STRING: {
+            value->type = CSS_VALUE_TYPE_STRING;
+            const char* str_val = token->value;
+            if (!str_val && token->start && token->length > 0) {
+                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                if (buf) {
+                    memcpy(buf, token->start, token->length);
+                    buf[token->length] = '\0';
+                    str_val = buf;
+                }
+            }
+            value->data.string = str_val ? pool_strdup(pool, str_val) : "";
+            break;
+        }
+
+        case CSS_TOKEN_NUMBER:
+            value->type = CSS_VALUE_TYPE_NUMBER;
+            value->data.number.value = token->data.number_value;
+            break;
+
+        case CSS_TOKEN_DIMENSION:
+            value->type = CSS_VALUE_TYPE_LENGTH;
+            value->data.length.value = token->data.dimension.value;
+            value->data.length.unit = token->data.dimension.unit;
+            break;
+
+        case CSS_TOKEN_PERCENTAGE:
+            value->type = CSS_VALUE_TYPE_PERCENTAGE;
+            value->data.percentage.value = token->data.number_value;
+            break;
+
+        case CSS_TOKEN_HASH: {
+            value->type = CSS_VALUE_TYPE_COLOR;
+            value->data.color.type = CSS_COLOR_RGB;
+
+            const char* hex_str = token->value;
+            if (hex_str && hex_str[0] == '#') {
+                size_t len = strlen(hex_str + 1);
+                unsigned int hex_val = 0;
+
+                if (len == 6) {
+                    if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
+                        value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
+                        value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
+                        value->data.color.data.rgba.b = hex_val & 0xFF;
+                        value->data.color.data.rgba.a = 255;
+                    }
+                } else if (len == 3) {
+                    if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
+                        unsigned int r = (hex_val >> 8) & 0xF;
+                        unsigned int g = (hex_val >> 4) & 0xF;
+                        unsigned int b = hex_val & 0xF;
+                        value->data.color.data.rgba.r = (r << 4) | r;
+                        value->data.color.data.rgba.g = (g << 4) | g;
+                        value->data.color.data.rgba.b = (b << 4) | b;
+                        value->data.color.data.rgba.a = 255;
+                    }
+                } else if (len == 8) {
+                    if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
+                        value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
+                        value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
+                        value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
+                        value->data.color.data.rgba.a = hex_val & 0xFF;
+                    }
+                } else if (len == 4) {
+                    if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
+                        unsigned int r = (hex_val >> 12) & 0xF;
+                        unsigned int g = (hex_val >> 8) & 0xF;
+                        unsigned int b = (hex_val >> 4) & 0xF;
+                        unsigned int a = hex_val & 0xF;
+                        value->data.color.data.rgba.r = (r << 4) | r;
+                        value->data.color.data.rgba.g = (g << 4) | g;
+                        value->data.color.data.rgba.b = (b << 4) | b;
+                        value->data.color.data.rgba.a = (a << 4) | a;
+                    }
+                } else {
+                    value->data.color.data.rgba.r = 0;
+                    value->data.color.data.rgba.g = 0;
+                    value->data.color.data.rgba.b = 0;
+                    value->data.color.data.rgba.a = 255;
+                }
+            } else {
+                value->data.color.data.rgba.r = 0;
+                value->data.color.data.rgba.g = 0;
+                value->data.color.data.rgba.b = 0;
+                value->data.color.data.rgba.a = 255;
+            }
+            break;
+        }
+
+        default:
+            // Unknown token type - treat as custom value
+            value->type = CSS_VALUE_TYPE_CUSTOM;
+            if (token->value) {
+                value->data.custom_property.name = pool_strdup(pool, token->value);
+            } else if (token->start && token->length > 0) {
+                char* buf = (char*)pool_calloc(pool, token->length + 1);
+                if (buf) {
+                    memcpy(buf, token->start, token->length);
+                    buf[token->length] = '\0';
+                    value->data.custom_property.name = buf;
+                }
+            }
+            value->data.custom_property.fallback = NULL;
+            break;
+    }
+
+    return value;
+}
+
 // Helper: Parse a compound selector (e.g., "p.intro" or "div#main.content")
 // A compound selector is a sequence of simple selectors with no whitespace
 CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
@@ -539,8 +897,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     } else if (strcmp(elem_name, "file-selector-button") == 0) {
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
                     } else {
-                        // Accept but treat as generic pseudo-element
-                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE; // default fallback
+                        // Use generic pseudo-element type to preserve vendor-specific elements
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
                         fprintf(stderr, "[CSS Parser] Generic pseudo-element: '::%s'\n", elem_name);
                     }
 
@@ -761,6 +1119,135 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 matched = true;
             }
         }
+    } else if (token->type == CSS_TOKEN_LEFT_BRACKET) {
+        // Attribute selector: [attr], [attr=value], [attr~=value], etc.
+        (*pos)++; // skip '['
+
+        // Skip whitespace
+        *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+        if (*pos >= token_count) return NULL;
+
+        // Expect attribute name (IDENT)
+        if (tokens[*pos].type != CSS_TOKEN_IDENT) {
+            log_debug("[CSS Parser] Expected attribute name, got token type %d", tokens[*pos].type);
+            return NULL;
+        }
+
+        const char* attr_name = tokens[*pos].value;
+        if (!attr_name && tokens[*pos].start && tokens[*pos].length > 0) {
+            char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+            if (name_buf) {
+                memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
+                name_buf[tokens[*pos].length] = '\0';
+                attr_name = name_buf;
+            }
+        }
+        (*pos)++;
+
+        // Skip whitespace
+        *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+        if (*pos >= token_count) return NULL;
+
+        // Check for operator or closing bracket
+        CssSelectorType attr_type = CSS_SELECTOR_ATTR_EXISTS;
+        const char* attr_value = NULL;
+        bool case_insensitive = false;
+
+        if (tokens[*pos].type == CSS_TOKEN_RIGHT_BRACKET) {
+            // Simple attribute exists selector: [attr]
+            (*pos)++;
+        } else if (tokens[*pos].type == CSS_TOKEN_DELIM) {
+            char delim = tokens[*pos].data.delimiter;
+            (*pos)++;
+
+            // Check for operator pattern
+            if (delim == '=') {
+                attr_type = CSS_SELECTOR_ATTR_EXACT;
+            } else if (delim == '~' || delim == '^' || delim == '$' || delim == '*' || delim == '|') {
+                // These require '=' after
+                if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '=') {
+                    (*pos)++;
+                    switch (delim) {
+                        case '~': attr_type = CSS_SELECTOR_ATTR_CONTAINS; break;
+                        case '^': attr_type = CSS_SELECTOR_ATTR_BEGINS; break;
+                        case '$': attr_type = CSS_SELECTOR_ATTR_ENDS; break;
+                        case '*': attr_type = CSS_SELECTOR_ATTR_SUBSTRING; break;
+                        case '|': attr_type = CSS_SELECTOR_ATTR_LANG; break;
+                    }
+                }
+            }
+
+            // Skip whitespace
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Get attribute value if present
+            if (*pos < token_count && (tokens[*pos].type == CSS_TOKEN_STRING || tokens[*pos].type == CSS_TOKEN_IDENT)) {
+                if (tokens[*pos].type == CSS_TOKEN_STRING) {
+                    // String token - strip quotes
+                    const char* str_val = tokens[*pos].value;
+                    if (str_val && (str_val[0] == '"' || str_val[0] == '\'')) {
+                        size_t len = strlen(str_val);
+                        if (len >= 2) {
+                            char* val_buf = (char*)pool_calloc(pool, len - 1);
+                            if (val_buf) {
+                                memcpy(val_buf, str_val + 1, len - 2);
+                                val_buf[len - 2] = '\0';
+                                attr_value = val_buf;
+                            }
+                        }
+                    } else {
+                        attr_value = pool_strdup(pool, str_val);
+                    }
+                } else {
+                    // IDENT token
+                    attr_value = tokens[*pos].value;
+                    if (!attr_value && tokens[*pos].start && tokens[*pos].length > 0) {
+                        char* val_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+                        if (val_buf) {
+                            memcpy(val_buf, tokens[*pos].start, tokens[*pos].length);
+                            val_buf[tokens[*pos].length] = '\0';
+                            attr_value = val_buf;
+                        }
+                    }
+                }
+                (*pos)++;
+            }
+
+            // Skip whitespace
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Check for case insensitivity flag 'i' or 's'
+            if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
+                const char* flag = tokens[*pos].value;
+                if (flag && (strcmp(flag, "i") == 0 || strcmp(flag, "I") == 0)) {
+                    case_insensitive = true;
+                    (*pos)++;
+                } else if (flag && (strcmp(flag, "s") == 0 || strcmp(flag, "S") == 0)) {
+                    // Case sensitive (default)
+                    (*pos)++;
+                }
+            }
+
+            // Skip whitespace
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Expect closing bracket
+            if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_BRACKET) {
+                (*pos)++;
+            }
+        }
+
+        selector->type = attr_type;
+        selector->attribute.name = attr_name;
+        selector->attribute.value = attr_value;
+        selector->attribute.case_insensitive = case_insensitive;
+
+        log_debug("[CSS Parser] Attribute selector: [%s%s%s]%s",
+               attr_name,
+               attr_value ? "=" : "",
+               attr_value ? attr_value : "",
+               case_insensitive ? " (case-insensitive)" : "");
+        matched = true;
     }
 
     // If no valid selector was matched, return NULL
@@ -847,6 +1334,23 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             break;
         }
 
+        // Handle function tokens - skip entire function as one value
+        if (t == CSS_TOKEN_FUNCTION) {
+            value_count++;
+            (*pos)++;  // skip function token
+            // Skip function arguments until closing paren
+            int paren_depth = 1;
+            while (*pos < token_count && paren_depth > 0) {
+                if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN || tokens[*pos].type == CSS_TOKEN_FUNCTION) {
+                    paren_depth++;
+                } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
+                    paren_depth--;
+                }
+                (*pos)++;
+            }
+            continue;
+        }
+
         // Count non-whitespace, non-comma tokens as values
         if (t != CSS_TOKEN_WHITESPACE && t != CSS_TOKEN_COMMA) {
             value_count++;
@@ -866,6 +1370,9 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     // Get property ID from name
     decl->property_id = css_property_id_from_name(property_name);
 
+    // Store original property name (important for vendor-prefixed properties where property_id = -1)
+    decl->property_name = property_name;
+
     // Debug: Print property name and ID for troubleshooting
     log_debug("[CSS Parser] Property: '%s' -> ID: %d, important=%d, value_count=%d",
             property_name, decl->property_id, is_important, value_count);
@@ -877,163 +1384,28 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     // Create value(s) from tokens
     if (value_count == 1) {
         // Single value - create directly
-        for (int i = value_start; i < *pos; i++) {
-            if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
-
-            CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-            if (!value) return NULL;
-
-            // Determine value type from token
-            if (tokens[i].type == CSS_TOKEN_IDENT) {
-                const char* token_val = NULL;
-                if (tokens[i].value) {
-                    token_val = tokens[i].value;
-                } else if (tokens[i].start && tokens[i].length > 0) {
-                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
-                    if (keyword_buf) {
-                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
-                        keyword_buf[tokens[i].length] = '\0';
-                        token_val = keyword_buf;
-                    }
-                }
-
-                // Strip quotes from keyword (font names can be quoted)
-                const char* keyword_to_lookup = token_val;
-                if (token_val) {
-                    size_t len = strlen(token_val);
-                    if (len >= 2 && ((token_val[0] == '\'' && token_val[len-1] == '\'') ||
-                                     (token_val[0] == '"' && token_val[len-1] == '"'))) {
-                        // Create unquoted copy
-                        char* unquoted = (char*)pool_calloc(pool, len - 1);
-                        if (unquoted) {
-                            memcpy(unquoted, token_val + 1, len - 2);
-                            unquoted[len - 2] = '\0';
-                            keyword_to_lookup = unquoted;
-                        }
-                    }
-                }
-
-                // Lookup keyword enum
-                if (keyword_to_lookup) {
-                    CssEnum enum_id = css_enum_by_name(keyword_to_lookup);
-                    if (enum_id != CSS_VALUE__UNDEF) {
-                        // Known keyword
-                        value->type = CSS_VALUE_TYPE_KEYWORD;
-                        value->data.keyword = enum_id;
-                    } else {
-                        // Unknown keyword - store as custom property
-                        value->type = CSS_VALUE_TYPE_CUSTOM;
-                        value->data.custom_property.name = pool_strdup(pool, keyword_to_lookup);
-                        value->data.custom_property.fallback = NULL;
-                    }
-                }
-            } else if (tokens[i].type == CSS_TOKEN_STRING) {
-                // Handle string tokens (e.g., "«", "»" for content property)
-                value->type = CSS_VALUE_TYPE_STRING;
-                const char* str_val = tokens[i].value;
-                if (!str_val && tokens[i].start && tokens[i].length > 0) {
-                    char* temp_str = (char*)pool_calloc(pool, tokens[i].length + 1);
-                    if (temp_str) {
-                        memcpy(temp_str, tokens[i].start, tokens[i].length);
-                        temp_str[tokens[i].length] = '\0';
-                        str_val = temp_str;
-                    }
-                }
-                value->data.string = str_val ? pool_strdup(pool, str_val) : "";
-            } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
-                value->type = CSS_VALUE_TYPE_NUMBER;
-                value->data.number.value = tokens[i].data.number_value;
-            } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
-                value->type = CSS_VALUE_TYPE_LENGTH;
-                value->data.length.value = tokens[i].data.dimension.value;
-                value->data.length.unit = tokens[i].data.dimension.unit;
-            } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
-                value->type = CSS_VALUE_TYPE_PERCENTAGE;
-                value->data.percentage.value = tokens[i].data.number_value;
-            } else if (tokens[i].type == CSS_TOKEN_HASH) {
-                value->type = CSS_VALUE_TYPE_COLOR;
-                value->data.color.type = CSS_COLOR_RGB;
-
-                const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
-                if (hex_str && hex_str[0] == '#') {
-                    size_t len = strlen(hex_str + 1);
-                    unsigned int hex_val = 0;
-
-                    if (len == 6) {
-                        if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
-                            value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
-                            value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
-                            value->data.color.data.rgba.b = hex_val & 0xFF;
-                            value->data.color.data.rgba.a = 255;
-                        }
-                    } else if (len == 3) {
-                        if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
-                            unsigned int r = (hex_val >> 8) & 0xF;
-                            unsigned int g = (hex_val >> 4) & 0xF;
-                            unsigned int b = hex_val & 0xF;
-                            value->data.color.data.rgba.r = (r << 4) | r;
-                            value->data.color.data.rgba.g = (g << 4) | g;
-                            value->data.color.data.rgba.b = (b << 4) | b;
-                            value->data.color.data.rgba.a = 255;
-                        }
-                    } else if (len == 8) {
-                        if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
-                            value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
-                            value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
-                            value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
-                            value->data.color.data.rgba.a = hex_val & 0xFF;
-                        }
-                    } else if (len == 4) {
-                        if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
-                            unsigned int r = (hex_val >> 12) & 0xF;
-                            unsigned int g = (hex_val >> 8) & 0xF;
-                            unsigned int b = (hex_val >> 4) & 0xF;
-                            unsigned int a = hex_val & 0xF;
-                            value->data.color.data.rgba.r = (r << 4) | r;
-                            value->data.color.data.rgba.g = (g << 4) | g;
-                            value->data.color.data.rgba.b = (b << 4) | b;
-                            value->data.color.data.rgba.a = (a << 4) | a;
-                        }
-                    } else {
-                        value->data.color.data.rgba.r = 0;
-                        value->data.color.data.rgba.g = 0;
-                        value->data.color.data.rgba.b = 0;
-                        value->data.color.data.rgba.a = 255;
-                    }
-                } else {
-                    value->data.color.data.rgba.r = 0;
-                    value->data.color.data.rgba.g = 0;
-                    value->data.color.data.rgba.b = 0;
-                    value->data.color.data.rgba.a = 255;
-                }
-            } else {
-                // Not a hex color - treat as keyword
-                const char* keyword_val = NULL;
-                if (tokens[i].value) {
-                    keyword_val = tokens[i].value;
-                } else if (tokens[i].start && tokens[i].length > 0) {
-                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
-                    if (keyword_buf) {
-                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
-                        keyword_buf[tokens[i].length] = '\0';
-                        keyword_val = keyword_buf;
-                    }
-                }
-
-                if (keyword_val) {
-                    CssEnum enum_id = css_enum_by_name(keyword_val);
-                    if (enum_id != CSS_VALUE__UNDEF) {
-                        value->type = CSS_VALUE_TYPE_KEYWORD;
-                        value->data.keyword = enum_id;
-                    } else {
-                        value->type = CSS_VALUE_TYPE_CUSTOM;
-                        value->data.custom_property.name = pool_strdup(pool, keyword_val);
-                        value->data.custom_property.fallback = NULL;
-                    }
-                }
+        int i = value_start;
+        while (i < *pos) {
+            if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
+                i++;
+                continue;
             }
 
-            decl->value = value;
+            CssValue* value = NULL;
+
+            // Handle function tokens specially
+            if (tokens[i].type == CSS_TOKEN_FUNCTION) {
+                int func_pos = i;
+                value = css_parse_function_from_tokens(tokens, &func_pos, *pos, pool);
+                i = func_pos;  // advance past the function
+            } else {
+                value = css_parse_token_to_value(&tokens[i], pool);
+                i++;
+            }
+
+            if (value) {
+                decl->value = value;
+            }
             break;
         }
     } else {
@@ -1046,161 +1418,30 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
         // Allocate array of pointers to CssValue
         list_value->data.list.values = (CssValue**)pool_calloc(pool, sizeof(CssValue*) * value_count);
-        if (!list_value->data.list.values) return NULL;        int list_idx = 0;
-        for (int i = value_start; i < *pos && list_idx < value_count; i++) {
-            if (tokens[i].type == CSS_TOKEN_WHITESPACE || tokens[i].type == CSS_TOKEN_COMMA) continue;
+        if (!list_value->data.list.values) return NULL;
 
-            // Allocate individual CssValue
-            CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-            if (!value) return NULL;
+        int list_idx = 0;
+        int i = value_start;
+        while (i < *pos && list_idx < value_count) {
+            if (tokens[i].type == CSS_TOKEN_WHITESPACE || tokens[i].type == CSS_TOKEN_COMMA) {
+                i++;
+                continue;
+            }
 
-            list_value->data.list.values[list_idx++] = value;
+            CssValue* value = NULL;
 
-            if (tokens[i].type == CSS_TOKEN_IDENT) {
-                const char* token_val = NULL;
-                if (tokens[i].value) {
-                    token_val = tokens[i].value;
-                } else if (tokens[i].start && tokens[i].length > 0) {
-                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
-                    if (keyword_buf) {
-                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
-                        keyword_buf[tokens[i].length] = '\0';
-                        token_val = keyword_buf;
-                    }
-                }
-
-                // Strip quotes from keyword (font names can be quoted)
-                const char* keyword_to_lookup = token_val;
-                if (token_val) {
-                    size_t len = strlen(token_val);
-                    if (len >= 2 && ((token_val[0] == '\'' && token_val[len-1] == '\'') ||
-                                     (token_val[0] == '"' && token_val[len-1] == '"'))) {
-                        // Create unquoted copy
-                        char* unquoted = (char*)pool_calloc(pool, len - 1);
-                        if (unquoted) {
-                            memcpy(unquoted, token_val + 1, len - 2);
-                            unquoted[len - 2] = '\0';
-                            keyword_to_lookup = unquoted;
-                        }
-                    }
-                }
-
-                // Lookup keyword enum
-                if (keyword_to_lookup) {
-                    CssEnum enum_id = css_enum_by_name(keyword_to_lookup);
-                    if (enum_id != CSS_VALUE__UNDEF) {
-                        value->type = CSS_VALUE_TYPE_KEYWORD;
-                        value->data.keyword = enum_id;
-                    } else {
-                        value->type = CSS_VALUE_TYPE_CUSTOM;
-                        value->data.custom_property.name = pool_strdup(pool, keyword_to_lookup);
-                        value->data.custom_property.fallback = NULL;
-                    }
-                }
-            } else if (tokens[i].type == CSS_TOKEN_STRING) {
-                // Handle string tokens (e.g., "«", "»" for content property)
-                value->type = CSS_VALUE_TYPE_STRING;
-                const char* str_val = tokens[i].value;
-                if (!str_val && tokens[i].start && tokens[i].length > 0) {
-                    char* temp_str = (char*)pool_calloc(pool, tokens[i].length + 1);
-                    if (temp_str) {
-                        memcpy(temp_str, tokens[i].start, tokens[i].length);
-                        temp_str[tokens[i].length] = '\0';
-                        str_val = temp_str;
-                    }
-                }
-                value->data.string = str_val ? pool_strdup(pool, str_val) : "";
-            } else if (tokens[i].type == CSS_TOKEN_NUMBER) {
-                value->type = CSS_VALUE_TYPE_NUMBER;
-                value->data.number.value = tokens[i].data.number_value;
-            } else if (tokens[i].type == CSS_TOKEN_DIMENSION) {
-                value->type = CSS_VALUE_TYPE_LENGTH;
-                value->data.length.value = tokens[i].data.dimension.value;
-                value->data.length.unit = tokens[i].data.dimension.unit;
-            } else if (tokens[i].type == CSS_TOKEN_PERCENTAGE) {
-                value->type = CSS_VALUE_TYPE_PERCENTAGE;
-                value->data.percentage.value = tokens[i].data.number_value;
-            } else if (tokens[i].type == CSS_TOKEN_HASH) {
-                value->type = CSS_VALUE_TYPE_COLOR;
-                value->data.color.type = CSS_COLOR_RGB;
-
-                const char* hex_str = tokens[i].value ? tokens[i].value : NULL;
-                if (hex_str && hex_str[0] == '#') {
-                    size_t len = strlen(hex_str + 1);
-                    unsigned int hex_val = 0;
-
-                    if (len == 6) {
-                        if (sscanf(hex_str + 1, "%6x", &hex_val) == 1) {
-                            value->data.color.data.rgba.r = (hex_val >> 16) & 0xFF;
-                            value->data.color.data.rgba.g = (hex_val >> 8) & 0xFF;
-                            value->data.color.data.rgba.b = hex_val & 0xFF;
-                            value->data.color.data.rgba.a = 255;
-                        }
-                    } else if (len == 3) {
-                        if (sscanf(hex_str + 1, "%3x", &hex_val) == 1) {
-                            unsigned int r = (hex_val >> 8) & 0xF;
-                            unsigned int g = (hex_val >> 4) & 0xF;
-                            unsigned int b = hex_val & 0xF;
-                            value->data.color.data.rgba.r = (r << 4) | r;
-                            value->data.color.data.rgba.g = (g << 4) | g;
-                            value->data.color.data.rgba.b = (b << 4) | b;
-                            value->data.color.data.rgba.a = 255;
-                        }
-                    } else if (len == 8) {
-                        if (sscanf(hex_str + 1, "%8x", &hex_val) == 1) {
-                            value->data.color.data.rgba.r = (hex_val >> 24) & 0xFF;
-                            value->data.color.data.rgba.g = (hex_val >> 16) & 0xFF;
-                            value->data.color.data.rgba.b = (hex_val >> 8) & 0xFF;
-                            value->data.color.data.rgba.a = hex_val & 0xFF;
-                        }
-                    } else if (len == 4) {
-                        if (sscanf(hex_str + 1, "%4x", &hex_val) == 1) {
-                            unsigned int r = (hex_val >> 12) & 0xF;
-                            unsigned int g = (hex_val >> 8) & 0xF;
-                            unsigned int b = (hex_val >> 4) & 0xF;
-                            unsigned int a = hex_val & 0xF;
-                            value->data.color.data.rgba.r = (r << 4) | r;
-                            value->data.color.data.rgba.g = (g << 4) | g;
-                            value->data.color.data.rgba.b = (b << 4) | b;
-                            value->data.color.data.rgba.a = (a << 4) | a;
-                        }
-                    } else {
-                        value->data.color.data.rgba.r = 0;
-                        value->data.color.data.rgba.g = 0;
-                        value->data.color.data.rgba.b = 0;
-                        value->data.color.data.rgba.a = 255;
-                    }
-                } else {
-                    value->data.color.data.rgba.r = 0;
-                    value->data.color.data.rgba.g = 0;
-                    value->data.color.data.rgba.b = 0;
-                    value->data.color.data.rgba.a = 255;
-                }
+            // Handle function tokens specially
+            if (tokens[i].type == CSS_TOKEN_FUNCTION) {
+                int func_pos = i;
+                value = css_parse_function_from_tokens(tokens, &func_pos, *pos, pool);
+                i = func_pos;  // advance past the function
             } else {
-                // Not a hex color - treat as keyword
-                const char* keyword_val = NULL;
-                if (tokens[i].value) {
-                    keyword_val = tokens[i].value;
-                } else if (tokens[i].start && tokens[i].length > 0) {
-                    char* keyword_buf = (char*)pool_calloc(pool, tokens[i].length + 1);
-                    if (keyword_buf) {
-                        memcpy(keyword_buf, tokens[i].start, tokens[i].length);
-                        keyword_buf[tokens[i].length] = '\0';
-                        keyword_val = keyword_buf;
-                    }
-                }
+                value = css_parse_token_to_value(&tokens[i], pool);
+                i++;
+            }
 
-                if (keyword_val) {
-                    CssEnum enum_id = css_enum_by_name(keyword_val);
-                    if (enum_id != CSS_VALUE__UNDEF) {
-                        value->type = CSS_VALUE_TYPE_KEYWORD;
-                        value->data.keyword = enum_id;
-                    } else {
-                        value->type = CSS_VALUE_TYPE_CUSTOM;
-                        value->data.custom_property.name = pool_strdup(pool, keyword_val);
-                        value->data.custom_property.fallback = NULL;
-                    }
-                }
+            if (value) {
+                list_value->data.list.values[list_idx++] = value;
             }
         }
 

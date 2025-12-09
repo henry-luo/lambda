@@ -116,6 +116,237 @@ protected:
         return normalized.substr(start, end - start + 1);
     }
 
+    // Normalize quotes: convert single quotes to double quotes for comparison
+    std::string normalizeQuotes(const std::string& css) {
+        std::string result;
+        result.reserve(css.length());
+
+        for (size_t i = 0; i < css.length(); i++) {
+            if (css[i] == '\'') {
+                result += '"';
+            } else {
+                result += css[i];
+            }
+        }
+        return result;
+    }
+
+    // Normalize hex colors: expand 3-char hex to 6-char (#fff → #ffffff)
+    // Normalize hex colors: expand 3-char hex to 6-char (#fff → #ffffff) and lowercase
+    std::string normalizeHexColors(const std::string& css) {
+        std::string result;
+        result.reserve(css.length() * 2);
+
+        size_t i = 0;
+        while (i < css.length()) {
+            if (css[i] == '#') {
+                result += '#';
+                i++;
+
+                // Count hex digits
+                size_t hex_start = i;
+                while (i < css.length() && std::isxdigit(css[i])) {
+                    i++;
+                }
+                size_t hex_len = i - hex_start;
+                std::string hex = css.substr(hex_start, hex_len);
+
+                // Convert to lowercase for comparison
+                for (char& c : hex) {
+                    c = std::tolower(c);
+                }
+
+                // Expand 3-char or 4-char hex to 6-char or 8-char
+                if (hex_len == 3) {
+                    // #RGB → #RRGGBB
+                    result += hex[0]; result += hex[0];
+                    result += hex[1]; result += hex[1];
+                    result += hex[2]; result += hex[2];
+                } else if (hex_len == 4) {
+                    // #RGBA → #RRGGBBAA
+                    result += hex[0]; result += hex[0];
+                    result += hex[1]; result += hex[1];
+                    result += hex[2]; result += hex[2];
+                    result += hex[3]; result += hex[3];
+                } else {
+                    result += hex;
+                }
+            } else {
+                result += css[i];
+                i++;
+            }
+        }
+        return result;
+    }
+
+    // Normalize CSS numbers: .5 → 0.5, -.1 → -0.1, 4.0 → 4
+    std::string normalizeNumbers(const std::string& css) {
+        std::string result;
+        result.reserve(css.length() * 2);
+
+        size_t i = 0;
+        while (i < css.length()) {
+            // Check for number patterns
+            bool is_number_start = false;
+            bool negative = false;
+
+            // Check for negative sign followed by digit or dot
+            if (css[i] == '-' && i + 1 < css.length() &&
+                (std::isdigit(css[i + 1]) || css[i + 1] == '.')) {
+                // But make sure it's not part of an identifier like "margin-left"
+                if (i == 0 || !std::isalpha(css[i - 1])) {
+                    negative = true;
+                    is_number_start = true;
+                }
+            }
+            // Check for digit or leading decimal
+            else if (std::isdigit(css[i]) ||
+                     (css[i] == '.' && i + 1 < css.length() && std::isdigit(css[i + 1]))) {
+                is_number_start = true;
+            }
+
+            if (is_number_start) {
+                size_t num_start = i;
+                if (negative) i++; // Skip the minus
+
+                // Collect the number
+                std::string num_str;
+                bool has_decimal = false;
+
+                // Integer part (may be empty for .5)
+                while (i < css.length() && std::isdigit(css[i])) {
+                    num_str += css[i];
+                    i++;
+                }
+
+                // Decimal point and fraction
+                if (i < css.length() && css[i] == '.') {
+                    has_decimal = true;
+                    num_str += '.';
+                    i++;
+                    while (i < css.length() && std::isdigit(css[i])) {
+                        num_str += css[i];
+                        i++;
+                    }
+                }
+
+                // Normalize the number
+                if (!num_str.empty()) {
+                    // Handle leading decimal: .5 → 0.5
+                    if (num_str[0] == '.') {
+                        num_str = "0" + num_str;
+                    }
+
+                    // Handle trailing zeros after decimal: 4.0 → 4, 1.50 → 1.5
+                    if (has_decimal) {
+                        size_t dot_pos = num_str.find('.');
+                        if (dot_pos != std::string::npos) {
+                            // Remove trailing zeros
+                            while (num_str.length() > dot_pos + 1 && num_str.back() == '0') {
+                                num_str.pop_back();
+                            }
+                            // Remove trailing decimal point: 4. → 4
+                            if (num_str.back() == '.') {
+                                num_str.pop_back();
+                            }
+                        }
+                    }
+
+                    if (negative) result += '-';
+                    result += num_str;
+                } else {
+                    // Not actually a number, restore
+                    result += css.substr(num_start, i - num_start);
+                }
+            } else {
+                result += css[i];
+                i++;
+            }
+        }
+        return result;
+    }
+
+    // Normalize spaces around punctuation for media query comparison
+    // ( min-width : 400px ) → (min-width: 400px)
+    std::string normalizeMediaQuerySpaces(const std::string& css) {
+        std::string result;
+        result.reserve(css.length());
+
+        for (size_t i = 0; i < css.length(); i++) {
+            char c = css[i];
+
+            // Remove space before '(' and after '('
+            if (c == '(') {
+                // Remove trailing space before '('
+                while (!result.empty() && result.back() == ' ') {
+                    result.pop_back();
+                }
+                result += c;
+                // Skip spaces after '('
+                while (i + 1 < css.length() && css[i + 1] == ' ') {
+                    i++;
+                }
+            }
+            // Remove space before ')' and after ')'
+            else if (c == ')') {
+                // Remove trailing space before ')'
+                while (!result.empty() && result.back() == ' ') {
+                    result.pop_back();
+                }
+                result += c;
+            }
+            // Remove space before ':' and after ':'
+            else if (c == ':') {
+                // Remove trailing space before ':'
+                while (!result.empty() && result.back() == ' ') {
+                    result.pop_back();
+                }
+                result += c;
+                // Skip spaces after ':'
+                while (i + 1 < css.length() && css[i + 1] == ' ') {
+                    i++;
+                }
+            }
+            else {
+                result += c;
+            }
+        }
+        return result;
+    }
+
+    // Normalize CSS keywords to lowercase for comparison
+    // Handles known keywords like currentColor, etc.
+    std::string normalizeCssKeywords(const std::string& css) {
+        std::string result = css;
+
+        // List of case-insensitive CSS keywords that might have different casing
+        const std::vector<std::pair<std::string, std::string>> keywords = {
+            {"currentColor", "currentcolor"},
+            {"CurrentColor", "currentcolor"},
+            {"CURRENTCOLOR", "currentcolor"},
+        };
+
+        for (const auto& kw : keywords) {
+            size_t pos = 0;
+            while ((pos = result.find(kw.first, pos)) != std::string::npos) {
+                result.replace(pos, kw.first.length(), kw.second);
+                pos += kw.second.length();
+            }
+        }
+        return result;
+    }
+
+    // Normalize CSS for comparison: apply all normalizations
+    std::string normalizeCssForComparison(const std::string& css) {
+        std::string result = normalizeWhitespace(css);
+        result = normalizeQuotes(result);
+        result = normalizeHexColors(result);
+        result = normalizeNumbers(result);
+        result = normalizeMediaQuerySpaces(result);
+        result = normalizeCssKeywords(result);
+        return result;
+    }
+
     // strip comments from CSS (both /* */ style)
     std::string stripCssComments(const std::string& css) {
         std::string result;
@@ -204,7 +435,7 @@ protected:
                 }
 
                 std::string at_rule = css.substr(rule_start, pos - rule_start);
-                std::string normalized_rule = normalizeWhitespace(at_rule);
+                std::string normalized_rule = normalizeCssForComparison(at_rule);
                 if (!normalized_rule.empty()) {
                     rules.emplace_back("@rule", normalized_rule, at_rule);
                 }
@@ -237,7 +468,7 @@ protected:
                 std::string declarations = css.substr(decl_start, pos - decl_start - 1); // -1 to exclude closing brace
                 std::string full_rule = css.substr(selector_start, pos - selector_start);
 
-                std::string norm_selector = normalizeWhitespace(selector);
+                std::string norm_selector = normalizeCssForComparison(selector);
                 std::string norm_declarations = normalizeCssDeclarations(declarations);
 
                 if (!norm_selector.empty() && !norm_declarations.empty()) {
@@ -289,9 +520,9 @@ protected:
             std::string value = cleaned_declarations.substr(value_start, pos - value_start);
             if (pos < len) pos++; // Skip semicolon
 
-            // Normalize property and value
+            // Normalize property and value (including quotes, hex colors, numbers)
             property = normalizeWhitespace(property);
-            value = normalizeWhitespace(value);
+            value = normalizeCssForComparison(value);
 
             if (!property.empty() && !value.empty()) {
                 properties.push_back(property + ": " + value);
@@ -623,20 +854,16 @@ protected:
                            match_percentage, matching_rules, original_rules.size());
 
                     // Consider round-trip successful if:
-                    // 1. At least 80% of rules match exactly, OR
+                    // 1. At least threshold% of rules match exactly, OR
                     // 2. All rules match and there are only minor formatting differences
                     // 3. Special cases with lower thresholds:
                     //    - animate.css: @keyframes complexity
-                    //    - complete_css_grammar.css: comprehensive edge case testing
-                    double threshold = 80.0;
+                    double threshold = 80.0;  // Default threshold accounts for formatting differences
                     bool is_animate_css = (strstr(file_name, "animate.css") != nullptr);
-                    bool is_grammar_test = (strstr(file_name, "complete_css_grammar.css") != nullptr);
 
                     if (is_animate_css) {
                         threshold = 5.0; // animate.css has 80+ @keyframes rules with complex multi-selector blocks
                                          // The roundtrip preserves semantic correctness but formatting differs
-                    } else if (is_grammar_test) {
-                        threshold = 70.0; // complete_css_grammar.css tests many edge cases
                     }
 
                     if (match_percentage >= threshold) {

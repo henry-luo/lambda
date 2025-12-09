@@ -105,7 +105,7 @@ protected:
         }
 
         if (get_type_id(item) == LMD_TYPE_STRING) {
-            String* str = (String*)item.pointer;
+            String* str = item.get_string();
             if (str) {
                 return std::string(str->chars, str->len);
             }

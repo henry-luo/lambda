@@ -2,6 +2,11 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
+#include <algorithm>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <strings.h>  // for strcasecmp
 
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
@@ -94,7 +99,7 @@ std::string extract_css_from_html(Element* root) {
         for (int64_t i = 0; i < list->length; i++) {
             Item child_item = list->items[i];
             if (child_item.type_id() == LMD_TYPE_STRING) {
-                String* text = (String*)child_item.pointer;
+                String* text = child_item.get_string();
                 css_content += text->chars;
             }
         }
@@ -109,8 +114,9 @@ std::string extract_css_from_html(Element* root) {
         // Handle both typed and raw pointer items
         Element* child_elem = nullptr;
         if (child_item.type_id() == LMD_TYPE_ELEMENT) {
-            child_elem = (Element*)child_item.pointer;
-        } else if (child_item.type_id() == LMD_TYPE_RAW_POINTER && child_item.container) {
+            child_elem = child_item.element;
+        }
+        else if (child_item.type_id() == LMD_TYPE_RAW_POINTER && child_item.container) {
             // Check if it's an Element
             Element* potential_elem = (Element*)child_item.container;
             if (potential_elem->type_id == LMD_TYPE_ELEMENT) {
@@ -183,6 +189,32 @@ DomElement* find_element_by_tag(DomElement* root, const char* tag_name) {
     return nullptr;
 }
 
+// Helper to list HTML/HTM files in a directory
+std::vector<std::string> list_html_files(const char* dir_path) {
+    std::vector<std::string> files;
+    DIR* dir = opendir(dir_path);
+    if (!dir) {
+        return files;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        std::string name = entry->d_name;
+        // Check for .html or .htm extension
+        size_t len = name.length();
+        if (len > 5 && (name.substr(len - 5) == ".html" || name.substr(len - 4) == ".htm")) {
+            files.push_back(std::string(dir_path) + "/" + name);
+        } else if (len > 4 && name.substr(len - 4) == ".htm") {
+            files.push_back(std::string(dir_path) + "/" + name);
+        }
+    }
+    closedir(dir);
+
+    // Sort for consistent ordering
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
 class HtmlCssIntegrationTest : public ::testing::Test {
 protected:
     Pool* pool;
@@ -252,33 +284,24 @@ protected:
     // HTML parsing may produce a List containing DOCTYPE, comments, and the actual HTML element
     Element* get_root_element(Input* input) {
         if (!input) return nullptr;
-
-        void* root_ptr = (void*)input->root.pointer;
+        TypeId root_type = input->root.type_id();
 
         // Check if it's a List (may contain DOCTYPE, comments, and HTML element)
-        List* potential_list = (List*)root_ptr;
-        if (potential_list->type_id == LMD_TYPE_LIST) {
+        if (root_type == LMD_TYPE_LIST) {
+            List* potential_list = input->root.list;
             // Search for the first REAL Element (skip DOCTYPE, comments, etc.)
             for (int64_t i = 0; i < potential_list->length; i++) {
                 Item item = potential_list->items[i];
-
-                void* item_ptr = nullptr;
                 if (item.type_id() == LMD_TYPE_ELEMENT) {
-                    item_ptr = (void*)item.pointer;
-                } else if (item.type_id() == LMD_TYPE_RAW_POINTER) {
-                    item_ptr = item.container;
-                }
-
-                if (item_ptr) {
-                    Element* potential_elem = (Element*)item_ptr;
+                    Element* potential_elem = item.element;
                     if (potential_elem->type_id == LMD_TYPE_ELEMENT) {
                         // Check the tag name to skip DOCTYPE and comments
                         TypeElmt* elem_type = (TypeElmt*)potential_elem->type;
                         if (elem_type && elem_type->name.str) {
                             const char* tag_name = elem_type->name.str;
-
                             // Skip DOCTYPE declarations and comments - find actual HTML element
-                            if (strcmp(tag_name, "!DOCTYPE") != 0 &&
+                            // Use case-insensitive comparison for DOCTYPE (can be !doctype or !DOCTYPE)
+                            if (strcasecmp(tag_name, "!DOCTYPE") != 0 &&
                                 strcmp(tag_name, "!--") != 0) {
                                 return potential_elem;  // Found the real root element (html, body, div, etc.)
                             }
@@ -286,9 +309,10 @@ protected:
                     }
                 }
             }
-        } else if (potential_list->type_id == LMD_TYPE_ELEMENT) {
+        }
+        else if (root_type == LMD_TYPE_ELEMENT) {
             // Direct element (simpler HTML without DOCTYPE/comments)
-            return (Element*)root_ptr;
+            return input->root.element;
         }
 
         return nullptr;
@@ -328,7 +352,7 @@ TEST_F(HtmlCssIntegrationTest, ParseSimpleHTML) {
     // Parse HTML using actual Lambda parser
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -358,7 +382,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithAttributes) {
 
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     Element* root_elem = get_root_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
@@ -393,7 +417,7 @@ TEST_F(HtmlCssIntegrationTest, ParseHTMLWithInlineStyles) {
 
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "Failed to parse HTML";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     Element* root_elem = get_root_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
@@ -441,7 +465,7 @@ TEST_F(HtmlCssIntegrationTest, ExtractCSSFromStyleTag) {
 
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr);
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "Failed to parse HTML - root is NULL";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "Failed to parse HTML - root is NULL";
 
     Element* root_elem = get_root_element(input);
     ASSERT_EQ(root_elem->type_id, LMD_TYPE_ELEMENT) << "Root should be an element";
@@ -577,7 +601,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     // Step 1: Parse HTML
     Input* input = parse_html_string(html);
     ASSERT_NE(input, nullptr) << "HTML parsing failed";
-    ASSERT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    ASSERT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Step 2: Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -692,7 +716,7 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr) << "Failed to parse HTML file";
-    EXPECT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
@@ -705,10 +729,8 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
         if (root_list->length > 0) {
             Item first_item = root_list->items[0];
             printf("DEBUG: First item type_id=%d\n", first_item.type_id());
-            if (first_item.type_id() == LMD_TYPE_ELEMENT || first_item.type_id() == LMD_TYPE_RAW_POINTER) {
-                void* elem_ptr = (first_item.type_id() == LMD_TYPE_ELEMENT) ?
-                                 (void*)first_item.pointer : first_item.container;
-                Element* potential_elem = (Element*)elem_ptr;
+            if (first_item.type_id() == LMD_TYPE_ELEMENT) {
+                Element* potential_elem = first_item.element;
                 if (potential_elem && potential_elem->type_id == LMD_TYPE_ELEMENT) {
                     root_elem = potential_elem;
                     printf("DEBUG: Using first list item as root element\n");
@@ -726,24 +748,24 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
 }
 
 TEST_F(HtmlCssIntegrationTest, LoadAndParseSampleHTML) {
-    std::string html_content = read_file("test/html/sample.html");
+    std::string html_content = read_file("test/layout/data/page/sample1.html");
 
     if (html_content.empty()) {
-        GTEST_SKIP() << "Could not load test/html/sample.html";
+        GTEST_SKIP() << "Could not load test/layout/data/page/sample1.html";
     }
 
-    printf("\n=== Testing Real File: sample.html ===\n");
+    printf("\n=== Testing Real File: sample1.html ===\n");
 
     Input* input = parse_html_string(html_content.c_str());
     ASSERT_NE(input, nullptr) << "Failed to parse HTML file";
-    EXPECT_NE((void*)input->root.pointer, (void*)nullptr) << "No root element";
+    EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root element";
 
     // Convert to DomElement
     Element* root_elem = get_root_element(input);
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
-    printf("Successfully parsed sample.html: tag=%s\n", dom_root->tag_name);
+    printf("Successfully parsed sample1.html: tag=%s\n", dom_root->tag_name);
 
     // Try to extract CSS (will be empty if no <style> tags found)
     std::string css = extract_css_from_html(root_elem);
@@ -755,10 +777,10 @@ TEST_F(HtmlCssIntegrationTest, LoadAndParseSampleHTML) {
 }
 
 TEST_F(HtmlCssIntegrationTest, VerifyInlineStylesInSampleHTML) {
-    std::string html_content = read_file("test/html/sample.html");
+    std::string html_content = read_file("test/layout/data/page/sample1.html");
 
     if (html_content.empty()) {
-        GTEST_SKIP() << "Could not load test/html/sample.html";
+        GTEST_SKIP() << "Could not load test/layout/data/page/sample1.html";
     }
 
     Input* input = parse_html_string(html_content.c_str());
@@ -774,32 +796,37 @@ TEST_F(HtmlCssIntegrationTest, VerifyInlineStylesInSampleHTML) {
 }
 
 TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
-    const char* test_files[] = {
+    // Dynamically load files from test/layout/data/page directory
+    std::vector<std::string> page_files = list_html_files("test/layout/data/page");
+
+    // Also add some additional test files
+    std::vector<std::string> additional_files = {
         "test/html/simple_box_test.html",
-        "test/html/sample.html",
         "test/html/box.html",
-        "test/html/table_simple.html",
-        "test/html/test_whitespace.html",
-        nullptr
+        "test/layout/data/table/table_simple.html",
+        "test/layout/data/css2.1/whitespace-001.htm"
     };
 
     printf("\n=== Testing Multiple HTML Files ===\n");
+    printf("Found %zu files in test/layout/data/page/\n", page_files.size());
+
     int processed = 0;
     int converted = 0;
 
-    for (int i = 0; test_files[i] != nullptr; i++) {
-        std::string html_content = read_file(test_files[i]);
+    // Process page files
+    for (const auto& filepath : page_files) {
+        std::string html_content = read_file(filepath.c_str());
 
         if (html_content.empty()) {
-            printf("Skipping %s (file not found)\n", test_files[i]);
-            continue;  // Skip missing files
+            printf("Skipping %s (file not found or empty)\n", filepath.c_str());
+            continue;
         }
 
-        printf("\nProcessing: %s\n", test_files[i]);
+        printf("\nProcessing: %s\n", filepath.c_str());
 
         Input* input = parse_html_string(html_content.c_str());
-        ASSERT_NE(input, nullptr) << "Failed to parse " << test_files[i];
-        EXPECT_NE((void*)input->root.pointer, (void*)nullptr) << "No root for " << test_files[i];
+        ASSERT_NE(input, nullptr) << "Failed to parse " << filepath;
+        EXPECT_NE((void*)input->root.string_ptr, (void*)nullptr) << "No root for " << filepath;
 
         processed++;
 
@@ -813,6 +840,42 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
             // Count children
             int child_count = dom_element_count_child_elements(dom_root);
             printf("    Child count: %d\n", child_count);
+
+            // Extract CSS if present
+            std::string css = extract_css_from_html(root_elem);
+            if (!css.empty()) {
+                printf("    CSS: %zu bytes\n", css.length());
+            }
+        } else {
+            printf("  ✗ Failed to convert to DomElement\n");
+        }
+    }
+
+    // Process additional test files
+    for (const auto& filepath : additional_files) {
+        std::string html_content = read_file(filepath.c_str());
+
+        if (html_content.empty()) {
+            printf("Skipping %s (file not found)\n", filepath.c_str());
+            continue;
+        }
+
+        printf("\nProcessing: %s\n", filepath.c_str());
+
+        Input* input = parse_html_string(html_content.c_str());
+        if (!input) {
+            printf("  ✗ Failed to parse\n");
+            continue;
+        }
+
+        processed++;
+
+        Element* root_elem = get_root_element(input);
+        DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
+
+        if (dom_root) {
+            printf("  ✓ Converted to DomElement: tag=%s\n", dom_root->tag_name);
+            converted++;
         } else {
             printf("  ✗ Failed to convert to DomElement\n");
         }
@@ -821,6 +884,74 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
     printf("\nSummary: Processed %d files, converted %d to DomElements\n", processed, converted);
     EXPECT_GT(processed, 0) << "No test files were processed";
     EXPECT_GT(converted, 0) << "No files were converted to DomElements";
+    EXPECT_GE((double)converted / processed, 0.9) << "At least 90% should convert successfully";
+}
+
+// ============================================================================
+// Layout Data Tests - All Page Files (Dynamic)
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_AllPageFiles) {
+    std::vector<std::string> page_files = list_html_files("test/layout/data/page");
+
+    ASSERT_GT(page_files.size(), 0u) << "No HTML files found in test/layout/data/page/";
+
+    printf("\n=== Testing All Page Files (%zu files) ===\n", page_files.size());
+
+    int total = 0;
+    int parsed = 0;
+    int converted = 0;
+    int has_css = 0;
+
+    for (const auto& filepath : page_files) {
+        total++;
+        std::string html_content = read_file(filepath.c_str());
+
+        if (html_content.empty()) {
+            printf("  ⚠️  Empty or missing: %s\n", filepath.c_str());
+            continue;
+        }
+
+        Input* input = parse_html_string(html_content.c_str());
+        if (!input) {
+            printf("  ✗ Parse failed: %s\n", filepath.c_str());
+            continue;
+        }
+        parsed++;
+
+        Element* root_elem = get_root_element(input);
+        DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
+
+        if (dom_root) {
+            converted++;
+
+            // Try to extract CSS
+            std::string css = extract_css_from_html(root_elem);
+            if (!css.empty()) {
+                has_css++;
+                printf("  ✓ %s: %d children, %zu bytes CSS\n",
+                       filepath.c_str(),
+                       dom_element_count_child_elements(dom_root),
+                       css.length());
+            } else {
+                printf("  ✓ %s: %d children, no CSS\n",
+                       filepath.c_str(),
+                       dom_element_count_child_elements(dom_root));
+            }
+        } else {
+            printf("  ✗ Convert failed: %s\n", filepath.c_str());
+        }
+    }
+
+    printf("\n=== Page Files Summary ===\n");
+    printf("  Total files: %d\n", total);
+    printf("  Successfully parsed: %d (%.1f%%)\n", parsed, total > 0 ? 100.0 * parsed / total : 0);
+    printf("  Converted to DOM: %d (%.1f%%)\n", converted, total > 0 ? 100.0 * converted / total : 0);
+    printf("  Files with CSS: %d (%.1f%%)\n", has_css, converted > 0 ? 100.0 * has_css / converted : 0);
+
+    // All page files must pass parsing and DOM conversion
+    EXPECT_EQ(parsed, total) << "All files should parse successfully";
+    EXPECT_EQ(converted, parsed) << "All parsed files should convert to DOM";
 }
 
 // ============================================================================
@@ -1010,7 +1141,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_NestedGrid) {
 // ============================================================================
 
 TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BasicTable) {
-    std::string html_content = read_file("test/layout/data/table/table_001_basic_table.html");
+    std::string html_content = read_file("test/layout/data/table/table_001_basic_layout.html");
     if (html_content.empty()) {
         GTEST_SKIP() << "File not found";
     }
@@ -1059,7 +1190,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Table_ColspanRowspan) {
 // ============================================================================
 
 TEST_F(HtmlCssIntegrationTest, LayoutData_Position_FloatLeft) {
-    std::string html_content = read_file("test/layout/data/position/position_001_float_left.html");
+    std::string html_content = read_file("test/layout/data/position/float-001.htm");
     if (html_content.empty()) {
         GTEST_SKIP() << "File not found";
     }
@@ -1077,7 +1208,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_Position_FloatLeft) {
 }
 
 TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Absolute) {
-    std::string html_content = read_file("test/layout/data/position/position_007_absolute_basic.html");
+    std::string html_content = read_file("test/layout/data/position/position_008_absolute_corners.html");
     if (html_content.empty()) {
         GTEST_SKIP() << "File not found";
     }

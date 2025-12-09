@@ -112,16 +112,12 @@ bool ItemReader::isList() const {
 }
 
 String* ItemReader::asString() const {
-    if (isString()) {
-        return get_string(item_);
-    }
+    if (isString()) { return item_.get_string(); }
     return nullptr;
 }
 
 String* ItemReader::asSymbol() const {
-    if (isSymbol()) {
-        return (String*)item_.pointer;
-    }
+    if (isSymbol()) { return item_.get_string(); }
     return nullptr;
 }
 
@@ -129,7 +125,7 @@ int64_t ItemReader::asInt() const {
     if (cached_type_ == LMD_TYPE_INT) {
         return item_.int_val;
     } else if (cached_type_ == LMD_TYPE_INT64) {
-        return *((int64_t*)item_.pointer);
+        return item_.get_int64();
     }
     return 0;
 }
@@ -138,17 +134,15 @@ int32_t ItemReader::asInt32() const {
     if (cached_type_ == LMD_TYPE_INT) {
         return item_.int_val;
     } else if (cached_type_ == LMD_TYPE_INT64) {
-        int64_t val = *((int64_t*)item_.pointer);
+        int64_t val = item_.get_int64();
         return (int32_t)val;  // Truncate to 32-bit
     }
     return 0;
 }
 
 double ItemReader::asFloat() const {
-    if (isFloat()) {
-        return *((double*)item_.pointer);
-    }
-    return 0.0;
+    if (isFloat()) { return item_.get_double(); }
+    return NAN;
 }
 
 bool ItemReader::asBool() const {
@@ -446,7 +440,7 @@ bool ElementReader::isEmpty() const {
         if (type == LMD_TYPE_ELEMENT) {
             return false; // has child elements
         } else if (type == LMD_TYPE_STRING) {
-            String* str = get_string(child);
+            String* str = child.get_string();
             if (str && str->len > 0) {
                 return false; // has non-empty text
             }
@@ -634,7 +628,7 @@ static void _extract_text_recursive_inline(const Element* element, StringBuf* sb
         TypeId type = get_type_id(child);
 
         if (type == LMD_TYPE_STRING) {
-            String* str = get_string(child);
+            String* str = child.get_string();
             if (str && str->len > 0) {
                 stringbuf_append_str_n(sb, str->chars, str->len);
             }

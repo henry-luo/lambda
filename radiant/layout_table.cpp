@@ -349,11 +349,26 @@ static void apply_cell_vertical_align(ViewTableCell* tcell, int cell_height, int
         return; // No adjustment needed
     }
 
-    // Calculate content area (subtract border and padding)
-    int cell_content_area = cell_height - 2; // Approximate border
+    // Calculate content area by subtracting actual border and padding
+    int cell_content_area = cell_height;
+
+    // Subtract actual border widths
+    if (tcell->bound && tcell->bound->border) {
+        float border_top = (tcell->bound->border->top_style != CSS_VALUE_NONE)
+            ? tcell->bound->border->width.top : 0;
+        float border_bottom = (tcell->bound->border->bottom_style != CSS_VALUE_NONE)
+            ? tcell->bound->border->width.bottom : 0;
+        cell_content_area -= (int)(border_top + border_bottom);
+        log_debug("  Subtracting borders: top=%.1f, bottom=%.1f", border_top, border_bottom);
+    }
+
+    // Subtract padding
     if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
         cell_content_area -= (tcell->bound->padding.top + tcell->bound->padding.bottom);
+        log_debug("  Subtracting padding: top=%d, bottom=%d", tcell->bound->padding.top, tcell->bound->padding.bottom);
     }
+
+    log_debug("  cell_content_area=%d after border/padding subtraction", cell_content_area);
 
     int y_adjustment = 0;
     if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_MIDDLE) {
@@ -526,7 +541,19 @@ struct TableMetadata {
 
 // Parse table-specific CSS properties from DOM element
 static void resolve_table_properties(LayoutContext* lycon, DomNode* element, ViewTable* table) {
-    // Read CSS border-collapse and border-spacing properties first
+    // HTML User-Agent default: border-spacing: 2px for HTML table elements
+    // CSS 2.1 spec default is 0, but HTML tables have 2px as the UA stylesheet default
+    // This is only applied if the element is an actual HTML <table> tag
+    if (element->node_type == DOM_NODE_ELEMENT) {
+        DomElement* dom_elem = element->as_element();
+        if (dom_elem->tag() == HTM_TAG_TABLE) {
+            // Set HTML UA default (can be overridden by CSS below)
+            table->tb->border_spacing_h = 2.0f;
+            table->tb->border_spacing_v = 2.0f;
+        }
+    }
+
+    // Read CSS border-collapse and border-spacing properties
     // These apply regardless of table-layout mode
 
     // Handle both Lexbor and Lambda CSS elements for border properties
@@ -628,58 +655,38 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                     }
                 }
             }
+
+            // Read table-layout property (CSS 2.1 Section 17.5.2)
+            CssDeclaration* layout_decl = style_tree_get_declaration(
+                dom_elem->specified_style,
+                CSS_PROPERTY_TABLE_LAYOUT);
+
+            if (layout_decl && layout_decl->value) {
+                CssValue* val = (CssValue*)layout_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                    if (val->data.keyword == CSS_VALUE_FIXED) {
+                        table->tb->table_layout = TableProp::TABLE_LAYOUT_FIXED;
+                        log_debug("Table table-layout: fixed (from CSS)");
+                    } else if (val->data.keyword == CSS_VALUE_AUTO) {
+                        table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
+                        log_debug("Table table-layout: auto (from CSS)");
+                    }
+                }
+            }
         }
     }
 
-    // Check if table-layout was already set to FIXED by CSS (via custom property)
-    // If so, respect the CSS value and don't override it
+    // Check if table-layout was already set to FIXED by CSS
+    // If so, respect the CSS value and don't override it with heuristic
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED) {
-        log_debug("Table layout: already set to FIXED by CSS, skipping heuristic");
+        log_debug("Table layout: FIXED (from CSS), skipping heuristic");
         return;
     }
 
-    // Default to auto layout
+    // Default to auto layout per CSS 2.1 specification
+    // The table-layout property initial value is 'auto'
     table->tb->table_layout = TableProp::TABLE_LAYOUT_AUTO;
-
-    // Use heuristic: if table has BOTH explicit width AND height, assume fixed layout
-    // This matches common CSS patterns where fixed layout is used with constrained dimensions
-
-    bool has_explicit_width = false;
-    bool has_explicit_height = false;
-
-    if (element->node_type == DOM_NODE_ELEMENT) {
-        // Lambda CSS path
-        DomElement* dom_elem = element->as_element();
-
-        if (dom_elem->specified_style) {
-            // Check for explicit width property
-            CssDeclaration* width_decl = style_tree_get_declaration(
-                dom_elem->specified_style,
-                CSS_PROPERTY_WIDTH);
-
-            if (width_decl && width_decl->value) {
-                has_explicit_width = true;
-            }
-
-            // Check for explicit height property
-            CssDeclaration* height_decl = style_tree_get_declaration(
-                dom_elem->specified_style,
-                CSS_PROPERTY_HEIGHT);
-
-            if (height_decl && height_decl->value) {
-                has_explicit_height = true;
-            }
-        }
-    }
-
-    // If both width and height are explicitly set, use fixed layout
-    // This heuristic works for most real-world cases where fixed layout is desired
-    if (has_explicit_width && has_explicit_height) {
-        table->tb->table_layout = TableProp::TABLE_LAYOUT_FIXED;
-        log_debug("Table layout: fixed (heuristic: table has explicit width AND height)");
-    } else {
-        log_debug("Table layout: auto (no explicit width+height combo)");
-    }
+    log_debug("Table layout: auto (CSS 2.1 default)");
 }
 
 // Parse cell attributes (colspan, rowspan)
@@ -794,12 +801,12 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
 // When the document language does not contain elements to represent
 // missing table components, user agents must generate anonymous objects.
 //
-// Instead of creating new DOM nodes (which would violate View* = DomNode*),
-// we use flags to mark existing elements as "doubled" as anonymous boxes:
-// - is_annoy_tbody: table acts as its own anonymous tbody
-// - is_annoy_tr: row group/table acts as anonymous tr (cells as direct children)
-// - is_annoy_td: tr has text content wrapped in anonymous cell
-// - is_annoy_colgroup: col elements treated as wrapped in anonymous colgroup
+// Per CSS 2.1 spec, anonymous boxes:
+// - INHERIT all inheritable properties from their table parent (color, font, etc.)
+// - Use INITIAL VALUES for non-inherited properties (margin, padding, border, background)
+//
+// This implementation creates actual anonymous DomElement nodes with proper styling,
+// rather than using flags, to ensure correct layout behavior.
 
 // Helper: Check if a display value is a row group type
 static inline bool is_row_group_display(CssEnum display) {
@@ -816,6 +823,348 @@ static inline bool is_cell_display(CssEnum display) {
 // Helper: Check if a display value is a table row type
 static inline bool is_row_display(CssEnum display) {
     return display == CSS_VALUE_TABLE_ROW;
+}
+
+// =============================================================================
+// ANONYMOUS TABLE ELEMENT CREATION (CSS 2.1 Section 17.2.1)
+// =============================================================================
+
+/**
+ * Create an anonymous table element with proper CSS spec styling.
+ *
+ * Per CSS 2.1 Section 17.2.1:
+ * - Anonymous boxes inherit inheritable properties from their table parent
+ * - Non-inherited properties get their initial values (no margin, padding, border, background)
+ *
+ * @param lycon Layout context
+ * @param parent Parent element (provides inherited styles)
+ * @param display_type Display type for the anonymous element (table-row-group, table-row, table-cell)
+ * @param tag_name Tag name for debugging (e.g., "::anon-tbody", "::anon-tr", "::anon-td")
+ * @return New anonymous DomElement, or NULL on failure
+ */
+static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomElement* parent,
+                                                   CssEnum display_type, const char* tag_name) {
+    if (!lycon || !parent) return nullptr;
+
+    Pool* pool = lycon->doc->view_tree->pool;
+    if (!pool) return nullptr;
+
+    // Allocate the anonymous element
+    DomElement* anon = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    if (!anon) return nullptr;
+
+    // Initialize as element node
+    anon->node_type = DOM_NODE_ELEMENT;
+    anon->tag_name = tag_name;
+    anon->doc = parent->doc;
+    anon->parent = parent;
+    anon->first_child = nullptr;
+    anon->last_child = nullptr;
+    anon->next_sibling = nullptr;
+    anon->prev_sibling = nullptr;
+
+    // Set display type based on requested type
+    switch (display_type) {
+        case CSS_VALUE_TABLE_ROW_GROUP:
+        case CSS_VALUE_TABLE_HEADER_GROUP:
+        case CSS_VALUE_TABLE_FOOTER_GROUP:
+            anon->display.outer = CSS_VALUE_TABLE_ROW_GROUP;
+            anon->display.inner = CSS_VALUE_TABLE_ROW_GROUP;
+            break;
+        case CSS_VALUE_TABLE_ROW:
+            anon->display.outer = CSS_VALUE_TABLE_ROW;
+            anon->display.inner = CSS_VALUE_TABLE_ROW;
+            break;
+        case CSS_VALUE_TABLE_CELL:
+            anon->display.outer = CSS_VALUE_TABLE_CELL;
+            anon->display.inner = CSS_VALUE_TABLE_CELL;
+            break;
+        default:
+            anon->display.outer = display_type;
+            anon->display.inner = display_type;
+            break;
+    }
+
+    // CSS 2.1 Section 17.2.1: Anonymous boxes inherit inheritable properties
+    // Copy inherited properties from parent (font properties are inheritable)
+    if (parent->font) {
+        anon->font = (FontProp*)pool_calloc(pool, sizeof(FontProp));
+        if (anon->font) {
+            memcpy(anon->font, parent->font, sizeof(FontProp));
+            // Font family string needs to be copied or shared
+            anon->font->family = parent->font->family;  // Share the string
+        }
+    }
+
+    // Copy inherited inline properties (color is inheritable)
+    if (parent->in_line) {
+        anon->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
+        if (anon->in_line) {
+            // Only copy inheritable properties
+            anon->in_line->color = parent->in_line->color;  // color is inherited
+            anon->in_line->cursor = CSS_VALUE_AUTO;  // cursor inherits, use auto as default
+            anon->in_line->visibility = 0;  // visibility inherits, 0 = visible
+            anon->in_line->opacity = 1.0f;  // opacity is not inherited, use initial
+            anon->in_line->vertical_align = CSS_VALUE_BASELINE;  // not inherited, use initial
+        }
+    }
+
+    // CSS 2.1: Non-inherited properties get initial values
+    // - margin: 0 (initial)
+    // - padding: 0 (initial)
+    // - border: none (initial)
+    // - background: transparent (initial)
+    // By using pool_calloc, all these are already 0/NULL which represents initial values
+    anon->bound = nullptr;  // No margin, padding, border, or background
+
+    // Mark that this element doesn't need style resolution (styles are set here)
+    anon->styles_resolved = true;
+
+    log_debug("[ANON-TABLE] Created %s element (display=%d) with inherited styles from <%s>",
+              tag_name, display_type, parent->tag_name ? parent->tag_name : "unknown");
+
+    return anon;
+}
+
+/**
+ * Insert a child element at the end of parent's child list
+ */
+static void append_child_to_element(DomElement* parent, DomElement* child) {
+    if (!parent || !child) return;
+
+    child->parent = parent;
+    child->next_sibling = nullptr;
+
+    if (parent->last_child) {
+        parent->last_child->next_sibling = child;
+        child->prev_sibling = parent->last_child;
+        parent->last_child = child;
+    } else {
+        parent->first_child = child;
+        parent->last_child = child;
+        child->prev_sibling = nullptr;
+    }
+}
+
+/**
+ * Insert a child element at the beginning of parent's child list
+ */
+static void prepend_child_to_element(DomElement* parent, DomElement* child) {
+    if (!parent || !child) return;
+
+    child->parent = parent;
+    child->prev_sibling = nullptr;
+
+    if (parent->first_child) {
+        parent->first_child->prev_sibling = child;
+        child->next_sibling = parent->first_child;
+        parent->first_child = child;
+    } else {
+        parent->first_child = child;
+        parent->last_child = child;
+        child->next_sibling = nullptr;
+    }
+}
+
+/**
+ * Move a node from its current parent to a new parent
+ * Removes from old parent and appends to new parent
+ */
+static void reparent_node(DomNode* node, DomElement* new_parent) {
+    if (!node || !new_parent) return;
+
+    DomElement* old_parent = (DomElement*)node->parent;
+
+    // Remove from old parent's child list
+    if (old_parent) {
+        if (node->prev_sibling) {
+            node->prev_sibling->next_sibling = node->next_sibling;
+        } else {
+            old_parent->first_child = node->next_sibling;
+        }
+
+        if (node->next_sibling) {
+            node->next_sibling->prev_sibling = node->prev_sibling;
+        } else {
+            old_parent->last_child = node->prev_sibling;
+        }
+    }
+
+    // Add to new parent
+    node->parent = new_parent;
+    node->prev_sibling = new_parent->last_child;
+    node->next_sibling = nullptr;
+
+    if (new_parent->last_child) {
+        new_parent->last_child->next_sibling = node;
+    } else {
+        new_parent->first_child = node;
+    }
+    new_parent->last_child = node;
+}
+
+/**
+ * Generate anonymous table boxes for CSS 2.1 compliance.
+ *
+ * CSS 2.1 Section 17.2.1 requires anonymous boxes when:
+ * 1. table-cell is direct child of table (need anonymous tbody + tr)
+ * 2. table-row is direct child of table (need anonymous tbody)
+ * 3. table-cell is direct child of table-row-group (need anonymous tr)
+ *
+ * This function analyzes the table structure and inserts anonymous elements
+ * where needed, BEFORE layout begins.
+ *
+ * @param lycon Layout context
+ * @param table The table element to process
+ */
+static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* table) {
+    if (!lycon || !table) return;
+
+    Pool* pool = lycon->doc->view_tree->pool;
+    if (!pool) return;
+
+    log_debug("[ANON-TABLE] Analyzing table structure for anonymous box generation");
+
+    // Analyze direct children to determine what anonymous boxes are needed
+    bool has_row_group = false;
+    bool has_direct_row = false;
+    bool has_direct_cell = false;
+    DomNode* first_direct_row = nullptr;
+    DomNode* first_direct_cell = nullptr;
+
+    for (DomNode* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+
+        DisplayValue display = resolve_display_value(child);
+        uintptr_t tag = child->tag();
+
+        if (is_row_group_display(display.inner) ||
+            tag == HTM_TAG_THEAD || tag == HTM_TAG_TBODY || tag == HTM_TAG_TFOOT) {
+            has_row_group = true;
+        }
+        else if (is_row_display(display.inner) || tag == HTM_TAG_TR) {
+            has_direct_row = true;
+            if (!first_direct_row) first_direct_row = child;
+        }
+        else if (is_cell_display(display.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH) {
+            has_direct_cell = true;
+            if (!first_direct_cell) first_direct_cell = child;
+        }
+    }
+
+    // Case 1: Direct cells in table - need anonymous tbody AND anonymous tr
+    if (has_direct_cell && !has_direct_row) {
+        log_debug("[ANON-TABLE] Case 1: Direct cells need anonymous tbody + tr");
+
+        // Create anonymous tbody
+        DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
+            CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+        if (!anon_tbody) return;
+
+        // Create anonymous tr inside tbody
+        DomElement* anon_tr = create_anonymous_table_element(lycon, anon_tbody,
+            CSS_VALUE_TABLE_ROW, "::anon-tr");
+        if (!anon_tr) return;
+
+        append_child_to_element(anon_tbody, anon_tr);
+
+        // Move all direct cells into the anonymous tr
+        DomNode* child = table->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            if (child->is_element()) {
+                DisplayValue display = resolve_display_value(child);
+                uintptr_t tag = child->tag();
+                if (is_cell_display(display.inner) || tag == HTM_TAG_TD || tag == HTM_TAG_TH) {
+                    reparent_node(child, anon_tr);
+                }
+            }
+            child = next;
+        }
+
+        // Insert anonymous tbody at the appropriate position
+        append_child_to_element(table, anon_tbody);
+    }
+    // Case 2: Direct rows in table (no row groups) - need anonymous tbody
+    else if (has_direct_row && !has_row_group) {
+        log_debug("[ANON-TABLE] Case 2: Direct rows need anonymous tbody");
+
+        // Create anonymous tbody
+        DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
+            CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
+        if (!anon_tbody) return;
+
+        // Move all direct rows into the anonymous tbody
+        DomNode* child = table->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            if (child->is_element()) {
+                DisplayValue display = resolve_display_value(child);
+                uintptr_t tag = child->tag();
+                if (is_row_display(display.inner) || tag == HTM_TAG_TR) {
+                    reparent_node(child, anon_tbody);
+                }
+            }
+            child = next;
+        }
+
+        // Insert anonymous tbody
+        append_child_to_element(table, anon_tbody);
+    }
+
+    // Case 3: Check each row group for direct cells (need anonymous tr)
+    for (DomNode* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+
+        DomElement* row_group = child->as_element();
+        DisplayValue display = resolve_display_value(child);
+        uintptr_t tag = child->tag();
+
+        if (!is_row_group_display(display.inner) &&
+            tag != HTM_TAG_THEAD && tag != HTM_TAG_TBODY && tag != HTM_TAG_TFOOT) {
+            continue;
+        }
+
+        // Check for direct cells in this row group
+        bool group_has_direct_cell = false;
+        for (DomNode* gchild = row_group->first_child; gchild; gchild = gchild->next_sibling) {
+            if (!gchild->is_element()) continue;
+            DisplayValue gdisp = resolve_display_value(gchild);
+            uintptr_t gtag = gchild->tag();
+            if (is_cell_display(gdisp.inner) || gtag == HTM_TAG_TD || gtag == HTM_TAG_TH) {
+                group_has_direct_cell = true;
+                break;
+            }
+        }
+
+        if (group_has_direct_cell) {
+            log_debug("[ANON-TABLE] Case 3: Row group has direct cells, need anonymous tr");
+
+            // Create anonymous tr
+            DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
+                CSS_VALUE_TABLE_ROW, "::anon-tr");
+            if (!anon_tr) continue;
+
+            // Move all direct cells into the anonymous tr
+            DomNode* gchild = row_group->first_child;
+            while (gchild) {
+                DomNode* gnext = gchild->next_sibling;
+                if (gchild->is_element()) {
+                    DisplayValue gdisp = resolve_display_value(gchild);
+                    uintptr_t gtag = gchild->tag();
+                    if (is_cell_display(gdisp.inner) || gtag == HTM_TAG_TD || gtag == HTM_TAG_TH) {
+                        reparent_node(gchild, anon_tr);
+                    }
+                }
+                gchild = gnext;
+            }
+
+            // Insert anonymous tr
+            append_child_to_element(row_group, anon_tr);
+        }
+    }
+
+    log_debug("[ANON-TABLE] Anonymous box generation complete");
 }
 
 // Detect and set anonymous box flags for a table element
@@ -1011,6 +1360,12 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     ViewTable* table = (ViewTable*)lycon->view;
     dom_node_resolve_style(tableNode, lycon);
     resolve_table_properties(lycon, tableNode, table);
+
+    // CSS 2.1 Section 17.2.1: Generate anonymous table boxes BEFORE building view tree
+    // This ensures proper table structure for layout regardless of HTML structure
+    if (tableNode->is_element()) {
+        generate_anonymous_table_boxes(lycon, tableNode->as_element());
+    }
 
     // Recursively mark all table children with correct view types
     if (tableNode->is_element()) {
@@ -1235,12 +1590,28 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     Linebox saved_line = lycon->line;
     DomNode* saved_elmt = lycon->elmt;
 
-    // Calculate cell border and padding offsets
+    // Calculate cell border and padding offsets from actual CSS style
     // Content area starts AFTER border and padding
-    int border_left = 1;  // 1px left border
-    int border_top = 1;   // 1px top border
-    int border_right = 1; // 1px right border
-    int border_bottom = 1; // 1px bottom border
+    int border_left = 0;
+    int border_top = 0;
+    int border_right = 0;
+    int border_bottom = 0;
+
+    // Read border widths from cell's bound style (if present)
+    if (tcell->bound && tcell->bound->border) {
+        if (tcell->bound->border->left_style != CSS_VALUE_NONE) {
+            border_left = (int)tcell->bound->border->width.left;
+        }
+        if (tcell->bound->border->top_style != CSS_VALUE_NONE) {
+            border_top = (int)tcell->bound->border->width.top;
+        }
+        if (tcell->bound->border->right_style != CSS_VALUE_NONE) {
+            border_right = (int)tcell->bound->border->width.right;
+        }
+        if (tcell->bound->border->bottom_style != CSS_VALUE_NONE) {
+            border_bottom = (int)tcell->bound->border->width.bottom;
+        }
+    }
 
     int padding_left = 0;
     int padding_right = 0;
@@ -1595,19 +1966,27 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (ViewBlock* child = (ViewBlock*)table->first_child;  child;  child = (ViewBlock*)child->next_sibling) {
         if (child->tag() == HTM_TAG_CAPTION) {
             caption = child;
-            // Caption height = content height + padding + border
+            // Caption height = content height + padding + border + margin
             if (caption->height > 0) {
                 float padding_v = 0;
                 float border_v = 0;
+                float margin_v = 0;
                 if (caption->bound) {
                     padding_v = caption->bound->padding.top + caption->bound->padding.bottom;
+                    // Include margin - caption-side:top means margin-bottom adds space,
+                    // caption-side:bottom means margin-top adds space
+                    if (table->tb && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
+                        margin_v = caption->bound->margin.bottom; // Space between caption and table
+                    } else {
+                        margin_v = caption->bound->margin.top; // Space between table and caption
+                    }
                     if (caption->bound->border) {
                         border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
                     }
                 }
-                caption_height = (int)(caption->height + padding_v + border_v);
-                log_debug("Caption height calculation: content=%.1f, padding_v=%.1f, border_v=%.1f, total=%d",
-                    caption->height, padding_v, border_v, caption_height);
+                caption_height = (int)(caption->height + padding_v + border_v + margin_v);
+                log_debug("Caption height calculation: content=%.1f, padding_v=%.1f, border_v=%.1f, margin_v=%.1f, total=%d",
+                    caption->height, padding_v, border_v, margin_v, caption_height);
             }
             break;
         }
@@ -2018,7 +2397,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Step 3: CSS 2.1 Table Layout Algorithm - Width Distribution (Section 17.5.2)
-    log_debug("===== CSS 2.1 AUTO TABLE LAYOUT ALGORITHM =====");
+    // ONLY run auto algorithm if we're NOT using fixed layout
+    // Fixed layout already set column widths above
+    if (table->tb->table_layout != TableProp::TABLE_LAYOUT_FIXED) {
+        log_debug("===== CSS 2.1 AUTO TABLE LAYOUT ALGORITHM =====");
 
     // Calculate minimum and preferred table widths (including borders and spacing)
     int min_table_content_width = 0;  // MCW sum for table content
@@ -2044,11 +2426,27 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Table total (with spacing): min=%dpx, preferred=%dpx", min_table_width, pref_table_width);
 
     // Determine used table width according to CSS 2.1 specification
+    // For explicit width, we need to account for border and padding
+    // (table_content_width already has border/padding/spacing subtracted,
+    // but we need the width after border/padding only, before spacing)
+    int explicit_content_area = explicit_table_width;
+    if (explicit_table_width > 0) {
+        // Subtract table border
+        if (table->bound && table->bound->border) {
+            explicit_content_area -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+        }
+        // Subtract table padding
+        if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+            explicit_content_area -= table->bound->padding.left + table->bound->padding.right;
+        }
+        log_debug("Explicit content area (after border/padding): %dpx", explicit_content_area);
+    }
+
     int used_table_width;
     if (explicit_table_width > 0) {
-        // CSS 2.1: Table has explicit width - use it (but not less than minimum)
-        used_table_width = explicit_table_width > min_table_width ? explicit_table_width : min_table_width;
-        log_debug("CSS 2.1: Using explicit table width: %dpx (requested: %dpx)", used_table_width, explicit_table_width);
+        // CSS 2.1: Table has explicit width - use content area (but not less than minimum)
+        used_table_width = explicit_content_area > min_table_width ? explicit_content_area : min_table_width;
+        log_debug("CSS 2.1: Using explicit table content width: %dpx (requested: %dpx)", used_table_width, explicit_content_area);
     } else {
         // CSS 2.1: Table width is auto - use preferred width
         used_table_width = pref_table_width;
@@ -2147,6 +2545,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
         }
     }
+    } // End of auto layout algorithm guard
 
     // Calculate final table width
     int table_width = 0;
@@ -2743,6 +3142,125 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Calculate final table height with border-spacing and padding
     int final_table_height = current_y;
+
+    // CSS 2.1 Section 17.5.3: Handle explicit table height
+    // If the table has an explicit height and content is smaller, distribute extra space to rows
+    int explicit_css_height = 0;
+    if (table->node_type == DOM_NODE_ELEMENT) {
+        DomElement* dom_elem = table->as_element();
+        if (dom_elem->specified_style) {
+            CssDeclaration* height_decl = style_tree_get_declaration(
+                dom_elem->specified_style, CSS_PROPERTY_HEIGHT);
+            if (height_decl && height_decl->value) {
+                float resolved_height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+                if (resolved_height > 0) {
+                    explicit_css_height = (int)resolved_height;
+                    log_debug("Table has explicit CSS height: %dpx", explicit_css_height);
+                }
+            }
+        }
+    }
+
+    // Calculate what the minimum content height would be (including padding, borders, spacing)
+    int min_content_height = current_y;
+    int table_padding_vert = 0;
+    int table_border_vert = 0;
+    int table_spacing_vert = 0;
+
+    if (table->bound && table->bound->padding.top >= 0) {
+        table_padding_vert += table->bound->padding.top;
+    }
+    if (table->bound && table->bound->padding.bottom >= 0) {
+        table_padding_vert += table->bound->padding.bottom;
+    }
+    if (table->bound && table->bound->border) {
+        table_border_vert = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
+    }
+    if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+        table_spacing_vert = (int)(2 * table->tb->border_spacing_v);  // Top and bottom edge spacing
+    }
+
+    int total_box_overhead = table_padding_vert + table_border_vert + table_spacing_vert;
+    int content_only_height = min_content_height - table_padding_vert;  // current_y includes top padding
+
+    // If explicit height is larger than content, distribute extra height to rows
+    if (explicit_css_height > 0 && meta->row_count > 0) {
+        int available_for_content = explicit_css_height - table_border_vert;  // CSS height minus borders
+        int extra_height = available_for_content - (content_only_height + table_padding_vert + table_spacing_vert);
+
+        if (extra_height > 0) {
+            log_debug("Distributing %dpx extra height to %d rows", extra_height, meta->row_count);
+
+            // Distribute extra height equally among rows
+            int height_per_row = extra_height / meta->row_count;
+            int remainder = extra_height % meta->row_count;
+
+            // Adjust row heights and y positions
+            int y_adjustment = 0;
+            for (int r = 0; r < meta->row_count; r++) {
+                int row_extra = height_per_row + (r < remainder ? 1 : 0);
+                meta->row_heights[r] += row_extra;
+                meta->row_y_positions[r] += y_adjustment;
+                y_adjustment += row_extra;
+            }
+
+            // Now update all row and cell views with new heights
+            // Iterate through row groups and direct rows to update their dimensions
+            for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+                if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
+                    // Update rows within group
+                    for (ViewBlock* row = (ViewBlock*)child->first_child; row; row = (ViewBlock*)row->next_sibling) {
+                        if (row->view_type == RDT_VIEW_TABLE_ROW) {
+                            ViewTableRow* trow = (ViewTableRow*)row;
+                            // Find row index and update
+                            for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                                int row_idx = tcell->td->row_index;
+                                if (row_idx >= 0 && row_idx < meta->row_count) {
+                                    row->height = meta->row_heights[row_idx];
+                                    row->y = meta->row_y_positions[row_idx] - child->y;  // Adjust for group offset
+
+                                    // Update cell heights and vertical alignment
+                                    for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
+                                        if (cell->td->row_span == 1) {
+                                            cell->height = row->height;
+                                            // Re-apply vertical alignment with new height
+                                            int content_h = measure_cell_content_height(lycon, cell);
+                                            apply_cell_vertical_align(cell, (int)cell->height, content_h);
+                                        }
+                                    }
+                                    break;  // Found the row index
+                                }
+                            }
+                        }
+                    }
+                } else if (child->view_type == RDT_VIEW_TABLE_ROW) {
+                    ViewTableRow* trow = (ViewTableRow*)child;
+                    for (ViewTableCell* tcell = trow->first_cell(); tcell; tcell = trow->next_cell(tcell)) {
+                        int row_idx = tcell->td->row_index;
+                        if (row_idx >= 0 && row_idx < meta->row_count) {
+                            child->height = meta->row_heights[row_idx];
+                            child->y = meta->row_y_positions[row_idx];
+
+                            // Update cell heights
+                            for (ViewTableCell* cell = trow->first_cell(); cell; cell = trow->next_cell(cell)) {
+                                if (cell->td->row_span == 1) {
+                                    cell->height = child->height;
+                                    int content_h = measure_cell_content_height(lycon, cell);
+                                    apply_cell_vertical_align(cell, (int)cell->height, content_h);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Update current_y to reflect expanded height
+            current_y += extra_height;
+            final_table_height = current_y;
+            log_debug("Updated final_table_height to %d after height distribution", final_table_height);
+        }
+    }
 
     // Add table padding bottom
     int table_padding_bottom = 0;

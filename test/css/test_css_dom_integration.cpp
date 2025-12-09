@@ -41,13 +41,13 @@ protected:
         // Create Input for MarkBuilder
         char* dummy_source = strdup("<html></html>");
         Url* dummy_url = url_parse("/test.html");
-        
+
         Pool* temp_pool = pool_create();
         String* type_str = create_string(temp_pool, "html");
         input = input_from_source(dummy_source, dummy_url, type_str, nullptr);
         ASSERT_NE(input, nullptr);
         pool_destroy(temp_pool);
-        
+
         // Use Input's pool for all test operations
         pool = input->pool;
         ASSERT_NE(pool, nullptr);
@@ -73,7 +73,7 @@ protected:
     // Helper: Build DomElement from Lambda Element with MarkBuilder
     DomElement* build_element(Item elem_item) {
         if (!elem_item.element) return nullptr;
-        
+
         Element* lambda_elem = elem_item.element;
         // Build DOM tree with DomDocument
         DomElement* dom_elem = build_dom_tree_from_element(lambda_elem, doc, nullptr);
@@ -151,14 +151,12 @@ protected:
 
     // Helper: Get HTML root element (skip DOCTYPE)
     Element* get_html_root_element(Input* input) {
-        void* root_ptr = (void*)input->root.pointer;
-        List* root_list = (List*)root_ptr;
-
-        if (root_list->type_id == LMD_TYPE_LIST) {
+        if (input->root.type_id() == LMD_TYPE_LIST) {
+            List* root_list = input->root.list;
             for (int64_t i = 0; i < root_list->length; i++) {
                 Item item = root_list->items[i];
                 if (item.type_id() == LMD_TYPE_ELEMENT) {
-                    Element* elem = (Element*)item.pointer;
+                    Element* elem = item.element;
                     TypeElmt* type = (TypeElmt*)elem->type;
                     const char* tag_name = type ? type->name.str : nullptr;
                     if (tag_name && strcasecmp(tag_name, "html") == 0) {
@@ -362,7 +360,7 @@ TEST_F(DomIntegrationTest, IdSelectorMatching) {
     Item elem_item = builder.element("div")
         .attr("id", "test-id")
         .final();
-    
+
     DomElement* element = build_element(elem_item);
     ASSERT_NE(element, nullptr);
 
@@ -379,7 +377,7 @@ TEST_F(DomIntegrationTest, AttributeSelectorMatching) {
     Item elem_item = builder.element("div")
         .attr("data-test", "hello-world")
         .final();
-    
+
     DomElement* element = build_element(elem_item);
     ASSERT_NE(element, nullptr);
 
@@ -455,7 +453,7 @@ TEST_F(DomIntegrationTest, AttributeSelector_All7Types) {
     DomElement* elem4 = build_element(elem4_item);
     EXPECT_TRUE(selector_matcher_matches_attribute(matcher, "lang", "en",
                                                    CSS_SELECTOR_ATTR_LANG, false, elem4));
-    
+
     // Rebuild elem4 with different lang value
     Item elem4b_item = builder.element("div")
         .attr("lang", "en")
@@ -1491,10 +1489,10 @@ TEST_F(DomIntegrationTest, AdvancedSelector_HierarchyWithAttributes) {
                 .final()
         )
         .final();
-    
+
     DomElement* app = build_element(app_item);
     ASSERT_NE(app, nullptr);
-    
+
     DomElement* section = (DomElement*)app->first_child;
     DomElement* article = (DomElement*)section->first_child;
     DomElement* p = (DomElement*)article->first_child;
@@ -1797,22 +1795,22 @@ TEST_F(DomIntegrationTest, AdvancedSelector_FormElementHierarchy) {
                 .final()
         )
         .final();
-    
+
     DomElement* form = build_element(form_item);
     ASSERT_NE(form, nullptr);
-    
+
     // Navigate to child elements
     DomElement* fieldset1 = (DomElement*)form->first_child;
     DomElement* fieldset2 = (DomElement*)fieldset1->next_sibling;
     DomElement* button = (DomElement*)fieldset2->next_sibling;
-    
+
     DomElement* input1 = (DomElement*)fieldset1->first_child;
     DomElement* input2 = (DomElement*)input1->next_sibling;
-    
+
     DomElement* input3 = (DomElement*)fieldset2->first_child;
     DomElement* input4 = (DomElement*)input3->next_sibling;
     DomElement* input5 = (DomElement*)input4->next_sibling;
-    
+
     // Set pseudo-states (must be done after element creation)
     dom_element_set_pseudo_state(input3, PSEUDO_STATE_CHECKED);
     dom_element_set_pseudo_state(input5, PSEUDO_STATE_CHECKED);
@@ -1922,7 +1920,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_TableStructure) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, DomText_Create) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; 
+    GTEST_SKIP() << "Standalone node creation no longer supported";
     DomText* text = nullptr;  // Dummy to allow compilation
     return;
 //     DomText* text = dom_text_create(pool, "Hello World");
@@ -2015,11 +2013,11 @@ TEST_F(DomIntegrationTest, DomComment_CreateComment) {
     MarkBuilder builder(input);
     Item parent_item = builder.element("div").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     // Build DomElement from Lambda element
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Create comment via parent
     DomComment* comment = dom_element_append_comment(parent, " This is a comment ");
     ASSERT_NE(comment, nullptr);
@@ -2034,7 +2032,7 @@ TEST_F(DomIntegrationTest, DomComment_CreateDoctype) {
     const char* html = "<!DOCTYPE html><html><body></body></html>";
     DomElement* root = parse_html_and_build_dom(html);
     ASSERT_NE(root, nullptr);
-    
+
     // DOCTYPE should be a child of root (html element's parent in parse tree)
     // For this test, we'll verify that parsing handles DOCTYPE
     // Note: DOCTYPE may not be in the final DOM tree as it's typically discarded
@@ -2049,10 +2047,10 @@ TEST_F(DomIntegrationTest, DomComment_CreateXMLDeclaration) {
     MarkBuilder builder(input);
     Item parent_item = builder.element("root").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Create a comment with XML-like content
     DomComment* comment = dom_element_append_comment(parent, "xml version=\"1.0\" encoding=\"UTF-8\"");
     ASSERT_NE(comment, nullptr);
@@ -2065,10 +2063,10 @@ TEST_F(DomIntegrationTest, DomComment_EmptyContent) {
     MarkBuilder builder(input);
     Item parent_item = builder.element("div").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Create empty comment
     DomComment* comment = dom_element_append_comment(parent, "");
     ASSERT_NE(comment, nullptr);
@@ -2080,11 +2078,11 @@ TEST_F(DomIntegrationTest, DomComment_NullParameters) {
     // Test NULL parameter handling
     DomElement* parent = create_element_with_backing("div");
     ASSERT_NE(parent, nullptr);
-    
+
     // NULL content should create empty comment
     DomComment* comment2 = dom_element_append_comment(parent, nullptr);
     EXPECT_EQ(comment2, nullptr);  // Should fail with NULL content
-    
+
     // NULL parent should fail (tested by API design - can't call without parent)
     // This is enforced by the function signature itself
 }
@@ -2094,10 +2092,10 @@ TEST_F(DomIntegrationTest, DomComment_MultilineContent) {
     MarkBuilder builder(input);
     Item parent_item = builder.element("div").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     const char* multiline = "Line 1\nLine 2\nLine 3";
     DomComment* comment = dom_element_append_comment(parent, multiline);
     ASSERT_NE(comment, nullptr);
@@ -2113,14 +2111,14 @@ TEST_F(DomIntegrationTest, NodeType_GetType) {
     MarkBuilder builder(input);
     Item parent_item = builder.element("div").final();
     ASSERT_NE(parent_item.element, nullptr);
-    
+
     DomElement* parent = build_dom_tree_from_element(parent_item.element, doc, nullptr);
     ASSERT_NE(parent, nullptr);
-    
+
     // Create text and comment nodes
     DomText* text = dom_element_append_text(parent, "text");
     ASSERT_NE(text, nullptr);
-    
+
     DomComment* comment = dom_element_append_comment(parent, "content");
     ASSERT_NE(comment, nullptr);
 
@@ -2135,7 +2133,7 @@ TEST_F(DomIntegrationTest, NodeType_GetType) {
 // }
 
 TEST_F(DomIntegrationTest, NodeType_IsElement) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; 
+    GTEST_SKIP() << "Standalone node creation no longer supported";
     DomElement* element = nullptr; DomText* text = nullptr; DomComment* comment = nullptr;
     return;
     element = create_element_with_backing("div");
@@ -2149,7 +2147,7 @@ TEST_F(DomIntegrationTest, NodeType_IsElement) {
 }
 
 TEST_F(DomIntegrationTest, NodeType_IsText) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; 
+    GTEST_SKIP() << "Standalone node creation no longer supported";
     DomElement* element = nullptr; DomText* text = nullptr; DomComment* comment = nullptr;
     return;
     element = create_element_with_backing("div");
@@ -2162,7 +2160,7 @@ TEST_F(DomIntegrationTest, NodeType_IsText) {
 }
 
 TEST_F(DomIntegrationTest, NodeType_IsComment) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; 
+    GTEST_SKIP() << "Standalone node creation no longer supported";
     DomElement* element = nullptr; DomText* text = nullptr; DomComment* comment = nullptr; DomComment* comment1 = nullptr; DomComment* comment2 = nullptr; DomComment* doctype = nullptr;
     return;
     element = create_element_with_backing("div");
@@ -2181,7 +2179,7 @@ TEST_F(DomIntegrationTest, NodeType_IsComment) {
 // ============================================================================
 
 TEST_F(DomIntegrationTest, MixedTree_ElementWithTextChild) {
-    GTEST_SKIP() << "Standalone node creation no longer supported"; 
+    GTEST_SKIP() << "Standalone node creation no longer supported";
     DomElement* div = nullptr; DomText* text = nullptr;
     return;
     div = create_element_with_backing("div");
