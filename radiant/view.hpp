@@ -294,6 +294,7 @@ typedef struct ImageSurface {
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
 } ImageSurface;
+
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern void image_surface_destroy(ImageSurface* img_surface);
