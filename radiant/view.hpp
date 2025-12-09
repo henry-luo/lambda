@@ -811,4 +811,5 @@ extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
 DomDocument* load_html_doc(Url *base, char* doc_filename);
+DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 void free_document(DomDocument* doc);
