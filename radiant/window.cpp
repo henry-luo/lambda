@@ -426,6 +426,13 @@ int view_doc_in_window(const char* doc_file) {
         }
     }
 
+    // Check for auto-close after initial render (for testing/benchmarking)
+    bool auto_close_enabled = (getenv("LAMBDA_AUTO_CLOSE") != NULL);
+    if (auto_close_enabled) {
+        log_info("First frame rendered, auto-closing window for testing");
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+    }
+
     // Main loop
     double lastTime = glfwGetTime();
     double deltaTime = 0.0;

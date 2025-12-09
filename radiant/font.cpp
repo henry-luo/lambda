@@ -24,7 +24,7 @@ int fontface_compare(const void *a, const void *b, void *udata) {
 uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const FontfaceEntry *fontface = (const FontfaceEntry*)item;
     // xxhash3 is a fast hash function
-    log_debug("hashing fontface: %s", fontface->name);
+    // log_debug("hashing fontface: %s", fontface->name);  // Too verbose - called on every hash lookup
     return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
 }
 
