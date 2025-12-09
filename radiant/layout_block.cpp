@@ -545,29 +545,60 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         log_debug("[FLOAT PRE-SCAN] Adjusting initial line bounds for pre-scanned floats");
 
         float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
-        FloatAvailableSpace space = block_context_space_at_y(&lycon->block, 0.0f, line_height);
+
+        // Calculate current block's Y position in BFC coordinates
+        // We need to walk up from the parent_block to the BFC establishing element
+        float bfc_y_offset = 0.0f;
+        float bfc_x_offset = 0.0f;
+        ViewElement* walker = parent_block;
+        ViewBlock* bfc_elem = lycon->block.establishing_element;
+        while (walker && walker != bfc_elem) {
+            bfc_y_offset += walker->y;
+            bfc_x_offset += walker->x;
+            walker = walker->parent_view();
+        }
+        // Add parent_block's border/padding to get to content area
+        if (parent_block && parent_block->bound) {
+            if (parent_block->bound->border) {
+                bfc_y_offset += parent_block->bound->border->width.top;
+                bfc_x_offset += parent_block->bound->border->width.left;
+            }
+            bfc_y_offset += parent_block->bound->padding.top;
+            bfc_x_offset += parent_block->bound->padding.left;
+        }
+
+        // Query at the BFC-relative Y position of this block's first line
+        float query_y = bfc_y_offset + lycon->block.advance_y;
+        log_debug("[FLOAT PRE-SCAN] querying space at bfc_y=%.1f, line_height=%.1f, left_count=%d",
+               query_y, line_height, lycon->block.left_float_count);
+        FloatAvailableSpace space = block_context_space_at_y(&lycon->block, query_y, line_height);
+        log_debug("[FLOAT PRE-SCAN] space=(%.1f, %.1f), has_left=%d, has_right=%d",
+               space.left, space.right, space.has_left_float, space.has_right_float);
 
         if (space.has_left_float) {
             // Left float intrudes - adjust effective_left and advance_x
-            // space.left is relative to the container content area
-            float new_left = space.left;
-            if (new_left > lycon->line.effective_left) {
-                log_debug("[FLOAT PRE-SCAN] Adjusting line.effective_left: %.1f -> %.1f",
-                          lycon->line.effective_left, new_left);
-                lycon->line.effective_left = new_left;
+            // space.left is in BFC coordinates, need to convert to local (block content area) coords
+            float local_left = space.left - bfc_x_offset;
+            log_debug("[FLOAT PRE-SCAN] space.left=%.1f, bfc_x_offset=%.1f, local_left=%.1f, current effective_left=%.1f",
+                   space.left, bfc_x_offset, local_left, lycon->line.effective_left);
+            if (local_left > lycon->line.effective_left) {
+                log_debug("[FLOAT PRE-SCAN] Adjusting line.effective_left: %.1f -> %.1f, advance_x: %.1f -> %.1f",
+                       lycon->line.effective_left, local_left, lycon->line.advance_x, local_left);
+                lycon->line.effective_left = local_left;
                 lycon->line.has_float_intrusion = true;
-                if (lycon->line.advance_x < new_left) {
-                    lycon->line.advance_x = new_left;
+                if (lycon->line.advance_x < local_left) {
+                    lycon->line.advance_x = local_left;
                 }
             }
         }
         if (space.has_right_float) {
             // Right float intrudes - adjust effective_right
-            float new_right = space.right;
-            if (new_right < lycon->line.effective_right) {
+            // space.right is in BFC coordinates, convert to local
+            float local_right = space.right - bfc_x_offset;
+            if (local_right < lycon->line.effective_right) {
                 log_debug("[FLOAT PRE-SCAN] Adjusting line.effective_right: %.1f -> %.1f",
-                          lycon->line.effective_right, new_right);
-                lycon->line.effective_right = new_right;
+                          lycon->line.effective_right, local_right);
+                lycon->line.effective_right = local_right;
                 lycon->line.has_float_intrusion = true;
             }
         }
@@ -717,6 +748,16 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // setup inline context
     float content_width = lycon->block.content_width;
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
+
+    // Calculate BFC offset for this block (used for float coordinate conversion)
+    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+    if (bfc) {
+        block_context_calc_bfc_offset((ViewElement*)block, bfc,
+                                      &lycon->block.bfc_offset_x, &lycon->block.bfc_offset_y);
+    } else {
+        lycon->block.bfc_offset_x = 0;
+        lycon->block.bfc_offset_y = 0;
+    }
 
     // Calculate the block's inner content bounds based on border and padding
     // Note: content_width is already the inner content width (excluding padding/border)
@@ -1134,8 +1175,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     // Apply CSS float layout using BlockContext
-    // IMPORTANT: Floats must be added to the PARENT's BlockContext (pa_block),
-    // not lycon->block which is the float element's own context
+    // IMPORTANT: Floats must be added to the BFC root, not just the immediate parent
     if (block->position && element_has_float(block)) {
         log_debug("Element has float property, applying float layout");
 
@@ -1143,10 +1183,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // layout_float_element uses block_context_find_bfc which walks up parent chain
         layout_float_element(lycon, block);
 
-        // Add float to parent's BlockContext (the BFC container)
-        // pa_block is the parent's context that was saved before entering this function
-        block_context_add_float(pa_block, block);
-        log_debug("[BlockContext] Float added to parent context");
+        // Add float to the BFC root (not just immediate parent)
+        // This ensures sibling elements can see the float via block_context_find_bfc
+        BlockContext* bfc = block_context_find_bfc(pa_block);
+        if (bfc) {
+            block_context_add_float(bfc, block);
+            log_debug("[BlockContext] Float added to BFC root (bfc=%p, pa_block=%p)", (void*)bfc, (void*)pa_block);
+        } else {
+            // Fallback to parent if no BFC found
+            block_context_add_float(pa_block, block);
+            log_debug("[BlockContext] Float added to parent context (no BFC found)");
+        }
     }
 
     // Restore parent BFC if we created a new one - handled by block.parent in calling code
@@ -1220,9 +1267,33 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // flow the block in parent context
         if (display.outer == CSS_VALUE_INLINE_BLOCK) {
             if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
-            if (lycon->line.advance_x + block->width > lycon->line.right) {
+
+            // Update effective line bounds for floats at current Y position
+            // This is critical for inline-blocks to wrap around floats correctly
+            update_line_for_bfc_floats(lycon);
+
+            // Check available width considering floats
+            float effective_left = lycon->line.has_float_intrusion ?
+                lycon->line.effective_left : lycon->line.left;
+            float effective_right = lycon->line.has_float_intrusion ?
+                lycon->line.effective_right : lycon->line.right;
+
+            log_debug("inline-block float check: has_float_intrusion=%d, effective_left=%.1f, effective_right=%.1f, line.left=%.1f, line.right=%.1f, advance_x=%.1f",
+                lycon->line.has_float_intrusion, lycon->line.effective_left, lycon->line.effective_right,
+                lycon->line.left, lycon->line.right, lycon->line.advance_x);
+
+            // Ensure advance_x is at least at effective_left
+            if (lycon->line.advance_x < effective_left) {
+                lycon->line.advance_x = effective_left;
+            }
+
+            if (lycon->line.advance_x + block->width > effective_right) {
                 line_break(lycon);
-                block->x = lycon->line.left;
+                // After line break, update effective bounds for new Y
+                update_line_for_bfc_floats(lycon);
+                effective_left = lycon->line.has_float_intrusion ?
+                    lycon->line.effective_left : lycon->line.left;
+                block->x = effective_left;
             } else {
                 block->x = lycon->line.advance_x;
             }
