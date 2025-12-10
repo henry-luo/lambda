@@ -129,10 +129,6 @@ project "lambda-input-full-cpp"
         "lambda/input/css/css_engine.cpp",
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/css_style_node.cpp",
-        "lambda/input/latex/latex_parser.cpp",
-        "lambda/input/latex/latex_primitives.cpp",
-        "lambda/input/latex/latex_commands.cpp",
-        "lambda/input/latex/latex_environments.cpp",
         "lambda/parse.c",
         "lib/arraylist.c",
         "lib/avl_tree.c",
@@ -159,6 +155,7 @@ project "lambda-input-full-cpp"
         "/opt/homebrew/opt/freetype/include/freetype2",
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "mac-deps/curl-8.10.1/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -193,6 +190,7 @@ project "lambda-input-full-cpp"
     
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
@@ -302,11 +300,6 @@ project "lambda"
         "lambda/mark_builder.cpp",
         "lambda/mark_editor.cpp",
         "lambda/mark_reader.cpp",
-        "lambda/validator/validate.cpp",
-        "lambda/validator/doc_validator.cpp",
-        "lambda/validator/ast_validate.cpp",
-        "lambda/validator/error_reporting.cpp",
-        "lambda/validator/suggestions.cpp",
         "lambda/js/js_scope.cpp",
         "lambda/js/build_js_ast.cpp",
         "lambda/js/transpile_js.cpp",
@@ -412,6 +405,7 @@ project "lambda"
         "lambda/input/input-xml.cpp",
         "lambda/input/input-common.cpp",
         "lambda/input/input-graph-d2.cpp",
+        "lambda/input/input-latex-ts.cpp",
         "lambda/input/input-graph-dot.cpp",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_tokenizer.cpp",
@@ -424,10 +418,6 @@ project "lambda"
         "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/css_parser.cpp",
-        "lambda/input/latex/latex_commands.cpp",
-        "lambda/input/latex/latex_primitives.cpp",
-        "lambda/input/latex/latex_parser.cpp",
-        "lambda/input/latex/latex_environments.cpp",
         "lambda/input/css/css_style_node.cpp",
         "lambda/input/css/css_tokenizer.cpp",
         "lambda/input/css/css_properties.cpp",
@@ -439,10 +429,6 @@ project "lambda"
         "lambda/input/css/css_value_parser.cpp",
         "lambda/input/css/css_formatter.cpp",
         "lambda/input/css/css_parser.cpp",
-        "lambda/input/latex/latex_commands.cpp",
-        "lambda/input/latex/latex_primitives.cpp",
-        "lambda/input/latex/latex_parser.cpp",
-        "lambda/input/latex/latex_environments.cpp",
         "lambda/format/format-md.cpp",
         "lambda/format/format-toml.cpp",
         "lambda/format/format-jsx.cpp",
@@ -465,6 +451,11 @@ project "lambda"
         "lambda/format/format-utils.cpp",
         "lambda/format/format-json.cpp",
         "lambda/format/format-wiki.cpp",
+        "lambda/validator/validate.cpp",
+        "lambda/validator/ast_validate.cpp",
+        "lambda/validator/error_reporting.cpp",
+        "lambda/validator/doc_validator.cpp",
+        "lambda/validator/suggestions.cpp",
     }
     
     includedirs {
@@ -478,6 +469,7 @@ project "lambda"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -493,6 +485,7 @@ project "lambda"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
+        "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
         "/usr/local/lib/libmir.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
@@ -584,6 +577,7 @@ project "test_strbuf_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -645,6 +639,7 @@ project "test_stringbuf_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -707,6 +702,7 @@ project "test_strview_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -768,6 +764,7 @@ project "test_num_stack_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -829,6 +826,7 @@ project "test_datetime_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -895,6 +893,7 @@ project "test_font_config_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -957,6 +956,7 @@ project "test_url_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1018,6 +1018,7 @@ project "test_url_extra_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1079,6 +1080,7 @@ project "test_cmdedit_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1146,6 +1148,7 @@ project "test_mempool_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1209,6 +1212,7 @@ project "test_avl_tree"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1270,6 +1274,7 @@ project "test_arena_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1373,6 +1378,7 @@ project "test_avl_tree_perf"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1434,6 +1440,7 @@ project "test_mime_detect_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1535,6 +1542,7 @@ project "test_mark_builder_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1637,6 +1645,7 @@ project "test_mark_builder_deepcopy_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1739,6 +1748,7 @@ project "test_mark_editor_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1841,6 +1851,7 @@ project "test_name_pool_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -1943,6 +1954,7 @@ project "test_mark_reader_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2045,6 +2057,7 @@ project "test_error_tracking"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2147,6 +2160,7 @@ project "test_math_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2249,6 +2263,7 @@ project "test_math_ascii_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2351,6 +2366,7 @@ project "test_markup_roundtrip_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2453,6 +2469,7 @@ project "test_entity_emoji_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2555,6 +2572,7 @@ project "test_input_roundtrip_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2577,6 +2595,110 @@ project "test_input_roundtrip_gtest"
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_latex_ts_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_latex_ts_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_latex_ts_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/opt/freetype/include/freetype2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+        "../../lambda/tree-sitter-latex/libtree-sitter-latex.a",
     }
     
     linkoptions {
@@ -2657,6 +2779,7 @@ project "test_html_roundtrip_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2759,6 +2882,7 @@ project "test_html_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2861,6 +2985,7 @@ project "test_html_negative_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -2967,6 +3092,7 @@ project "test_lambda_domnode_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3069,6 +3195,7 @@ project "test_dir_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3170,6 +3297,7 @@ project "test_graph_parser_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3272,6 +3400,7 @@ project "test_validator_input_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3374,6 +3503,7 @@ project "test_validator_features_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3476,6 +3606,7 @@ project "test_null_vs_missing_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3578,6 +3709,7 @@ project "test_enhanced_errors"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3680,6 +3812,7 @@ project "test_validation_options"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3782,6 +3915,7 @@ project "test_format_validation"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3884,6 +4018,7 @@ project "test_validator_integration"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -3986,6 +4121,7 @@ project "test_type_references_simple"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4088,6 +4224,7 @@ project "test_graph_formatter_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4190,6 +4327,7 @@ project "test_sysinfo_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4292,6 +4430,7 @@ project "test_jsx_roundtrip_new_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4394,6 +4533,7 @@ project "test_mdx_roundtrip_new_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4504,6 +4644,7 @@ project "test_css_style_node"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4576,6 +4717,7 @@ project "test_css_system"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4649,6 +4791,7 @@ project "test_css_dom_integration"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4762,6 +4905,7 @@ project "test_css_dom_crud"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4875,6 +5019,7 @@ project "test_css_style_application_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -4981,6 +5126,7 @@ project "test_html_css_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5083,6 +5229,7 @@ project "test_css_tokenizer_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5185,6 +5332,7 @@ project "test_css_tokenizer_unit"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5287,6 +5435,7 @@ project "test_css_parser_unit"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5389,6 +5538,7 @@ project "test_css_engine_unit"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5491,6 +5641,7 @@ project "test_css_engine_negative"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5593,6 +5744,7 @@ project "test_css_formatter_unit"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5695,6 +5847,7 @@ project "test_css_roundtrip_unit"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5797,6 +5950,7 @@ project "test_compound_descendant_selectors"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -5899,6 +6053,7 @@ project "test_selector_groups"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6001,6 +6156,7 @@ project "test_css_parser_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6103,6 +6259,7 @@ project "test_css_integration_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6205,6 +6362,7 @@ project "test_css_files_safe_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6307,6 +6465,7 @@ project "test_css_frameworks_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6409,6 +6568,7 @@ project "test_css_to_mark_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6511,6 +6671,7 @@ project "test_mdx_roundtrip_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6612,6 +6773,7 @@ project "test_jsx_roundtrip_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6713,6 +6875,109 @@ project "test_latex_parser_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_latex_treesitter"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_latex_treesitter"
+    targetextension ".exe"
+    
+    files {
+        "test/test_latex_treesitter.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/opt/freetype/include/freetype2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6817,6 +7082,7 @@ project "test_latex_html_baseline"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -6920,6 +7186,7 @@ project "test_validator_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7020,6 +7287,7 @@ project "test_ast_validator_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7121,6 +7389,7 @@ project "test_validator_path_reporting"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7222,6 +7491,7 @@ project "test_lambda_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7282,6 +7552,7 @@ project "test_lambda_repl_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7342,6 +7613,7 @@ project "test_lambda_proc_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7402,6 +7674,7 @@ project "test_js_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7462,6 +7735,7 @@ project "test_mir_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7522,6 +7796,7 @@ project "test_http_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7626,6 +7901,7 @@ project "test_latex_html_extended"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
@@ -7729,6 +8005,7 @@ project "test_lambda_proc_extended_gtest"
         "/opt/homebrew/include/libpng16",
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
         "/usr/local/include",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
     }
