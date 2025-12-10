@@ -51,7 +51,7 @@ Element* get_html_root_element(Input* input);
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool);
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
@@ -299,30 +299,87 @@ Element* get_html_root_element(Input* input) {
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
-void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool) {
-    if (!elem || !engine || !pool) return;
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count) {
+    if (!elem || !engine || !pool || !stylesheets || !count) return;
 
     TypeElmt* type = (TypeElmt*)elem->type;
     if (!type) return;
 
     // Check if this is a <link> element
     if (strcasecmp(type->name.str, "link") == 0) {
-        // TODO: Extract 'rel' and 'href' attributes
-        // For now, we'll rely on external -c flag
-        // Full implementation would:
-        // 1. Check rel="stylesheet"
-        // 2. Extract href attribute
-        // 3. Resolve relative path using base_path
-        // 4. Load and parse CSS file
-        // 5. Add to engine's stylesheet list
-        log_debug("[CSS] Found <link> element (attribute extraction not yet implemented)");
+        // Extract 'rel' and 'href' attributes
+        const char* rel = extract_element_attribute(elem, "rel", nullptr);
+        const char* href = extract_element_attribute(elem, "href", nullptr);
+
+        if (rel && href && strcasecmp(rel, "stylesheet") == 0) {
+            log_debug("[CSS] Found <link rel='stylesheet' href='%s'>", href);
+
+            // Resolve relative path using base_path
+            char css_path[1024];
+            if (href[0] == '/' || strstr(href, "://") != nullptr) {
+                // Absolute path or URL - use as-is (URLs won't load locally)
+                strncpy(css_path, href, sizeof(css_path) - 1);
+                css_path[sizeof(css_path) - 1] = '\0';
+            } else if (base_path) {
+                // Relative path - resolve against base_path
+                const char* last_slash = strrchr(base_path, '/');
+                if (last_slash) {
+                    size_t dir_len = last_slash - base_path + 1;
+                    if (dir_len < sizeof(css_path) - strlen(href) - 1) {
+                        strncpy(css_path, base_path, dir_len);
+                        css_path[dir_len] = '\0';
+                        strncat(css_path, href, sizeof(css_path) - dir_len - 1);
+                    } else {
+                        strncpy(css_path, href, sizeof(css_path) - 1);
+                        css_path[sizeof(css_path) - 1] = '\0';
+                    }
+                } else {
+                    strncpy(css_path, href, sizeof(css_path) - 1);
+                    css_path[sizeof(css_path) - 1] = '\0';
+                }
+            } else {
+                strncpy(css_path, href, sizeof(css_path) - 1);
+                css_path[sizeof(css_path) - 1] = '\0';
+            }
+
+            log_debug("[CSS] Loading stylesheet from: %s", css_path);
+
+            // Load and parse CSS file
+            char* css_content = read_text_file(css_path);
+            if (css_content) {
+                size_t css_len = strlen(css_content);
+                char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+                if (css_pool_copy) {
+                    strcpy(css_pool_copy, css_content);
+                    free(css_content);
+
+                    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_pool_copy, css_path);
+                    if (stylesheet && stylesheet->rule_count > 0) {
+                        log_debug("[CSS] Parsed linked stylesheet '%s': %zu rules", css_path, stylesheet->rule_count);
+
+                        // Add to list
+                        *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
+                                                                      (*count + 1) * sizeof(CssStylesheet*));
+                        (*stylesheets)[*count] = stylesheet;
+                        (*count)++;
+                    } else {
+                        log_warn("[CSS] Failed to parse stylesheet or empty: %s", css_path);
+                    }
+                } else {
+                    free(css_content);
+                    log_error("[CSS] Failed to allocate memory for CSS content");
+                }
+            } else {
+                log_warn("[CSS] Failed to load stylesheet: %s", css_path);
+            }
+        }
     }
 
     // Recursively process children
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_linked_stylesheets(child_item.element, engine, base_path, pool);
+            collect_linked_stylesheets(child_item.element, engine, base_path, pool, stylesheets, count);
         }
     }
 }
@@ -437,8 +494,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
 
     // Step 1: Collect and parse <link rel="stylesheet"> references
     log_debug("[CSS] Step 1: Collecting linked stylesheets...");
-    collect_linked_stylesheets(html_root, engine, base_path, pool);
-    // TODO: Add linked stylesheets to array when implemented
+    collect_linked_stylesheets(html_root, engine, base_path, pool, &stylesheets, stylesheet_count);
 
     // Step 2: Collect and parse <style> inline CSS
     log_debug("[CSS] Step 2: Collecting inline <style> elements...");
