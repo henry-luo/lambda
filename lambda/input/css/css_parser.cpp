@@ -841,17 +841,17 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         } else if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0) {
             // :host() is for Shadow DOM
             selector->type = CSS_SELECTOR_PSEUDO_IS; // treat similar to :is()
-            fprintf(stderr, "[CSS Parser] Shadow DOM function: '%s()'\n", func_name);
+            log_debug(" Shadow DOM function: '%s()'", func_name);
         } else {
             // Accept unknown pseudo-class functions
             selector->type = CSS_SELECTOR_PSEUDO_NOT; // default fallback
-            fprintf(stderr, "[CSS Parser] Generic functional pseudo-class: '%s()'\n", func_name);
+            log_debug(" Generic functional pseudo-class: '%s()'", func_name);
         }
 
         selector->value = func_name;
         selector->argument = pseudo_arg;
 
-        fprintf(stderr, "[CSS Parser] Functional pseudo-class: '%s(%s)'\n",
+        log_debug(" Functional pseudo-class: '%s(%s)'",
                func_name, pseudo_arg ? pseudo_arg : "");
         matched = true;
     } else if (token->type == CSS_TOKEN_COLON) {
@@ -899,12 +899,12 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     } else {
                         // Use generic pseudo-element type to preserve vendor-specific elements
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
-                        fprintf(stderr, "[CSS Parser] Generic pseudo-element: '::%s'\n", elem_name);
+                        log_debug(" Generic pseudo-element: '::%s'", elem_name);
                     }
 
                     selector->value = elem_name;
                     selector->argument = NULL;
-                    fprintf(stderr, "[CSS Parser] Pseudo-element: '::%s'\n", elem_name);
+                    log_debug(" Pseudo-element: '::%s'", elem_name);
                     matched = true;
                 }
                 if (!matched) {
@@ -996,13 +996,13 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 } else {
                     // Accept unknown pseudo-classes but use a generic type
                     selector->type = CSS_SELECTOR_PSEUDO_HOVER; // default fallback
-                    fprintf(stderr, "[CSS Parser] Generic pseudo-class: ':%s'\n", pseudo_name);
+                    log_debug(" Generic pseudo-class: ':%s'", pseudo_name);
                 }
 
                 selector->value = pseudo_name;
                 selector->argument = NULL;
 
-                fprintf(stderr, "[CSS Parser] Simple pseudo-class: ':%s'\n", pseudo_name);
+                log_debug(" Simple pseudo-class: ':%s'", pseudo_name);
                 matched = true;
 
             } else if (pseudo_token->type == CSS_TOKEN_FUNCTION) {
@@ -1104,17 +1104,17 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 } else if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0) {
                     // :host() is for Shadow DOM
                     selector->type = CSS_SELECTOR_PSEUDO_IS; // treat similar to :is()
-                    fprintf(stderr, "[CSS Parser] Shadow DOM pseudo-class: ':%s()'\n", func_name);
+                    log_debug(" Shadow DOM pseudo-class: ':%s()'", func_name);
                 } else {
                     // Accept unknown functional pseudo-classes
                     selector->type = CSS_SELECTOR_PSEUDO_NOT; // default fallback
-                    fprintf(stderr, "[CSS Parser] Generic functional pseudo-class: ':%s()'\n", func_name);
+                    log_debug(" Generic functional pseudo-class: ':%s()'", func_name);
                 }
 
                 selector->value = func_name;
                 selector->argument = pseudo_arg;
 
-                fprintf(stderr, "[CSS Parser] Functional pseudo-class after colon: ':%s(%s)'\n",
+                log_debug(" Functional pseudo-class after colon: ':%s(%s)'",
                        func_name, pseudo_arg ? pseudo_arg : "");
                 matched = true;
             }
@@ -1252,7 +1252,7 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
     // If no valid selector was matched, return NULL
     if (!matched) {
-        fprintf(stderr, "[CSS Parser] WARNING: No valid selector found at position %d (token type %d)\n",
+        log_debug(" WARNING: No valid selector found at position %d (token type %d)",
                 *pos, token->type);
         return NULL;
     }
@@ -1264,15 +1264,13 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
 
-    fprintf(stderr, "[CSS Parser] Parsing declaration at position %d\n", *pos);
-
     // Skip leading whitespace
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
     if (*pos >= token_count) return NULL;
 
     // Expect property name (identifier)
     if (tokens[*pos].type != CSS_TOKEN_IDENT) {
-        fprintf(stderr, "[CSS Parser] Expected IDENT for property, got token type %d\n", tokens[*pos].type);
+        log_debug("[CSS Parser] Expected IDENT for property, got token type %d", tokens[*pos].type);
         // Skip to next semicolon or right brace to avoid infinite loop
         while (*pos < token_count &&
                tokens[*pos].type != CSS_TOKEN_SEMICOLON &&
@@ -1294,11 +1292,9 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         name_buf[tokens[*pos].length] = '\0';
         property_name = name_buf;
     } else {
-        fprintf(stderr, "[CSS Parser] No property name in token\n");
+        log_debug("[CSS Parser] No property name in token");
         return NULL; // No valid property name
     }
-
-    fprintf(stderr, "[CSS Parser] Property name: '%s'\n", property_name);
 
     (*pos)++;
 
@@ -1359,7 +1355,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     }
 
     if (value_count == 0) {
-        fprintf(stderr, "[CSS Parser] No value tokens found\n");
+        log_debug("[CSS Parser] No value tokens found");
         return NULL;
     }
 
@@ -1523,7 +1519,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule) {
     if (!tokens || token_count <= 0 || !pool || !out_rule) return 0;
 
-    fprintf(stderr, "[CSS Parser] Parsing rule from %d tokens\n", token_count);
+    log_debug(" Parsing rule from %d tokens", token_count);
 
     int pos = 0;
     int start_pos = 0;
@@ -1531,7 +1527,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     // Skip leading whitespace and comments
     pos = css_skip_whitespace_tokens(tokens, pos, token_count);
     if (pos >= token_count) {
-        fprintf(stderr, "[CSS Parser] No tokens after whitespace skip\n");
+        log_debug(" No tokens after whitespace skip");
         return 0;
     }
 
@@ -1540,7 +1536,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     // Check for @-rules
     if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
         const char* at_keyword = tokens[pos].value;
-        fprintf(stderr, "[CSS Parser] Parsing @-rule: %s\n", at_keyword ? at_keyword : "(null)");
+        log_debug(" Parsing @-rule: %s", at_keyword ? at_keyword : "(null)");
         pos++; // consume @keyword token
 
         // Skip leading '@' in keyword name if present
@@ -1552,7 +1548,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         // Create rule structure
         CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
         if (!rule) {
-            fprintf(stderr, "[CSS Parser] ERROR: Failed to allocate rule\n");
+            log_debug(" ERROR: Failed to allocate rule");
             return 0;
         }
         rule->pool = pool;
@@ -1637,7 +1633,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             }
 
             *out_rule = rule;
-            fprintf(stderr, "[CSS Parser] Parsed conditional @-rule with %zu nested rules\n",
+            log_debug(" Parsed conditional @-rule with %zu nested rules",
                 rule->data.conditional_rule.rule_count);
             return pos - start_pos;
 
@@ -1664,7 +1660,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             }
 
             *out_rule = rule;
-            fprintf(stderr, "[CSS Parser] Parsed simple @-rule: %s\n", keyword_name);
+            log_debug(" Parsed simple @-rule: %s", keyword_name);
             return pos - start_pos;
 
         } else {
@@ -1676,7 +1672,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 rule->type = CSS_RULE_KEYFRAMES;
             } else {
                 // Unknown at-rule - skip it
-                fprintf(stderr, "[CSS Parser] Skipping unknown @-rule: %s\n", keyword_name ? keyword_name : "null");
+                log_debug(" Skipping unknown @-rule: %s", keyword_name ? keyword_name : "null");
                 return 0;
             }
 
@@ -1745,19 +1741,36 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 strcat(content, "{");
 
                 // Build body content
+                // Track if we're inside a function like url() to avoid adding spaces
+                int paren_depth = 0;
                 for (int i = content_start; i < content_end; i++) {
                     if (tokens[i].value) {
+                        // Track parenthesis depth for URL functions
+                        if (tokens[i].type == CSS_TOKEN_FUNCTION ||
+                            (tokens[i].type == CSS_TOKEN_DELIM && tokens[i].value[0] == '(')) {
+                            paren_depth++;
+                        }
+                        if (tokens[i].type == CSS_TOKEN_RIGHT_PAREN) {
+                            paren_depth--;
+                            if (paren_depth < 0) paren_depth = 0;
+                        }
+
                         if (tokens[i].type == CSS_TOKEN_WHITESPACE) {
-                            // Preserve some whitespace for readability
-                            strcat(content, " ");
+                            // Only preserve whitespace outside of function calls
+                            if (paren_depth == 0) {
+                                strcat(content, " ");
+                            }
                         } else {
-                            // Add space before tokens that need it
-                            if (strlen(content) > 0 && content[strlen(content)-1] != '{' &&
+                            // Add space before tokens that need it - but not inside function calls
+                            if (paren_depth == 0 &&
+                                strlen(content) > 0 && content[strlen(content)-1] != '{' &&
                                 content[strlen(content)-1] != ' ' &&
+                                content[strlen(content)-1] != '(' &&
                                 tokens[i].type != CSS_TOKEN_SEMICOLON &&
                                 tokens[i].type != CSS_TOKEN_COLON &&
                                 tokens[i].type != CSS_TOKEN_COMMA &&
-                                tokens[i].type != CSS_TOKEN_RIGHT_BRACE) {
+                                tokens[i].type != CSS_TOKEN_RIGHT_BRACE &&
+                                tokens[i].type != CSS_TOKEN_RIGHT_PAREN) {
                                 strcat(content, " ");
                             }
                             strcat(content, tokens[i].value);
@@ -1769,38 +1782,38 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 strcat(content, " }");
 
                 rule->data.generic_rule.content = content;
-                fprintf(stderr, "[CSS Parser] Stored content for %s: '%s'\n", keyword_name, content);
+                log_debug(" Stored content for %s: '%s'", keyword_name, content);
 
             } else if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
                 pos++; // consume ';'
             }
 
             *out_rule = rule;
-            fprintf(stderr, "[CSS Parser] Parsed generic @-rule: %s\n", keyword_name);
+            log_debug(" Parsed generic @-rule: %s", keyword_name);
             return pos - start_pos;
         }
     }    // Parse selector(s) using enhanced parser (supports compound, descendant, and comma-separated selectors)
-    fprintf(stderr, "[CSS Parser] Parsing selectors at position %d\n", pos);
+    log_debug(" Parsing selectors at position %d", pos);
 
     // Parse selector group (handles single selectors and comma-separated groups)
     CssSelectorGroup* selector_group = css_parse_selector_group_from_tokens(tokens, &pos, token_count, pool);
     if (!selector_group) {
-        fprintf(stderr, "[CSS Parser] ERROR: Failed to parse selector group\n");
+        log_debug(" ERROR: Failed to parse selector group");
         return 0;
     }
 
-    fprintf(stderr, "[CSS Parser] Parsed selector group with %zu selector(s)\n", selector_group->selector_count);
+    log_debug(" Parsed selector group with %zu selector(s)", selector_group->selector_count);
 
     // Skip whitespace
     pos = css_skip_whitespace_tokens(tokens, pos, token_count);
 
     // Expect opening brace
     if (pos >= token_count || tokens[pos].type != CSS_TOKEN_LEFT_BRACE) {
-        fprintf(stderr, "[CSS Parser] ERROR: Expected '{' but got token type %d at position %d\n",
+        log_debug(" ERROR: Expected '{' but got token type %d at position %d",
                 pos < token_count ? tokens[pos].type : -1, pos);
         return 0;
     }
-    fprintf(stderr, "[CSS Parser] Found '{', parsing declarations\n");
+    log_debug(" Found '{', parsing declarations");
     pos++;
 
     // Parse declarations
@@ -1816,9 +1829,9 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
         // Parse declaration
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
-        fprintf(stderr, "[CSS Parser] After parsing: decl=%p\n", (void*)decl);
+        log_debug(" After parsing: decl=%p", (void*)decl);
         if (decl) {
-            fprintf(stderr, "[CSS Parser] Parsed declaration: property_id=%d for position %d\n",
+            log_debug(" Parsed declaration: property_id=%d for position %d",
                     decl->property_id, decl_count);
 
             // Expand array if needed
@@ -1829,7 +1842,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 declarations = new_decls;
             }
             declarations[decl_count++] = decl;
-            fprintf(stderr, "[CSS Parser] Stored declaration at index %d, now have %d declarations\n",
+            log_debug(" Stored declaration at index %d, now have %d declarations",
                     decl_count - 1, decl_count);
         }
 
@@ -1857,10 +1870,10 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     rule->data.style_rule.declarations = declarations;
     rule->data.style_rule.declaration_count = decl_count;
 
-    fprintf(stderr, "[CSS Parser] Created rule with %d declarations:\n", decl_count);
+    log_debug(" Created rule with %d declarations:", decl_count);
     for (int i = 0; i < decl_count && i < 5; i++) {
         if (declarations[i]) {
-            fprintf(stderr, "[CSS Parser]   Declaration[%d]: property_id=%d\n", i, declarations[i]->property_id);
+            log_debug("   Declaration[%d]: property_id=%d", i, declarations[i]->property_id);
         }
     }
 

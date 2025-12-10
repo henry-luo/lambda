@@ -1540,8 +1540,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing max-width property");
             if (!block) break;
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-            block->blk->given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
-            log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
+            // CSS 2.2 Section 10.4: max-width percentage resolves against containing block width
+            // If parent has 0 or auto width, percentage max-width should be treated as 'none'
+            // because the containing block's width depends on this element's width
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE && lycon->block.parent &&
+                lycon->block.parent->content_width <= 0) {
+                block->blk->given_max_width = -1;  // -1 means 'none' (unconstrained)
+                log_debug("[CSS] Max-width: percentage on 0-width parent, treating as 'none'");
+            } else {
+                block->blk->given_max_width = resolve_length_value(lycon, CSS_PROPERTY_MAX_WIDTH, value);
+                log_debug("[CSS] Max-width: %.2f px", block->blk->given_max_width);
+            }
             break;
         }
 

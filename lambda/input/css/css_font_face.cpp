@@ -94,7 +94,13 @@ static char* extract_url_value(const char* src_value, Pool* pool) {
 char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     if (!url) return nullptr;
 
-    // If URL is absolute, return as-is
+    // Skip remote URLs - we don't support downloading fonts from http/https URLs
+    if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
+        log_debug("[CSS FontFace] Skipping remote font URL: %s", url);
+        return nullptr;  // Return nullptr to indicate font can't be loaded
+    }
+
+    // If URL is absolute path, return as-is
     if (url[0] == '/') {
         if (pool) {
             return pool_strdup(pool, url);
@@ -329,13 +335,17 @@ CssFontFaceDescriptor** css_extract_font_faces(CssStylesheet* stylesheet,
 
         CssFontFaceDescriptor* descriptor = css_parse_font_face_content(content, pool);
         if (descriptor) {
-            // Resolve relative URL
+            // Resolve relative URL (or skip remote URLs)
             if (descriptor->src_url && base_path) {
                 char* resolved = css_resolve_font_url(descriptor->src_url, base_path, pool);
                 if (resolved) {
                     if (!pool) free(descriptor->src_url);
                     descriptor->src_url = resolved;
                     log_debug("[CSS FontFace]   resolved src: '%s'", descriptor->src_url);
+                } else {
+                    // URL could not be resolved (e.g., remote URL) - clear it
+                    if (!pool) free(descriptor->src_url);
+                    descriptor->src_url = nullptr;
                 }
             }
 
