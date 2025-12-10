@@ -274,6 +274,40 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // calculate position based on offset properties and containing block
     calculate_absolute_position(lycon, block, cb);
 
+    // CSS 2.2 Section 10.6.4: For absolutely positioned elements without explicit top/bottom,
+    // use the "static position" - where the element would be in normal flow
+    // The static Y position is the parent's current advance_y (where next block would go)
+    if (!block->position->has_top && !block->position->has_bottom) {
+        // Calculate static position: pa_block->advance_y is relative to parent's content area
+        // We need to convert this to be relative to the containing block
+        // The static-position containing block is the parent element, not necessarily cb
+        float static_y = pa_block->advance_y;
+        // Add margin.top (if not already included)
+        if (block->bound && block->bound->margin.top > 0) {
+            static_y += block->bound->margin.top;
+        }
+        log_debug("[STATIC POS] Using static Y position: %.1f (pa_block->advance_y=%.1f)",
+                  static_y, pa_block->advance_y);
+        block->y = static_y;
+    }
+    // Similarly for X when neither left nor right specified
+    if (!block->position->has_left && !block->position->has_right) {
+        float static_x = pa_line->left;  // Line's left edge for static horizontal position
+        if (block->bound && block->bound->margin.left > 0) {
+            static_x += block->bound->margin.left;
+        }
+        log_debug("[STATIC POS] Using static X position: %.1f (pa_line->left=%.1f)",
+                  static_x, pa_line->left);
+        block->x = static_x;
+    }
+
+    // Absolutely positioned elements establish a new BFC
+    // CSS 2.2 Section 9.4.1: "Absolutely positioned elements ... establish new BFCs"
+    lycon->block.is_bfc_root = true;
+    lycon->block.establishing_element = block;
+    block_context_reset_floats(&lycon->block);
+    log_debug("[ABS BFC] Established new BFC for absolutely positioned element %s", block->node_name());
+
     // setup inline context
     setup_inline(lycon, block);
 
@@ -293,6 +327,31 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     if (block->position && block->position->clear != CSS_VALUE_NONE) {
         log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
+    }
+
+    // BFC height expansion to contain floats
+    // CSS 2.2 Section 10.6.7: For BFC roots (including position:absolute),
+    // the heights of floating descendants are taken into account
+    float max_float_bottom = 0;
+    if (lycon->block.is_bfc_root || lycon->block.establishing_element == block) {
+        // Find the maximum bottom of all floated children (including margins)
+        for (FloatBox* fb = lycon->block.left_floats; fb; fb = fb->next) {
+            log_debug("[ABS BFC] left float margin_box_bottom=%.1f", fb->margin_box_bottom);
+            if (fb->margin_box_bottom > max_float_bottom) {
+                max_float_bottom = fb->margin_box_bottom;
+            }
+        }
+        for (FloatBox* fb = lycon->block.right_floats; fb; fb = fb->next) {
+            log_debug("[ABS BFC] right float margin_box_bottom=%.1f", fb->margin_box_bottom);
+            if (fb->margin_box_bottom > max_float_bottom) {
+                max_float_bottom = fb->margin_box_bottom;
+            }
+        }
+        // Also check lowest_float_bottom which may be set during child layout
+        if (lycon->block.lowest_float_bottom > max_float_bottom) {
+            max_float_bottom = lycon->block.lowest_float_bottom;
+        }
+        log_debug("[ABS BFC] max_float_bottom=%.1f for %s", max_float_bottom, block->node_name());
     }
 
     // adjust block width and height based on content
@@ -318,6 +377,13 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         log_debug("auto-sizing height: flow_height=%f (includes top border+padding), adding padding_bottom=%f, border_bottom=%f",
             flow_height, padding_bottom, border_bottom);
         block->height = flow_height + padding_bottom + border_bottom;
+
+        // BFC height expansion: if floats extend beyond flow content, expand height
+        if (max_float_bottom > block->height) {
+            log_debug("[ABS BFC] Expanding height from %.1f to %.1f to contain floats",
+                      block->height, max_float_bottom);
+            block->height = max_float_bottom;
+        }
     }
     log_debug("final block position: x=%f, y=%f, width=%f, height=%f",
         block->x, block->y, block->width,  block->height);
