@@ -22,7 +22,7 @@ void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_html_impl(Input* input, const char* html_string);  // Internal - use input_from_source()
 void parse_latex(Input* input, const char* latex_string);
-void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser
+extern "C" void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
 void parse_asciidoc(Input* input, const char* asciidoc_string);
