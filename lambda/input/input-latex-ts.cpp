@@ -230,6 +230,22 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
         return {.item = ITEM_NULL};
     }
     
+    // Operator nodes (-, --, ---, and potentially other punctuation)
+    // Extract the actual text and decide how to handle it
+    if (strcmp(node_type, "operator") == 0) {
+        // Get the operator text
+        String* op_text = extract_text(ctx, node, source);
+        if (op_text && op_text->len > 0) {
+            // Check if it's a dash sequence (for ligature processing)
+            if (op_text->chars[0] == '-') {
+                // Return as text string for ligature processing
+                return {.item = s2it(op_text)};
+            }
+            // For other operators, also return as text
+            return {.item = s2it(op_text)};
+        }
+    }
+    
     // Default: use node type as symbol name
     return {.item = y2it(builder.createSymbol(node_type))};
 }
