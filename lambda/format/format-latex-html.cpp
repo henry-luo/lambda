@@ -790,10 +790,24 @@ typedef enum {
     FONT_FAMILY_TYPEWRITER
 } FontFamily;
 
+typedef enum {
+    FONT_SIZE_TINY,         // \tiny
+    FONT_SIZE_SCRIPTSIZE,   // \scriptsize
+    FONT_SIZE_FOOTNOTESIZE, // \footnotesize
+    FONT_SIZE_SMALL,        // \small
+    FONT_SIZE_NORMALSIZE,   // \normalsize (default)
+    FONT_SIZE_LARGE,        // \large
+    FONT_SIZE_LARGE_CAP,    // \Large
+    FONT_SIZE_LARGE_2,      // \LARGE
+    FONT_SIZE_HUGE,         // \huge
+    FONT_SIZE_HUGE_CAP      // \Huge
+} FontSize;
+
 typedef struct {
     FontSeries series;
     FontShape shape;
     FontFamily family;
+    FontSize size;
     bool em_active;  // Track if \em is active (for toggling)
 } FontContext;
 
@@ -846,7 +860,7 @@ static void process_element_content_reader(StringBuf* html_buf, const ElementRea
 static void process_element_content_simple_reader(StringBuf* html_buf, const ElementReader& elem, Pool* pool, int depth, FontContext* font_ctx);
 
 static DocumentState doc_state = {0};
-static FontContext font_context = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, false};
+static FontContext font_context = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, FONT_SIZE_NORMALSIZE, false};
 static int chapter_counter = 0;         // Counter for chapter numbering within document
 static int section_counter = 0;         // Counter for section numbering within chapter (resets on new chapter)
 static int global_section_id = 0;       // Global counter for id="sec-N" attribute
@@ -863,6 +877,22 @@ static const char* get_alignment_css_class(AlignmentMode align) {
 }
 
 // Helper functions for font context
+static const char* get_size_css_class(FontSize size) {
+    switch (size) {
+        case FONT_SIZE_TINY: return "tiny";
+        case FONT_SIZE_SCRIPTSIZE: return "scriptsize";
+        case FONT_SIZE_FOOTNOTESIZE: return "footnotesize";
+        case FONT_SIZE_SMALL: return "small";
+        case FONT_SIZE_NORMALSIZE: return "normalsize";
+        case FONT_SIZE_LARGE: return "large";
+        case FONT_SIZE_LARGE_CAP: return "Large";
+        case FONT_SIZE_LARGE_2: return "LARGE";
+        case FONT_SIZE_HUGE: return "huge";
+        case FONT_SIZE_HUGE_CAP: return "Huge";
+        default: return "normalsize";
+    }
+}
+
 static const char* get_font_css_class(FontContext* ctx) {
     // Generate CSS class based on font context
     // Priority: family > series > shape
@@ -896,6 +926,10 @@ static bool needs_font_span(FontContext* ctx) {
     return ctx->series != FONT_SERIES_NORMAL ||
            ctx->shape != FONT_SHAPE_UPRIGHT ||
            ctx->family != FONT_FAMILY_ROMAN;
+}
+
+static bool needs_size_span(FontContext* ctx) {
+    return ctx->size != FONT_SIZE_NORMALSIZE;
 }
 
 // Helper: Extract string content from element's first argument
@@ -1038,6 +1072,8 @@ static const struct {
     {"sout", "sout"},
 
     // Font sizes - using LaTeX.js naming convention
+    // NOTE: These are actually both scoped AND declaration commands in LaTeX
+    // For now, handle them as scoped (wrapping content) via text_command_map
     {"tiny", "tiny"},
     {"scriptsize", "scriptsize"},
     {"footnotesize", "footnotesize"},
@@ -1305,17 +1341,14 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
     // Check if we have a valid AST
     if (latex_ast.item == ITEM_NULL) {
-        fprintf(stderr, "DEBUG: format_latex_to_html: latex_ast is NULL\n");
     } else {
         // Process the LaTeX AST without automatic paragraph wrapper
         // Individual text content will be wrapped in paragraphs as needed
-        fprintf(stderr, "DEBUG: format_latex_to_html: About to process LaTeX AST, type_id=%d\n", get_type_id(latex_ast));
 
         // use MarkReader API
         ItemReader ast_reader(latex_ast.to_const());
         process_latex_element_reader(html_buf, ast_reader, pool, 1, &font_context);
         
-        fprintf(stderr, "DEBUG: format_latex_to_html: Finished processing LaTeX AST\n");
     }
 
     // Break down the CSS into smaller chunks to avoid C++ compiler issues with very long string literals
@@ -1669,6 +1702,11 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Initialize paragraph state for CSS class management
             ParagraphState para_state = {false, false};
             
+            // Track font size for span management
+            bool size_span_open = false;
+            FontSize span_size = FONT_SIZE_NORMALSIZE;
+            
+            
             List* list = (List*)elem;
             for (size_t i = 0; i < list->length; i++) {
                 Item child = list->items[i];
@@ -1720,46 +1758,79 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                 }
                 
                 // Open paragraph for inline content if needed
+                // But skip if this is whitespace-only text (don't create empty paragraphs)
+                bool should_open_paragraph = false;
                 if (!is_block && !in_paragraph) {
-                    // Determine CSS class for paragraph
-                    const char* para_class = nullptr;
-                    if (para_state.noindent_next) {
-                        para_class = "noindent";
-                        para_state.noindent_next = false;
-                    } else if (para_state.after_block_element) {
-                        para_class = "continue";
-                        para_state.after_block_element = false;
+                    // Check if this child has actual content (not just whitespace)
+                    if (child_type == LMD_TYPE_STRING) {
+                        String* str = child.get_string();
+                        if (str && str->chars) {
+                            // Check if string is non-empty after trimming whitespace
+                            bool has_content = false;
+                            for (size_t k = 0; k < str->len; k++) {
+                                char c = str->chars[k];
+                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                                    has_content = true;
+                                    break;
+                                }
+                            }
+                            should_open_paragraph = has_content;
+                        }
+                    } else if (child_type != LMD_TYPE_SYMBOL) {
+                        // For non-string, non-symbol elements, open paragraph
+                        // (symbols like parbreak don't need paragraphs)
+                        should_open_paragraph = true;
                     }
                     
-                    // Open paragraph with appropriate class
-                    if (para_class) {
-                        stringbuf_append_str(html_buf, "<p class=\"");
-                        stringbuf_append_str(html_buf, para_class);
-                        stringbuf_append_str(html_buf, "\">");
-                    } else {
-                        stringbuf_append_str(html_buf, "<p>");
+                    if (should_open_paragraph) {
+                        // Determine CSS class for paragraph
+                        const char* para_class = nullptr;
+                        if (para_state.noindent_next) {
+                            para_class = "noindent";
+                            para_state.noindent_next = false;
+                        } else if (para_state.after_block_element) {
+                            para_class = "continue";
+                            para_state.after_block_element = false;
+                        }
+                        
+                        // Open paragraph with appropriate class
+                        if (para_class) {
+                            stringbuf_append_str(html_buf, "<p class=\"");
+                            stringbuf_append_str(html_buf, para_class);
+                            stringbuf_append_str(html_buf, "\">");
+                        } else {
+                            stringbuf_append_str(html_buf, "<p>");
+                        }
+                        in_paragraph = true;
+                        needs_paragraph = false;
                     }
-                    in_paragraph = true;
-                    needs_paragraph = false;
                 }
                 
                 // Handle LIST children (tree-sitter creates lists for mixed content)
                 if (child_type == LMD_TYPE_LIST) {
                     List* child_list = child.list;
                     bool font_span_open = false;
+                    bool size_span_open = false;
+                    FontSize prev_size = font_ctx->size;  // Track previous size to detect changes
                     
                     for (size_t j = 0; j < child_list->length; j++) {
                         Item list_item = child_list->items[j];
                         TypeId list_item_type = get_type_id(list_item);
                         
+                        log_debug("LIST item %d: type=%d, current font size=%d", (int)j, list_item_type, font_ctx->size);
+                        
                         // Check for parbreak in list items
                         if (list_item_type == LMD_TYPE_SYMBOL) {
                             Symbol* sym = (Symbol*)(list_item.symbol_ptr);
                             if (sym && strcmp(sym->chars, "parbreak") == 0) {
-                                // Close font span before paragraph
+                                // Close font and size spans before paragraph
                                 if (font_span_open) {
                                     stringbuf_append_str(html_buf, "</span>");
                                     font_span_open = false;
+                                }
+                                if (size_span_open) {
+                                    stringbuf_append_str(html_buf, "</span>");
+                                    size_span_open = false;
                                 }
                                 if (in_paragraph) {
                                     close_paragraph(html_buf, true);  // Will remove if empty
@@ -1794,10 +1865,14 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         
                         // Close paragraph before block element
                         if (item_is_block && in_paragraph) {
-                            // Close font span before paragraph
+                            // Close font and size spans before paragraph
                             if (font_span_open) {
                                 stringbuf_append_str(html_buf, "</span>");
                                 font_span_open = false;
+                            }
+                            if (size_span_open) {
+                                stringbuf_append_str(html_buf, "</span>");
+                                size_span_open = false;
                             }
                             stringbuf_append_str(html_buf, "</p>\n");
                             in_paragraph = false;
@@ -1809,26 +1884,51 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         }
                         
                         // Open paragraph for inline content
+                        // But skip if this is whitespace-only text (don't create empty paragraphs)
+                        bool should_open_para_in_list = false;
                         if (!item_is_block && !in_paragraph) {
-                            // Determine CSS class for paragraph
-                            const char* para_class = nullptr;
-                            if (para_state.noindent_next) {
-                                para_class = "noindent";
-                                para_state.noindent_next = false;
-                            } else if (para_state.after_block_element) {
-                                para_class = "continue";
-                                para_state.after_block_element = false;
+                            // Check if this list_item has actual content (not just whitespace)
+                            if (list_item_type == LMD_TYPE_STRING) {
+                                String* str = list_item.get_string();
+                                if (str && str->chars) {
+                                    // Check if string is non-empty after trimming whitespace
+                                    bool has_content = false;
+                                    for (size_t k = 0; k < str->len; k++) {
+                                        char c = str->chars[k];
+                                        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+                                            has_content = true;
+                                            break;
+                                        }
+                                    }
+                                    should_open_para_in_list = has_content;
+                                }
+                            } else if (list_item_type != LMD_TYPE_SYMBOL) {
+                                // For non-string, non-symbol elements, open paragraph
+                                // (symbols like parbreak don't need paragraphs)
+                                should_open_para_in_list = true;
                             }
                             
-                            // Open paragraph with appropriate class
-                            if (para_class) {
-                                stringbuf_append_str(html_buf, "<p class=\"");
-                                stringbuf_append_str(html_buf, para_class);
-                                stringbuf_append_str(html_buf, "\">");
-                            } else {
-                                stringbuf_append_str(html_buf, "<p>");
+                            if (should_open_para_in_list) {
+                                // Determine CSS class for paragraph
+                                const char* para_class = nullptr;
+                                if (para_state.noindent_next) {
+                                    para_class = "noindent";
+                                    para_state.noindent_next = false;
+                                } else if (para_state.after_block_element) {
+                                    para_class = "continue";
+                                    para_state.after_block_element = false;
+                                }
+                                
+                                // Open paragraph with appropriate class
+                                if (para_class) {
+                                    stringbuf_append_str(html_buf, "<p class=\"");
+                                    stringbuf_append_str(html_buf, para_class);
+                                    stringbuf_append_str(html_buf, "\">");
+                                } else {
+                                    stringbuf_append_str(html_buf, "<p>");
+                                }
+                                in_paragraph = true;
                             }
-                            in_paragraph = true;
                         }
                         
                         // Before processing text content, check if we need to open a font span
@@ -1848,15 +1948,65 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         
                         // Process the item (this may change font_ctx for font declaration commands)
                         process_latex_element(html_buf, list_item, pool, depth + 1, font_ctx);
+                        
+                        // AFTER processing, check if font size has changed and manage spans
+                        if (font_ctx->size != prev_size) {
+                            // DEBUG
+                            
+                            // Close old size span if one was open
+                            if (size_span_open) {
+                                stringbuf_append_str(html_buf, "</span>");
+                                size_span_open = false;
+                                log_debug("Closed old size span");
+                            }
+                            
+                            // Open new size span if needed
+                            if (needs_size_span(font_ctx)) {
+                                const char* size_class = get_size_css_class(font_ctx->size);
+                                stringbuf_append_str(html_buf, "<span class=\"");
+                                stringbuf_append_str(html_buf, size_class);
+                                stringbuf_append_str(html_buf, "\">");
+                                size_span_open = true;
+                                log_debug("Opened new size span: %s", size_class);
+                            }
+                            
+                            prev_size = font_ctx->size;
+                        }
                     }
                     
-                    // Close any open font span at the end of the list
+                    // Close any open spans at the end of the list (inner to outer)
                     if (font_span_open) {
                         stringbuf_append_str(html_buf, "</span>");
                         font_span_open = false;
                     }
+                    if (size_span_open) {
+                        stringbuf_append_str(html_buf, "</span>");
+                        size_span_open = false;
+                    }
                 } else {
+                    // For non-LIST children, manage size spans here
+                    // Process the child (which may change font_ctx for declarations like \small)
                     process_latex_element(html_buf, child, pool, depth + 1, font_ctx);
+                    
+                    // AFTER processing, check if font size changed
+                    if (font_ctx->size != span_size) {
+                        // Close old size span if one was open
+                        if (size_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            size_span_open = false;
+                        }
+                        
+                        // Open new size span if needed for next child
+                        if (needs_size_span(font_ctx)) {
+                            const char* size_class = get_size_css_class(font_ctx->size);
+                            stringbuf_append_str(html_buf, "<span class=\"");
+                            stringbuf_append_str(html_buf, size_class);
+                            stringbuf_append_str(html_buf, "\">");
+                            size_span_open = true;
+                        }
+                        
+                        span_size = font_ctx->size;
+                    }
                 }
                 
                 // After processing block element, set flag for next paragraph
@@ -1864,6 +2014,12 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                     para_state.after_block_element = true;
                     needs_paragraph = true;
                 }
+            }
+            
+            // Close any open size span at the end
+            if (size_span_open) {
+                stringbuf_append_str(html_buf, "</span>");
+                size_span_open = false;
             }
             
             // Close final paragraph if still open
@@ -2679,6 +2835,116 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             font_ctx->family = FONT_FAMILY_TYPEWRITER;
             return;
         }
+        // Font size declaration commands
+        else if (strcmp(cmd_name, "tiny") == 0) {
+            font_ctx->size = FONT_SIZE_TINY;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "scriptsize") == 0) {
+            font_ctx->size = FONT_SIZE_SCRIPTSIZE;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "footnotesize") == 0) {
+            font_ctx->size = FONT_SIZE_FOOTNOTESIZE;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "small") == 0) {
+            font_ctx->size = FONT_SIZE_SMALL;
+            // Declaration command - just sets size, doesn't wrap content
+            return;
+        }
+        else if (strcmp(cmd_name, "normalsize") == 0) {
+            font_ctx->size = FONT_SIZE_NORMALSIZE;
+            // normalsize doesn't need spans (it's the default)
+            if (elem->length > 0) {
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "large") == 0) {
+            font_ctx->size = FONT_SIZE_LARGE;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "Large") == 0) {
+            font_ctx->size = FONT_SIZE_LARGE_CAP;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "LARGE") == 0) {
+            font_ctx->size = FONT_SIZE_LARGE_2;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "huge") == 0) {
+            font_ctx->size = FONT_SIZE_HUGE;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "Huge") == 0) {
+            font_ctx->size = FONT_SIZE_HUGE_CAP;
+            if (elem->length > 0) {
+                const char* size_class = get_size_css_class(font_ctx->size);
+                stringbuf_append_str(html_buf, "<span class=\"");
+                stringbuf_append_str(html_buf, size_class);
+                stringbuf_append_str(html_buf, "\">");
+                process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            return;
+        }
         else if (strcmp(cmd_name, "em") == 0) {
             // Toggle between italic and upright
             if (font_ctx->shape == FONT_SHAPE_UPRIGHT) {
@@ -2694,6 +2960,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             font_ctx->series = FONT_SERIES_NORMAL;
             font_ctx->shape = FONT_SHAPE_UPRIGHT;
             font_ctx->family = FONT_FAMILY_ROMAN;
+            font_ctx->size = FONT_SIZE_NORMALSIZE;
             font_ctx->em_active = false;
             return;
         }
@@ -2915,35 +3182,54 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
         return;
     }
 
-    // Process element items, wrapping text in font spans as needed
+    log_debug("process_element_content_simple: elem->length=%d, font_ctx->size=%d", elem->length, font_ctx->size);
+
+    // Process element items, wrapping text in font and size spans as needed
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
         bool font_span_open = false;
+        bool size_span_open = false;
+        FontSize span_size = FONT_SIZE_NORMALSIZE;  // Track what size span is currently open
 
         for (int i = 0; i < elem->length; i++) {
             Item content_item = elem->items[i];
             TypeId item_type = get_type_id(content_item);
+            
+            log_debug("  item %d: type=%d, font_ctx->size=%d, span_size=%d", i, item_type, font_ctx->size, span_size);
 
-            // Before processing, check if we need to open a font span for text/textblocks
-            if (needs_font_span(font_ctx) && !font_span_open && item_type == LMD_TYPE_STRING) {
-                const char* css_class = get_font_css_class(font_ctx);
-                stringbuf_append_str(html_buf, "<span class=\"");
-                stringbuf_append_str(html_buf, css_class);
-                stringbuf_append_str(html_buf, "\">");
-                font_span_open = true;
+            // For STRING items, ensure correct size span is open BEFORE processing
+            if (item_type == LMD_TYPE_STRING) {
+                // Check if we need to change the size span
+                if (font_ctx->size != span_size) {
+                    // Close old size span if one was open
+                    if (size_span_open) {
+                        stringbuf_append_str(html_buf, "</span>");
+                        size_span_open = false;
+                    }
+                    
+                    // Open new size span if needed
+                    if (needs_size_span(font_ctx)) {
+                        const char* size_class = get_size_css_class(font_ctx->size);
+                        stringbuf_append_str(html_buf, "<span class=\"");
+                        stringbuf_append_str(html_buf, size_class);
+                        stringbuf_append_str(html_buf, "\">");
+                        size_span_open = true;
+                    }
+                    
+                    span_size = font_ctx->size;
+                }
+                
+                // TODO: Handle font span similarly (for bold/italic/etc)
             }
 
-            // If font returned to default and span is open, close it
-            if (!needs_font_span(font_ctx) && font_span_open) {
-                stringbuf_append_str(html_buf, "</span>");
-                font_span_open = false;
-            }
-
-            // Process the item (this may change font_ctx for declarations)
+            // Process the item (this may change font_ctx for declarations like \small)
             process_latex_element(html_buf, content_item, pool, depth, font_ctx);
         }
 
-        // Close any open font span at the end
+        // Close any open spans at the end (inner to outer)
         if (font_span_open) {
+            stringbuf_append_str(html_buf, "</span>");
+        }
+        if (size_span_open) {
             stringbuf_append_str(html_buf, "</span>");
         }
     }
@@ -3758,7 +4044,7 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int
 
     // Use simple content processing to avoid adding paragraph tags
     // Note: verbatim doesn't need font context
-    FontContext verb_ctx = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, false};
+    FontContext verb_ctx = {FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN, FONT_SIZE_NORMALSIZE, false};
     process_element_content_simple(html_buf, elem, pool, depth, &verb_ctx);
 
     stringbuf_append_str(html_buf, "</pre>\n");
@@ -4052,6 +4338,7 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
 
         // Process content with paragraph wrapping
         bool in_paragraph = false;
+        bool is_first_text = true;  // Track if this is the first text content
         for (int64_t i = content_start_index; i < elem->length; i++) {
             Item child = elem->items[i];
             TypeId child_type = get_type_id(child);
@@ -4059,14 +4346,30 @@ static bool process_item(StringBuf* html_buf, Element* elem, Pool* pool, int dep
             if (child_type == LMD_TYPE_STRING) {
                 String* str = child.get_string();
                 if (str && str->len > 0) {
-                    // Start paragraph if not in one
-                    if (!in_paragraph) {
-                        stringbuf_append_str(html_buf, "<p>");
-                        in_paragraph = true;
+                    // Find start position (skip leading whitespace for first text)
+                    size_t start_pos = 0;
+                    if (is_first_text) {
+                        while (start_pos < str->len && 
+                               (str->chars[start_pos] == ' ' || 
+                                str->chars[start_pos] == '\t' || 
+                                str->chars[start_pos] == '\n' || 
+                                str->chars[start_pos] == '\r')) {
+                            start_pos++;
+                        }
+                        is_first_text = false;
                     }
-                    // Output text with ligatures
-                    bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
-                    append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+                    
+                    // Only output if there's content after trimming
+                    if (start_pos < str->len) {
+                        // Start paragraph if not in one
+                        if (!in_paragraph) {
+                            stringbuf_append_str(html_buf, "<p>");
+                            in_paragraph = true;
+                        }
+                        // Output text with ligatures, starting from trimmed position
+                        bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
+                        append_escaped_text_with_ligatures(html_buf, str->chars + start_pos, is_tt);
+                    }
                 }
             } else if (child_type == LMD_TYPE_ELEMENT) {
                 Element* child_elem = child.element;
@@ -4378,16 +4681,13 @@ static void process_element_content_reader(StringBuf* html_buf, const ElementRea
 
 // main LaTeX element processor using reader API
 static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx) {
-    fprintf(stderr, "DEBUG: process_latex_element_reader called, depth=%d\n", depth);
     
     if (item.isNull()) {
-        fprintf(stderr, "DEBUG: process_latex_element_reader: item is null\n");
         return;
     }
 
     if (item.isString()) {
         String* str = item.asString();
-        fprintf(stderr, "DEBUG: process_latex_element_reader: item is string: %s\n", str ? str->chars : "NULL");
         if (str && str->chars) {
             append_escaped_text(html_buf, str->chars);
         }
@@ -4395,19 +4695,13 @@ static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& 
     }
 
     if (!item.isElement()) {
-        fprintf(stderr, "DEBUG: process_latex_element_reader: item is not element (type=%d)\n", item.getType());
         return;
     }
 
     ElementReader elem = item.asElement();
     const char* cmd_name = elem.tagName();
-    fprintf(stderr, "DEBUG: process_latex_element_reader: Processing element: %s, children=%lld\n", 
-            cmd_name ? cmd_name : "NULL", elem.childCount());
-    
-    fprintf(stderr, "DEBUG: elem.element() = %p\n", elem.element());
     
     if (!cmd_name) {
-        fprintf(stderr, "DEBUG: cmd_name is NULL, returning\n");
         return;
     }
 
@@ -4415,14 +4709,11 @@ static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& 
     // convert reader back to Item/Element for compatibility with existing code
     if (elem.element()) {
         Element* raw_elem = (Element*)elem.element();
-        fprintf(stderr, "DEBUG: Converting element to Item and calling process_latex_element\n");
         Item raw_item;
         raw_item.element = raw_elem;
         raw_item._type_id = LMD_TYPE_ELEMENT;
 
         process_latex_element(html_buf, raw_item, pool, depth, font_ctx);
-        fprintf(stderr, "DEBUG: Returned from process_latex_element\n");
     } else {
-        fprintf(stderr, "DEBUG: elem.element() returned NULL!\n");
     }
 }
