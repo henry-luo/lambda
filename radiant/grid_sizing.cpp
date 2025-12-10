@@ -24,12 +24,22 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
             if (i < grid_layout->explicit_row_count &&
                 grid_layout->grid_template_rows &&
                 i < grid_layout->grid_template_rows->track_count) {
-                // Explicit track - use template definition
+                // Explicit track - use template definition (shared, don't free)
                 track->size = grid_layout->grid_template_rows->tracks[i];
                 track->is_implicit = false;
+                track->owns_size = false;  // Shared with template
             } else {
-                // Implicit track - use auto sizing or grid-auto-rows
-                track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
+                // Implicit track - use grid-auto-rows if defined, otherwise auto sizing
+                if (grid_layout->grid_auto_rows && grid_layout->grid_auto_rows->track_count > 0) {
+                    // Use the first auto-row track size (cycle through if multiple)
+                    // Note: this is shared, don't free
+                    int auto_track_idx = (i - grid_layout->explicit_row_count) % grid_layout->grid_auto_rows->track_count;
+                    track->size = grid_layout->grid_auto_rows->tracks[auto_track_idx];
+                    track->owns_size = false;  // Shared with auto tracks
+                } else {
+                    track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
+                    track->owns_size = true;  // We created this, we own it
+                }
                 track->is_implicit = true;
             }
 
@@ -50,12 +60,22 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
             if (i < grid_layout->explicit_column_count &&
                 grid_layout->grid_template_columns &&
                 i < grid_layout->grid_template_columns->track_count) {
-                // Explicit track - use template definition
+                // Explicit track - use template definition (shared, don't free)
                 track->size = grid_layout->grid_template_columns->tracks[i];
                 track->is_implicit = false;
+                track->owns_size = false;  // Shared with template
             } else {
-                // Implicit track - use auto sizing or grid-auto-columns
-                track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
+                // Implicit track - use grid-auto-columns if defined, otherwise auto sizing
+                if (grid_layout->grid_auto_columns && grid_layout->grid_auto_columns->track_count > 0) {
+                    // Use the first auto-column track size (cycle through if multiple)
+                    // Note: this is shared, don't free
+                    int auto_track_idx = (i - grid_layout->explicit_column_count) % grid_layout->grid_auto_columns->track_count;
+                    track->size = grid_layout->grid_auto_columns->tracks[auto_track_idx];
+                    track->owns_size = false;  // Shared with auto tracks
+                } else {
+                    track->size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
+                    track->owns_size = true;  // We created this, we own it
+                }
                 track->is_implicit = true;
             }
 

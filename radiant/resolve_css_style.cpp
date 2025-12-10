@@ -3851,6 +3851,92 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        case CSS_PROPERTY_GRID_AUTO_ROWS: {
+            log_debug("[CSS] Processing grid-auto-rows property");
+            if (!block) {
+                log_debug("[CSS] grid-auto-rows: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            GridProp* grid = block->embed->grid;
+
+            // Handle "auto" keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                log_debug("[CSS] grid-auto-rows: auto");
+                // Auto means content-based sizing - clear any explicit auto tracks
+                if (grid->grid_auto_rows) {
+                    destroy_grid_track_list(grid->grid_auto_rows);
+                    grid->grid_auto_rows = NULL;
+                }
+                break;
+            }
+
+            // Handle single length value (e.g., "100px")
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                if (!grid->grid_auto_rows) {
+                    grid->grid_auto_rows = create_grid_track_list(1);
+                }
+                // Create a GridTrackSize for the length value
+                GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)value->data.length.value);
+                grid->grid_auto_rows->tracks[0] = track_size;
+                grid->grid_auto_rows->track_count = 1;
+                log_debug("[CSS] grid-auto-rows: %.2fpx", value->data.length.value);
+                break;
+            }
+
+            // Handle list of track sizes
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                log_debug("[CSS] grid-auto-rows: using parse_grid_track_list helper");
+                parse_grid_track_list(value, &grid->grid_auto_rows);
+                log_debug("[CSS] grid-auto-rows: %d tracks parsed",
+                          grid->grid_auto_rows ? grid->grid_auto_rows->track_count : 0);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_AUTO_COLUMNS: {
+            log_debug("[CSS] Processing grid-auto-columns property");
+            if (!block) {
+                log_debug("[CSS] grid-auto-columns: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            GridProp* grid = block->embed->grid;
+
+            // Handle "auto" keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                log_debug("[CSS] grid-auto-columns: auto");
+                // Auto means content-based sizing - clear any explicit auto tracks
+                if (grid->grid_auto_columns) {
+                    destroy_grid_track_list(grid->grid_auto_columns);
+                    grid->grid_auto_columns = NULL;
+                }
+                break;
+            }
+
+            // Handle single length value (e.g., "100px")
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                if (!grid->grid_auto_columns) {
+                    grid->grid_auto_columns = create_grid_track_list(1);
+                }
+                // Create a GridTrackSize for the length value
+                GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)value->data.length.value);
+                grid->grid_auto_columns->tracks[0] = track_size;
+                grid->grid_auto_columns->track_count = 1;
+                log_debug("[CSS] grid-auto-columns: %.2fpx", value->data.length.value);
+                break;
+            }
+
+            // Handle list of track sizes
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                log_debug("[CSS] grid-auto-columns: using parse_grid_track_list helper");
+                parse_grid_track_list(value, &grid->grid_auto_columns);
+                log_debug("[CSS] grid-auto-columns: %d tracks parsed",
+                          grid->grid_auto_columns ? grid->grid_auto_columns->track_count : 0);
+            }
+            break;
+        }
+
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
             alloc_flex_item_prop(lycon, span);
