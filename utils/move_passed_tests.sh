@@ -4,7 +4,7 @@
 # move_passed_tests.sh
 #
 # Script to move passed layout tests from a source suite to the baseline suite.
-# 
+#
 # Usage:
 #   ./utils/move_passed_tests.sh box          # Move passed tests from 'box' to 'baseline'
 #   ./utils/move_passed_tests.sh basic        # Move passed tests from 'basic' to 'baseline'
@@ -12,7 +12,8 @@
 # This script:
 # 1. Runs layout tests for the specified suite
 # 2. Parses the output to identify passed tests
-# 3. Moves both .htm/.html files and .json reference files to baseline suite
+# 3. Moves .htm/.html test files to baseline suite
+# Note: Reference JSON files are stored in a flat combined directory and don't need to be moved.
 #
 
 set -e  # Exit on error
@@ -38,22 +39,14 @@ TARGET_SUITE="baseline"
 # Validate suite directories exist
 DATA_SOURCE_DIR="test/layout/data/$SOURCE_SUITE"
 DATA_TARGET_DIR="test/layout/data/$TARGET_SUITE"
-REF_SOURCE_DIR="test/layout/reference/$SOURCE_SUITE"
-REF_TARGET_DIR="test/layout/reference/$TARGET_SUITE"
 
 if [ ! -d "$DATA_SOURCE_DIR" ]; then
     echo -e "${RED}Error: Source data directory not found: $DATA_SOURCE_DIR${NC}"
     exit 1
 fi
 
-if [ ! -d "$REF_SOURCE_DIR" ]; then
-    echo -e "${RED}Error: Source reference directory not found: $REF_SOURCE_DIR${NC}"
-    exit 1
-fi
-
-# Create target directories if they don't exist
+# Create target directory if it doesn't exist
 mkdir -p "$DATA_TARGET_DIR"
-mkdir -p "$REF_TARGET_DIR"
 
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}  Moving Passed Tests: ${SOURCE_SUITE} → ${TARGET_SUITE}${NC}"
@@ -145,33 +138,20 @@ for test in "${PASSED_TESTS[@]}"; do
     elif [ -f "$DATA_SOURCE_DIR/$test.html" ]; then
         HTML_FILE="$test.html"
     fi
-    
-    JSON_FILE="$test.json"
-    
+
     # Check if HTML file exists
     if [ -z "$HTML_FILE" ]; then
         echo -e "${RED}  ⚠️  HTML file not found for: $test${NC}"
         ((SKIPPED_COUNT++))
         continue
     fi
-    
-    # Check if JSON reference exists
-    if [ ! -f "$REF_SOURCE_DIR/$JSON_FILE" ]; then
-        echo -e "${YELLOW}  ⚠️  JSON reference not found for: $test (will move HTML only)${NC}"
-    fi
-    
+
     # Move HTML file
     if [ -f "$DATA_SOURCE_DIR/$HTML_FILE" ]; then
         mv "$DATA_SOURCE_DIR/$HTML_FILE" "$DATA_TARGET_DIR/$HTML_FILE"
-        echo -e "${GREEN}  ✓ Moved HTML: $HTML_FILE${NC}"
+        echo -e "${GREEN}  ✓ Moved: $HTML_FILE${NC}"
     fi
-    
-    # Move JSON reference file (if exists)
-    if [ -f "$REF_SOURCE_DIR/$JSON_FILE" ]; then
-        mv "$REF_SOURCE_DIR/$JSON_FILE" "$REF_TARGET_DIR/$JSON_FILE"
-        echo -e "${GREEN}  ✓ Moved JSON: $JSON_FILE${NC}"
-    fi
-    
+
     ((MOVED_COUNT++))
 done
 
