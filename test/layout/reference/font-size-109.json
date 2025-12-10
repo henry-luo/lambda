@@ -731,7 +731,7 @@
           "contentWidth": 1184,
           "contentHeight": 55,
           "scrollWidth": 1184,
-          "scrollHeight": 60
+          "scrollHeight": 58
         },
         "computed": {
           "display": "block",
@@ -881,7 +881,7 @@
               "contentWidth": 1184,
               "contentHeight": 21,
               "scrollWidth": 1184,
-              "scrollHeight": 26
+              "scrollHeight": 24
             },
             "computed": {
               "display": "block",
@@ -935,9 +935,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 39,
-                  "width": 23.11,
-                  "height": 37,
+                  "y": 42,
+                  "width": 32,
+                  "height": 32,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -996,11 +996,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 39,
-                          "width": 23.11,
-                          "height": 37,
-                          "right": 31.11,
-                          "bottom": 76,
+                          "y": 42,
+                          "width": 32,
+                          "height": 32,
+                          "right": 40,
+                          "bottom": 74,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1
@@ -1024,10 +1024,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 31.11,
-                  "y": 54,
-                  "width": 11.56,
-                  "height": 18,
+                  "x": 40,
+                  "y": 55,
+                  "width": 16,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1085,12 +1085,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 31.11,
-                          "y": 54,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 42.67,
-                          "bottom": 72,
+                          "x": 40,
+                          "y": 55,
+                          "width": 16,
+                          "height": 16,
+                          "right": 56,
+                          "bottom": 71,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1

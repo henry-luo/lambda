@@ -654,7 +654,7 @@
           "contentWidth": 1184,
           "contentHeight": 74,
           "scrollWidth": 1184,
-          "scrollHeight": 75
+          "scrollHeight": 74
         },
         "computed": {
           "display": "block",
@@ -804,7 +804,7 @@
               "contentWidth": 1184,
               "contentHeight": 20,
               "scrollWidth": 1184,
-              "scrollHeight": 21
+              "scrollHeight": 20
             },
             "computed": {
               "display": "block",
@@ -858,9 +858,9 @@
                 "classes": [],
                 "layout": {
                   "x": 108,
-                  "y": 48,
-                  "width": 72.22,
-                  "height": 23,
+                  "y": 50,
+                  "width": 100,
+                  "height": 20,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -919,11 +919,11 @@
                       "rects": [
                         {
                           "x": 108,
-                          "y": 48,
-                          "width": 72.22,
-                          "height": 23,
-                          "right": 180.22,
-                          "bottom": 71,
+                          "y": 50,
+                          "width": 100,
+                          "height": 20,
+                          "right": 208,
+                          "bottom": 70,
                           "text": "XXXXX",
                           "startIndex": 0,
                           "endIndex": 5
@@ -947,10 +947,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 380.22,
-                  "y": 48,
-                  "width": 72.22,
-                  "height": 23,
+                  "x": 408,
+                  "y": 50,
+                  "width": 100,
+                  "height": 20,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1008,12 +1008,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 380.22,
-                          "y": 48,
-                          "width": 72.22,
-                          "height": 23,
-                          "right": 452.44,
-                          "bottom": 71,
+                          "x": 408,
+                          "y": 50,
+                          "width": 100,
+                          "height": 20,
+                          "right": 508,
+                          "bottom": 70,
                           "text": "XXXXX",
                           "startIndex": 0,
                           "endIndex": 5
@@ -1046,7 +1046,7 @@
               "contentWidth": 1184,
               "contentHeight": 20,
               "scrollWidth": 1184,
-              "scrollHeight": 21
+              "scrollHeight": 20
             },
             "computed": {
               "display": "block",
@@ -1100,9 +1100,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 68,
-                  "width": 72.22,
-                  "height": 23,
+                  "y": 70,
+                  "width": 100,
+                  "height": 20,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1161,11 +1161,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 68,
-                          "width": 72.22,
-                          "height": 23,
-                          "right": 80.22,
-                          "bottom": 91,
+                          "y": 70,
+                          "width": 100,
+                          "height": 20,
+                          "right": 108,
+                          "bottom": 90,
                           "text": "XXXXX",
                           "startIndex": 0,
                           "endIndex": 5
@@ -1191,10 +1191,10 @@
                   "color1"
                 ],
                 "layout": {
-                  "x": 80.22,
-                  "y": 68,
-                  "width": 72.22,
-                  "height": 23,
+                  "x": 108,
+                  "y": 70,
+                  "width": 100,
+                  "height": 20,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1252,12 +1252,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 80.22,
-                          "y": 68,
-                          "width": 72.22,
-                          "height": 23,
-                          "right": 152.44,
-                          "bottom": 91,
+                          "x": 108,
+                          "y": 70,
+                          "width": 100,
+                          "height": 20,
+                          "right": 208,
+                          "bottom": 90,
                           "text": "XXXXX",
                           "startIndex": 0,
                           "endIndex": 5
@@ -1281,10 +1281,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 152.44,
-                  "y": 68,
-                  "width": 144.44,
-                  "height": 23,
+                  "x": 208,
+                  "y": 70,
+                  "width": 200,
+                  "height": 20,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1342,12 +1342,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 152.44,
-                          "y": 68,
-                          "width": 144.44,
-                          "height": 23,
-                          "right": 296.88,
-                          "bottom": 91,
+                          "x": 208,
+                          "y": 70,
+                          "width": 200,
+                          "height": 20,
+                          "right": 408,
+                          "bottom": 90,
                           "text": "XXXXXXXXXX",
                           "startIndex": 0,
                           "endIndex": 10
@@ -1373,10 +1373,10 @@
                   "color1"
                 ],
                 "layout": {
-                  "x": 296.88,
-                  "y": 68,
-                  "width": 72.22,
-                  "height": 23,
+                  "x": 408,
+                  "y": 70,
+                  "width": 100,
+                  "height": 20,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1434,12 +1434,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 296.88,
-                          "y": 68,
-                          "width": 72.22,
-                          "height": 23,
-                          "right": 369.09,
-                          "bottom": 91,
+                          "x": 408,
+                          "y": 70,
+                          "width": 100,
+                          "height": 20,
+                          "right": 508,
+                          "bottom": 90,
                           "text": "XXXXX",
                           "startIndex": 0,
                           "endIndex": 5

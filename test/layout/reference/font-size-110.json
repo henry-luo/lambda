@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 75,
+      "height": 74,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 51,
+          "height": 50,
           "contentWidth": 1184,
-          "contentHeight": 51,
+          "contentHeight": 50,
           "scrollWidth": 1184,
-          "scrollHeight": 53
+          "scrollHeight": 51
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 8,
               "y": 50,
               "width": 1184,
-              "height": 17,
+              "height": 16,
               "contentWidth": 1184,
-              "contentHeight": 17,
+              "contentHeight": 16,
               "scrollWidth": 1184,
-              "scrollHeight": 19
+              "scrollHeight": 17
             },
             "computed": {
               "display": "block",
@@ -935,9 +935,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 47,
-                  "width": 13.88,
-                  "height": 22,
+                  "y": 48,
+                  "width": 19.2,
+                  "height": 19,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -996,11 +996,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 47,
-                          "width": 13.88,
-                          "height": 22,
-                          "right": 21.88,
-                          "bottom": 69,
+                          "y": 48,
+                          "width": 19.2,
+                          "height": 19,
+                          "right": 27.2,
+                          "bottom": 67,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1
@@ -1024,10 +1024,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 21.88,
+                  "x": 27.2,
                   "y": 50,
-                  "width": 11.56,
-                  "height": 18,
+                  "width": 16,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1085,12 +1085,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 21.88,
+                          "x": 27.2,
                           "y": 50,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 33.44,
-                          "bottom": 68,
+                          "width": 16,
+                          "height": 16,
+                          "right": 43.2,
+                          "bottom": 66,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1

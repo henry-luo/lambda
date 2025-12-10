@@ -935,9 +935,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 51,
-                  "width": 9.64,
-                  "height": 15,
+                  "y": 52,
+                  "width": 13.34,
+                  "height": 14,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -996,10 +996,10 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 51,
-                          "width": 9.64,
-                          "height": 15,
-                          "right": 17.64,
+                          "y": 52,
+                          "width": 13.34,
+                          "height": 14,
+                          "right": 21.34,
                           "bottom": 66,
                           "text": "X",
                           "startIndex": 0,
@@ -1024,10 +1024,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 17.64,
-                  "y": 49,
-                  "width": 11.56,
-                  "height": 18,
+                  "x": 21.34,
+                  "y": 50,
+                  "width": 16,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1085,12 +1085,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 17.64,
-                          "y": 49,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 29.2,
-                          "bottom": 67,
+                          "x": 21.34,
+                          "y": 50,
+                          "width": 16,
+                          "height": 16,
+                          "right": 37.34,
+                          "bottom": 66,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1

@@ -998,11 +998,11 @@
                   "x": 27.19,
                   "y": 50,
                   "width": 16,
-                  "height": 18,
+                  "height": 16,
                   "contentWidth": 16,
-                  "contentHeight": 18,
+                  "contentHeight": 16,
                   "scrollWidth": 16,
-                  "scrollHeight": 18
+                  "scrollHeight": 16
                 },
                 "computed": {
                   "display": "block",
@@ -1038,7 +1038,7 @@
                   "verticalAlign": "baseline",
                   "top": "0px",
                   "right": "-19.1875px",
-                  "bottom": "-18px",
+                  "bottom": "-16px",
                   "left": "19.2px",
                   "zIndex": "auto",
                   "overflow": "visible",
@@ -1058,10 +1058,10 @@
                         {
                           "x": 27.19,
                           "y": 50,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 38.75,
-                          "bottom": 68,
+                          "width": 16,
+                          "height": 16,
+                          "right": 43.19,
+                          "bottom": 66,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1

@@ -731,7 +731,7 @@
           "contentWidth": 1184,
           "contentHeight": 18,
           "scrollWidth": 1184,
-          "scrollHeight": 137
+          "scrollHeight": 130
         },
         "computed": {
           "display": "block",
@@ -881,7 +881,7 @@
               "contentWidth": 1184,
               "contentHeight": 0,
               "scrollWidth": 1184,
-              "scrollHeight": 103
+              "scrollHeight": 96
             },
             "computed": {
               "display": "block",
@@ -941,7 +941,7 @@
                   "contentWidth": 96,
                   "contentHeight": 96,
                   "scrollWidth": 96,
-                  "scrollHeight": 103
+                  "scrollHeight": 96
                 },
                 "computed": {
                   "display": "block",
@@ -996,11 +996,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 43,
-                          "width": 48,
-                          "height": 110,
-                          "right": 56,
-                          "bottom": 153,
+                          "y": 50,
+                          "width": 96,
+                          "height": 96,
+                          "right": 104,
+                          "bottom": 146,
                           "text": "x",
                           "startIndex": 0,
                           "endIndex": 1
@@ -1026,12 +1026,12 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 48,
+                  "width": 96,
                   "height": 96,
-                  "contentWidth": 48,
+                  "contentWidth": 96,
                   "contentHeight": 96,
-                  "scrollWidth": 48,
-                  "scrollHeight": 103
+                  "scrollWidth": 96,
+                  "scrollHeight": 96
                 },
                 "computed": {
                   "display": "block",
@@ -1066,7 +1066,7 @@
                   "textAlign": "start",
                   "verticalAlign": "baseline",
                   "top": "0px",
-                  "right": "1136px",
+                  "right": "1088px",
                   "bottom": "-96px",
                   "left": "0px",
                   "zIndex": "auto",
@@ -1086,11 +1086,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 43,
-                          "width": 48,
-                          "height": 110,
-                          "right": 56,
-                          "bottom": 153,
+                          "y": 50,
+                          "width": 96,
+                          "height": 96,
+                          "right": 104,
+                          "bottom": 146,
                           "text": "x",
                           "startIndex": 0,
                           "endIndex": 1
