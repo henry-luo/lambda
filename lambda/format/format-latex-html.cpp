@@ -240,6 +240,235 @@ static std::string generate_anchor_id(const std::string& prefix = "ref") {
 }
 
 // =============================================================================
+// Macro System
+// =============================================================================
+
+// Macro definition struct
+struct MacroDefinition {
+    std::string name;           // Command name (without backslash)
+    int num_params;             // Number of parameters (0-9)
+    std::vector<std::string> default_values;  // Default values for optional params
+    Element* definition;        // The replacement text as an Element tree
+    bool is_environment;        // True if defined with \newenvironment
+};
+
+// Macro registry - maps command names to their definitions
+static std::map<std::string, MacroDefinition> macro_registry;
+static bool macro_registry_initialized = false;
+
+static void init_macros() {
+    if (macro_registry_initialized) return;
+    macro_registry.clear();
+    macro_registry_initialized = true;
+}
+
+// Register a new macro
+static void register_macro(const std::string& name, int num_params, Element* definition, bool is_environment = false) {
+    init_macros();
+    MacroDefinition macro;
+    macro.name = name;
+    macro.num_params = num_params;
+    macro.definition = definition;
+    macro.is_environment = is_environment;
+    macro_registry[name] = macro;
+}
+
+// Check if a command is a user-defined macro
+static bool is_macro(const std::string& name) {
+    init_macros();
+    return macro_registry.count(name) > 0;
+}
+
+// Get macro definition
+static MacroDefinition* get_macro(const std::string& name) {
+    init_macros();
+    if (macro_registry.count(name)) {
+        return &macro_registry[name];
+    }
+    return nullptr;
+}
+
+// Clone an Element tree (deep copy for macro expansion)
+static Element* clone_element(Element* elem, Pool* pool);
+
+// Helper: Replace parameter references (#1, #2, etc.) in a string
+// Returns a list of Items: strings and/or elements that replace the original string
+static std::vector<Item> substitute_params_in_string(const char* text, size_t len, 
+                                                      const std::vector<Element*>& args, Pool* pool) {
+    std::vector<Item> result;
+    
+    size_t i = 0;
+    size_t segment_start = 0;
+    
+    while (i < len) {
+        // Look for # followed by a digit
+        if (text[i] == '#' && i + 1 < len && text[i + 1] >= '1' && text[i + 1] <= '9') {
+            // Found parameter reference
+            int param_num = text[i + 1] - '0';  // Convert '1'-'9' to 1-9
+            
+            // Add any text before the parameter reference
+            if (i > segment_start) {
+                size_t seg_len = i - segment_start;
+                String* seg_str = (String*)pool_calloc(pool, sizeof(String) + seg_len + 1);
+                seg_str->len = seg_len;
+                memcpy(seg_str->chars, text + segment_start, seg_len);
+                seg_str->chars[seg_len] = '\0';
+                
+                Item str_item;
+                str_item.string_ptr = (uint64_t)seg_str;
+                str_item._8_s = LMD_TYPE_STRING;
+                result.push_back(str_item);
+            }
+            
+            // Add the argument element (if it exists)
+            if (param_num > 0 && param_num <= (int)args.size() && args[param_num - 1]) {
+                Item arg_item;
+                arg_item.element = args[param_num - 1];
+                result.push_back(arg_item);
+            }
+            
+            // Skip past #N
+            i += 2;
+            segment_start = i;
+        } else {
+            i++;
+        }
+    }
+    
+    // Add any remaining text
+    if (segment_start < len) {
+        size_t seg_len = len - segment_start;
+        String* seg_str = (String*)pool_calloc(pool, sizeof(String) + seg_len + 1);
+        seg_str->len = seg_len;
+        memcpy(seg_str->chars, text + segment_start, seg_len);
+        seg_str->chars[seg_len] = '\0';
+        
+        Item str_item;
+        str_item.string_ptr = (uint64_t)seg_str;
+        str_item._8_s = LMD_TYPE_STRING;
+        result.push_back(str_item);
+    }
+    
+    return result;
+}
+
+// Helper: Recursively substitute parameters in an Element tree (modifies in place)
+static void substitute_params_recursive(Element* elem, const std::vector<Element*>& args, Pool* pool) {
+    if (!elem || !elem->items || elem->length == 0) return;
+    
+    // We'll build a new items array with parameter substitutions
+    std::vector<Item> new_items;
+    
+    for (size_t i = 0; i < elem->length; i++) {
+        Item item = elem->items[i];
+        TypeId type = get_type_id(item);
+        
+        if (type == LMD_TYPE_STRING) {
+            // Check if this string contains parameter references
+            String* str = item.get_string();
+            if (str && str->len > 0) {
+                bool has_param = false;
+                for (size_t j = 0; j < str->len - 1; j++) {
+                    if (str->chars[j] == '#' && str->chars[j + 1] >= '1' && str->chars[j + 1] <= '9') {
+                        has_param = true;
+                        break;
+                    }
+                }
+                
+                if (has_param) {
+                    // Substitute parameters in this string
+                    std::vector<Item> substituted = substitute_params_in_string(str->chars, str->len, args, pool);
+                    new_items.insert(new_items.end(), substituted.begin(), substituted.end());
+                } else {
+                    // No parameters, keep as is
+                    new_items.push_back(item);
+                }
+            } else {
+                new_items.push_back(item);
+            }
+        } else if (type == LMD_TYPE_ELEMENT) {
+            // Recursively process child elements
+            substitute_params_recursive(item.element, args, pool);
+            new_items.push_back(item);
+        } else {
+            // Other types: keep as is
+            new_items.push_back(item);
+        }
+    }
+    
+    // Replace the items array if we made changes
+    if (new_items.size() != elem->length) {
+        elem->length = new_items.size();
+        elem->capacity = new_items.size();
+        elem->items = (Item*)pool_calloc(pool, new_items.size() * sizeof(Item));
+        for (size_t i = 0; i < new_items.size(); i++) {
+            elem->items[i] = new_items[i];
+        }
+    }
+}
+
+// Substitute macro parameters (#1, #2, etc.) in the definition
+// This creates a new Element tree with parameters replaced by actual arguments
+static Element* expand_macro_params(Element* definition, const std::vector<Element*>& args, Pool* pool) {
+    if (!definition) return nullptr;
+    
+    // Clone the definition first
+    Element* expanded = clone_element(definition, pool);
+    if (!expanded) return nullptr;
+    
+    // Walk the cloned tree and replace parameter references (#1, #2, etc.)
+    substitute_params_recursive(expanded, args, pool);
+    
+    return expanded;
+}
+
+// Clone an Element tree recursively
+static Element* clone_element(Element* elem, Pool* pool) {
+    if (!elem) return nullptr;
+    
+    Element* cloned = (Element*)pool_calloc(pool, sizeof(Element));
+    cloned->type_id = elem->type_id;
+    cloned->type = elem->type;  // Type pointer can be shared
+    
+    // Clone items array
+    if (elem->items && elem->length > 0) {
+        cloned->length = elem->length;
+        cloned->capacity = elem->length;
+        cloned->items = (Item*)pool_calloc(pool, elem->length * sizeof(Item));
+        
+        for (size_t i = 0; i < elem->length; i++) {
+            Item item = elem->items[i];
+            TypeId type = get_type_id(item);
+            
+            if (type == LMD_TYPE_ELEMENT) {
+                // Recursively clone child elements
+                Element* child = clone_element(item.element, pool);
+                Item child_item;
+                child_item.element = child;
+                cloned->items[i] = child_item;
+            } else if (type == LMD_TYPE_STRING) {
+                // Strings need to be copied
+                String* orig_str = item.get_string();
+                if (orig_str) {
+                    String* new_str = (String*)pool_calloc(pool, sizeof(String) + orig_str->len + 1);
+                    new_str->len = orig_str->len;
+                    memcpy(new_str->chars, orig_str->chars, orig_str->len + 1);
+                    Item str_item;
+                    str_item.string_ptr = (uint64_t)new_str;
+                    str_item._8_s = LMD_TYPE_STRING;
+                    cloned->items[i] = str_item;
+                }
+            } else {
+                // For other types (numbers, etc.), copy as-is
+                cloned->items[i] = item;
+            }
+        }
+    }
+    
+    return cloned;
+}
+
+// =============================================================================
 // Counter Formatters (continued)
 // =============================================================================
 
@@ -851,7 +1080,7 @@ static const struct {
     // Spaces
     {"space", " "},
     {"nobreakspace", "\xC2\xA0"},           // U+00A0 nbsp
-    {"thinspace", " "},                     // Regular space (for HTML compatibility)
+    {"thinspace", "\xE2\x80\x89"},          // U+2009 THIN SPACE
     {"enspace", "\xE2\x80\x82"},            // U+2002
     {"enskip", "\xE2\x80\x82"},             // U+2002
     {"quad", "\xE2\x80\x83"},               // U+2003 em space
@@ -1368,6 +1597,39 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         strncpy(cmd_name, name.str, name_len);
         cmd_name[name_len] = '\0';
 
+        // Debug: log all commands
+        if (depth < 3) {  // Only log top-level commands to avoid spam
+            log_debug("Processing command: %s (depth=%d)", cmd_name, depth);
+        }
+
+        // Check if this is a user-defined macro and expand it
+        if (is_macro(cmd_name)) {
+            MacroDefinition* macro_def = get_macro(cmd_name);
+            if (macro_def && macro_def->definition) {
+                log_debug("Expanding macro '%s' with %d params", cmd_name, macro_def->num_params);
+                // Extract arguments for the macro
+                std::vector<Element*> args;
+                for (int i = 0; i < macro_def->num_params && i < elem->length; i++) {
+                    Element* arg = extract_argument_element(elem, i);
+                    if (arg) {
+                        log_debug("  arg[%d] = %p", i, arg);
+                        args.push_back(arg);
+                    }
+                }
+                
+                // Expand the macro with arguments substituted
+                Element* expanded = expand_macro_params(macro_def->definition, args, pool);
+                if (expanded) {
+                    log_debug("Expanded macro to element %p", expanded);
+                    // Process the expanded definition
+                    Item expanded_item;
+                    expanded_item.element = expanded;
+                    process_latex_element(html_buf, expanded_item, pool, depth + 1, font_ctx);
+                }
+                return;
+            }
+        }
+
         // Handle different LaTeX commands
         if (strcmp(cmd_name, "latex_document") == 0) {
             // Root document - handle content with paragraph breaks
@@ -1723,6 +1985,81 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             stringbuf_append_str(html_buf, "??");
             return;
         }
+        
+        // Macro definition commands
+        // =================================================================
+        else if (strcmp(cmd_name, "new_command_definition") == 0 || strcmp(cmd_name, "renew_command_definition") == 0) {
+            // \newcommand{\name}[numargs]{definition}
+            // \renewcommand{\name}[numargs]{definition}
+            // Parser creates structure: new_command_definition with children:
+            //   0: \newcommand element (skip)
+            //   1: curly_group_command_name (contains the command name)
+            //   2: brack_group_argc (optional, contains number)
+            //   3: curly_group (contains definition)
+            
+            log_debug("Processing new_command_definition with %zu children", elem->length);
+            
+            // Simple approach: scan for non-system element names
+            // System names: start with \ or are group names (curly_group, brack_group_argc)
+            // Command name: first regular element name (like "greet")
+            // Param count: inside brack_group_argc
+            // Definition: inside curly_group (last one)
+            
+            std::string new_cmd_name;
+            int num_params = 0;
+            Element* definition = nullptr;
+            
+            for (size_t i = 0; i < elem->length; i++) {
+                if (get_type_id(elem->items[i]) != LMD_TYPE_ELEMENT) continue;
+                Element* child = elem->items[i].element;
+                if (!child || !child->type) continue;
+                
+                TypeElmt* child_type = (TypeElmt*)child->type;
+                StrView child_name = child_type->name;
+                char child_name_str[64];
+                int child_name_len = child_name.length < 63 ? child_name.length : 63;
+                strncpy(child_name_str, child_name.str, child_name_len);
+                child_name_str[child_name_len] = '\0';
+                
+                log_debug("  child[%zu]: %s", i, child_name_str);
+                
+                // Check for command name group
+                if (strcmp(child_name_str, "curly_group_command_name") == 0) {
+                    // Look inside this group for the actual command element
+                    for (size_t j = 0; j < child->length; j++) {
+                        if (get_type_id(child->items[j]) == LMD_TYPE_ELEMENT) {
+                            Element* cmd_elem = child->items[j].element;
+                            if (cmd_elem && cmd_elem->type) {
+                                TypeElmt* cmd_type = (TypeElmt*)cmd_elem->type;
+                                new_cmd_name = std::string(cmd_type->name.str, cmd_type->name.length);
+                                log_debug("    Found command name: %s", new_cmd_name.c_str());
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Check for param count
+                else if (strcmp(child_name_str, "brack_group_argc") == 0) {
+                    std::string param_str = extract_argument_string(child, 0);
+                    if (!param_str.empty()) {
+                        num_params = atoi(param_str.c_str());
+                        log_debug("    Found param count: %d", num_params);
+                    }
+                }
+                // Check for definition body
+                else if (strcmp(child_name_str, "curly_group") == 0) {
+                    definition = child;
+                    log_debug("    Found definition element");
+                }
+            }
+            
+            if (!new_cmd_name.empty() && definition) {
+                log_debug("Registering macro '%s' with %d params", new_cmd_name.c_str(), num_params);
+                register_macro(new_cmd_name, num_params, definition, false);
+            }
+            return;
+        }
+        
         // =================================================================
         else if (strcmp(cmd_name, "title") == 0) {
             process_title(html_buf, elem, pool, depth);
@@ -1822,7 +2159,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // textnormal resets to defaults
             process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
         }
-        else if (strcmp(cmd_name, "linebreak") == 0 || strcmp(cmd_name, "linebreak_command") == 0) {
+        else if (strcmp(cmd_name, "linebreak") == 0 || strcmp(cmd_name, "linebreak_command") == 0 || strcmp(cmd_name, "newline") == 0) {
             // Check if linebreak has spacing argument (dimension)
             if (elem->length > 0 && elem->items) {
                 Item spacing_item = elem->items[0];
@@ -1863,11 +2200,13 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;  // No HTML output, just sets state
         }
         else if (strcmp(cmd_name, "verb") == 0) {
-            stringbuf_append_str(html_buf, "<code class=\"tt\">");
+            // \verb - verbatim text (LaTeX.js uses latex-verbatim class)
+            stringbuf_append_str(html_buf, "<code class=\"latex-verbatim\">");
             process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
             stringbuf_append_str(html_buf, "</code>");
         }
-        else if (strcmp(cmd_name, "thinspace") == 0) {
+        else if (strcmp(cmd_name, "thinspace") == 0 || strcmp(cmd_name, ",") == 0) {
+            // \thinspace or \, - thin space (LaTeX.js compatibility)
             stringbuf_append_str(html_buf, "\xE2\x80\x89"); // U+2009 THIN SPACE
             return;
         }
@@ -2311,6 +2650,9 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             } else if (strcmp(sym->chars, "parbreak") == 0) {
                 // parbreak should be handled at document level, ignore here
                 return;
+            } else if (strcmp(sym->chars, ",") == 0 || strcmp(sym->chars, "thinspace") == 0) {
+                // \, or \thinspace - thin space (U+2009)
+                stringbuf_append_str(html_buf, "\xE2\x80\x89"); // U+2009 THIN SPACE
             } else {
                 // Unknown symbol - output as-is
                 stringbuf_append_str(html_buf, sym->chars);
@@ -2418,8 +2760,8 @@ static bool is_silent_command(Item item) {
             strcmp(cmd_name, "stepcounter") == 0 ||
             strcmp(cmd_name, "addtocounter") == 0 ||
             strcmp(cmd_name, "label") == 0 ||
-            strcmp(cmd_name, "newcommand") == 0 ||
-            strcmp(cmd_name, "renewcommand") == 0 ||
+            strcmp(cmd_name, "new_command_definition") == 0 ||
+            strcmp(cmd_name, "renew_command_definition") == 0 ||
             strcmp(cmd_name, "newenvironment") == 0 ||
             strcmp(cmd_name, "renewenvironment") == 0 ||
             strcmp(cmd_name, "newlength") == 0 ||
@@ -2509,7 +2851,15 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             bool is_par_break = false;
             bool is_textblock = false;
             bool is_noindent = false;
-            if (item_type == LMD_TYPE_ELEMENT) {
+            
+            // Check for parbreak symbol (tree-sitter creates these)
+            if (item_type == LMD_TYPE_SYMBOL) {
+                Symbol* sym = (Symbol*)(content_item.symbol_ptr);
+                if (sym && strcmp(sym->chars, "parbreak") == 0) {
+                    is_par_break = true;
+                }
+            }
+            else if (item_type == LMD_TYPE_ELEMENT) {
                 Element* elem_ptr = content_item.element;
                 if (elem_ptr && elem_ptr->type) {
                     StrView elem_name = ((TypeElmt*)elem_ptr->type)->name;
