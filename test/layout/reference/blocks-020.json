@@ -529,8 +529,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .outer { position: relative; width: 300px; height: 100px; background: red; }\n   .inner { width: 200%; height: 200%; font: 100px/1 Ahem; color: green; }\n  ",
-                "length": 377,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n           .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .outer { position: relative; width: 300px; height: 100px; background: red; }\n   .inner { width: 200%; height: 200%; font: 100px/1 Ahem; color: green; }\n  ",
+                "length": 385,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -848,11 +848,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 18,
-                          "width": 216.66,
-                          "height": 115,
-                          "right": 224.66,
-                          "bottom": 133,
+                          "y": 26,
+                          "width": 300,
+                          "height": 100,
+                          "right": 308,
+                          "bottom": 126,
                           "text": "XXX",
                           "startIndex": 0,
                           "endIndex": 3
