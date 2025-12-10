@@ -424,6 +424,10 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     // Create a surface for layout calculations with specified viewport dimensions
     ui_context_create_surface(&ui_context, viewport_width, viewport_height);
 
+    // Update UI context viewport dimensions for layout calculations
+    ui_context.window_width = viewport_width;
+    ui_context.window_height = viewport_height;
+
     // Get current directory for relative path resolution
     Url* cwd = get_current_dir();
     if (!cwd) {

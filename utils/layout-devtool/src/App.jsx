@@ -11,6 +11,7 @@ function App() {
   const [terminalHeight, setTerminalHeight] = useState(250);
   const [lambdaRenderPath, setLambdaRenderPath] = useState(null);
   const terminalRef = useRef(null);
+  const comparisonPanelRef = useRef(null);
   const isDraggingLeftRef = useRef(false);
   const isDraggingBottomRef = useRef(false);
 
@@ -34,10 +35,28 @@ function App() {
       const testPath = `test/layout/data/${selectedTest.category}/${selectedTest.testFile}`;
       console.log('Test path:', testPath);
 
-      // Render the Lambda view
+      // Get browser panel width
+      let viewportWidth = 1200;
+      if (comparisonPanelRef.current?.getBrowserDimensions) {
+        const dims = comparisonPanelRef.current.getBrowserDimensions();
+        viewportWidth = dims.width;
+      }
+
+      // Measure actual page content height via main process
+      terminalRef.current?.writeln('Measuring page content height...');
+      let viewportHeight = 800;
+      try {
+        viewportHeight = await window.electronAPI.measurePageHeight(testPath, viewportWidth);
+        console.log('Measured page height:', viewportHeight);
+      } catch (measureError) {
+        console.error('Failed to measure page height:', measureError);
+      }
+      terminalRef.current?.writeln(`Viewport: ${viewportWidth}x${viewportHeight}`);
+
+      // Render the Lambda view with browser panel dimensions
       terminalRef.current?.writeln('Rendering Lambda view...');
       try {
-        const renderPath = await window.electronAPI.renderLambdaView(testPath);
+        const renderPath = await window.electronAPI.renderLambdaView(testPath, viewportWidth, viewportHeight);
         console.log('Render path:', renderPath);
         setLambdaRenderPath(renderPath);
         terminalRef.current?.writeln('\x1b[32m✓ Render completed\x1b[0m');
@@ -164,7 +183,7 @@ function App() {
 
         <div className="right-content">
           <div className="top-panel">
-            <ComparisonPanel test={selectedTest} lambdaRenderPath={lambdaRenderPath} />
+            <ComparisonPanel ref={comparisonPanelRef} test={selectedTest} lambdaRenderPath={lambdaRenderPath} />
           </div>
           <div className="resize-handle-horizontal" onMouseDown={handleBottomMouseDown} />
           <div className="bottom-panel" style={{ height: `${terminalHeight}px` }}>
