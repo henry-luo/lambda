@@ -17,7 +17,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
     const ext = htmlFilePath.endsWith('.htm') && !htmlFilePath.endsWith('.html') ? '.htm' : '.html';
     const baseName = path.basename(htmlFilePath, ext);
     // Write directly to flat reference directory (combined structure)
-    const outputDir = path.join(__dirname, '..', 'reference');
+    const outputDir = path.join(__dirname, 'reference');
     const outputFile = path.join(outputDir, `${baseName}.json`);
 
     // Check if output file already exists (unless force regeneration is requested)
@@ -584,7 +584,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
 async function extractAllTestFiles(category = null, forceRegenerate = false, includeCss21 = false) {
     console.log('🔍 Scanning for test HTML files...');
 
-    const dataDir = path.join(__dirname, '..', 'data');
+    const dataDir = path.join(__dirname, 'data');
 
     // Auto-discover available categories if none specified
     let categories;
@@ -735,39 +735,6 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
         console.log(`  ${status} ${result.category}/${result.file} - ${details}`);
     });
 
-    // Save summary to file
-    const summaryFile = path.join(__dirname, '..', 'reports', 'extraction_summary.json');
-    await fs.mkdir(path.dirname(summaryFile), { recursive: true });
-
-    // Extract browser info from first successful result for summary
-    const firstSuccessResult = results.find(r => r.success && r.result)?.result;
-    const devicePixelRatio = firstSuccessResult?._devicePixelRatio || 1;
-    const userAgent = firstSuccessResult?._userAgent || 'Unknown';
-    const fullViewport = firstSuccessResult?._fullViewport || { width: 1200, height: 800, deviceScaleFactor: 1 };
-
-    const summary = {
-        total_files: totalFiles,
-        generated: successCount,
-        skipped: skippedCount,
-        failed: failCount,
-        success_rate: Math.round((successCount + skippedCount) / totalFiles * 100),
-        browser_info: {
-            userAgent: userAgent,
-            viewport: fullViewport
-        },
-        results: results.map(r => ({
-            category: r.category,
-            file: r.file,
-            success: r.success,
-            was_skipped: r.wasSkipped || false,
-            node_count: r.nodeCount || 0,
-            error: r.error || null
-        }))
-    };
-
-    await fs.writeFile(summaryFile, JSON.stringify(summary, null, 2));
-    console.log(`\n💾 Summary saved to: ${summaryFile}`);
-
     return results;
 }
 
@@ -822,12 +789,11 @@ Examples:
   node extract_browser_references.js --category baseline                # Extract only baseline tests
   node extract_browser_references.js --include-css21                    # Extract all including css2.1 suite
   node extract_browser_references.js --force                           # Force regenerate all references
-  node extract_browser_references.js ../data/basic/flex_001.html        # Extract single .html file
-  node extract_browser_references.js ../data/css2.1/blocks-001.htm      # Extract single .htm file
+  node extract_browser_references.js data/basic/flex_001.html           # Extract single .html file
+  node extract_browser_references.js data/css2.1/blocks-001.htm         # Extract single .htm file
 
 Generated files:
-  ../reference/<test_name>.json                             # Individual reference files (flat structure)
-  ../reports/extraction_summary.json                        # Summary report
+  reference/<test_name>.json                                # Individual reference files (flat structure)
 
 Note: By default, existing reference files are skipped. Use --force to regenerate them.
       The css2.1 test suite is excluded by default due to its size. Use --include-css21 to include it.
@@ -843,9 +809,9 @@ Note: By default, existing reference files are skipped. Use --force to regenerat
 
             // If path starts with 'test/', it's relative to project root, so adjust for current directory
             if (singleFile.startsWith('test/')) {
-                resolvedPath = path.join(__dirname, '..', '..', '..', singleFile);
+                resolvedPath = path.join(__dirname, '..', '..', singleFile);
             }
-            // If path starts with '../', it's already relative to tools directory
+            // If path starts with '../', it's already relative to layout directory
             else if (!path.isAbsolute(singleFile)) {
                 resolvedPath = path.resolve(singleFile);
             }

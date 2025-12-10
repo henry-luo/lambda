@@ -1389,10 +1389,10 @@ build-test: build-lambda-input
 #   make capture-layout suite=basic force=1   # force regenerate specific category
 capture-layout:
 	@echo "🧭 Capturing browser layout references..."
-	@if [ -d "test/layout/tools" ]; then \
-	    cd test/layout/tools && \
+	@if [ -d "test/layout" ]; then \
+	    cd test/layout && \
 	    if [ ! -d node_modules ]; then \
-	        echo "📦 Installing test tools dependencies..."; \
+	        echo "📦 Installing test layout dependencies..."; \
 	        npm install; \
 	    fi; \
 	    FORCE_FLAG=""; \
@@ -1416,7 +1416,7 @@ capture-layout:
 	        fi; \
 	    fi; \
 	else \
-	    echo "❌ Error: Tools directory not found at test/layout/tools"; \
+	    echo "❌ Error: Layout directory not found at test/layout"; \
 	    exit 1; \
 	fi
 
