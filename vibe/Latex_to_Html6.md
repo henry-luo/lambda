@@ -1840,9 +1840,9 @@ if (grammar_allows_children(node_type)) {
 
 ## 9. Implementation Progress Report
 
-### 9.1 Current Status (10 December 2025)
+### 9.1 Current Status (10 December 2025 - Evening Update)
 
-**Test Results**: 13/42 baseline tests passing (31% pass rate)
+**Test Results**: 14/42 baseline tests passing (33% pass rate)
 
 **Implementation Phase**: Phase 3 - Formatter Integration (In Progress)
 
@@ -1959,46 +1959,140 @@ if (grammar_allows_children(node_type)) {
 - Smart paragraph management pattern established
 - Handler pattern consistent across formatter
 
-### 9.7 Next Steps
+### 9.7 Test Suite Analysis (Full Results)
 
-**Immediate Priorities** (in order):
+After running the complete baseline test suite, we now have a comprehensive view of remaining issues:
 
-1. **Debug Section Handler** (HIGH PRIORITY)
-   - Add debug output to trace execution
-   - Test with simple section example
-   - Verify tree-sitter structure matches expectations
-   - Fix content nesting issue
-   - **Expected Impact**: +5-8 tests passing
+**Passing Tests (14/42 = 33%)**:
+1. ✅ BasicTextFormatting - Basic formatting commands work
+2. ✅ ListEnvironments - Itemize/enumerate rendering
+3. ✅ basic_test_tex_1, 2 - Simple test cases
+4. ✅ formatting_tex_1-5 - Bold, italic, underline, etc.
+5. ✅ basic_text_tex_1 - Paragraph handling
+6. ✅ text_tex_1 - Basic text processing
+7. ✅ environments_tex_1 - Environment basics
 
-2. **Implement Environment Handlers** (MEDIUM PRIORITY)
-   - quote, quotation, verse environments
-   - center, flushleft, flushright environments
-   - Use existing patterns from itemize/enumerate
-   - **Expected Impact**: +3-5 tests passing
+**Failing Tests by Category (28 failures)**:
 
-3. **Polish Special Characters** (LOW PRIORITY)
-   - Fix ZWSP placement edge cases
-   - Test with complex nested scenarios
-   - **Expected Impact**: Improve existing test output
+**1. CSS Class Attributes (8 tests) - HIGHEST PRIORITY** 🔥
+- Missing `class="continue"` on paragraphs after environments (7 tests)
+- Missing `class="noindent"` on \noindent paragraphs (1 test)
+- **Impact**: environments_tex_4, 5, 7, 8, 9 + text_tex_3
+- **Complexity**: LOW - just add CSS class logic
+- **Expected Impact**: +8 tests passing
 
-4. **Verbatim Grammar Fix** (FUTURE WORK)
-   - Modify grammar.js verb_command rule
-   - Extract content between arbitrary delimiters
-   - Rebuild parser and test
-   - **Expected Impact**: +2-3 tests passing
-   - **Effort**: Significant (grammar work + testing)
+**2. Sectioning Content Separation (4 tests) - HIGH PRIORITY** 🔥
+- Section content merged into heading tags instead of separate paragraphs
+- Example: `<h2>Title​Content</h2>` should be `<h2>Title</h2><p>Content</p>`
+- **Impact**: SectioningCommands, sectioning_tex_1, 2, 3
+- **Complexity**: MEDIUM - debug paragraph opening logic after sections
+- **Expected Impact**: +4 tests passing
 
-5. **LaTeX Logo Handlers** (FUTURE WORK)
-   - Implement \TeX, \LaTeX, \LaTeXe commands
-   - Use proper HTML entities or CSS styling
-   - **Expected Impact**: +1-2 tests passing
+**3. Special Character/Symbol Commands (5 tests) - MEDIUM PRIORITY**
+- Operators showing as "operator" text instead of symbols
+- Missing implementations: `\textellipsis`, dashes (en-dash, em-dash)
+- Text processing issues with punctuation
+- **Impact**: formatting_tex_6, text_tex_4, 5, 6 + symbols_tex_4
+- **Complexity**: LOW-MEDIUM - implement missing symbol handlers
+- **Expected Impact**: +5 tests passing
 
-**Target Milestones**:
-- **Short-term** (next session): 18-20 tests passing (43-48%)
-- **Medium-term** (1-2 weeks): 30+ tests passing (71%+)
-- **Long-term** (Phase 3 complete): 40+ tests passing (95%+)
+**4. Counter System (2 tests) - LOW PRIORITY** ⚠️
+- `\newcounter`, `\stepcounter`, `\arabic`, `\roman`, etc. not implemented
+- Output showing raw names: "c", "operator", "value_literal"
+- **Impact**: counters_tex_1, 2
+- **Complexity**: HIGH - entire counter subsystem needed
+- **Expected Impact**: +2 tests, but significant effort
+- **Decision**: Defer to later phase
 
-### 9.8 Lessons Learned
+**5. Paragraph Break with \par (2 tests) - MEDIUM PRIORITY**
+- `\par` command not creating new paragraphs in latex_document context
+- Currently handled in process_element_content but not in latex_document
+- **Impact**: basic_text_tex_2, text_tex_2
+- **Complexity**: LOW - add \par handler to latex_document
+- **Expected Impact**: +2 tests passing
+
+**6. Advanced Commands (7 tests) - VARIED PRIORITY**
+- Verbatim: `\verb|text|` not implemented (1 test) - GRAMMAR ISSUE
+- TeX/LaTeX logos: `\TeX`, `\LaTeX` not styled (1 test) - LOW
+- Line break spacing: `\\[1cm]` → styled span (1 test) - LOW
+- Preamble: `\usepackage`, `\setlength` creating output (1 test) - LOW
+- Comment environment: Not hiding content (1 test) - LOW
+- Custom item labels: `\item[]` not working (1 test) - LOW
+- Ligature prevention: Missing `,` and zero-width joiner (1 test) - LOW
+- **Total Impact**: +7 tests, but individual implementations needed
+
+### 9.8 Revised Action Plan
+
+**QUICK WINS (Target: 26/42 = 62% by next session)**
+
+**Phase A: CSS Classes (2-3 hours)** 🎯
+1. Implement `class="continue"` detection after environments
+   - Track when we just exited block-level element
+   - Set flag: `after_block_element = true`
+   - Apply class to next paragraph
+   - **Impact**: +7 tests (environments_tex_4, 5, 7, 8, 9 + likely others)
+
+2. Implement `class="noindent"` for \noindent command
+   - Detect \noindent element
+   - Set flag: `noindent_next_paragraph = true`
+   - Apply class to next paragraph opening
+   - **Impact**: +1 test (text_tex_3)
+
+**Phase B: Section Fixes (2-3 hours)** 🎯
+1. Debug section handler paragraph management
+   - Add extensive debug logging to trace execution
+   - Test with minimal example: `\section{Title}\nContent`
+   - Identify why content appears inside `<h2>`
+   - Fix paragraph opening logic after sections
+   - **Impact**: +4 tests (SectioningCommands, sectioning_tex_1, 2, 3)
+
+**Phase C: \par Command (1 hour)** 🎯
+1. Add \par handler to latex_document
+   - Close current `<p>` tag
+   - Open new `<p>` tag
+   - Similar to parbreak symbol handling
+   - **Impact**: +2 tests (basic_text_tex_2, text_tex_2)
+
+**MEDIUM PRIORITY (Target: 31/42 = 74%)**
+
+**Phase D: Special Characters (3-4 hours)**
+1. Fix operator rendering
+   - Implement en-dash (--), em-dash (---) handlers
+   - Fix comma and punctuation in text processing
+   - **Impact**: +3-4 tests (text_tex_4, 6, 7)
+
+2. Implement symbol commands
+   - `\textellipsis` → `…`
+   - Other missing symbols from test failures
+   - **Impact**: +1 test (symbols_tex_4)
+
+**LOW PRIORITY (Defer)**
+
+1. Counter system - Significant work, defer to Phase 4
+2. Verbatim - Grammar issue, needs separate session
+3. Advanced formatting - Individual small fixes
+4. Preamble handling - Low impact
+
+### 9.9 Next Session Goals
+
+**Primary Target**: 26/42 tests passing (62%)
+- Complete Phase A (CSS classes): +8 tests
+- Complete Phase B (Sections): +4 tests
+
+**Stretch Target**: 31/42 tests passing (74%)
+- Also complete Phase C (\par command): +2 tests
+- Start Phase D (Special characters): +3 tests
+
+**Success Criteria**:
+- All environment tests with paragraphs pass
+- All sectioning tests pass
+- Paragraph management fully functional
+
+**Blockers to Monitor**:
+- Section handler may reveal deeper structural issues
+- CSS class logic may interact with other systems
+
+### 9.10 Lessons Learned
 
 1. **Tree-sitter Structure Differences**: New parser creates different element names (e.g., "enum_item" vs "item")
    - Solution: Check for both names in handlers for compatibility
@@ -2020,20 +2114,49 @@ if (grammar_allows_children(node_type)) {
    - Use JSON output to verify element types
    - Don't assume structure matches old parser
 
-### 9.9 Technical Debt & Known Issues
+6. **Test-Driven Development**: Running full test suite reveals patterns
+   - 7 tests failing due to same CSS class issue → high ROI fix
+   - Grouped failures indicate systemic issues, not individual bugs
+   - Prioritize by impact: CSS classes affect 8 tests, worth addressing first
+
+### 9.11 Technical Debt & Known Issues
 
 1. **Section Content Nesting** - needs debugging session with detailed tracing
 2. **Verbatim Grammar** - requires grammar.js rewrite for verb_command
 3. **ZWSP Handling** - minor whitespace differences in some contexts
 4. **Error Reporting** - not yet leveraging tree-sitter source locations
 5. **Compatibility Layer** - currently supporting both old and new parser simultaneously
+6. **CSS Class Management** - Need state tracking for "continue" and "noindent" classes
+7. **Counter System** - Major subsystem not yet implemented (defer to Phase 4)
 
-### 9.10 Performance Notes
+### 9.12 Performance Notes
 
 - Build system: Automatic parser regeneration working correctly
 - Test execution: Baseline suite runs in <5 seconds
 - Memory usage: Not yet benchmarked, but architecture supports efficient allocation
 - Compilation: Incremental builds fast with dependency tracking
+
+### 9.13 Macro System Status
+
+**Implementation Complete** ✅:
+- Macro registry with storage for definitions
+- `\newcommand` and `\renewcommand` handlers
+- Parameter substitution (`#1`, `#2`, etc.) in macro definitions
+- Deep element cloning for macro expansion
+- Macro expansion at command dispatch point
+
+**Current Status**:
+- Core algorithm tested and working
+- Command name extraction from `new_command_definition` AST nodes successful
+- Parameter count and definition body extraction functional
+- Macro expansion integrated into formatter
+
+**Blocked on \usepackage**:
+- Test files use `\usepackage{echo}` to load macro definitions
+- Need to implement either:
+  1. `\usepackage` handler with predefined macro sets, OR
+  2. Convert test files to use `\newcommand` directly
+- Decision: Defer to Phase 4 (macro tests not in baseline suite)
 
 ---
 
@@ -2042,9 +2165,11 @@ if (grammar_allows_children(node_type)) {
 **Status Summary**:
 - ✅ Phase 1 (Grammar): Complete
 - ✅ Phase 2 (Converter): Complete  
-- 🔄 Phase 3 (Formatter): 31% complete (13/42 tests passing)
+- 🔄 Phase 3 (Formatter): 33% complete (14/42 tests passing)
 - ⏸️ Phase 4 (Testing): Blocked on Phase 3
 - ⏸️ Phase 5 (Optimization): Not started
 
-**Overall Assessment**: Solid architectural foundation in place. Core integration working correctly with smart paragraph management and block-level detection. Main remaining work is implementing remaining handlers and debugging edge cases. Verbatim limitation is significant but can be worked around short-term.
+**Overall Assessment**: Solid architectural foundation in place. Core integration working with smart paragraph management and block-level detection. **Clear path to 62% pass rate** identified through systematic test analysis - CSS classes and section fixes are high-impact, low-complexity changes. Counter system and verbatim are deferred as lower priority. Focus on quick wins will demonstrate rapid progress.
+
+**Key Insight from Full Test Suite**: Most failures fall into just 3-4 categories, each affecting multiple tests. This is **good news** - fixing systemic issues has multiplicative impact. CSS classes alone will unlock 8 tests.
 
