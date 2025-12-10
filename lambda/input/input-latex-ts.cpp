@@ -472,7 +472,7 @@ static Item convert_environment(InputContext& ctx, TSNode node, const char* sour
 }
 
 // Main entry point - tree-sitter LaTeX parser
-void parse_latex_ts(Input* input, const char* latex_string) {
+extern "C" void parse_latex_ts(Input* input, const char* latex_string) {
     log_info("Tree-sitter LaTeX parser starting...");
     
     // Create tree-sitter parser
