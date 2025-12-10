@@ -1142,8 +1142,10 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // Scan backwards: last is family, find size
                 const CssValue* family_value = nullptr;
                 const CssValue* size_value = nullptr;
+                const CssValue* line_height_value = nullptr;
                 const CssValue* weight_value = nullptr;
                 const CssValue* style_value = nullptr;
+                size_t family_start_index = count; // Index where font-family starts
 
                 for (size_t i = 0; i < count; i++) {
                     const CssValue* v = value->data.list.values[i];
@@ -1152,14 +1154,45 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] Font shorthand value[%zu]: type=%d", i, v->type);
 
                     if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                        // This is font-size
-                        size_value = v;
-                        log_debug("[CSS] Font shorthand: found font-size at [%zu]", i);
-                        // Everything after size is font-family
-                        if (i + 1 < count) {
-                            family_value = value->data.list.values[i + 1];
+                        if (!size_value) {
+                            // First length is font-size
+                            size_value = v;
+                            log_debug("[CSS] Font shorthand: found font-size at [%zu]", i);
+
+                            // Check for /line-height syntax: next values might be "/" and line-height
+                            size_t next_idx = i + 1;
+
+                            // Skip "/" delimiter if present
+                            if (next_idx < count) {
+                                const CssValue* next = value->data.list.values[next_idx];
+                                // Check if next is "/" (could be CUSTOM type with name "/")
+                                if (next && next->type == CSS_VALUE_TYPE_CUSTOM &&
+                                    next->data.custom_property.name &&
+                                    strcmp(next->data.custom_property.name, "/") == 0) {
+                                    log_debug("[CSS] Font shorthand: found '/' delimiter at [%zu]", next_idx);
+                                    next_idx++;
+
+                                    // Next should be line-height
+                                    if (next_idx < count) {
+                                        const CssValue* lh = value->data.list.values[next_idx];
+                                        if (lh && (lh->type == CSS_VALUE_TYPE_LENGTH ||
+                                                   lh->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                                                   lh->type == CSS_VALUE_TYPE_NUMBER)) {
+                                            line_height_value = lh;
+                                            log_debug("[CSS] Font shorthand: found line-height at [%zu]", next_idx);
+                                            next_idx++;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Everything from next_idx onwards is font-family
+                            family_start_index = next_idx;
+                            if (family_start_index < count) {
+                                family_value = value->data.list.values[family_start_index];
+                            }
+                            break;  // Found size, done scanning for size
                         }
-                        break;  // Found size, rest is family
                     } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* info = css_enum_info(v->data.keyword);
                         if (info) {
@@ -1178,9 +1211,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         family_value = v;
                         log_debug("[CSS] Font shorthand: found string font-family '%s'", v->data.string);
                     } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name) {
-                        // Custom identifier is font-family name
-                        family_value = v;
-                        log_debug("[CSS] Font shorthand: found custom font-family '%s'", v->data.custom_property.name);
+                        // Custom identifier - could be font-family or "/" delimiter
+                        // Skip "/" as it's the line-height separator
+                        if (strcmp(v->data.custom_property.name, "/") != 0) {
+                            family_value = v;
+                            log_debug("[CSS] Font shorthand: found custom font-family '%s'", v->data.custom_property.name);
+                        }
                     }
                 }
 
@@ -1191,6 +1227,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         span->font->font_size = font_size;
                         log_debug("[CSS] Font shorthand: set font-size = %.2f", font_size);
                     }
+                }
+
+                // Apply line-height
+                if (line_height_value && span->blk) {
+                    span->blk->line_height = line_height_value;
+                    log_debug("[CSS] Font shorthand: set line-height");
                 }
 
                 // Apply font-family
