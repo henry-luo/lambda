@@ -36,6 +36,7 @@ extern "C" {
 #include "../lambda/input/input.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/font_face.h"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -756,7 +757,29 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         if (formatted_css) {
             log_debug("[Lambda CSS] Parsed inline stylesheet %d:\n%s", i, formatted_css);
         }
-    }    // Step 6: Apply CSS cascade (external + <style> elements)
+    }
+
+    // Store stylesheets in DomDocument for @font-face processing later
+    // (after UiContext is initialized in cmd_layout_main)
+    int total_stylesheets = inline_stylesheet_count + (external_stylesheet ? 1 : 0);
+    if (total_stylesheets > 0) {
+        dom_doc->stylesheet_capacity = total_stylesheets;
+        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
+        dom_doc->stylesheet_count = 0;
+
+        if (external_stylesheet) {
+            dom_doc->stylesheets[dom_doc->stylesheet_count++] = external_stylesheet;
+        }
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            if (inline_stylesheets[i]) {
+                dom_doc->stylesheets[dom_doc->stylesheet_count++] = inline_stylesheets[i];
+            }
+        }
+        log_debug("[Lambda CSS] Stored %d stylesheets in DomDocument for @font-face processing",
+                  dom_doc->stylesheet_count);
+    }
+
+    // Step 6: Apply CSS cascade (external + <style> elements)
     log_debug("[Lambda CSS] Applying CSS cascade...");
     log_debug("[Lambda CSS] inline_stylesheet_count = %d", inline_stylesheet_count);
     log_debug("[Lambda CSS] external_stylesheet = %p, rule_count = %d",
@@ -1099,6 +1122,18 @@ int cmd_layout(int argc, char** argv) {
     log_debug("[Layout] Creating surface for layout calculations...");
     ui_context_create_surface(&ui_context, opts.viewport_width, opts.viewport_height);
     log_debug("[Layout] Surface created");
+
+    // Process @font-face rules from stored stylesheets
+    // This must happen after UiContext is initialized but before layout
+    if (doc->stylesheets && doc->stylesheet_count > 0) {
+        log_debug("[Layout] Processing @font-face rules from %d stylesheets...", doc->stylesheet_count);
+        char* base_path = url_to_local_path(doc->url);
+        for (int i = 0; i < doc->stylesheet_count; i++) {
+            if (doc->stylesheets[i]) {
+                process_font_face_rules_from_stylesheet(&ui_context, doc->stylesheets[i], base_path);
+            }
+        }
+    }
 
     // Perform layout computation
     log_debug("[Layout] About to call layout_html_doc...");

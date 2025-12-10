@@ -56,6 +56,11 @@ struct DomDocument {
     DomElement* root;            // Root element of DOM tree (optional)
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
 
+    // CSS stylesheets (for @font-face processing after UiContext init)
+    struct CssStylesheet** stylesheets;  // Array of parsed stylesheets
+    int stylesheet_count;                // Number of stylesheets
+    int stylesheet_capacity;             // Capacity of stylesheet array
+
     // Layout and state
     ViewTree* view_tree;         // View tree after layout
     StateStore* state;           // Document state (cursor, caret, etc.)
@@ -63,6 +68,7 @@ struct DomDocument {
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
+                    stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     view_tree(nullptr), state(nullptr) {}
 };
 

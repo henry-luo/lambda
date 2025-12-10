@@ -1124,6 +1124,105 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        // ===== Font Shorthand (must be before individual font properties) =====
+        case CSS_PROPERTY_FONT: {
+            log_debug("[CSS] Processing font shorthand property");
+            if (!span->font) { span->font = alloc_font_prop(lycon); }
+
+            // Font shorthand format: [font-style] [font-variant] [font-weight] [font-stretch] font-size[/line-height] font-family
+            // The last value (or values) is always font-family
+            // font-size is required and comes before font-family
+
+            // Handle list of values (common case for shorthand)
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
+                size_t count = value->data.list.count;
+                log_debug("[CSS] Font shorthand: %zu values", count);
+
+                // Last value(s) are font-family - find the font-size value first
+                // Scan backwards: last is family, find size
+                const CssValue* family_value = nullptr;
+                const CssValue* size_value = nullptr;
+                const CssValue* weight_value = nullptr;
+                const CssValue* style_value = nullptr;
+
+                for (size_t i = 0; i < count; i++) {
+                    const CssValue* v = value->data.list.values[i];
+                    if (!v) continue;
+
+                    log_debug("[CSS] Font shorthand value[%zu]: type=%d", i, v->type);
+
+                    if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        // This is font-size
+                        size_value = v;
+                        log_debug("[CSS] Font shorthand: found font-size at [%zu]", i);
+                        // Everything after size is font-family
+                        if (i + 1 < count) {
+                            family_value = value->data.list.values[i + 1];
+                        }
+                        break;  // Found size, rest is family
+                    } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(v->data.keyword);
+                        if (info) {
+                            log_debug("[CSS] Font shorthand keyword: %s (group=%d)", info->name, info->group);
+                            if (info->group == CSS_VALUE_GROUP_FONT_WEIGHT) {
+                                weight_value = v;
+                            } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
+                                style_value = v;
+                            } else if (v->data.keyword >= CSS_VALUE_SERIF && v->data.keyword <= CSS_VALUE_FANGSONG) {
+                                // Generic font family keyword
+                                family_value = v;
+                            }
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_STRING) {
+                        // String is font-family name
+                        family_value = v;
+                        log_debug("[CSS] Font shorthand: found string font-family '%s'", v->data.string);
+                    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name) {
+                        // Custom identifier is font-family name
+                        family_value = v;
+                        log_debug("[CSS] Font shorthand: found custom font-family '%s'", v->data.custom_property.name);
+                    }
+                }
+
+                // Apply font-size
+                if (size_value) {
+                    float font_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, size_value);
+                    if (font_size > 0) {
+                        span->font->font_size = font_size;
+                        log_debug("[CSS] Font shorthand: set font-size = %.2f", font_size);
+                    }
+                }
+
+                // Apply font-family
+                if (family_value) {
+                    if (family_value->type == CSS_VALUE_TYPE_STRING) {
+                        span->font->family = (char*)family_value->data.string;
+                        log_debug("[CSS] Font shorthand: set font-family = '%s'", span->font->family);
+                    } else if (family_value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(family_value->data.keyword);
+                        span->font->family = info ? (char*)info->name : nullptr;
+                        log_debug("[CSS] Font shorthand: set font-family keyword = '%s'", span->font->family);
+                    } else if (family_value->type == CSS_VALUE_TYPE_CUSTOM && family_value->data.custom_property.name) {
+                        span->font->family = (char*)family_value->data.custom_property.name;
+                        log_debug("[CSS] Font shorthand: set font-family custom = '%s'", span->font->family);
+                    }
+                }
+
+                // Apply font-weight if specified
+                if (weight_value) {
+                    span->font->font_weight = map_font_weight(weight_value);
+                    log_debug("[CSS] Font shorthand: set font-weight");
+                }
+
+                // Apply font-style if specified
+                if (style_value) {
+                    span->font->font_style = style_value->data.keyword;
+                    log_debug("[CSS] Font shorthand: set font-style");
+                }
+            }
+            break;
+        }
+
         case CSS_PROPERTY_FONT_SIZE: {
             log_debug("[CSS] Processing font-size property");
             if (!span->font) { span->font = alloc_font_prop(lycon); }
