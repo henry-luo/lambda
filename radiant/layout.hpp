@@ -298,6 +298,7 @@ PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
 void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
+void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 void free_view(ViewTree* tree, View* view);
 
