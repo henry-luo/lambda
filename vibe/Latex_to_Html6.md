@@ -1840,11 +1840,17 @@ if (grammar_allows_children(node_type)) {
 
 ## 9. Implementation Progress Report
 
-### 9.1 Current Status (10 December 2025 - Evening Update)
+### 9.1 Current Status (10 December 2025 - Latest Update)
 
-**Test Results**: 14/42 baseline tests passing (33% pass rate)
+**Test Results**: 17/42 baseline tests passing (40.5% pass rate) ⬆️ +3 tests
 
 **Implementation Phase**: Phase 3 - Formatter Integration (In Progress)
+
+**Recent Improvements**:
+- ✅ CSS `class="continue"` implementation working (+3 passing tests)
+- ✅ Fixed build-test errors (linkage issues with `parse_latex_ts` and `print_item`)
+- ✅ ParagraphState tracking system implemented
+- ✅ Smart flag management for CSS class application
 
 ### 9.2 Completed Work
 
@@ -1902,6 +1908,21 @@ if (grammar_allows_children(node_type)) {
   - Handler has proper `return;` statement
   - Needs debugging to identify root cause
 - **Status**: Functional foundation exists, needs fix for nesting issue
+
+#### ✅ CSS Class System (NEW - 10 Dec 2025)
+- **Implemented ParagraphState tracking**: Manages CSS class flags across paragraph boundaries
+  - `after_block_element`: Set when exiting block-level elements
+  - `noindent_next`: Set when `\noindent` command detected
+- **Smart flag timing**: Flags set AFTER processing block elements (not before)
+  - Prevents flags from being consumed by paragraphs inside the block element
+  - Ensures flags apply to next paragraph in parent scope
+- **Empty paragraph removal**: Using existing `close_paragraph()` helper
+  - Removes `<p></p>` or `<p class="..."></p>` tags with no content
+  - Critical for handling `\noindent` followed by `parbreak`
+- **Result**: 
+  - ✅ `class="continue"` working for environments_tex_4, 5, 8
+  - ⚠️ `class="noindent"` partially working (top-level cases work, nested LIST cases need fix)
+- **Status**: Major progress, 3 tests fixed, 1 edge case remains
 
 #### 🔄 Special Characters
 - All handlers implemented and mostly working
@@ -1963,23 +1984,24 @@ if (grammar_allows_children(node_type)) {
 
 After running the complete baseline test suite, we now have a comprehensive view of remaining issues:
 
-**Passing Tests (14/42 = 33%)**:
+**Passing Tests (17/42 = 40.5%)** ⬆️:
 1. ✅ BasicTextFormatting - Basic formatting commands work
 2. ✅ ListEnvironments - Itemize/enumerate rendering
 3. ✅ basic_test_tex_1, 2 - Simple test cases
 4. ✅ formatting_tex_1-5 - Bold, italic, underline, etc.
 5. ✅ basic_text_tex_1 - Paragraph handling
 6. ✅ text_tex_1 - Basic text processing
-7. ✅ environments_tex_1 - Environment basics
+7. ✅ environments_tex_1, 4, 5, 8 - Environment handling with CSS classes ✨
 
-**Failing Tests by Category (28 failures)**:
+**Failing Tests by Category (25 failures)** ⬇️:
 
-**1. CSS Class Attributes (8 tests) - HIGHEST PRIORITY** 🔥
-- Missing `class="continue"` on paragraphs after environments (7 tests)
-- Missing `class="noindent"` on \noindent paragraphs (1 test)
-- **Impact**: environments_tex_4, 5, 7, 8, 9 + text_tex_3
-- **Complexity**: LOW - just add CSS class logic
-- **Expected Impact**: +8 tests passing
+**1. CSS Class Attributes (5 tests remaining) - HIGH PRIORITY** 🔥
+- ✅ FIXED: `class="continue"` on paragraphs after environments (3 tests: env_4, 5, 8)
+- ❌ Still failing: environments_tex_7, 9 (different issues than CSS classes)
+- ❌ Missing `class="noindent"` edge case: nested \noindent in LISTs (1 test: text_tex_3)
+- **Impact**: text_tex_3 + environments_tex_7, 9
+- **Complexity**: LOW-MEDIUM - debug nested LIST noindent handling
+- **Expected Impact**: +1 test passing (text_tex_3), env_7/9 need investigation
 
 **2. Sectioning Content Separation (4 tests) - HIGH PRIORITY** 🔥
 - Section content merged into heading tags instead of separate paragraphs
@@ -1988,7 +2010,14 @@ After running the complete baseline test suite, we now have a comprehensive view
 - **Complexity**: MEDIUM - debug paragraph opening logic after sections
 - **Expected Impact**: +4 tests passing
 
-**3. Special Character/Symbol Commands (5 tests) - MEDIUM PRIORITY**
+**3. \par Command Handler (2 tests) - MEDIUM PRIORITY**
+- `\par` command not handled like `parbreak` symbol
+- Should close current paragraph and open new one
+- **Impact**: basic_text_tex_2, text_tex_2
+- **Complexity**: LOW - add handler to latex_document similar to parbreak
+- **Expected Impact**: +2 tests passing
+
+**4. Special Character/Symbol Commands (5 tests) - MEDIUM PRIORITY**
 - Operators showing as "operator" text instead of symbols
 - Missing implementations: `\textellipsis`, dashes (en-dash, em-dash)
 - Text processing issues with punctuation
@@ -1996,7 +2025,7 @@ After running the complete baseline test suite, we now have a comprehensive view
 - **Complexity**: LOW-MEDIUM - implement missing symbol handlers
 - **Expected Impact**: +5 tests passing
 
-**4. Counter System (2 tests) - LOW PRIORITY** ⚠️
+**5. Counter System (2 tests) - LOW PRIORITY** ⚠️
 - `\newcounter`, `\stepcounter`, `\arabic`, `\roman`, etc. not implemented
 - Output showing raw names: "c", "operator", "value_literal"
 - **Impact**: counters_tex_1, 2
@@ -2121,13 +2150,15 @@ After running the complete baseline test suite, we now have a comprehensive view
 
 ### 9.11 Technical Debt & Known Issues
 
-1. **Section Content Nesting** - needs debugging session with detailed tracing
-2. **Verbatim Grammar** - requires grammar.js rewrite for verb_command
+1. **Section Content Nesting** - needs debugging session with detailed tracing (affects 4 tests)
+2. **Verbatim Grammar** - requires grammar.js rewrite for verb_command (affects 1 test)
 3. **ZWSP Handling** - minor whitespace differences in some contexts
 4. **Error Reporting** - not yet leveraging tree-sitter source locations
 5. **Compatibility Layer** - currently supporting both old and new parser simultaneously
-6. **CSS Class Management** - Need state tracking for "continue" and "noindent" classes
-7. **Counter System** - Major subsystem not yet implemented (defer to Phase 4)
+6. ~~**CSS Class Management**~~ - ✅ IMPLEMENTED (ParagraphState system working)
+7. **Noindent in Nested LISTs** - Edge case where `(\noindent, "text")` doesn't apply class
+8. **\par Command** - Not yet handled like parbreak symbol (affects 2 tests)
+9. **Counter System** - Major subsystem not yet implemented (defer to Phase 4)
 
 ### 9.12 Performance Notes
 
@@ -2162,14 +2193,25 @@ After running the complete baseline test suite, we now have a comprehensive view
 
 **End of Migration Plan & Progress Report**
 
-**Status Summary**:
+**Status Summary** (Updated 10 Dec 2025):
 - ✅ Phase 1 (Grammar): Complete
 - ✅ Phase 2 (Converter): Complete  
-- 🔄 Phase 3 (Formatter): 33% complete (14/42 tests passing)
+- 🔄 Phase 3 (Formatter): **40.5% complete (17/42 tests passing)** ⬆️ +3 tests
 - ⏸️ Phase 4 (Testing): Blocked on Phase 3
 - ⏸️ Phase 5 (Optimization): Not started
 
-**Overall Assessment**: Solid architectural foundation in place. Core integration working with smart paragraph management and block-level detection. **Clear path to 62% pass rate** identified through systematic test analysis - CSS classes and section fixes are high-impact, low-complexity changes. Counter system and verbatim are deferred as lower priority. Focus on quick wins will demonstrate rapid progress.
+**Recent Wins** 🎉:
+- ✅ CSS `class="continue"` system implemented and working (+3 tests)
+- ✅ Build system fixes (test_latex_treesitter now compiles)
+- ✅ ParagraphState tracking for CSS class management
+- ✅ Smart flag timing (set after block element processing, not before)
 
-**Key Insight from Full Test Suite**: Most failures fall into just 3-4 categories, each affecting multiple tests. This is **good news** - fixing systemic issues has multiplicative impact. CSS classes alone will unlock 8 tests.
+**Overall Assessment**: **Strong momentum** - jumped from 33% to 40.5% pass rate with CSS class implementation. The systematic approach is paying off: implementing one system (paragraph CSS classes) fixed 3 tests at once. Clear path forward remains:
+- Section nesting fix → +4 tests (44.5% → 54%)
+- \par command → +2 tests (54% → 59%)
+- Special character symbols → +5 tests (59% → 71%)
+
+**Projected 71% pass rate achievable** with medium-complexity fixes. Counter system (2 tests) and verbatim (1 test) remain deferred as they require substantial new subsystems.
+
+**Key Insight from Implementation**: Flag lifecycle management is critical - flags must be set AFTER processing child elements to prevent consumption by paragraphs inside the block scope. This pattern will be important for future state management features.
 
