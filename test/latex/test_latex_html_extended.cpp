@@ -251,7 +251,10 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         "preamble.tex",
         "basic_text.tex",
         "spacing.tex",
-        "symbols.tex"
+        "symbols.tex",
+        // Moved to baseline - Dec 10, 2025 (but some tests still in extended)
+        "macros.tex",     // ID 1 in baseline, rest in extended
+        "fonts.tex"       // ID 1, 6 in baseline, rest in extended
     };
 
     // Tests moved from baseline to extended (10 Dec 2025)
@@ -264,11 +267,17 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         {"preamble.tex", {1}},                     // Preamble handling issues
         {"formatting.tex", {6}},                   // Text alignment commands
         {"sectioning.tex", {1, 2, 3}},             // Section content nesting issue
-        {"basic_text.tex", {2, 3, 4, 5, 6}},       // \par, special chars, dashes, verbatim
+        {"basic_text.tex", {2, 4, 6}},             // \par (ID 2), special chars (ID 4), verbatim (ID 6)
+                                                   // ID 3, 5 moved to baseline (dashes)
         {"text.tex", {2, 3, 4, 5, 6, 7, 8, 9}},    // Various text processing issues
         {"environments.tex", {3, 6, 7, 9, 14}},    // Environment edge cases
-        {"whitespace.tex", {1, 2, 5, 6, 7, 8, 12, 13, 14, 16, 17, 18, 19, 20, 21}},  // Various whitespace handling issues
+        {"whitespace.tex", {1, 2, 5, 6, 7, 8, 12, 13, 14, 17, 18, 19, 20, 21}},  
+                                                   // Various whitespace handling issues
+                                                   // ID 16 moved to baseline (trailing whitespace)
         {"groups.tex", {2, 3}},                    // Group scope issues
+        {"macros.tex", {2, 3, 4, 5, 6}},           // ID 1 in baseline, rest in extended
+        {"fonts.tex", {2, 3, 4, 5, 7, 8}},         // ID 1, 6 in baseline (font declarations, typewriter ligatures)
+                                                   // ID 2-5, 7-8 in extended (em toggle, nesting, scoping, sizes)
     };
 
     // Legacy header-based mapping (kept for compatibility)
