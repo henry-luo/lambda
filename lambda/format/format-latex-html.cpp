@@ -1746,13 +1746,21 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                 // Handle LIST children (tree-sitter creates lists for mixed content)
                 if (child_type == LMD_TYPE_LIST) {
                     List* child_list = child.list;
+                    bool font_span_open = false;
+                    
                     for (size_t j = 0; j < child_list->length; j++) {
                         Item list_item = child_list->items[j];
+                        TypeId list_item_type = get_type_id(list_item);
                         
                         // Check for parbreak in list items
-                        if (get_type_id(list_item) == LMD_TYPE_SYMBOL) {
+                        if (list_item_type == LMD_TYPE_SYMBOL) {
                             Symbol* sym = (Symbol*)(list_item.symbol_ptr);
                             if (sym && strcmp(sym->chars, "parbreak") == 0) {
+                                // Close font span before paragraph
+                                if (font_span_open) {
+                                    stringbuf_append_str(html_buf, "</span>");
+                                    font_span_open = false;
+                                }
                                 if (in_paragraph) {
                                     close_paragraph(html_buf, true);  // Will remove if empty
                                     in_paragraph = false;
@@ -1764,7 +1772,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         
                         // Check if list item is block-level or special command
                         bool item_is_block = false;
-                        if (get_type_id(list_item) == LMD_TYPE_ELEMENT) {
+                        if (list_item_type == LMD_TYPE_ELEMENT) {
                             Element* item_elem = list_item.element;
                             if (item_elem && item_elem->type) {
                                 TypeElmt* item_elmt_type = (TypeElmt*)item_elem->type;
@@ -1786,6 +1794,11 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         
                         // Close paragraph before block element
                         if (item_is_block && in_paragraph) {
+                            // Close font span before paragraph
+                            if (font_span_open) {
+                                stringbuf_append_str(html_buf, "</span>");
+                                font_span_open = false;
+                            }
                             stringbuf_append_str(html_buf, "</p>\n");
                             in_paragraph = false;
                         }
@@ -1818,7 +1831,29 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                             in_paragraph = true;
                         }
                         
+                        // Before processing text content, check if we need to open a font span
+                        if (list_item_type == LMD_TYPE_STRING && needs_font_span(font_ctx) && !font_span_open) {
+                            const char* css_class = get_font_css_class(font_ctx);
+                            stringbuf_append_str(html_buf, "<span class=\"");
+                            stringbuf_append_str(html_buf, css_class);
+                            stringbuf_append_str(html_buf, "\">");
+                            font_span_open = true;
+                        }
+                        
+                        // If font returned to default and span is open, close it before text
+                        if (list_item_type == LMD_TYPE_STRING && !needs_font_span(font_ctx) && font_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            font_span_open = false;
+                        }
+                        
+                        // Process the item (this may change font_ctx for font declaration commands)
                         process_latex_element(html_buf, list_item, pool, depth + 1, font_ctx);
+                    }
+                    
+                    // Close any open font span at the end of the list
+                    if (font_span_open) {
+                        stringbuf_append_str(html_buf, "</span>");
+                        font_span_open = false;
                     }
                 } else {
                     process_latex_element(html_buf, child, pool, depth + 1, font_ctx);
@@ -1833,7 +1868,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             
             // Close final paragraph if still open
             if (in_paragraph) {
-                stringbuf_append_str(html_buf, "</p>");
+                close_paragraph(html_buf, false);  // Use helper to trim trailing whitespace
             }
             return;
         } else if (strcmp(cmd_name, "argument") == 0) {
@@ -2216,10 +2251,37 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
 
-        // Check text command map for common formatting commands
-        // This handles: textbf, textit, texttt, emph, textup, textsl, textsc, underline, sout, font sizes
+        // Font family commands that need special ligature handling
+        if (strcmp(cmd_name, "texttt") == 0) {
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_TYPEWRITER);
+            return;
+        }
+        else if (strcmp(cmd_name, "textrm") == 0) {
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
+            return;
+        }
+        else if (strcmp(cmd_name, "textsf") == 0) {
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_SANS_SERIF);
+            return;
+        }
+        else if (strcmp(cmd_name, "textmd") == 0) {
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
+            return;
+        }
+        else if (strcmp(cmd_name, "textnormal") == 0) {
+            // textnormal resets to defaults
+            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
+            return;
+        }
+
+        // Check text command map for other formatting commands (not fonts, which need ligature control)
+        // This handles: textbf, textit, textup, textsl, textsc, underline, sout, font sizes
         bool handled_by_map = false;
         for (int i = 0; text_command_map[i].cmd != NULL; i++) {
+            // Skip texttt - it's handled above with font context
+            if (strcmp(text_command_map[i].cmd, "texttt") == 0) {
+                continue;
+            }
             if (strcmp(cmd_name, text_command_map[i].cmd) == 0) {
                 process_text_command(html_buf, elem, pool, depth, text_command_map[i].css_class, "span", font_ctx);
                 handled_by_map = true;
@@ -2228,21 +2290,6 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
         if (handled_by_map) {
             return;
-        }
-
-        // Font family commands use font context (not in map since they need special handling)
-        if (strcmp(cmd_name, "textrm") == 0) {
-            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
-        }
-        else if (strcmp(cmd_name, "textsf") == 0) {
-            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_SANS_SERIF);
-        }
-        else if (strcmp(cmd_name, "textmd") == 0) {
-            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
-        }
-        else if (strcmp(cmd_name, "textnormal") == 0) {
-            // textnormal resets to defaults
-            process_font_scoped_command(html_buf, elem, pool, depth, font_ctx, FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
         }
         else if (strcmp(cmd_name, "linebreak") == 0 || strcmp(cmd_name, "linebreak_command") == 0 || strcmp(cmd_name, "newline") == 0) {
             // Check if linebreak has spacing argument (dimension)
@@ -3746,14 +3793,36 @@ static void process_font_scoped_command(StringBuf* html_buf, Element* elem, Pool
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
 
-    // Reset font context to default so text inside doesn't add redundant spans
+    // Save the family for ligature control, then reset context to prevent redundant inner spans
+    // (needs_font_span checks series/shape/family, so we reset all to NORMAL/UPRIGHT/ROMAN)
+    FontFamily active_family = font_ctx->family;
     font_ctx->series = FONT_SERIES_NORMAL;
     font_ctx->shape = FONT_SHAPE_UPRIGHT;
     font_ctx->family = FONT_FAMILY_ROMAN;
     font_ctx->em_active = false;
 
-    // Process content with neutral context (text won't add spans)
-    process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
+    // Process each child directly, manually handling ligatures based on active_family
+    if (elem && elem->items && elem->length > 0) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            TypeId child_type = get_type_id(child);
+            
+            if (child_type == LMD_TYPE_STRING) {
+                // Direct string output with ligature control based on saved family
+                String* str = child.get_string();
+                if (str && str->len > 0) {
+                    bool is_tt = (active_family == FONT_FAMILY_TYPEWRITER);
+                    append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+                }
+            } else {
+                // For non-string children (nested commands, etc.), restore family temporarily
+                FontFamily saved_fam = font_ctx->family;
+                font_ctx->family = active_family;
+                process_latex_element(html_buf, child, pool, depth, font_ctx);
+                font_ctx->family = saved_fam;
+            }
+        }
+    }
 
     stringbuf_append_str(html_buf, "</span>");
 
@@ -4145,13 +4214,9 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
             }
             p += 1; // Skip next dash
         }
-        // Check for single hyphen (not part of em/en dash)
+        // Check for single hyphen (not part of em/en dash) - keep as regular hyphen
         else if (*p == '-') {
-            if (is_tt) {
-                stringbuf_append_char(html_buf, '-'); // U+002D hyphen-minus in typewriter
-            } else {
-                stringbuf_append_str(html_buf, "\xE2\x80\x90"); // U+2010 hyphen
-            }
+            stringbuf_append_char(html_buf, '-'); // U+002D hyphen-minus (regular hyphen)
         }
         // HTML entity escaping
         else if (*p == '<') {
