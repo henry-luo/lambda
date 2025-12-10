@@ -1346,12 +1346,18 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
                 span->font->family = (char*)value->data.string;
+                log_debug("[CSS] Set font-family from STRING: '%s'", span->font->family);
+            }
+            else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                // Custom identifier font family (e.g., "ahem" without quotes)
+                span->font->family = (char*)value->data.custom_property.name;
+                log_debug("[CSS] Set font-family from CUSTOM: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Keyword font family - check if generic or specific
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
                 span->font->family = info ? (char*)info->name : NULL;
-                log_debug("[CSS] Set span->font->family = '%s'", span->font->family);
+                log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Arial, sans-serif")
@@ -2219,11 +2225,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->top_style = border.style->data.keyword;
                 span->bound->border->top_style_specificity = specificity;
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length);
                 span->bound->border->width.top_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->top_color = resolve_color_value(border.color);
                 span->bound->border->top_color_specificity = specificity;
             }
@@ -2243,11 +2249,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->right_style = border.style->data.keyword;
                 span->bound->border->right_style_specificity = specificity;
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length);
                 span->bound->border->width.right_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->right_color = resolve_color_value(border.color);
                 span->bound->border->right_color_specificity = specificity;
             }
@@ -2267,12 +2273,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->bottom_style = border.style->data.keyword;
                 span->bound->border->bottom_style_specificity = specificity;
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length);
                 span->bound->border->width.bottom_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->bottom_color = resolve_color_value(border.color);
+                span->bound->border->bottom_color_specificity = specificity;
             }
             break;
         }
@@ -2290,12 +2297,13 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->left_style = border.style->data.keyword;
                 span->bound->border->left_style_specificity = specificity;
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length);
                 span->bound->border->width.left_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->left_color = resolve_color_value(border.color);
+                span->bound->border->left_color_specificity = specificity;
             }
             break;
         }
