@@ -134,15 +134,26 @@ class RadiantLayoutTester {
      * Load browser reference data
      */
     async loadBrowserReference(testName, category) {
-        const refFile = path.join(this.referenceDir, category, `${testName}.json`);
+        // First try flat directory structure (merged references)
+        const flatRefFile = path.join(this.referenceDir, `${testName}.json`);
         try {
-            const content = await fs.readFile(refFile, 'utf8');
+            const content = await fs.readFile(flatRefFile, 'utf8');
             return JSON.parse(content);
         } catch (error) {
-            if (error.code === 'ENOENT') {
-                return null; // Reference doesn't exist
+            if (error.code !== 'ENOENT') {
+                throw new Error(`Failed to load browser reference: ${error.message}`);
             }
-            throw new Error(`Failed to load browser reference: ${error.message}`);
+            // Fall back to category subdirectory for backwards compatibility
+            const categoryRefFile = path.join(this.referenceDir, category, `${testName}.json`);
+            try {
+                const content = await fs.readFile(categoryRefFile, 'utf8');
+                return JSON.parse(content);
+            } catch (error) {
+                if (error.code === 'ENOENT') {
+                    return null; // Reference doesn't exist
+                }
+                throw new Error(`Failed to load browser reference: ${error.message}`);
+            }
         }
     }
 
