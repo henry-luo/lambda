@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 104,
+      "height": 100,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            table, div\n            {\n                font: 1em ahem;\n            }\n            table\n            {\n                background: black;\n                border-spacing: 0;\n                overflow: hidden;\n                table-layout: fixed;\n                width: 5em;\n            }\n            td\n            {\n                padding: 0;\n            }\n            div\n            {\n                background: black;\n                margin-top: 10px;\n                width: 5em;\n            }\n        ",
-                "length": 519,
+                "text": "\n            @font-face {\n                font-family: 'ahem';\n                src: url('../../font/Ahem.ttf') format('truetype');\n            }\n            table, div\n            {\n                font: 1em ahem;\n            }\n            table\n            {\n                background: black;\n                border-spacing: 0;\n                overflow: hidden;\n                table-layout: fixed;\n                width: 5em;\n            }\n            td\n            {\n                padding: 0;\n            }\n            div\n            {\n                background: black;\n                margin-top: 10px;\n                width: 5em;\n            }\n        ",
+                "length": 663,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 80,
+          "height": 76,
           "contentWidth": 1184,
-          "contentHeight": 80,
+          "contentHeight": 76,
           "scrollWidth": 1184,
-          "scrollHeight": 80
+          "scrollHeight": 76
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 8,
               "y": 50,
               "width": 80,
-              "height": 18,
+              "height": 16,
               "contentWidth": 80,
-              "contentHeight": 18,
-              "scrollWidth": 132,
-              "scrollHeight": 18
+              "contentHeight": 16,
+              "scrollWidth": 168,
+              "scrollHeight": 16
             },
             "computed": {
               "display": "table",
@@ -937,11 +937,11 @@
                   "x": 8,
                   "y": 50,
                   "width": 80,
-                  "height": 18,
+                  "height": 16,
                   "contentWidth": 80,
-                  "contentHeight": 18,
-                  "scrollWidth": 132,
-                  "scrollHeight": 18
+                  "contentHeight": 16,
+                  "scrollWidth": 168,
+                  "scrollHeight": 16
                 },
                 "computed": {
                   "display": "table-row-group",
@@ -997,11 +997,11 @@
                       "x": 8,
                       "y": 50,
                       "width": 80,
-                      "height": 18,
+                      "height": 16,
                       "contentWidth": 80,
-                      "contentHeight": 18,
-                      "scrollWidth": 132,
-                      "scrollHeight": 18
+                      "contentHeight": 16,
+                      "scrollWidth": 168,
+                      "scrollHeight": 16
                     },
                     "computed": {
                       "display": "table-row",
@@ -1057,11 +1057,11 @@
                           "x": 8,
                           "y": 50,
                           "width": 40,
-                          "height": 18,
+                          "height": 16,
                           "contentWidth": 40,
-                          "contentHeight": 18,
-                          "scrollWidth": 92,
-                          "scrollHeight": 18
+                          "contentHeight": 16,
+                          "scrollWidth": 128,
+                          "scrollHeight": 16
                         },
                         "computed": {
                           "display": "table-cell",
@@ -1117,10 +1117,10 @@
                                 {
                                   "x": 8,
                                   "y": 50,
-                                  "width": 92.44,
-                                  "height": 18,
-                                  "right": 100.44,
-                                  "bottom": 68,
+                                  "width": 128,
+                                  "height": 16,
+                                  "right": 136,
+                                  "bottom": 66,
                                   "text": "XXXXXXXX",
                                   "startIndex": 0,
                                   "endIndex": 8
@@ -1147,11 +1147,11 @@
                           "x": 48,
                           "y": 50,
                           "width": 40,
-                          "height": 18,
+                          "height": 16,
                           "contentWidth": 40,
-                          "contentHeight": 18,
-                          "scrollWidth": 92,
-                          "scrollHeight": 18
+                          "contentHeight": 16,
+                          "scrollWidth": 128,
+                          "scrollHeight": 16
                         },
                         "computed": {
                           "display": "table-cell",
@@ -1207,10 +1207,10 @@
                                 {
                                   "x": 48,
                                   "y": 50,
-                                  "width": 92.44,
-                                  "height": 18,
-                                  "right": 140.44,
-                                  "bottom": 68,
+                                  "width": 128,
+                                  "height": 16,
+                                  "right": 176,
+                                  "bottom": 66,
                                   "text": "XXXXXXXX",
                                   "startIndex": 0,
                                   "endIndex": 8
@@ -1241,13 +1241,13 @@
             "classes": [],
             "layout": {
               "x": 8,
-              "y": 78,
+              "y": 76,
               "width": 80,
-              "height": 18,
+              "height": 16,
               "contentWidth": 80,
-              "contentHeight": 18,
+              "contentHeight": 16,
               "scrollWidth": 80,
-              "scrollHeight": 18
+              "scrollHeight": 16
             },
             "computed": {
               "display": "block",
@@ -1302,11 +1302,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 78,
-                      "width": 11.56,
-                      "height": 18,
-                      "right": 19.56,
-                      "bottom": 96,
+                      "y": 76,
+                      "width": 16,
+                      "height": 16,
+                      "right": 24,
+                      "bottom": 92,
                       "text": "X",
                       "startIndex": 0,
                       "endIndex": 1
