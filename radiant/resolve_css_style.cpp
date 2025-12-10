@@ -3541,6 +3541,316 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        // Grid Item Placement Properties
+        case CSS_PROPERTY_GRID_COLUMN_START: {
+            log_debug("[CSS] Processing grid-column-start property");
+            alloc_grid_item_prop(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int line = (int)value->data.number.value;
+                span->gi->grid_column_start = line;
+                span->gi->has_explicit_grid_column_start = true;
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-column-start: %d", line);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (value->data.keyword == CSS_VALUE_AUTO) {
+                    span->gi->grid_column_start = 0;  // auto
+                    log_debug("[CSS] grid-column-start: auto");
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_COLUMN_END: {
+            log_debug("[CSS] Processing grid-column-end property");
+            alloc_grid_item_prop(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int line = (int)value->data.number.value;
+                span->gi->grid_column_end = line;
+                span->gi->has_explicit_grid_column_end = true;
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-column-end: %d", line);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                span->gi->grid_column_end = 0;  // auto
+                log_debug("[CSS] grid-column-end: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_ROW_START: {
+            log_debug("[CSS] Processing grid-row-start property");
+            alloc_grid_item_prop(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int line = (int)value->data.number.value;
+                span->gi->grid_row_start = line;
+                span->gi->has_explicit_grid_row_start = true;
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-row-start: %d", line);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                span->gi->grid_row_start = 0;  // auto
+                log_debug("[CSS] grid-row-start: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_ROW_END: {
+            log_debug("[CSS] Processing grid-row-end property");
+            alloc_grid_item_prop(lycon, span);
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int line = (int)value->data.number.value;
+                span->gi->grid_row_end = line;
+                span->gi->has_explicit_grid_row_end = true;
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-row-end: %d", line);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                span->gi->grid_row_end = 0;  // auto
+                log_debug("[CSS] grid-row-end: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_COLUMN: {
+            log_debug("[CSS] Processing grid-column shorthand property");
+            alloc_grid_item_prop(lycon, span);
+            // grid-column: <start> / <end> or span <n> or <line>
+            // Per CSS Grid spec: "span N" without "/" means "auto / span N"
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                bool has_separator = false;
+
+                // First pass: check if there's a "/" separator
+                for (size_t i = 0; i < count; i++) {
+                    CssValue* v = values[i];
+                    if (v->type == CSS_VALUE_TYPE_STRING && v->data.string && strcmp(v->data.string, "/") == 0) {
+                        has_separator = true;
+                        break;
+                    }
+                }
+
+                if (!has_separator) {
+                    // No separator: "span N" or just "N"
+                    // Check if first value is span keyword
+                    bool is_span = false;
+                    int span_value = 1;
+                    int line_value = 0;
+
+                    for (size_t i = 0; i < count; i++) {
+                        CssValue* v = values[i];
+                        if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
+                            if (info && info->name && strcmp(info->name, "span") == 0) {
+                                is_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
+                            // "span" may come as custom identifier
+                            const char* name = v->data.custom_property.name;
+                            if (name && strcmp(name, "span") == 0) {
+                                is_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                            if (is_span) {
+                                span_value = (int)v->data.number.value;
+                            } else {
+                                line_value = (int)v->data.number.value;
+                            }
+                        }
+                    }                    if (is_span) {
+                        // "span N" -> auto / span N
+                        span->gi->grid_column_start = 0;  // auto
+                        span->gi->grid_column_end = -span_value;  // negative for span
+                        span->gi->has_explicit_grid_column_end = true;
+                    } else if (line_value != 0) {
+                        // Just a line number
+                        span->gi->grid_column_start = line_value;
+                        span->gi->has_explicit_grid_column_start = true;
+                    }
+                } else {
+                    // Has separator: <start> / <end>
+                    int value_idx = 0;  // 0 = start, 1 = end
+                    bool saw_span = false;
+
+                    for (size_t i = 0; i < count; i++) {
+                        CssValue* v = values[i];
+                        if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                            int num = (int)v->data.number.value;
+                            if (saw_span) {
+                                if (value_idx == 0) {
+                                    span->gi->grid_column_start = -num;
+                                    span->gi->has_explicit_grid_column_start = true;
+                                } else {
+                                    span->gi->grid_column_end = -num;
+                                    span->gi->has_explicit_grid_column_end = true;
+                                }
+                                saw_span = false;
+                            } else {
+                                if (value_idx == 0) {
+                                    span->gi->grid_column_start = num;
+                                    span->gi->has_explicit_grid_column_start = true;
+                                } else {
+                                    span->gi->grid_column_end = num;
+                                    span->gi->has_explicit_grid_column_end = true;
+                                }
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
+                            if (info && info->name && strcmp(info->name, "span") == 0) {
+                                saw_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
+                            const char* name = v->data.custom_property.name;
+                            if (name && strcmp(name, "span") == 0) {
+                                saw_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_STRING) {
+                            if (v->data.string && strcmp(v->data.string, "/") == 0) {
+                                value_idx = 1;
+                                saw_span = false;
+                            }
+                        }
+                    }
+                }
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-column: %d / %d",
+                          span->gi->grid_column_start, span->gi->grid_column_end);
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                // Single line number
+                int line = (int)value->data.number.value;
+                span->gi->grid_column_start = line;
+                span->gi->has_explicit_grid_column_start = true;
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-column: %d", line);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_ROW: {
+            log_debug("[CSS] Processing grid-row shorthand property");
+            alloc_grid_item_prop(lycon, span);
+            // grid-row: <start> / <end> or span <n> or <line>
+            // Per CSS Grid spec: "span N" without "/" means "auto / span N"
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                bool has_separator = false;
+
+                // First pass: check if there's a "/" separator
+                for (size_t i = 0; i < count; i++) {
+                    CssValue* v = values[i];
+                    if (v->type == CSS_VALUE_TYPE_STRING && v->data.string && strcmp(v->data.string, "/") == 0) {
+                        has_separator = true;
+                        break;
+                    }
+                }
+
+                if (!has_separator) {
+                    // No separator: "span N" or just "N"
+                    bool is_span = false;
+                    int span_value = 1;
+                    int line_value = 0;
+
+                    for (size_t i = 0; i < count; i++) {
+                        CssValue* v = values[i];
+                        if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
+                            if (info && info->name && strcmp(info->name, "span") == 0) {
+                                is_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
+                            const char* name = v->data.custom_property.name;
+                            if (name && strcmp(name, "span") == 0) {
+                                is_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                            if (is_span) {
+                                span_value = (int)v->data.number.value;
+                            } else {
+                                line_value = (int)v->data.number.value;
+                            }
+                        }
+                    }
+
+                    if (is_span) {
+                        // "span N" -> auto / span N
+                        span->gi->grid_row_start = 0;  // auto
+                        span->gi->grid_row_end = -span_value;  // negative for span
+                        span->gi->has_explicit_grid_row_end = true;
+                    } else if (line_value != 0) {
+                        span->gi->grid_row_start = line_value;
+                        span->gi->has_explicit_grid_row_start = true;
+                    }
+                } else {
+                    // Has separator: <start> / <end>
+                    int value_idx = 0;
+                    bool saw_span = false;
+
+                    for (size_t i = 0; i < count; i++) {
+                        CssValue* v = values[i];
+                        if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                            int num = (int)v->data.number.value;
+                            if (saw_span) {
+                                if (value_idx == 0) {
+                                    span->gi->grid_row_start = -num;
+                                    span->gi->has_explicit_grid_row_start = true;
+                                } else {
+                                    span->gi->grid_row_end = -num;
+                                    span->gi->has_explicit_grid_row_end = true;
+                                }
+                                saw_span = false;
+                            } else {
+                                if (value_idx == 0) {
+                                    span->gi->grid_row_start = num;
+                                    span->gi->has_explicit_grid_row_start = true;
+                                } else {
+                                    span->gi->grid_row_end = num;
+                                    span->gi->has_explicit_grid_row_end = true;
+                                }
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* info = css_enum_info(v->data.keyword);
+                            if (info && info->name && strcmp(info->name, "span") == 0) {
+                                saw_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_CUSTOM) {
+                            const char* name = v->data.custom_property.name;
+                            if (name && strcmp(name, "span") == 0) {
+                                saw_span = true;
+                            }
+                        } else if (v->type == CSS_VALUE_TYPE_STRING) {
+                            if (v->data.string && strcmp(v->data.string, "/") == 0) {
+                                value_idx = 1;
+                                saw_span = false;
+                            }
+                        }
+                    }
+                }
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-row: %d / %d",
+                          span->gi->grid_row_start, span->gi->grid_row_end);
+            } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                int line = (int)value->data.number.value;
+                span->gi->grid_row_start = line;
+                span->gi->has_explicit_grid_row_start = true;
+                span->gi->is_grid_auto_placed = false;
+                log_debug("[CSS] grid-row: %d", line);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_AUTO_FLOW: {
+            log_debug("[CSS] Processing grid-auto-flow property");
+            if (!block) {
+                log_debug("[CSS] grid-auto-flow: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum flow = value->data.keyword;
+                block->embed->grid->grid_auto_flow = flow;
+                log_debug("[CSS] grid-auto-flow: %s", css_enum_info(flow)->name);
+            }
+            break;
+        }
+
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
             alloc_flex_item_prop(lycon, span);

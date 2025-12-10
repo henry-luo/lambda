@@ -116,6 +116,10 @@ typedef struct GridContainerLayout : GridProp {
     int implicit_row_count;
     int implicit_column_count;
 
+    // Auto-placement cursor (for tracking current position during auto-placement)
+    int auto_row_cursor;
+    int auto_col_cursor;
+
     // Container dimensions
     int container_width;
     int container_height;
