@@ -18,6 +18,10 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     lycon->grid_container = grid;
     grid->lycon = lycon;  // Store layout context for intrinsic sizing
 
+    // Initialize auto-placement cursors (grid lines are 1-indexed)
+    grid->auto_row_cursor = 1;
+    grid->auto_col_cursor = 1;
+
     // Debug: check what's available
     log_debug("container->embed=%p", (void*)container->embed);
     if (container->embed) {
@@ -370,9 +374,11 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
         if (!item->gi) continue;  // Skip items without grid item properties
 
         // Check if item has explicit grid positioning
-        if (item->gi->grid_row_start > 0 || item->gi->grid_row_end > 0 ||
-            item->gi->grid_column_start > 0 || item->gi->grid_column_end > 0 ||
-            item->gi->grid_area) {
+        // Note: Negative values indicate span (e.g., -2 means "span 2")
+        bool has_explicit_row = item->gi->grid_row_start != 0 || item->gi->grid_row_end != 0;
+        bool has_explicit_column = item->gi->grid_column_start != 0 || item->gi->grid_column_end != 0;
+
+        if (has_explicit_row || has_explicit_column || item->gi->grid_area) {
 
             if (item->gi->grid_area) {
                 // Resolve named grid area
@@ -387,12 +393,72 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
                 }
             } else {
                 // Use explicit line positions
-                item->gi->computed_grid_row_start = item->gi->grid_row_start;
-                item->gi->computed_grid_row_end = item->gi->grid_row_end;
-                item->gi->computed_grid_column_start = item->gi->grid_column_start;
-                item->gi->computed_grid_column_end = item->gi->grid_column_end;
+                // Handle span values (negative numbers mean "span N")
+
+                // Column placement
+                int col_start = item->gi->grid_column_start;
+                int col_end = item->gi->grid_column_end;
+
+                if (col_start == 0 && col_end < 0) {
+                    // "span N" only - needs auto-placement for start
+                    // Will be handled in auto-place phase
+                    item->gi->computed_grid_column_start = 0;
+                    item->gi->computed_grid_column_end = col_end;  // Keep span for auto-place
+                } else if (col_start > 0 && col_end < 0) {
+                    // "N / span M" - explicit start, span end
+                    int span = -col_end;
+                    item->gi->computed_grid_column_start = col_start;
+                    item->gi->computed_grid_column_end = col_start + span;
+                } else if (col_start < 0 && col_end > 0) {
+                    // "span N / M" - span start, explicit end
+                    int span = -col_start;
+                    item->gi->computed_grid_column_start = col_end - span;
+                    item->gi->computed_grid_column_end = col_end;
+                } else if (col_start > 0 && col_end == 0) {
+                    // "N" only - single line, defaults to span 1
+                    item->gi->computed_grid_column_start = col_start;
+                    item->gi->computed_grid_column_end = col_start + 1;
+                } else {
+                    // Normal explicit positions
+                    item->gi->computed_grid_column_start = col_start;
+                    item->gi->computed_grid_column_end = col_end;
+                }
+
+                // Row placement
+                int row_start = item->gi->grid_row_start;
+                int row_end = item->gi->grid_row_end;
+
+                if (row_start == 0 && row_end < 0) {
+                    // "span N" only - needs auto-placement for start
+                    item->gi->computed_grid_row_start = 0;
+                    item->gi->computed_grid_row_end = row_end;  // Keep span for auto-place
+                } else if (row_start > 0 && row_end < 0) {
+                    // "N / span M" - explicit start, span end
+                    int span = -row_end;
+                    item->gi->computed_grid_row_start = row_start;
+                    item->gi->computed_grid_row_end = row_start + span;
+                } else if (row_start < 0 && row_end > 0) {
+                    // "span N / M" - span start, explicit end
+                    int span = -row_start;
+                    item->gi->computed_grid_row_start = row_end - span;
+                    item->gi->computed_grid_row_end = row_end;
+                } else if (row_start > 0 && row_end == 0) {
+                    // "N" only - single line, defaults to span 1
+                    item->gi->computed_grid_row_start = row_start;
+                    item->gi->computed_grid_row_end = row_start + 1;
+                } else {
+                    // Normal explicit positions
+                    item->gi->computed_grid_row_start = row_start;
+                    item->gi->computed_grid_row_end = row_end;
+                }
             }
-            item->gi->is_grid_auto_placed = false;
+
+            // Check if we still need auto-placement (for "span N" without explicit start)
+            if (item->gi->computed_grid_column_start == 0 || item->gi->computed_grid_row_start == 0) {
+                item->gi->is_grid_auto_placed = true;
+            } else {
+                item->gi->is_grid_auto_placed = false;
+            }
 
             log_debug("Explicit placement - item %d: row %d-%d, col %d-%d\n",
                       i, item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
@@ -421,74 +487,125 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
 
     log_debug(" auto_place_grid_item called for item %p\n", item);
 
-    // Enhanced auto-placement algorithm that respects grid dimensions
-    static int current_row = 1;
-    static int current_column = 1;
-    static int item_counter = 0;
+    // Use grid_layout to track current auto-placement cursor
+    // Note: These are initialized to 1 in init_grid_container_layout
 
-    // Reset counters for new grid layout (simple heuristic)
-    if (item_counter == 0) {
-        current_row = 1;
-        current_column = 1;
+    // Determine span sizes
+    int col_span = 1;
+    int row_span = 1;
+
+    // Check if computed_grid_column_end has a span value (negative)
+    if (item->gi->computed_grid_column_end < 0) {
+        col_span = -item->gi->computed_grid_column_end;
     }
+    if (item->gi->computed_grid_row_end < 0) {
+        row_span = -item->gi->computed_grid_row_end;
+    }
+
+    log_debug(" Item span: %d cols x %d rows\n", col_span, row_span);
 
     // Determine grid dimensions from template
     int max_columns = grid_layout->explicit_column_count;
     int max_rows = grid_layout->explicit_row_count;
 
     // CSS Grid spec: Without explicit grid-template-columns, there's 1 implicit column
-    // Items are placed in a single column and stack vertically (for row flow)
-    // Without explicit grid-template-rows, rows are created implicitly as needed
-    if (max_columns <= 0) max_columns = 1;  // Single column when no template
-    // max_rows can remain 0 - rows are created implicitly
+    if (max_columns <= 0) max_columns = 1;
+
+    // If span is larger than max_columns, the grid must expand
+    if (col_span > max_columns) {
+        max_columns = col_span;
+    }
+    if (row_span > max_rows && max_rows > 0) {
+        // For rows, only expand if we have explicit rows defined
+    }
 
     log_debug(" Grid dimensions for auto-placement: %dx%d (cols x rows)\n", max_columns, max_rows);
+    log_debug(" Current cursor: row=%d, col=%d\n", grid_layout->auto_row_cursor, grid_layout->auto_col_cursor);
 
     if (grid_layout->grid_auto_flow == CSS_VALUE_ROW) {
         // Place items row by row (default behavior)
-        item->gi->computed_grid_row_start = current_row;
-        item->gi->computed_grid_row_end = current_row + 1;
-        item->gi->computed_grid_column_start = current_column;
-        item->gi->computed_grid_column_end = current_column + 1;
+        // Find a position where the item fits with its span
+        int iterations = 0;
+        bool placed = false;
 
-        log_debug(" Placing item %d at row %d, col %d\n", item_counter, current_row, current_column);
+        while (!placed && iterations < 1000) {
+            iterations++;
+            // Check if item fits at current position
+            if (grid_layout->auto_col_cursor + col_span - 1 <= max_columns) {
+                // Item fits in this row
+                item->gi->computed_grid_column_start = grid_layout->auto_col_cursor;
+                item->gi->computed_grid_column_end = grid_layout->auto_col_cursor + col_span;
+                item->gi->computed_grid_row_start = grid_layout->auto_row_cursor;
+                item->gi->computed_grid_row_end = grid_layout->auto_row_cursor + row_span;
+                placed = true;
 
-        // Advance to next position
-        current_column++;
-        if (current_column > max_columns) {
-            current_column = 1;
-            current_row++;
+                // Advance cursor past this item
+                grid_layout->auto_col_cursor += col_span;
+                if (grid_layout->auto_col_cursor > max_columns) {
+                    grid_layout->auto_col_cursor = 1;
+                    grid_layout->auto_row_cursor++;
+                }
+            } else {
+                // Doesn't fit, move to next row
+                grid_layout->auto_col_cursor = 1;
+                grid_layout->auto_row_cursor++;
+            }
         }
+
+        if (!placed) {
+            log_error("Failed to auto-place grid item after %d iterations", iterations);
+            // Force placement at cursor as fallback
+            item->gi->computed_grid_column_start = 1;
+            item->gi->computed_grid_column_end = 1 + col_span;
+            item->gi->computed_grid_row_start = grid_layout->auto_row_cursor;
+            item->gi->computed_grid_row_end = grid_layout->auto_row_cursor + row_span;
+        }
+
+        log_debug(" Placed item at row %d-%d, col %d-%d\n",
+               item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+               item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
     } else {
         // Place items column by column (grid-auto-flow: column)
-        // Without explicit template, there's 1 implicit row
         if (max_rows <= 0) max_rows = 1;
-
-        item->gi->computed_grid_column_start = current_column;
-        item->gi->computed_grid_column_end = current_column + 1;
-        item->gi->computed_grid_row_start = current_row;
-        item->gi->computed_grid_row_end = current_row + 1;
-
-        log_debug(" Placing item %d at row %d, col %d (column-first)\n", item_counter, current_row, current_column);
-
-        // Advance to next position
-        current_row++;
-        if (current_row > max_rows) {
-            current_row = 1;
-            current_column++;
+        if (row_span > max_rows) {
+            max_rows = row_span;
         }
+
+        int iterations = 0;
+        bool placed = false;
+
+        while (!placed && iterations < 1000) {
+            iterations++;
+            if (grid_layout->auto_row_cursor + row_span - 1 <= max_rows) {
+                item->gi->computed_grid_row_start = grid_layout->auto_row_cursor;
+                item->gi->computed_grid_row_end = grid_layout->auto_row_cursor + row_span;
+                item->gi->computed_grid_column_start = grid_layout->auto_col_cursor;
+                item->gi->computed_grid_column_end = grid_layout->auto_col_cursor + col_span;
+                placed = true;
+
+                grid_layout->auto_row_cursor += row_span;
+                if (grid_layout->auto_row_cursor > max_rows) {
+                    grid_layout->auto_row_cursor = 1;
+                    grid_layout->auto_col_cursor++;
+                }
+            } else {
+                grid_layout->auto_row_cursor = 1;
+                grid_layout->auto_col_cursor++;
+            }
+        }
+
+        if (!placed) {
+            log_error("Failed to auto-place grid item (column-flow) after %d iterations", iterations);
+            item->gi->computed_grid_row_start = 1;
+            item->gi->computed_grid_row_end = 1 + row_span;
+            item->gi->computed_grid_column_start = grid_layout->auto_col_cursor;
+            item->gi->computed_grid_column_end = grid_layout->auto_col_cursor + col_span;
+        }
+
+        log_debug(" Placed item at row %d-%d, col %d-%d (column-first)\n",
+               item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
+               item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
     }
-
-    item_counter++;
-
-    // Reset counter when we've placed all items (simple heuristic)
-    if (item_counter >= grid_layout->item_count) {
-        item_counter = 0;
-    }
-
-    log_debug(" Auto-placed item at row %d-%d, col %d-%d\n",
-           item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
-           item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
 }
 
 // Determine the size of the grid
