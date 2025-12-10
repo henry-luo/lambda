@@ -1947,9 +1947,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         }
                         
                         // Process the item (this may change font_ctx for font declaration commands)
-                                (int)j, font_ctx, prev_size, font_ctx->size);
                         process_latex_element(html_buf, list_item, pool, depth + 1, font_ctx);
-                                (int)j, font_ctx, prev_size, font_ctx->size);
                         
                         // AFTER processing, check if font size has changed and manage spans
                         if (font_ctx->size != prev_size) {
@@ -1987,12 +1985,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                     }
                 } else {
                     // For non-LIST children, manage size spans here
-                            (int)i, child_type, span_size, font_ctx->size);
-                    
                     // Process the child (which may change font_ctx for declarations like \small)
                     process_latex_element(html_buf, child, pool, depth + 1, font_ctx);
-                    
-                            (int)i, font_ctx->size, span_size);
                     
                     // AFTER processing, check if font size changed
                     if (font_ctx->size != span_size) {
@@ -4706,8 +4700,6 @@ static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& 
 
     ElementReader elem = item.asElement();
     const char* cmd_name = elem.tagName();
-            cmd_name ? cmd_name : "NULL", elem.childCount());
-    
     
     if (!cmd_name) {
         return;
