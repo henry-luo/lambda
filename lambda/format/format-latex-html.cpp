@@ -1095,6 +1095,13 @@ static const struct {
     {"textcompwordmark", "\xE2\x80\x8C"},   // U+200C ZWNJ
 
     // Basic Latin - special characters
+    {"$", "$"},                     // \$ - dollar sign
+    {"&", "&"},                     // \& - ampersand
+    {"%", "%"},                     // \% - percent sign
+    {"{", "{"},                     // \{ - left brace
+    {"}", "}"},                     // \} - right brace
+    {"#", "#"},                     // \# - hash/pound sign
+    {"_", "_"},                     // \_ - underscore
     {"textdollar", "$"},
     {"textless", "<"},
     {"textgreater", ">"},
@@ -1545,6 +1552,9 @@ static void generate_latex_css(StringBuf* css_buf) {
 static bool is_block_level_element(const char* cmd_name) {
     if (!cmd_name) return false;
     
+    // Note: par and parbreak are NOT in this list because they have special handling
+    // as paragraph breaks (is_par_break) and should not be treated as generic block elements
+    
     // List environments
     if (strcmp(cmd_name, "itemize") == 0) return true;
     if (strcmp(cmd_name, "enumerate") == 0) return true;
@@ -1612,9 +1622,12 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         strncpy(cmd_name, name.str, name_len);
         cmd_name[name_len] = '\0';
 
-        // Debug: log all commands
-        if (depth < 3) {  // Only log top-level commands to avoid spam
-            log_debug("Processing command: %s (depth=%d)", cmd_name, depth);
+        // Handle single-character element names FIRST (punctuation from tree-sitter)
+        // These are elements like "," "." ";" ":" "?" "!" etc. that have no children
+        if (name_len == 1 && !isalpha(cmd_name[0])) {
+            // Output the punctuation character directly
+            stringbuf_append_str(html_buf, cmd_name);
+            return;
         }
 
         // Check if this is a user-defined macro and expand it
@@ -2255,8 +2268,11 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             stringbuf_append_str(html_buf, "<br>");
         }
         else if (strcmp(cmd_name, "par") == 0) {
-            // Par creates a paragraph break - handled by paragraph logic
-            // This is a no-op in HTML since paragraph breaks are handled by the paragraph wrapper
+            // \par command creates a paragraph break
+            // Don't process it here - let the parent content processor handle it via is_par_break logic
+            // The parent function (process_element_content) will detect this as a par break element
+            // and close the current paragraph / start a new one
+            return;
         }
         // Alignment commands - set current paragraph alignment
         else if (strcmp(cmd_name, "centering") == 0) {
@@ -2341,7 +2357,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             return;
         }
         else if (strcmp(cmd_name, "~") == 0) {
-            stringbuf_append_char(html_buf, '~');
+            // Tilde is non-breaking space in LaTeX
+            stringbuf_append_str(html_buf, "\xC2\xA0"); // U+00A0 non-breaking space
             return;
         }
         else if (strcmp(cmd_name, "-") == 0) {
@@ -2716,14 +2733,15 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             } else if (strcmp(sym->chars, "^") == 0) {
                 stringbuf_append_str(html_buf, "^");
             } else if (strcmp(sym->chars, "~") == 0) {
-                stringbuf_append_str(html_buf, "~");
+                // Tilde is non-breaking space in LaTeX
+                stringbuf_append_str(html_buf, "\xC2\xA0"); // U+00A0 non-breaking space
             } else if (strcmp(sym->chars, "\\") == 0 || strcmp(sym->chars, "textbackslash") == 0) {
                 stringbuf_append_str(html_buf, "\\");
             } else if (strcmp(sym->chars, "parbreak") == 0) {
                 // parbreak should be handled at document level, ignore here
                 return;
-            } else if (strcmp(sym->chars, ",") == 0 || strcmp(sym->chars, "thinspace") == 0) {
-                // \, or \thinspace - thin space (U+2009)
+            } else if (strcmp(sym->chars, "thinspace") == 0) {
+                // \, command - thin space (U+2009)
                 stringbuf_append_str(html_buf, "\xE2\x80\x89"); // U+2009 THIN SPACE
             } else {
                 // Unknown symbol - output as-is
