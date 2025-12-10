@@ -1,6 +1,11 @@
 #include "font_face.h"
 #include "layout.hpp"
 #include "../lib/font_config.h"
+#include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_font_face.hpp"
+extern "C" {
+#include "../lib/url.h"
+}
 #include <string.h>
 #include <stdlib.h>
 
@@ -54,13 +59,99 @@ void log_font_fallback_triggered(const char* requested, const char* fallback) {
     }
 }
 
-// CSS @font-face parsing integration
+// CSS @font-face parsing integration - uses css_font_face.hpp module
 void parse_font_face_rule(LayoutContext* lycon, void* rule) {
-    // Placeholder implementation - lexbor dependency removed
-    log_debug("parse_font_face_rule: lexbor support removed, skipping");
-    (void)lycon;  // suppress unused parameter warning
-    (void)rule;   // suppress unused parameter warning
-    return;
+    if (!lycon || !rule) {
+        clog_debug(font_log, "parse_font_face_rule: invalid parameters");
+        return;
+    }
+
+    CssRule* css_rule = (CssRule*)rule;
+    if (css_rule->type != CSS_RULE_FONT_FACE) {
+        clog_debug(font_log, "parse_font_face_rule: not a font-face rule");
+        return;
+    }
+
+    const char* content = css_rule->data.generic_rule.content;
+    if (!content) {
+        clog_warn(font_log, "parse_font_face_rule: no content in rule");
+        return;
+    }
+
+    // Get base path from document URL
+    const char* base_path = nullptr;
+    if (lycon->doc && lycon->doc->url) {
+        base_path = url_to_local_path(lycon->doc->url);
+    }
+
+    // Parse using CSS module
+    CssFontFaceDescriptor* css_desc = css_parse_font_face_content(content, nullptr);
+    if (!css_desc) return;
+
+    // Resolve URL
+    if (css_desc->src_url && base_path) {
+        char* resolved = css_resolve_font_url(css_desc->src_url, base_path, nullptr);
+        if (resolved) {
+            free(css_desc->src_url);
+            css_desc->src_url = resolved;
+        }
+    }
+
+    // Convert to FontFaceDescriptor and register
+    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
+    if (descriptor) {
+        descriptor->family_name = css_desc->family_name ? strdup(css_desc->family_name) : nullptr;
+        descriptor->src_local_path = css_desc->src_url ? strdup(css_desc->src_url) : nullptr;
+        descriptor->font_style = css_desc->font_style;
+        descriptor->font_weight = css_desc->font_weight;
+        descriptor->font_display = css_desc->font_display;
+        descriptor->is_loaded = false;
+
+        register_font_face(lycon->ui_context, descriptor);
+    }
+
+    css_font_face_descriptor_free(css_desc);
+}
+
+// Process all @font-face rules from a stylesheet - uses css_font_face.hpp module
+void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* stylesheet, const char* base_path) {
+    if (!uicon || !stylesheet) {
+        return;
+    }
+
+    clog_info(font_log, "Processing @font-face rules from stylesheet (base: %s)",
+              base_path ? base_path : "(none)");
+
+    int count = 0;
+    CssFontFaceDescriptor** css_descs = css_extract_font_faces(stylesheet, base_path, nullptr, &count);
+
+    if (!css_descs || count == 0) {
+        clog_debug(font_log, "No @font-face rules found");
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        CssFontFaceDescriptor* css_desc = css_descs[i];
+        if (!css_desc) continue;
+
+        // Convert to FontFaceDescriptor and register
+        FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
+        if (descriptor) {
+            descriptor->family_name = css_desc->family_name ? strdup(css_desc->family_name) : nullptr;
+            descriptor->src_local_path = css_desc->src_url ? strdup(css_desc->src_url) : nullptr;
+            descriptor->font_style = css_desc->font_style;
+            descriptor->font_weight = css_desc->font_weight;
+            descriptor->font_display = css_desc->font_display;
+            descriptor->is_loaded = false;
+
+            register_font_face(uicon, descriptor);
+        }
+
+        css_font_face_descriptor_free(css_desc);
+    }
+
+    free(css_descs);
+    clog_info(font_log, "Registered %d @font-face descriptors", count);
 }
 
 /* Original lexbor-dependent code - commented out:
@@ -139,6 +230,10 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
         clog_error(font_log, "Invalid parameters for register_font_face");
         return;
     }
+
+    log_debug("register_font_face: registering %s -> %s",
+              descriptor->family_name ? descriptor->family_name : "(null)",
+              descriptor->src_local_path ? descriptor->src_local_path : "(null)");
 
     // Initialize @font-face storage if needed
     if (!uicon->font_faces) {
@@ -331,11 +426,11 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     // Fall back to system fonts if no @font-face match
     clog_debug(font_log, "No @font-face match found, falling back to system fonts for: %s", family_name);
     if (is_fallback) *is_fallback = true;
-    
+
     // Early-exit optimization: Check if font family exists in database before expensive lookups
     ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_name);
     bool family_exists = (family_matches && family_matches->length > 0);
-    
+
     if (family_exists) {
         arraylist_free(family_matches);
         return load_styled_font(uicon, family_name, style);
