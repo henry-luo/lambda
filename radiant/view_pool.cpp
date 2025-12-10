@@ -236,6 +236,30 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
+void alloc_grid_item_prop(LayoutContext* lycon, ViewSpan* span) {
+    if (!span->gi) {
+        GridItemProp* prop = (GridItemProp*)alloc_prop(lycon, sizeof(GridItemProp));
+        span->gi = prop;
+        // Initialize with default values (auto placement)
+        prop->grid_row_start = 0;  // 0 means auto
+        prop->grid_row_end = 0;
+        prop->grid_column_start = 0;
+        prop->grid_column_end = 0;
+        prop->grid_area = nullptr;
+        prop->justify_self = CSS_VALUE_AUTO;
+        prop->align_self_grid = CSS_VALUE_AUTO;
+        prop->computed_grid_row_start = 0;
+        prop->computed_grid_row_end = 0;
+        prop->computed_grid_column_start = 0;
+        prop->computed_grid_column_end = 0;
+        prop->has_explicit_grid_row_start = false;
+        prop->has_explicit_grid_row_end = false;
+        prop->has_explicit_grid_column_start = false;
+        prop->has_explicit_grid_column_end = false;
+        prop->is_grid_auto_placed = true;
+    }
+}
+
 void view_pool_init(ViewTree* tree) {
     log_debug("init view pool");
     tree->pool = pool_create();
