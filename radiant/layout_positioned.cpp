@@ -207,9 +207,9 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
         float bottom_edge = cb_height - block->position->bottom - (block->bound ? block->bound->margin.bottom : 0);
         content_height = max(bottom_edge - top_edge, 0.0f);
     } else {
-        // shrink-to-fit: will be determined by content
-        // For now, fall back to containing block height minus margins
-        content_height = max(cb_height - (block->bound ? block->bound->margin.bottom + block->bound->margin.top : 0), 0.0f);
+        // shrink-to-fit: height will be determined by content after layout
+        // Start with 0 and let the post-layout adjustment set the final height
+        content_height = 0;
     }
 
     // Now determine y position (relative to padding box, then add border offset)
@@ -296,17 +296,28 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     }
 
     // adjust block width and height based on content
-    log_debug("block position: x=%f, y=%f, width=%f, height=%f",
-        block->x, block->y, block->width,  block->height);
-    if (!(block->position->has_left || block->position->has_right || lycon->block.given_width >= 0)) {
+    log_debug("block position: x=%f, y=%f, width=%f, height=%f, advance_y=%f, max_width=%f, given_height=%f, has_top=%d, has_bottom=%d",
+        block->x, block->y, block->width, block->height, lycon->block.advance_y, lycon->block.max_width,
+        lycon->block.given_height, block->position->has_top, block->position->has_bottom);
+    // Width is auto-sized when no explicit width AND neither left+right constraints
+    if (!(lycon->block.given_width >= 0 || (block->position->has_left && block->position->has_right))) {
+        // Note: max_width already includes left border + left padding from setup_inline
+        // So we only need to add right padding and right border
         float flow_width = lycon->block.max_width;
-        block->width = flow_width + (block->bound ? block->bound->padding.left + block->bound->padding.right +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0) : 0);
+        float padding_right = block->bound ? block->bound->padding.right : 0;
+        float border_right = (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
+        block->width = flow_width + padding_right + border_right;
     }
-    if (!(block->position->has_top || block->position->has_bottom || lycon->block.given_height >= 0)) {
+    // Height is auto-sized when no explicit height AND neither top+bottom constraints
+    if (!(lycon->block.given_height >= 0 || (block->position->has_top && block->position->has_bottom))) {
         float flow_height = lycon->block.advance_y;
-        block->height = flow_height + (block->bound ? block->bound->padding.top + block->bound->padding.bottom +
-            (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0) : 0);
+        // Note: advance_y already includes top border + top padding from setup_inline
+        // So we only need to add bottom padding and bottom border
+        float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
+        float border_bottom = (block->bound && block->bound->border) ? block->bound->border->width.bottom : 0;
+        log_debug("auto-sizing height: flow_height=%f (includes top border+padding), adding padding_bottom=%f, border_bottom=%f",
+            flow_height, padding_bottom, border_bottom);
+        block->height = flow_height + padding_bottom + border_bottom;
     }
     log_debug("final block position: x=%f, y=%f, width=%f, height=%f",
         block->x, block->y, block->width,  block->height);

@@ -284,6 +284,13 @@ DisplayValue resolve_display_value(void* child) {
             return dom_elem->display;
         }
 
+        // Determine if this is a replaced element (img, video, iframe, etc.)
+        // Replaced elements always have inner display of RDT_DISPLAY_REPLACED
+        bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
+                            tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
+                            tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
+                            tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR);
+
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
             StyleTree* style_tree = dom_elem->specified_style;
@@ -321,15 +328,15 @@ DisplayValue resolve_display_value(void* child) {
                                 return display;
                             } else if (keyword == CSS_VALUE_BLOCK) {
                                 display.outer = CSS_VALUE_BLOCK;
-                                display.inner = CSS_VALUE_FLOW;
+                                display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                                 return display;
                             } else if (keyword == CSS_VALUE_INLINE) {
                                 display.outer = CSS_VALUE_INLINE;
-                                display.inner = CSS_VALUE_FLOW;
+                                display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                                 return display;
                             } else if (keyword == CSS_VALUE_INLINE_BLOCK) {
                                 display.outer = CSS_VALUE_INLINE_BLOCK;
-                                display.inner = CSS_VALUE_FLOW;
+                                display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                                 return display;
                             } else if (keyword == CSS_VALUE_NONE) {
                                 display.outer = CSS_VALUE_NONE;
@@ -1346,12 +1353,18 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (value->type == CSS_VALUE_TYPE_STRING) {
                 // Font family name as string (quotes already stripped during parsing)
                 span->font->family = (char*)value->data.string;
+                log_debug("[CSS] Set font-family from STRING: '%s'", span->font->family);
+            }
+            else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
+                // Custom identifier font family (e.g., "ahem" without quotes)
+                span->font->family = (char*)value->data.custom_property.name;
+                log_debug("[CSS] Set font-family from CUSTOM: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Keyword font family - check if generic or specific
                 const CssEnumInfo* info = css_enum_info(value->data.keyword);
                 span->font->family = info ? (char*)info->name : NULL;
-                log_debug("[CSS] Set span->font->family = '%s'", span->font->family);
+                log_debug("[CSS] Set font-family from KEYWORD: '%s'", span->font->family);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
                 // List of font families (e.g., "Arial, sans-serif")
@@ -2111,8 +2124,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssValue** values = value->data.list.values;
                 for (size_t i = 0; i < count; i++) {
                     CssValue* val = values[i];
-                    if (val->type == CSS_VALUE_TYPE_LENGTH) {
-                        // Width - convert to pixels
+                    if (val->type == CSS_VALUE_TYPE_LENGTH || val->type == CSS_VALUE_TYPE_NUMBER) {
+                        // Width - convert to pixels (NUMBER handles unitless 0)
                         border_width = resolve_length_value(lycon, prop_id, val);
                     }
                     else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -2148,7 +2161,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             } else {
                 // Single value
                 log_debug("[CSS] Border shorthand has single value of type: %d", value->type);
-                if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+                    // Width - convert to pixels (NUMBER handles unitless 0)
                     border_width = resolve_length_value(lycon, prop_id, value);
                 } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                     CssEnum keyword = value->data.keyword;
@@ -2173,6 +2187,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
 
             // Apply to all 4 sides
+            // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
+            // none/hidden styles mean no border, so no default width
+            if (border_style >= 0 && border_width < 0 &&
+                border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
+                border_width = 3.0f;  // medium
+            }
             if (border_width >= 0) {
                 span->bound->border->width.top = border_width;
                 span->bound->border->width.right = border_width;
@@ -2218,12 +2238,20 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (border.style) {
                 span->bound->border->top_style = border.style->data.keyword;
                 span->bound->border->top_style_specificity = specificity;
+                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
+                // none/hidden styles mean no border, so no default width
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.top_specificity) {
+                    span->bound->border->width.top = 3.0f;  // medium
+                    span->bound->border->width.top_specificity = specificity;
+                }
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, border.length);
                 span->bound->border->width.top_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->top_color = resolve_color_value(border.color);
                 span->bound->border->top_color_specificity = specificity;
             }
@@ -2242,12 +2270,20 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (border.style) {
                 span->bound->border->right_style = border.style->data.keyword;
                 span->bound->border->right_style_specificity = specificity;
+                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
+                // none/hidden styles mean no border, so no default width
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.right_specificity) {
+                    span->bound->border->width.right = 3.0f;  // medium
+                    span->bound->border->width.right_specificity = specificity;
+                }
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, border.length);
                 span->bound->border->width.right_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->right_color = resolve_color_value(border.color);
                 span->bound->border->right_color_specificity = specificity;
             }
@@ -2266,13 +2302,22 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (border.style) {
                 span->bound->border->bottom_style = border.style->data.keyword;
                 span->bound->border->bottom_style_specificity = specificity;
+                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
+                // none/hidden styles mean no border, so no default width
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.bottom_specificity) {
+                    span->bound->border->width.bottom = 3.0f;  // medium
+                    span->bound->border->width.bottom_specificity = specificity;
+                }
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, border.length);
                 span->bound->border->width.bottom_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->bottom_color = resolve_color_value(border.color);
+                span->bound->border->bottom_color_specificity = specificity;
             }
             break;
         }
@@ -2289,13 +2334,22 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (border.style) {
                 span->bound->border->left_style = border.style->data.keyword;
                 span->bound->border->left_style_specificity = specificity;
+                // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
+                // none/hidden styles mean no border, so no default width
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
+                    border.style->data.keyword != CSS_VALUE_HIDDEN &&
+                    specificity >= span->bound->border->width.left_specificity) {
+                    span->bound->border->width.left = 3.0f;  // medium
+                    span->bound->border->width.left_specificity = specificity;
+                }
             }
-            else if (border.length) {
+            if (border.length) {
                 span->bound->border->width.left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, border.length);
                 span->bound->border->width.left_specificity = specificity;
             }
-            else if (border.color) {
+            if (border.color) {
                 span->bound->border->left_color = resolve_color_value(border.color);
+                span->bound->border->left_color_specificity = specificity;
             }
             break;
         }

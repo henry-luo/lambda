@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 84,
+      "height": 166,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -573,11 +573,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 52,
+          "height": 134,
           "contentWidth": 1184,
-          "contentHeight": 52,
+          "contentHeight": 134,
           "scrollWidth": 1184,
-          "scrollHeight": 52
+          "scrollHeight": 134
         },
         "computed": {
           "display": "block",
@@ -723,11 +723,11 @@
               "x": 8,
               "y": 50,
               "width": 1184,
-              "height": 18,
+              "height": 100,
               "contentWidth": 1184,
-              "contentHeight": 18,
+              "contentHeight": 100,
               "scrollWidth": 1184,
-              "scrollHeight": 18
+              "scrollHeight": 100
             },
             "computed": {
               "display": "block",
@@ -783,11 +783,11 @@
                   "x": 8,
                   "y": 50,
                   "width": 1184,
-                  "height": 18,
+                  "height": 100,
                   "contentWidth": 1184,
-                  "contentHeight": 18,
+                  "contentHeight": 100,
                   "scrollWidth": 1184,
-                  "scrollHeight": 18
+                  "scrollHeight": 100
                 },
                 "computed": {
                   "display": "block",
@@ -842,12 +842,12 @@
                     "layout": {
                       "x": 8,
                       "y": 50,
-                      "width": 241.28,
-                      "height": 18,
-                      "contentWidth": 241,
-                      "contentHeight": 18,
-                      "scrollWidth": 241,
-                      "scrollHeight": 18
+                      "width": 1184,
+                      "height": 100,
+                      "contentWidth": 1184,
+                      "contentHeight": 100,
+                      "scrollWidth": 1184,
+                      "scrollHeight": 100
                     },
                     "computed": {
                       "display": "inline",
