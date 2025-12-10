@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            #div1\n            {\n                background: url(\"support/margin-collapse-2em-space.png\");\n                font: 20px/1em ahem;\n                height: 4em;\n                width: 5em;\n            }\n            #div2\n            {\n                margin-bottom: 1em;\n            }\n            #div3\n            {\n                margin-top: 2em;\n            }\n        ",
-                "length": 384,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n            #div1\n            {\n                background: url(\"support/margin-collapse-2em-space.png\");\n                font: 20px/1em ahem;\n                height: 4em;\n                width: 5em;\n            }\n            #div2\n            {\n                margin-bottom: 1em;\n            }\n            #div3\n            {\n                margin-top: 2em;\n            }\n        ",
+                "length": 509,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

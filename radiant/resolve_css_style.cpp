@@ -602,11 +602,14 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         case CSS_UNIT_EX:
-            // relative to x-height (approximate as 0.5em)
+            // relative to x-height of the font
+            // For Times/serif fonts, x-height is typically ~0.45em
+            // For sans-serif fonts, it's typically ~0.52em
+            // Using 0.45 as default approximation (closer to browser behavior)
             if (lycon->font.current_font_size < 0) {
                 resolve_font_size(lycon, NULL);
             }
-            result = num * lycon->font.current_font_size * 0.5;
+            result = num * lycon->font.current_font_size * 0.45;
             break;
         case CSS_UNIT_CH:
             // relative to width of "0" character (approximate as 0.5em)
@@ -940,32 +943,55 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
 // Main Style Resolution
 // ============================================================================
 
-// Callback for AVL tree traversal
-static bool resolve_property_callback(AvlNode* node, void* context) {
+// Callback for AVL tree traversal - first pass (font properties only)
+static bool resolve_font_property_callback(AvlNode* node, void* context) {
     LayoutContext* lycon = (LayoutContext*)context;
-
-    // Get StyleNode from AvlNode->declaration field
     StyleNode* style_node = (StyleNode*)node->declaration;
-
-    // get property ID from node
     CssPropertyId prop_id = (CssPropertyId)node->property_id;
 
-    log_debug("[Lambda CSS Property] Processing property ID: %d", prop_id);
-
-    // get the CSS declaration for this property
-    CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
-    if (!decl) {
-        log_debug("[Lambda CSS Property] No declaration found for property %d (style_node=%p)",
-                  prop_id, (void*)style_node);
-        return true; // continue iteration
+    // Only process font-related properties in first pass
+    // These must be resolved before width/height/etc. which may use em/ex units
+    if (prop_id != CSS_PROPERTY_FONT &&
+        prop_id != CSS_PROPERTY_FONT_SIZE &&
+        prop_id != CSS_PROPERTY_FONT_FAMILY &&
+        prop_id != CSS_PROPERTY_FONT_WEIGHT &&
+        prop_id != CSS_PROPERTY_FONT_STYLE &&
+        prop_id != CSS_PROPERTY_FONT_VARIANT &&
+        prop_id != CSS_PROPERTY_LINE_HEIGHT) {
+        return true; // skip, will process in second pass
     }
 
-    log_debug("[Lambda CSS Property] Found declaration for property %d: decl=%p, value=%p",
-              prop_id, (void*)decl, (void*)decl->value);
+    CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
+    if (!decl) return true;
 
-    // resolve this property
+    log_debug("[Lambda CSS] First pass - resolving font property %d", prop_id);
     resolve_lambda_css_property(prop_id, decl, lycon);
-    return true; // continue iteration
+    return true;
+}
+
+// Callback for AVL tree traversal - second pass (non-font properties)
+static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
+    LayoutContext* lycon = (LayoutContext*)context;
+    StyleNode* style_node = (StyleNode*)node->declaration;
+    CssPropertyId prop_id = (CssPropertyId)node->property_id;
+
+    // Skip font properties (already processed in first pass)
+    if (prop_id == CSS_PROPERTY_FONT ||
+        prop_id == CSS_PROPERTY_FONT_SIZE ||
+        prop_id == CSS_PROPERTY_FONT_FAMILY ||
+        prop_id == CSS_PROPERTY_FONT_WEIGHT ||
+        prop_id == CSS_PROPERTY_FONT_STYLE ||
+        prop_id == CSS_PROPERTY_FONT_VARIANT ||
+        prop_id == CSS_PROPERTY_LINE_HEIGHT) {
+        return true; // already processed
+    }
+
+    CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
+    if (!decl) return true;
+
+    log_debug("[Lambda CSS] Second pass - resolving property %d", prop_id);
+    resolve_lambda_css_property(prop_id, decl, lycon);
+    return true;
 }
 
 void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
@@ -980,9 +1006,15 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     }
     log_debug("[Lambda CSS] Style tree has %d nodes", style_tree->tree->node_count);
 
-    // Traverse the AVL tree and resolve each property
-    int processed = avl_tree_foreach_inorder(style_tree->tree, resolve_property_callback, lycon);
-    log_debug("[Lambda CSS] Processed %d style properties", processed);
+    // Two-pass resolution:
+    // 1. First pass: Resolve font properties (font, font-size, font-family, etc.)
+    //    This ensures font metrics are available for em/ex unit calculations
+    // 2. Second pass: Resolve all other properties
+    int font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
+    log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
+
+    int other_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
+    log_debug("[Lambda CSS] Second pass - processed %d other properties", other_processed);
 
     // Handle CSS inheritance for inheritable properties not explicitly set
     // Important inherited properties: font-family, font-size, font-weight, color, etc.
