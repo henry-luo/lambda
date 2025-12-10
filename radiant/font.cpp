@@ -43,7 +43,7 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
             log_warn("Font not found in database: %s", font_name);
         }
         if (matches) arraylist_free(matches);
-        
+
         // Fallback: Try platform-specific font lookup
         log_debug("Font database lookup failed, trying platform-specific lookup for: %s", font_name);
         char* result = find_font_path_fallback(font_name);
@@ -57,7 +57,7 @@ char* load_font_path(FontDatabase *font_db, const char* font_name) {
     // Just take the first match for now - could be enhanced to prefer normal weight/style
     FontEntry* font = (FontEntry*)matches->data[0];
     char* result = strdup(font->file_path);
-    
+
     log_debug("Found font '%s' at: %s", font_name, font->file_path);
     arraylist_free(matches);
     return result;
@@ -96,8 +96,8 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
         } else {
             // For color emoji fonts (like Apple Color Emoji) with fixed bitmap sizes,
             // we need to use FT_Select_Size instead of FT_Set_Pixel_Sizes
-            if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
-                (face->face_flags & FT_FACE_FLAG_COLOR) && 
+            if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
+                (face->face_flags & FT_FACE_FLAG_COLOR) &&
                 face->num_fixed_sizes > 0) {
                 // Find the best matching fixed size for the requested font_size
                 int best_idx = 0;
@@ -111,7 +111,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
                     }
                 }
                 FT_Select_Size(face, best_idx);
-                log_debug("Color emoji font loaded: %s, selected fixed size index: %d (ppem: %ld)", 
+                log_debug("Color emoji font loaded: %s, selected fixed size index: %d (ppem: %ld)",
                     font_name, best_idx, face->available_sizes[best_idx].y_ppem >> 6);
             } else {
                 // Set height of the font
@@ -151,47 +151,47 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
 FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style) {
     log_debug("load_styled_font: font_name='%s', font_weight=%d, CSS_VALUE_BOLD=%d",
         font_name, font_style->font_weight, CSS_VALUE_BOLD);
-    
+
     // Use FontDatabaseCriteria to find font with specific weight and style
     FontDatabaseCriteria criteria;
     memset(&criteria, 0, sizeof(criteria));
     strncpy(criteria.family_name, font_name, sizeof(criteria.family_name) - 1);
-    
+
     // Convert CSS weight to font weight
     if (font_style->font_weight == CSS_VALUE_BOLD) {
         criteria.weight = 700;  // Bold
     } else {
         criteria.weight = 400;  // Normal
     }
-    
+
     // Convert CSS style to font style
     if (font_style->font_style == CSS_VALUE_ITALIC) {
         criteria.style = FONT_STYLE_ITALIC;
     } else {
         criteria.style = FONT_STYLE_NORMAL;
     }
-    
+
     // Try to find a font matching the criteria
     FontDatabaseResult result = font_database_find_best_match(uicon->font_db, &criteria);
     FT_Face face = NULL;
-    
+
     // If score is too low (< 0.5), the match is poor - try platform lookup instead
     const float SCORE_THRESHOLD = 0.5f;
     bool use_database_result = (result.font && result.font->file_path && result.match_score >= SCORE_THRESHOLD);
-    
+
     if (use_database_result) {
         FontEntry* font = result.font;
         // Create cache key for this specific font file and size
         StrBuf* cache_key = strbuf_create(font->file_path);
         strbuf_append_str(cache_key, ":");
         strbuf_append_int(cache_key, (int)font_style->font_size);
-        
+
         // Initialize fontface map if needed
         if (uicon->fontface_map == NULL) {
             uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
                 fontface_hash, fontface_compare, NULL, NULL);
         }
-        
+
         // Check cache first
         if (uicon->fontface_map) {
             FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
@@ -200,8 +200,8 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 log_debug("Fontface loaded from cache: %s", cache_key->str);
                 FT_Face cached_face = entry->face;
                 // Ensure color emoji fonts have correct size selected
-                if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
-                    (cached_face->face_flags & FT_FACE_FLAG_COLOR) && 
+                if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
+                    (cached_face->face_flags & FT_FACE_FLAG_COLOR) &&
                     cached_face->num_fixed_sizes > 0) {
                     int best_idx = 0;
                     int best_diff = INT_MAX;
@@ -219,13 +219,13 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 return cached_face;
             }
         }
-        
+
         // Load the font file (use collection_index for TTC files)
         FT_Long face_index = font->is_collection ? font->collection_index : 0;
         if (FT_New_Face(uicon->ft_library, font->file_path, face_index, &face) == 0) {
             // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
-            if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
-                (face->face_flags & FT_FACE_FLAG_COLOR) && 
+            if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
+                (face->face_flags & FT_FACE_FLAG_COLOR) &&
                 face->num_fixed_sizes > 0) {
                 // Find the best matching fixed size
                 int best_idx = 0;
@@ -243,7 +243,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
             } else {
                 FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
             }
-            
+
             // Cache the loaded font
             if (uicon->fontface_map) {
                 char* name = (char*)malloc(cache_key->length + 1);
@@ -252,9 +252,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 FontfaceEntry new_entry = {.name=name, .face=face};
                 hashmap_set(uicon->fontface_map, &new_entry);
             }
-            
+
             log_info("Loading styled font: %s (family: %s, weight: %d, style: %s, %s), ascd: %f, desc: %f, em size: %f, font height: %f",
-                font_name, font->family_name, font->weight, 
+                font_name, font->family_name, font->weight,
                 font_style_to_string(font->style),
                 font->is_collection ? "TTC" : "single",
                 face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0,
@@ -262,28 +262,25 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
         } else {
             log_error("Failed to load font face for: %s (found font: %s)", font_name, font->file_path);
         }
-        
+
         strbuf_free(cache_key);
     } else {
-        log_warn("Font database lookup failed for: %s (weight: %d, style: %d)", font_name, criteria.weight, criteria.style);
-        
-        // Fallback: Try platform-specific font lookup
-        log_debug("Trying platform-specific lookup for: %s", font_name);
+        // Font not found in database, fall back to platform-specific lookup
         char* font_path = find_font_path_fallback(font_name);
         if (font_path) {
             log_debug("Found font via platform lookup: %s", font_path);
-            
+
             // Create cache key for this font
             StrBuf* cache_key = strbuf_create(font_path);
             strbuf_append_str(cache_key, ":");
             strbuf_append_int(cache_key, (int)font_style->font_size);
-            
+
             // Initialize fontface map if needed
             if (uicon->fontface_map == NULL) {
                 uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0,
                     fontface_hash, fontface_compare, NULL, NULL);
             }
-            
+
             // Check cache first
             if (uicon->fontface_map) {
                 FontfaceEntry search_key = {.name = cache_key->str, .face = NULL};
@@ -292,8 +289,8 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                     log_debug("Fontface loaded from cache (platform): %s", cache_key->str);
                     FT_Face cached_face = entry->face;
                     // Ensure color emoji fonts have correct size selected
-                    if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
-                        (cached_face->face_flags & FT_FACE_FLAG_COLOR) && 
+                    if ((cached_face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
+                        (cached_face->face_flags & FT_FACE_FLAG_COLOR) &&
                         cached_face->num_fixed_sizes > 0) {
                         int best_idx = 0;
                         int best_diff = INT_MAX;
@@ -312,12 +309,12 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                     return cached_face;
                 }
             }
-            
+
             // Load the font file
             if (FT_New_Face(uicon->ft_library, font_path, 0, &face) == 0) {
                 // For color emoji fonts with fixed bitmap sizes, use FT_Select_Size
-                if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) && 
-                    (face->face_flags & FT_FACE_FLAG_COLOR) && 
+                if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
+                    (face->face_flags & FT_FACE_FLAG_COLOR) &&
                     face->num_fixed_sizes > 0) {
                     // Find the best matching fixed size
                     int best_idx = 0;
@@ -335,7 +332,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                 } else {
                     FT_Set_Pixel_Sizes(face, 0, font_style->font_size);
                 }
-                
+
                 // Cache the loaded font
                 if (uicon->fontface_map) {
                     char* name = (char*)malloc(cache_key->length + 1);
@@ -344,19 +341,19 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
                     FontfaceEntry new_entry = {.name=name, .face=face};
                     hashmap_set(uicon->fontface_map, &new_entry);
                 }
-                
+
                 log_info("Loaded font via platform lookup: %s (path: %s)", font_name, font_path);
             } else {
                 log_error("Failed to load font face via platform lookup: %s (path: %s)", font_name, font_path);
             }
-            
+
             strbuf_free(cache_key);
             free(font_path);
         } else {
             log_error("Platform lookup also failed for: %s", font_name);
         }
     }
-    
+
     return face;
 }
 
@@ -410,7 +407,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_to_load);
         bool family_exists = (family_matches && family_matches->length > 0);
         int match_count = family_matches ? family_matches->length : 0;
-        
+
         if (family_exists) {
             // Family exists in database - do full styled lookup (weight, style matching)
             log_debug("Font family '%s' exists in database (%d matches), doing styled lookup", family_to_load, match_count);
@@ -422,11 +419,11 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             if (family_matches) arraylist_free(family_matches);
         }
     }
-    
+
     // If font loading failed, try fallback fonts
     if (!fbox->ft_face) {
-        log_warn("Font '%s' not found, trying fallbacks...", family_to_load);
-        
+        log_debug("Font '%s' not found, trying fallbacks...", family_to_load);
+
         // Try some common fallback fonts
         const char* fallbacks[] = {
             "Helvetica",        // Common on macOS
@@ -437,7 +434,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             "AppleSDGothicNeo", // We know this one exists from our scan
             NULL
         };
-        
+
         for (int i = 0; fallbacks[i] && !fbox->ft_face; i++) {
             log_debug("Trying fallback font: %s", fallbacks[i]);
             fbox->ft_face = load_styled_font(uicon, fallbacks[i], fprop);
@@ -447,7 +444,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             }
         }
     }
-    
+
     if (!fbox->ft_face) {
         log_error("Failed to setup font: %s (and all fallbacks)", family_to_load);
         return;

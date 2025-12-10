@@ -134,6 +134,14 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         CssFontFaceDescriptor* css_desc = css_descs[i];
         if (!css_desc) continue;
 
+        // Skip fonts without a loadable source (e.g., remote URLs)
+        if (!css_desc->src_url && !css_desc->src_local) {
+            clog_debug(font_log, "Skipping @font-face '%s': no local source available",
+                       css_desc->family_name ? css_desc->family_name : "(unnamed)");
+            css_font_face_descriptor_free(css_desc);
+            continue;
+        }
+
         // Convert to FontFaceDescriptor and register
         FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
         if (descriptor) {

@@ -685,10 +685,6 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                                    CssToken** tokens) {
     if (!tokenizer || !input || !tokens) return 0;
 
-    fprintf(stderr, "[CSS Tokenizer] Starting tokenization of %zu characters\n", length);
-    fprintf(stderr, "[CSS Tokenizer] Input preview: %.80s%s\n",
-            input, length > 80 ? "..." : "");
-
     // Simple tokenizer implementation for testing
     // This is a basic implementation to break the recursion and allow tests to pass
 
@@ -696,7 +692,6 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
     size_t max_tokens = length + 10; // Conservative estimate
     CssToken* token_array = static_cast<CssToken*>(pool_alloc(tokenizer->pool, sizeof(CssToken) * max_tokens));
     if (!token_array) {
-        fprintf(stderr, "[CSS Tokenizer] ERROR: Failed to allocate token array\n");
         return 0;
     }
 
@@ -1202,19 +1197,6 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
         eof_token->length = 0;
         eof_token->value = "";  // Empty string instead of NULL
         token_count++;
-    }
-
-    fprintf(stderr, "[CSS Tokenizer] Tokenization complete: %zu tokens generated\n", token_count);
-
-    // Log first few tokens for debugging
-    fprintf(stderr, "[CSS Tokenizer] First tokens:\n");
-    for (size_t i = 0; i < token_count && i < 10; i++) {
-        const char* type_name = css_token_type_to_string(token_array[i].type);
-        fprintf(stderr, "  [%zu] %s", i, type_name);
-        if (token_array[i].length > 0 && token_array[i].length < 50) {
-            fprintf(stderr, " '%.*s'", (int)token_array[i].length, token_array[i].start);
-        }
-        fprintf(stderr, "\n");
     }
 
     *tokens = token_array;
