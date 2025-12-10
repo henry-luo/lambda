@@ -396,7 +396,7 @@ Lambda CSS is a parallel CSS implementation to Lexbor for the Lambda HTML parser
 ```
 CSS Declaration (from AVL tree)
     ↓
-resolve_lambda_css_property(prop_id, decl, lycon)
+resolve_css_property(prop_id, decl, lycon)
     ↓
 switch (prop_id) {
     case CSS_PROPERTY_XXX:
@@ -644,7 +644,7 @@ After each group implementation, create a test HTML file:
 - List required keyword mappings
 
 **Step 2: Implement Resolution**
-In `radiant/lambda_css_resolve.cpp`, add cases to `resolve_lambda_css_property()`:
+In `radiant/lambda_css_resolve.cpp`, add cases to `resolve_css_property()`:
 
 ```cpp
 case CSS_PROPERTY_XXX: {
