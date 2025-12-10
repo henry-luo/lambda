@@ -4,16 +4,18 @@
 
 Based on running `make layout suite=box` (213 tests), the following improvements have been made:
 
-### Current Status (After Fixes)
-- **Passing tests**: 5 out of 213 (2.3%)
-- **Tests with 90%+ element match**: 13+ tests
+### Current Status (After Phase 2 Fixes)
+- **Passing tests**: 11 out of 213 (5.2%)
+- **Tests with 100% element match**: 14 tests
+- **Tests with 90%+ element match**: 20+ tests
 - **Tests with 80%+ element match**: 25+ tests
-- **Highest element match**: 97.0% (box_012_overflow)
 
 ### Fixes Implemented
 1. **CSS auto value handling**: Fixed `height: auto` and `width: auto` to return -1 instead of 0
 2. **BFC height expansion**: Absolute positioned elements now properly expand height to contain floats
 3. **JSON output for block-in-inline**: Fixed view tree output for blocks inside inline elements
+4. **Ex unit calculation**: Changed ratio from 0.5 to 0.45 for Times/serif fonts
+5. **Two-pass CSS resolution**: Font properties resolved before width/height (for em/ex units)
 
 ---
 
