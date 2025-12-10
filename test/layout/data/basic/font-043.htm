@@ -8,7 +8,11 @@
         <meta name="flags" content="ahem">
         <meta name="assert" content="The 'font' shorthand property set to 'inherit' inherits the parent element's values.">
         <style type="text/css">
-            #wrapper
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+                    #wrapper
             {
                 font: italic small-caps bold 1in/1em ahem;
                 position: relative;

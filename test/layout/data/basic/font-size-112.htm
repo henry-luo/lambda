@@ -8,7 +8,11 @@
         <meta name="flags" content="ahem">
         <meta name="assert" content="The 'font-size' property sets a value of 'inherit' and inherits its value from its parent.">
         <style type="text/css">
-            div
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+                    div
             {
                 font-family: ahem;
                 font-size: 3in;

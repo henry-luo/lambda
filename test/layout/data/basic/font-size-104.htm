@@ -8,7 +8,11 @@
         <meta name="flags" content="ahem">
         <meta name="assert" content="The 'font-size' property set to the keyword 'x-small' makes the font size smaller.">
         <style type="text/css">
-            div
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+                    div
             {
                 color: orange;
                 font-family: ahem;
