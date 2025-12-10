@@ -1,14 +1,13 @@
-# Radiant Block Layout Improvements - Phase 2
+# Radiant Block Layout Improvements - Phase 3
 
 ## Analysis Summary
 
 Based on running `make layout suite=box` (213 tests), the following improvements have been made:
 
-### Current Status (After Phase 2 Fixes)
-- **Passing tests**: 11 out of 213 (5.2%)
-- **Tests with 100% element match**: 14 tests
-- **Tests with 90%+ element match**: 20+ tests
-- **Tests with 80%+ element match**: 25+ tests
+### Current Status (After Phase 3 Fixes)
+- **Passing tests**: 23 out of 213 (10.8%)
+- **Tests with 100% element match**: 25+ tests
+- **Tests with 90%+ element match**: 30+ tests
 
 ### Fixes Implemented
 1. **CSS auto value handling**: Fixed `height: auto` and `width: auto` to return -1 instead of 0
@@ -16,6 +15,8 @@ Based on running `make layout suite=box` (213 tests), the following improvements
 3. **JSON output for block-in-inline**: Fixed view tree output for blocks inside inline elements
 4. **Ex unit calculation**: Changed ratio from 0.5 to 0.45 for Times/serif fonts
 5. **Two-pass CSS resolution**: Font properties resolved before width/height (for em/ex units)
+6. **Inline element border bounding box**: Span bounding box now includes vertical border (top/bottom)
+7. **Ahem font @font-face**: Added @font-face rules to all box suite tests using Ahem font
 
 ---
 
@@ -236,29 +237,45 @@ make layout suite=box                                   # Full regression
    - `block-formatting-context-height-002`: Container elements matching ✓
    - `block-formatting-context-height-003`: 71.4% elements matching ✓
 5. ⬜ Fix block-in-inline basic detection
-6. ⬜ Test block-in-inline
-7. ⬜ Run full box suite regression
+6. ✅ Fix inline element border bounding box
+7. ✅ Run full box suite regression
 
 ## Progress Summary
 
-### Tests with 100% Element Match
-- `block-non-replaced-width-007` - 100% elements, 50% text
-- `inline-block-width-002b` - 100% elements, 66.7% text
-
-### Tests with 80%+ Element Match
-- 25 tests now have 80%+ element match rate
+### Tests Passing (23/213 = 10.8%)
+- `block-in-inline-003` ✅
+- `block-in-inline-004` ✅
+- `block-in-inline-005` ✅
+- `block-in-inline-insert-001-ref` ✅ (NEW)
+- `block-in-inline-insert-003-ref` ✅ (NEW)
+- `block-in-inline-insert-004-ref` ✅ (NEW)
+- `block-in-inline-insert-005-ref` ✅ (NEW)
+- `block-in-inline-insert-008-ref` ✅ (NEW)
+- `block-in-inline-nested-001` ✅
+- `block-in-inline-percents-001` ✅
+- `block-in-inline-remove-002-ref` ✅ (NEW)
+- `block-in-inline-remove-004-nosplit-ref` ✅ (NEW)
+- `block-in-inline-remove-004-ref` ✅ (NEW)
+- `block-in-inline-remove-005-nosplit-ref` ✅ (NEW)
+- `block-in-inline-remove-005-ref` ✅ (NEW)
+- `block-in-inline-remove-006-nosplit-ref` ✅ (NEW)
+- `block-in-inline-remove-006-ref` ✅ (NEW)
+- `blocks-013` ✅
+- `blocks-016` ✅
+- `height-083` ✅
+- `height-084` ✅
+- `width-083` ✅
+- `width-084` ✅
 
 ### Key Fixes Applied
 
 1. **CSS auto value handling** (`resolve_css_style.cpp`):
    - `height: auto` now returns -1 (not 0) to indicate auto-sizing
    - `width: auto` now returns -1 (not 0) to indicate auto-sizing
-   - This fixes the condition `!(given_height >= 0)` to correctly detect auto height
 
 2. **BFC establishment for absolute elements** (`layout_positioned.cpp`):
    - Absolute positioned elements now properly establish BFC
    - Float tracking is initialized for absolute containers
-   - Float margins are tracked via `margin_box_bottom`
 
 3. **BFC height expansion** (`layout_positioned.cpp`):
    - After child layout, check all floats in BFC
@@ -266,24 +283,25 @@ make layout suite=box                                   # Full regression
 
 4. **JSON output for block-in-inline** (`view_pool.cpp`):
    - Fixed `print_inline_json` to call `print_block_json` for block children
-   - Previously block children inside inline elements were output as `{"type": "block"}` only
 
-## Test Results After Fixes
+5. **Inline element border bounding box** (`layout_inline.cpp`):
+   - `compute_span_bounding_box()` now includes vertical border (top/bottom)
+   - The Y position and height expand to include border-top and border-bottom
+   - Horizontal border not included (matches browser behavior for fragmented inlines)
 
-**Passing Tests (5/213 = 2.3%)**:
-- `block-in-inline-003` ✅
-- `block-in-inline-004` ✅
-- `block-in-inline-005` ✅
-- `block-in-inline-nested-001` ✅
-- `block-in-inline-percents-001` ✅
+6. **Ahem font @font-face rules** (test files):
+   - Added `@font-face` rules for Ahem font to 21 test files
+   - Re-captured browser references with proper font loading
 
-**Tests with 100% Element Match**: 7 tests
-**Tests with 90%+ Element Match**: 13 tests
-**Tests with 80%+ Element Match**: 25+ tests
+## Remaining Issues
 
-## Remaining Issues to Address
+### Tests with JavaScript (won't pass without JS execution)
+Many `block-in-inline-insert-*` tests use `onload` JavaScript to dynamically modify the DOM.
+These tests will have element count mismatches since Radiant doesn't execute JS.
 
-1. **Block-in-inline text handling**: Tests 001/002 have text node issues
-2. **html/body height propagation**: Many tests fail because html/body heights differ from browser
-3. **ex unit calculation**: Height tests with `6ex` calculate incorrectly
-4. **Table row view generation**: Table tests missing row views
+### Other Issues to Address
+1. **Relative positioning in block-in-inline**: Tests like `block-in-inline-008` have relative positioning issues
+2. **Text-overflow ellipsis**: `box_012_overflow` test fails on text-overflow handling
+3. **Text alignment for wrapped lines**: `box_006_text_align` fails on text-align for wrapped text
+4. **Ahem font metrics**: Some tests using Ahem font have slight width differences (66.7 vs 72.2)
+```
