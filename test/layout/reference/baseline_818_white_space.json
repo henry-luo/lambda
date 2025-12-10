@@ -671,8 +671,8 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "Normal: This    text   has    multiple    spaces and\n        line breaks that should be collapsed.",
-                    "length": 98,
+                    "text": "Normal: This    text   has    multiple    spaces and\n",
+                    "length": 53,
                     "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
@@ -686,7 +686,24 @@
                           "text": "Normal: This    text   has    multiple    spaces and\n",
                           "startIndex": 0,
                           "endIndex": 53
-                        },
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "        line breaks that should be collapsed.",
+                    "length": 45,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 32,
                           "y": 60,
@@ -695,8 +712,8 @@
                           "right": 290.84,
                           "bottom": 77,
                           "text": "        line breaks that should be collapsed.",
-                          "startIndex": 53,
-                          "endIndex": 98
+                          "startIndex": 0,
+                          "endIndex": 45
                         }
                       ],
                       "hasLayout": true,
@@ -1025,8 +1042,8 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "Pre: This    text   preserves    all    spaces and\n        line breaks exactly as written.",
-                    "length": 90,
+                    "text": "Pre: This    text   preserves    all    spaces and\n",
+                    "length": 51,
                     "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
@@ -1040,7 +1057,24 @@
                           "text": "Pre: This    text   preserves    all    spaces and\n",
                           "startIndex": 0,
                           "endIndex": 51
-                        },
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "        line breaks exactly as written.",
+                    "length": 39,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 356.3,
                           "y": 200,
@@ -1049,16 +1083,8 @@
                           "right": 356.3,
                           "bottom": 217,
                           "text": "        line breaks exactly as written.",
-                          "startIndex": 51,
-                          "endIndex": 90
-                        },
-                        {
-                          "x": 32,
-                          "y": 218,
-                          "width": 244.55,
-                          "height": 17,
-                          "right": 276.55,
-                          "bottom": 235
+                          "startIndex": 0,
+                          "endIndex": 39
                         }
                       ],
                       "hasLayout": true,
@@ -1265,8 +1291,8 @@
                 "children": [
                   {
                     "nodeType": "text",
-                    "text": "Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.",
-                    "length": 116,
+                    "text": "Pre-wrap: This    text   preserves    spaces ",
+                    "length": 45,
                     "isWhitespaceOnly": false,
                     "layout": {
                       "rects": [
@@ -1280,7 +1306,24 @@
                           "text": "Pre-wrap: This    text   preserves    spaces ",
                           "startIndex": 0,
                           "endIndex": 45
-                        },
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "but still wraps when it reaches the ",
+                    "length": 36,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 331.38,
                           "y": 342,
@@ -1289,9 +1332,26 @@
                           "right": 335.83,
                           "bottom": 359,
                           "text": "but still wraps when it reaches the ",
-                          "startIndex": 45,
-                          "endIndex": 81
-                        },
+                          "startIndex": 0,
+                          "endIndex": 36
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "container edge like this long line.",
+                    "length": 35,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
                         {
                           "x": 32,
                           "y": 360,
@@ -1300,24 +1360,8 @@
                           "right": 272.13,
                           "bottom": 377,
                           "text": "container edge like this long line.",
-                          "startIndex": 81,
-                          "endIndex": 116
-                        },
-                        {
-                          "x": 272.13,
-                          "y": 360,
-                          "width": 4.45,
-                          "height": 17,
-                          "right": 276.58,
-                          "bottom": 377
-                        },
-                        {
-                          "x": 32,
-                          "y": 378,
-                          "width": 232.16,
-                          "height": 17,
-                          "right": 264.16,
-                          "bottom": 395
+                          "startIndex": 0,
+                          "endIndex": 35
                         }
                       ],
                       "hasLayout": true,

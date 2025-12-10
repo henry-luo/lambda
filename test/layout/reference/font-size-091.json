@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            #div1\n            {\n                font: 1in/1em ahem;\n            }\n            div div\n            {\n                font-size: 1%;\n            }\n        ",
-                "length": 170,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../../font/Ahem.ttf') format('truetype');\n        }\n                    #div1\n            {\n                font: 1in/1em ahem;\n            }\n            div div\n            {\n                font-size: 1%;\n            }\n        ",
+                "length": 306,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
