@@ -179,7 +179,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             apply_element_default_style(lycon, dom_elem);
 
             // Lambda CSS: use the full implementation from resolve_css_style.cpp
-            resolve_lambda_css_styles(dom_elem, lycon);
+            resolve_css_styles(dom_elem, lycon);
 
             // Mark as resolved for this layout pass
             // Don't mark as resolved during measurement mode - let the actual layout pass do that

@@ -367,11 +367,11 @@ int32_t get_lambda_specificity(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
 
 // Resolve Lambda CSS styles for a DomElement
-void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon);
+void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 
 // Process single Lambda CSS property declaration
 // Called for each property in DomElement->specified_style
-void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
+void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
 
 void line_break(LayoutContext* lycon);

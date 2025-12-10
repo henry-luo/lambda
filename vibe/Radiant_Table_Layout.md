@@ -95,7 +95,7 @@ Per CSS 2.1 table model, define display mapping and insertion of anonymous boxes
   - Respect `border-spacing` and `caption-side`.
 
 - Steps:
-  1. **Dispatch**: Extend `layout_flow_node()` to detect table display and call `layout_table()`.
+  1. **Dispatch**: Extend `layout_flow_node()` to detect table display and call `layout_table_content()`.
   2. **Table box sizing**: Determine table available width from parent like a block-level box (`BlockContext` mechanics, `box-sizing` honored). Content width is initially unknown.
   3. **Column discovery**: From first row (`tr`) or from explicit `colgroup`/`col` widths, infer the number of columns and initial preferred widths per column.
   4. **Intrinsic width collection (auto layout)**:
@@ -161,7 +161,7 @@ Per CSS 2.1 table model, define display mapping and insertion of anonymous boxes
 - **layout.cpp (`layout_flow_node`)**
   - Extend display resolution to classify table display types.
   - Route to new functions creating specific view subclasses:
-    - `layout_table()` constructs a `ViewTable` and owns the full table algorithm.
+    - `layout_table_content()` constructs a `ViewTable` and owns the full table algorithm.
     - Internally, create `ViewTableRowGroup`, `ViewTableRow`, `ViewTableCell` instances as children and attach minimal metadata.
     - External callers should not layout table descendants directly; the table algorithm orchestrates child layout.
 

@@ -1000,7 +1000,7 @@ static bool resolve_font_property_callback(AvlNode* node, void* context) {
     if (!decl) return true;
 
     log_debug("[Lambda CSS] First pass - resolving font property %d", prop_id);
-    resolve_lambda_css_property(prop_id, decl, lycon);
+    resolve_css_property(prop_id, decl, lycon);
     return true;
 }
 
@@ -1025,11 +1025,11 @@ static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
     if (!decl) return true;
 
     log_debug("[Lambda CSS] Second pass - resolving property %d", prop_id);
-    resolve_lambda_css_property(prop_id, decl, lycon);
+    resolve_css_property(prop_id, decl, lycon);
     return true;
 }
 
-void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
+void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
     log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
 
@@ -1137,7 +1137,7 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
 
                 // Apply the inherited property using the ancestor's declaration
-                resolve_lambda_css_property(prop_id, inherited_decl, lycon);
+                resolve_css_property(prop_id, inherited_decl, lycon);
             }
         }
     }
@@ -1181,8 +1181,8 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
     }
 }
 
-void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
-    log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
+void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
+    log_debug("[Lambda CSS Property] resolve_css_property called: prop_id=%d", prop_id);
     if (!decl || !lycon || !lycon->view) {
         log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
             (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
@@ -4417,7 +4417,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssDeclaration color_decl = *decl;
                 color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
                 log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
-                resolve_lambda_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
                 return;
             }
             log_debug("[Lambda CSS Shorthand] Complex background shorthand not yet implemented");
@@ -4435,9 +4435,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
                 CssDeclaration gap_decl = *decl;
                 gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
                 gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
                 return;
             } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count == 2) {
                 // two values: row-gap column-gap
@@ -4447,12 +4447,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssDeclaration row_gap_decl = *decl;
                 row_gap_decl.value = values[0];
                 row_gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
 
                 CssDeclaration col_gap_decl = *decl;
                 col_gap_decl.value = values[1];
                 col_gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
                 return;
             }
             log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");
