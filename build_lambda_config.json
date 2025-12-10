@@ -7,8 +7,8 @@
     "source_dirs": [
         "lambda/input",
         "lambda/input/css",
-        "lambda/input/latex",
-        "lambda/format"
+        "lambda/format",
+        "lambda/validator"
     ],
     "source_files": [
         "lib/strbuf.c",
@@ -54,11 +54,6 @@
         "lambda/mark_builder.cpp",
         "lambda/mark_editor.cpp",
         "lambda/mark_reader.cpp",
-        "lambda/validator/validate.cpp",
-        "lambda/validator/doc_validator.cpp",
-        "lambda/validator/ast_validate.cpp",
-        "lambda/validator/error_reporting.cpp",
-        "lambda/validator/suggestions.cpp",
         "lambda/js/js_scope.cpp",
         "lambda/js/build_js_ast.cpp",
         "lambda/js/transpile_js.cpp",
@@ -152,6 +147,13 @@
             "name": "tree-sitter-javascript",
             "include": "lambda/tree-sitter-javascript/bindings/c",
             "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter-latex",
+            "description": "Tree-sitter LaTeX parser library",
+            "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+            "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
             "link": "static"
         },
         {
@@ -346,10 +348,6 @@
                 "lambda/input/css/css_engine.cpp",
                 "lambda/input/css/css_formatter.cpp",
                 "lambda/input/css/css_style_node.cpp",
-                "lambda/input/latex/latex_parser.cpp",
-                "lambda/input/latex/latex_primitives.cpp",
-                "lambda/input/latex/latex_commands.cpp",
-                "lambda/input/latex/latex_environments.cpp",
                 "lib/arraylist.c",
                 "lib/avl_tree.c",
                 "lib/hashmap.c",
@@ -360,6 +358,7 @@
             "libraries": [
                 "lambda-lib",
                 "tree-sitter-lambda",
+                "tree-sitter-latex",
                 "tree-sitter",
                 "mpdec",
                 "utf8proc",
@@ -1248,6 +1247,21 @@
                         "icon": "🔄"
                     },
                     {
+                        "source": "test_latex_ts_gtest.cpp",
+                        "name": "LaTeX Tree-sitter Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "tree-sitter-latex"
+                        ],
+                        "binary": "test_latex_ts_gtest.exe",
+                        "icon": "📝"
+                    },
+                    {
                         "source": "test_html_roundtrip_gtest.cpp",
                         "name": "HTML Roundtrip Tests",
                         "dependencies": [
@@ -1912,6 +1926,19 @@
                         ],
                         "binary": "test_latex_parser_gtest.exe",
                         "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_latex_treesitter.cpp",
+                        "name": "LaTeX Tree-sitter Parser Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_treesitter.exe",
+                        "icon": "🌲"
                     },
                     {
                         "source": "test/latex/test_latex_html_baseline.cpp",

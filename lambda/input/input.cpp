@@ -22,6 +22,7 @@ void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_html_impl(Input* input, const char* html_string);  // Internal - use input_from_source()
 void parse_latex(Input* input, const char* latex_string);
+void parse_latex_ts(Input* input, const char* latex_string);  // Tree-sitter LaTeX parser
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
 void parse_asciidoc(Input* input, const char* asciidoc_string);
@@ -591,6 +592,10 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             input_context->disable_string_merging = true;
             parse_latex(input, source);
             input_context->disable_string_merging = prev_disable_string_merging;
+        }
+        else if (strcmp(effective_type, "latex-ts") == 0) {
+            // Tree-sitter LaTeX parser (experimental)
+            parse_latex_ts(input, source);
         }
         else if (strcmp(effective_type, "rtf") == 0) {
             parse_rtf(input, source);
