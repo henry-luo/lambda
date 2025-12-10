@@ -8,12 +8,12 @@
 
 ## Executive Summary
 
-### Current State (10 Dec 2025 - Updated)
+### Current State (11 Dec 2025 - Updated)
 - **Baseline Tests**: ✅ **30/30 passing (100%)** + 1 skipped
 - **Extended Tests**: ⚠️ **0/78 passing (100% failing)** - all ongoing development
 - **Total Coverage**: 30 passing out of 108 total tests (27.8%)
 - **Progress Since Start**: From 14 tests → 30 tests passing (+16, +114% improvement)
-- **Recent Work**: Font size commands fully implemented and stable
+- **Recent Work**: Fixed double-nesting regression in `\emph{}` and `\textit{}` commands
 
 ### Test Suite Organization
 After reorganization on 10 Dec 2025:
@@ -23,6 +23,13 @@ After reorganization on 10 Dec 2025:
   - 7 whitespace/groups tests moved from extended (initial reorganization)
   - 6 additional tests moved after fixing continue paragraphs and whitespace trimming
   - Total baseline growth: 14 tests → 24 tests → 30 tests
+
+### Latest Session (11 Dec 2025)
+- **Fixed**: Double-nesting regression in `\emph{}` and `\textit{}` commands
+  - Problem: Commands were generating `<span class="it"><span class="it">text</span></span>`
+  - Root cause: Commands opened span, updated font_ctx to ITALIC, then content processor created another span
+  - Solution: Set font_ctx to NEUTRAL (NORMAL/UPRIGHT/ROMAN) after opening span in both `process_text_command()` and `process_emph_command()`
+  - Result: All 30 baseline tests remain passing (100%)
 
 ---
 
@@ -429,6 +436,7 @@ Code: \verb|x = 5|
 - ✅ Empty continue paragraph fix (affects 6+ tests)
 - ✅ Whitespace trimming in items (affects multiple tests)
 - ✅ Formatting commands (all 6 tests: formatting_tex_1-6)
+- ✅ **Double-nesting fix** (11 Dec 2025): Fixed `\emph{}` and `\textit{}` creating nested spans by setting font_ctx to neutral after opening span
 
 **⚠️ IN PROGRESS**:
 1. **Section Content Nesting** (3 tests) - NOT STARTED
@@ -617,6 +625,7 @@ Focus on these for maximum impact:
 - ✅ Font size commands (infrastructure complete, scoped usage working)
 - ✅ Empty continue paragraphs (fixed 6+ tests)
 - ✅ All formatting commands (6 tests: formatting_tex_1-6)
+- ✅ Double-nesting fix (11 Dec 2025): `\emph{}` and `\textit{}` no longer create nested spans
 
 ---
 
@@ -786,6 +795,13 @@ make test-baseline
 ---
 
 ## Document History
+
+- **11 Dec 2025**: Fixed double-nesting regression
+  - Fixed `\emph{}` and `\textit{}` commands creating nested spans like `<span class="it"><span class="it">text</span></span>`
+  - Root cause: Commands updated font_ctx to ITALIC before processing content, causing content processor to create redundant span
+  - Solution: Set font_ctx to NEUTRAL (NORMAL/UPRIGHT/ROMAN) in `process_text_command()` and `process_emph_command()` after opening span
+  - All 30 baseline tests remain passing (100%)
+  - Commit: "Fix double-nesting in emph and textit by resetting font context to neutral"
 
 - **10 Dec 2025 (Evening Update)**: Progress update after font size implementation
   - 30 baseline tests passing (100%) - up from 24
