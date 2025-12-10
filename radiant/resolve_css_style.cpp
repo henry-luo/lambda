@@ -3617,7 +3617,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 size_t count = value->data.list.count;
                 CssValue** values = value->data.list.values;
                 bool has_separator = false;
-                
+
                 // First pass: check if there's a "/" separator
                 for (size_t i = 0; i < count; i++) {
                     CssValue* v = values[i];
@@ -3626,14 +3626,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                         break;
                     }
                 }
-                
+
                 if (!has_separator) {
                     // No separator: "span N" or just "N"
                     // Check if first value is span keyword
                     bool is_span = false;
                     int span_value = 1;
                     int line_value = 0;
-                    
+
                     for (size_t i = 0; i < count; i++) {
                         CssValue* v = values[i];
                         if (v->type == CSS_VALUE_TYPE_KEYWORD) {
