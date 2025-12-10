@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const { spawn } = require('child_process');
 
 class LayoutDevTool {
@@ -15,6 +16,16 @@ class LayoutDevTool {
     console.log('  __dirname:', __dirname);
     console.log('  projectRoot:', this.projectRoot);
     console.log('  testDataDir:', this.testDataDir);
+  }
+
+  registerProtocol() {
+    // Register a custom protocol to serve local test files
+    // This allows the renderer to access local files without cross-origin issues
+    protocol.registerFileProtocol('testfile', (request, callback) => {
+      // URL format: testfile://path/to/file
+      const filePath = decodeURIComponent(request.url.replace('testfile://', ''));
+      callback({ path: filePath });
+    });
   }
 
   createWindow() {
@@ -58,8 +69,13 @@ class LayoutDevTool {
     });
 
     // Render Lambda view - runs ./lambda.exe render <testPath> -o output.png
-    ipcMain.handle('render-lambda-view', async (event, testPath) => {
-      return await this.renderLambdaView(testPath);
+    ipcMain.handle('render-lambda-view', async (event, testPath, viewportWidth, viewportHeight) => {
+      return await this.renderLambdaView(testPath, viewportWidth, viewportHeight);
+    });
+
+    // Measure page content height using a hidden BrowserWindow
+    ipcMain.handle('measure-page-height', async (event, testPath, viewportWidth) => {
+      return await this.measurePageHeight(testPath, viewportWidth);
     });
 
     // Read log file
@@ -241,7 +257,63 @@ class LayoutDevTool {
     }
   }
 
-  async renderLambdaView(testPath) {
+  // Measure page content height using a hidden BrowserWindow
+  async measurePageHeight(testPath, viewportWidth) {
+    return new Promise((resolve, reject) => {
+      const absolutePath = path.join(this.projectRoot, testPath);
+
+      // Create a hidden window to load and measure the page
+      const measureWindow = new BrowserWindow({
+        width: viewportWidth,
+        height: 600,
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      });
+
+      measureWindow.loadFile(absolutePath);
+
+      measureWindow.webContents.on('did-finish-load', async () => {
+        try {
+          // Execute JavaScript in the page context to get content height
+          const height = await measureWindow.webContents.executeJavaScript(`
+            Math.max(
+              document.body.scrollHeight,
+              document.body.offsetHeight,
+              document.documentElement.scrollHeight,
+              document.documentElement.offsetHeight
+            )
+          `);
+
+          console.log('Measured page height:', height, 'for', testPath);
+          measureWindow.close();
+          resolve(height);
+        } catch (e) {
+          console.error('Failed to measure page height:', e);
+          measureWindow.close();
+          resolve(600); // fallback
+        }
+      });
+
+      measureWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+        console.error('Failed to load page for measurement:', errorDescription);
+        measureWindow.close();
+        resolve(600); // fallback
+      });
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        if (!measureWindow.isDestroyed()) {
+          measureWindow.close();
+          resolve(600);
+        }
+      }, 5000);
+    });
+  }
+
+  async renderLambdaView(testPath, viewportWidth = 1200, viewportHeight = 800) {
     return new Promise((resolve, reject) => {
       // Output path with timestamp to avoid caching
       const outputDir = path.join(this.projectRoot, 'test_output');
@@ -250,13 +322,18 @@ class LayoutDevTool {
       // Construct the absolute path to the test file
       const absoluteTestPath = path.join(this.projectRoot, testPath);
 
+      // Use provided viewport dimensions or defaults
+      const width = viewportWidth > 0 ? viewportWidth : 1200;
+      const height = viewportHeight > 0 ? viewportHeight : 800;
+
       console.log('Rendering Lambda view:');
       console.log('  testPath:', testPath);
       console.log('  absoluteTestPath:', absoluteTestPath);
       console.log('  outputPath:', outputPath);
+      console.log('  viewport:', width, 'x', height);
 
-      // Run: ./lambda.exe render <testPath> -o output.png
-      const args = ['render', absoluteTestPath, '-o', outputPath];
+      // Run: ./lambda.exe render <testPath> -o output.png -vw <width> -vh <height>
+      const args = ['render', absoluteTestPath, '-o', outputPath, '-vw', String(width), '-vh', String(height)];
       const renderProcess = spawn(this.lambdaExe, args, {
         cwd: this.projectRoot
       });
@@ -303,6 +380,7 @@ class LayoutDevTool {
 
   initialize() {
     app.whenReady().then(() => {
+      this.registerProtocol();  // Register custom protocol for local file access
       this.setupIPC();  // Setup IPC handlers BEFORE creating window
       this.createWindow();
 
