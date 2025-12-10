@@ -1486,8 +1486,15 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_WIDTH: {
             log_debug("[CSS] Processing width property");
-            // width cannot be negative
-            float width = max(resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value), 0);
+            // CSS 'width: auto' should be represented as -1, not 0
+            // This distinguishes from explicit 'width: 0'
+            float width;
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                width = -1;  // auto width
+            } else {
+                width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, value);
+                width = isnan(width) ? -1 : max(width, 0.0f);  // width cannot be negative
+            }
             lycon->block.given_width = width;
             log_debug("width property: %f, type: %d", lycon->block.given_width, value->type);
             // Store the raw width value for box-sizing calculations
@@ -1509,9 +1516,17 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_HEIGHT: {
             log_debug("[CSS] Processing height property");
-            float height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, value);
-            lycon->block.given_height = height = isnan(height) ? height : max(height, 0);  // height cannot be negative
-            log_debug("height property: %d", lycon->block.given_height);
+            // CSS 'height: auto' should be represented as -1, not 0
+            // This distinguishes from explicit 'height: 0'
+            float height;
+            if (value && value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                height = -1;  // auto height
+            } else {
+                height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, value);
+                height = isnan(height) ? -1 : max(height, 0.0f);  // height cannot be negative
+            }
+            lycon->block.given_height = height;
+            log_debug("height property: %.1f", lycon->block.given_height);
             // store the raw height value for box-sizing calculations
             if (block) {
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
