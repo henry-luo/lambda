@@ -340,7 +340,7 @@ DisplayValue resolve_display_value(void* child) {
                         CssDeclaration* decl = style_node->winning_decl;
                         if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum keyword = decl->value->data.keyword;
-                            log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK);
+                            log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d, GRID=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK, CSS_VALUE_GRID);
                             // Map keyword to display values
                             if (keyword == CSS_VALUE_FLEX) {
                                 log_debug("[CSS] ✅ MATCHED FLEX! Setting display to BLOCK+FLEX");
@@ -353,8 +353,10 @@ DisplayValue resolve_display_value(void* child) {
                                 display.inner = CSS_VALUE_FLEX;
                                 return display;
                             } else if (keyword == CSS_VALUE_GRID) {
+                                log_debug("[CSS] ✅ MATCHED GRID! Setting display to BLOCK+GRID");
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_GRID;
+                                log_debug("[CSS] ✅ Returning outer=%d, inner=%d for GRID", display.outer, display.inner);
                                 return display;
                             } else if (keyword == CSS_VALUE_INLINE_GRID) {
                                 display.outer = CSS_VALUE_INLINE;
@@ -998,7 +1000,7 @@ static bool resolve_font_property_callback(AvlNode* node, void* context) {
     if (!decl) return true;
 
     log_debug("[Lambda CSS] First pass - resolving font property %d", prop_id);
-    resolve_lambda_css_property(prop_id, decl, lycon);
+    resolve_css_property(prop_id, decl, lycon);
     return true;
 }
 
@@ -1023,11 +1025,11 @@ static bool resolve_non_font_property_callback(AvlNode* node, void* context) {
     if (!decl) return true;
 
     log_debug("[Lambda CSS] Second pass - resolving property %d", prop_id);
-    resolve_lambda_css_property(prop_id, decl, lycon);
+    resolve_css_property(prop_id, decl, lycon);
     return true;
 }
 
-void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
+void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     assert(dom_elem);
     log_debug("[Lambda CSS] Resolving styles for element <%s>", dom_elem->tag_name);
 
@@ -1135,7 +1137,7 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 }
 
                 // Apply the inherited property using the ancestor's declaration
-                resolve_lambda_css_property(prop_id, inherited_decl, lycon);
+                resolve_css_property(prop_id, inherited_decl, lycon);
             }
         }
     }
@@ -1179,8 +1181,8 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
     }
 }
 
-void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
-    log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
+void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
+    log_debug("[Lambda CSS Property] resolve_css_property called: prop_id=%d", prop_id);
     if (!decl || !lycon || !lycon->view) {
         log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
             (void*)decl, (void*)lycon, lycon ? (void*)lycon->view : NULL);
@@ -3851,6 +3853,98 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        case CSS_PROPERTY_GRID_AUTO_ROWS: {
+            log_debug("[CSS] Processing grid-auto-rows property");
+            if (!block) {
+                log_debug("[CSS] grid-auto-rows: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            GridProp* grid = block->embed->grid;
+
+            // Handle "auto" keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                log_debug("[CSS] grid-auto-rows: auto");
+                // Auto means content-based sizing - clear any explicit auto tracks
+                if (grid->grid_auto_rows) {
+                    destroy_grid_track_list(grid->grid_auto_rows);
+                    grid->grid_auto_rows = NULL;
+                }
+                break;
+            }
+
+            // Handle single length/fr value (e.g., "100px" or "1fr")
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                if (!grid->grid_auto_rows) {
+                    grid->grid_auto_rows = create_grid_track_list(1);
+                }
+                // Use parse_css_value_to_track_size to properly handle fr units
+                GridTrackSize* track_size = parse_css_value_to_track_size(value);
+                if (track_size) {
+                    grid->grid_auto_rows->tracks[0] = track_size;
+                    grid->grid_auto_rows->track_count = 1;
+                    log_debug("[CSS] grid-auto-rows: single track size set (type=%d, value=%d)",
+                              track_size->type, track_size->value);
+                }
+                break;
+            }
+
+            // Handle list of track sizes
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                log_debug("[CSS] grid-auto-rows: using parse_grid_track_list helper");
+                parse_grid_track_list(value, &grid->grid_auto_rows);
+                log_debug("[CSS] grid-auto-rows: %d tracks parsed",
+                          grid->grid_auto_rows ? grid->grid_auto_rows->track_count : 0);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_GRID_AUTO_COLUMNS: {
+            log_debug("[CSS] Processing grid-auto-columns property");
+            if (!block) {
+                log_debug("[CSS] grid-auto-columns: Cannot apply to non-block element");
+                break;
+            }
+            alloc_grid_prop(lycon, block);
+            GridProp* grid = block->embed->grid;
+
+            // Handle "auto" keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
+                log_debug("[CSS] grid-auto-columns: auto");
+                // Auto means content-based sizing - clear any explicit auto tracks
+                if (grid->grid_auto_columns) {
+                    destroy_grid_track_list(grid->grid_auto_columns);
+                    grid->grid_auto_columns = NULL;
+                }
+                break;
+            }
+
+            // Handle single length/fr value (e.g., "100px" or "1fr")
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                if (!grid->grid_auto_columns) {
+                    grid->grid_auto_columns = create_grid_track_list(1);
+                }
+                // Use parse_css_value_to_track_size to properly handle fr units
+                GridTrackSize* track_size = parse_css_value_to_track_size(value);
+                if (track_size) {
+                    grid->grid_auto_columns->tracks[0] = track_size;
+                    grid->grid_auto_columns->track_count = 1;
+                    log_debug("[CSS] grid-auto-columns: single track size set (type=%d, value=%d)",
+                              track_size->type, track_size->value);
+                }
+                break;
+            }
+
+            // Handle list of track sizes
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                log_debug("[CSS] grid-auto-columns: using parse_grid_track_list helper");
+                parse_grid_track_list(value, &grid->grid_auto_columns);
+                log_debug("[CSS] grid-auto-columns: %d tracks parsed",
+                          grid->grid_auto_columns ? grid->grid_auto_columns->track_count : 0);
+            }
+            break;
+        }
+
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
             alloc_flex_item_prop(lycon, span);
@@ -4323,7 +4417,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssDeclaration color_decl = *decl;
                 color_decl.property_id = CSS_PROPERTY_BACKGROUND_COLOR;
                 log_debug("[Lambda CSS Shorthand] Expanding background to background-color");
-                resolve_lambda_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_BACKGROUND_COLOR, &color_decl, lycon);
                 return;
             }
             log_debug("[Lambda CSS Shorthand] Complex background shorthand not yet implemented");
@@ -4341,9 +4435,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[Lambda CSS Shorthand] Expanding single-value gap to row-gap and column-gap");
                 CssDeclaration gap_decl = *decl;
                 gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_ROW_GAP, &gap_decl, lycon);
                 gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_COLUMN_GAP, &gap_decl, lycon);
                 return;
             } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count == 2) {
                 // two values: row-gap column-gap
@@ -4353,12 +4447,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 CssDeclaration row_gap_decl = *decl;
                 row_gap_decl.value = values[0];
                 row_gap_decl.property_id = CSS_PROPERTY_ROW_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_ROW_GAP, &row_gap_decl, lycon);
 
                 CssDeclaration col_gap_decl = *decl;
                 col_gap_decl.value = values[1];
                 col_gap_decl.property_id = CSS_PROPERTY_COLUMN_GAP;
-                resolve_lambda_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
+                resolve_css_property(CSS_PROPERTY_COLUMN_GAP, &col_gap_decl, lycon);
                 return;
             }
             log_debug("[Lambda CSS Shorthand] Gap shorthand expansion complete");

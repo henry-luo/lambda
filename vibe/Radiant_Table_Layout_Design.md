@@ -290,10 +290,10 @@ The table layout uses a **two-pass algorithm** with nested content layout.
 
 ### 4.2 Entry Point
 
-Table layout is initiated from `layout_table()` in `layout_table.cpp`:
+Table layout is initiated from `layout_table_content()` in `layout_table.cpp`:
 
 ```cpp
-void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
+void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
     // Step 1: Build table structure from DOM
     ViewTable* table = build_table_tree(lycon, tableNode);
 

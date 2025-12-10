@@ -262,7 +262,7 @@ The `layout_flow_node()` function in `layout.cpp` doesn't check for `display: ta
 // layout.cpp (assumed structure)
 void layout_flow_node(LayoutContext* lycon, DomNode* node) {
     if (node->tag() == HTM_TAG_TABLE) {
-        layout_table(lycon, node, display);
+        layout_table_content(lycon, node, display);
     }
     // MISSING: Check display.inner == CSS_VALUE_TABLE
     else if (display.outer == CSS_VALUE_BLOCK) {
@@ -279,7 +279,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode* node) {
 
     // Check CSS display property BEFORE tag name
     if (display.inner == CSS_VALUE_TABLE || node->tag() == HTM_TAG_TABLE) {
-        layout_table(lycon, node, display);
+        layout_table_content(lycon, node, display);
         return;
     }
 
