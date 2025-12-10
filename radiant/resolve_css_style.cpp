@@ -3,6 +3,40 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
+#include FT_TRUETYPE_TABLES_H
+
+/**
+ * Get x-height ratio for a font (x-height / em-size).
+ * Tries OS/2 sxHeight first, then measures 'x' glyph, fallback to 0.5.
+ */
+static float get_font_x_height_ratio(FT_Face face) {
+    if (!face) return 0.5f;
+
+    // Try to get sxHeight from OS/2 table (most accurate)
+    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+    if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
+        float ratio = (float)os2->sxHeight / face->units_per_EM;
+        log_debug("x-height ratio from OS/2 sxHeight: %.3f (sxHeight=%d, unitsPerEM=%d)",
+                  ratio, os2->sxHeight, face->units_per_EM);
+        return ratio;
+    }
+
+    // Fallback: measure the 'x' glyph height
+    FT_UInt x_index = FT_Get_Char_Index(face, 'x');
+    if (x_index > 0) {
+        FT_Error error = FT_Load_Glyph(face, x_index, FT_LOAD_NO_SCALE);
+        if (!error && face->units_per_EM > 0) {
+            float ratio = (float)face->glyph->metrics.height / face->units_per_EM;
+            log_debug("x-height ratio from 'x' glyph: %.3f (height=%ld, unitsPerEM=%d)",
+                      ratio, face->glyph->metrics.height, face->units_per_EM);
+            return ratio;
+        }
+    }
+
+    // Ultimate fallback: typical serif font ratio
+    log_debug("x-height ratio: using default 0.5");
+    return 0.5f;
+}
 
 Color resolve_color_value(const CssValue* value) {
     Color result;
@@ -601,16 +635,15 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = (num / 100.0) * vmax;
             break;
         }
-        case CSS_UNIT_EX:
+        case CSS_UNIT_EX: {
             // relative to x-height of the font
-            // For Times/serif fonts, x-height is typically ~0.45em
-            // For sans-serif fonts, it's typically ~0.52em
-            // Using 0.45 as default approximation (closer to browser behavior)
             if (lycon->font.current_font_size < 0) {
                 resolve_font_size(lycon, NULL);
             }
-            result = num * lycon->font.current_font_size * 0.45;
+            float x_height_ratio = get_font_x_height_ratio(lycon->font.ft_face);
+            result = num * lycon->font.current_font_size * x_height_ratio;
             break;
+        }
         case CSS_UNIT_CH:
             // relative to width of "0" character (approximate as 0.5em)
             if (lycon->font.current_font_size < 0) {
@@ -1012,6 +1045,19 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     // 2. Second pass: Resolve all other properties
     int font_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_font_property_callback, lycon);
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
+
+    // Set up FreeType font face if a font-family was specified for this element
+    // This ensures ex/ch units use the correct font metrics
+    if (font_processed > 0) {
+        ViewSpan* span = (ViewSpan*)lycon->view;
+        // Check if font or font-family was explicitly set on this element
+        bool has_font = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr ||
+                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr;
+        if (has_font && span && span->font && span->font->family && lycon->ui_context) {
+            log_debug("[Lambda CSS] Setting up font for element: family='%s'", span->font->family);
+            setup_font(lycon->ui_context, &lycon->font, span->font);
+        }
+    }
 
     int other_processed = avl_tree_foreach_inorder(style_tree->tree, resolve_non_font_property_callback, lycon);
     log_debug("[Lambda CSS] Second pass - processed %d other properties", other_processed);
