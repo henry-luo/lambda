@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 74,
+      "height": 73,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -650,11 +650,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 50,
+          "height": 49,
           "contentWidth": 1184,
-          "contentHeight": 50,
+          "contentHeight": 49,
           "scrollWidth": 1184,
-          "scrollHeight": 50
+          "scrollHeight": 49
         },
         "computed": {
           "display": "block",
@@ -800,11 +800,11 @@
               "x": 8,
               "y": 50,
               "width": 1184,
-              "height": 16,
+              "height": 15,
               "contentWidth": 1184,
-              "contentHeight": 16,
+              "contentHeight": 15,
               "scrollWidth": 1184,
-              "scrollHeight": 16
+              "scrollHeight": 15
             },
             "computed": {
               "display": "block",
@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 8,
                   "y": 50,
-                  "width": 87.55,
-                  "height": 16,
-                  "contentWidth": 88,
-                  "contentHeight": 16,
-                  "scrollWidth": 88,
-                  "scrollHeight": 16
+                  "width": 15,
+                  "height": 15,
+                  "contentWidth": 15,
+                  "contentHeight": 15,
+                  "scrollWidth": 15,
+                  "scrollHeight": 15
                 },
                 "computed": {
                   "display": "inline",
@@ -961,7 +961,7 @@
                   "verticalAlign": "baseline",
                   "top": "0px",
                   "right": "1154px",
-                  "bottom": "1px",
+                  "bottom": "0px",
                   "left": "15px",
                   "zIndex": "auto",
                   "overflow": "visible",
