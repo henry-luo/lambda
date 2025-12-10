@@ -11,7 +11,11 @@
   <meta name="assert" content="A system font value cannot mix with another subproperty value">
 
   <style type="text/css">
-  div 
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+          div 
   {
   background-color: red;
   color: white;

@@ -11,7 +11,11 @@
   <meta name="assert" content="'em' and 'ex' length values when defining 'font-size' property refer to the computed font size of the parent element.">
 
   <style type="text/css">
-  div {font-family: Ahem; font-size: 32px;}
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+          div {font-family: Ahem; font-size: 32px;}
 
   p {margin: 10px 30px;}
 

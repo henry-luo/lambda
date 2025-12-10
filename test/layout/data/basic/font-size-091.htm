@@ -8,7 +8,11 @@
         <meta name="flags" content="ahem">
         <meta name="assert" content="The 'font-size' property sets a minimum plus one length value in percentages.">
         <style type="text/css">
-            #div1
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+                    #div1
             {
                 font: 1in/1em ahem;
             }

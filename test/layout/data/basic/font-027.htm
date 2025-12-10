@@ -8,7 +8,11 @@
         <meta name="flags" content="ahem">
         <meta name="assert" content="The 'font' shorthand property accepts and sets font-style, font-variant, font-weight, font-size, line-height and font-family.">
         <style type="text/css">
-            #wrapper
+        @font-face {
+            font-family: 'ahem';
+            src: url('../../font/Ahem.ttf') format('truetype');
+        }
+                    #wrapper
             {
                 position: relative;
             }
