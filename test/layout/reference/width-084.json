@@ -876,11 +876,11 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 53.84,
+              "width": 96,
               "height": 96,
-              "contentWidth": 54,
+              "contentWidth": 96,
               "contentHeight": 96,
-              "scrollWidth": 54,
+              "scrollWidth": 96,
               "scrollHeight": 96
             },
             "computed": {
@@ -939,9 +939,9 @@
               "y": 148,
               "width": 1184,
               "height": 96,
-              "contentWidth": 1131,
+              "contentWidth": 1088,
               "contentHeight": 96,
-              "scrollWidth": 1131,
+              "scrollWidth": 1088,
               "scrollHeight": 96
             },
             "computed": {
@@ -958,7 +958,7 @@
               "borderTopWidth": 0,
               "borderRightWidth": 0,
               "borderBottomWidth": 0,
-              "borderLeftWidth": 53,
+              "borderLeftWidth": 96,
               "flexDirection": "row",
               "flexWrap": "nowrap",
               "justifyContent": "normal",
