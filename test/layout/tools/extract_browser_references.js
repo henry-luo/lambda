@@ -16,8 +16,8 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
     // Handle both .html and .htm extensions
     const ext = htmlFilePath.endsWith('.htm') && !htmlFilePath.endsWith('.html') ? '.htm' : '.html';
     const baseName = path.basename(htmlFilePath, ext);
-    const category = path.basename(path.dirname(htmlFilePath));
-    const outputDir = path.join(__dirname, '..', 'reference', category);
+    // Write directly to flat reference directory (combined structure)
+    const outputDir = path.join(__dirname, '..', 'reference');
     const outputFile = path.join(outputDir, `${baseName}.json`);
 
     // Check if output file already exists (unless force regeneration is requested)
@@ -826,7 +826,7 @@ Examples:
   node extract_browser_references.js ../data/css2.1/blocks-001.htm      # Extract single .htm file
 
 Generated files:
-  ../reference/<category>/<test_name>.json                  # Individual reference files
+  ../reference/<test_name>.json                             # Individual reference files (flat structure)
   ../reports/extraction_summary.json                        # Summary report
 
 Note: By default, existing reference files are skipped. Use --force to regenerate them.
