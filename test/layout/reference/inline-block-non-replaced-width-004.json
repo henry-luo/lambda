@@ -760,8 +760,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n  div\n  {\n  background-color: red;\n  display: inline-block;\n  font: 32px/4 Ahem;\n  width: auto;\n  }\n\n  div > div\n  {\n  background-color: green;\n  max-width: 4em;\n  }\n  ",
-                "length": 169,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n  div\n  {\n  background-color: red;\n  display: inline-block;\n  font: 32px/4 Ahem;\n  width: auto;\n  }\n\n  div > div\n  {\n  background-color: green;\n  max-width: 4em;\n  }\n  ",
+                "length": 294,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
