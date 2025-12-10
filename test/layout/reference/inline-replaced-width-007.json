@@ -799,12 +799,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 93.55,
-              "height": 70,
-              "contentWidth": 88,
-              "contentHeight": 64,
-              "scrollWidth": 88,
-              "scrollHeight": 64
+              "width": 102,
+              "height": 102,
+              "contentWidth": 96,
+              "contentHeight": 96,
+              "scrollWidth": 96,
+              "scrollHeight": 96
             },
             "computed": {
               "display": "block",
@@ -839,8 +839,8 @@
               "textAlign": "start",
               "verticalAlign": "baseline",
               "top": "50px",
-              "right": "1098.45px",
-              "bottom": "680px",
+              "right": "1090px",
+              "bottom": "648px",
               "left": "8px",
               "zIndex": "auto",
               "overflow": "visible",
@@ -859,12 +859,12 @@
                 "layout": {
                   "x": 11,
                   "y": 53,
-                  "width": 87.55,
-                  "height": 16,
-                  "contentWidth": 88,
-                  "contentHeight": 16,
-                  "scrollWidth": 88,
-                  "scrollHeight": 16
+                  "width": 48,
+                  "height": 48,
+                  "contentWidth": 48,
+                  "contentHeight": 48,
+                  "scrollWidth": 48,
+                  "scrollHeight": 48
                 },
                 "computed": {
                   "display": "inline",
@@ -919,7 +919,7 @@
                 "classes": [],
                 "layout": {
                   "x": 11,
-                  "y": 69,
+                  "y": 101,
                   "width": 48,
                   "height": 48,
                   "contentWidth": 48,
