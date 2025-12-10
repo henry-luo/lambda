@@ -16,9 +16,17 @@ The grid layout implementation has critical gaps that prevent CSS Grid propertie
 | Suite | Passed | Total | Pass Rate |
 |-------|--------|-------|-----------|
 | Baseline | 683 | 683 | 100% |
-| Grid | 1 | 39 | 2.6% |
+| Grid | 6 | 39 | 15.4% |
 
-**Progress:** Phase 1 implemented CSS property resolution and fixed auto-placement to handle span values. Baseline tests remain unaffected.
+### Test Results - Current State (Phase 2 Complete)
+| Suite | Passed | Total | Pass Rate |
+|-------|--------|-------|-----------|
+| Baseline | 683 | 683 | 100% |
+| Grid | 7 | 39 | 18% |
+
+**Progress:**
+- Phase 1: Implemented CSS property resolution and fixed auto-placement to handle span values
+- Phase 2: Implemented intrinsic sizing using unified API, added `grid-auto-rows/columns` support, fixed memory ownership, fixed `fr` unit parsing, fixed test framework text node comparison
 
 ### Root Causes of Grid Test Failures
 
@@ -27,36 +35,36 @@ The grid layout implementation has critical gaps that prevent CSS Grid propertie
 `resolve_css_style.cpp` now handles grid item placement properties:
 
 **Implemented:**
-- `CSS_PROPERTY_GRID_TEMPLATE_COLUMNS`
-- `CSS_PROPERTY_GRID_TEMPLATE_ROWS`
-- `CSS_PROPERTY_GRID_COLUMN_START` ✅ Added
-- `CSS_PROPERTY_GRID_COLUMN_END` ✅ Added
-- `CSS_PROPERTY_GRID_ROW_START` ✅ Added
-- `CSS_PROPERTY_GRID_ROW_END` ✅ Added
-- `CSS_PROPERTY_GRID_COLUMN` (shorthand) ✅ Added
-- `CSS_PROPERTY_GRID_ROW` (shorthand) ✅ Added
-- `CSS_PROPERTY_GRID_AUTO_FLOW` ✅ Added
+- `CSS_PROPERTY_GRID_TEMPLATE_COLUMNS` ✅
+- `CSS_PROPERTY_GRID_TEMPLATE_ROWS` ✅
+- `CSS_PROPERTY_GRID_COLUMN_START` ✅
+- `CSS_PROPERTY_GRID_COLUMN_END` ✅
+- `CSS_PROPERTY_GRID_ROW_START` ✅
+- `CSS_PROPERTY_GRID_ROW_END` ✅
+- `CSS_PROPERTY_GRID_COLUMN` (shorthand) ✅
+- `CSS_PROPERTY_GRID_ROW` (shorthand) ✅
+- `CSS_PROPERTY_GRID_AUTO_FLOW` ✅
+- `CSS_PROPERTY_GRID_AUTO_ROWS` ✅ Added in Phase 2
+- `CSS_PROPERTY_GRID_AUTO_COLUMNS` ✅ Added in Phase 2
 
 **Still Missing:**
 - `grid-area` (complex shorthand)
-- `grid-auto-rows`
-- `grid-auto-columns`
+- `justify-self` (grid item alignment)
+- `align-self` (grid item alignment)
+- `justify-content` (grid container alignment)
+- `align-content` (grid container alignment)
 
 **Key Fix:** The CSS parser returns "span" as `CSS_VALUE_TYPE_CUSTOM` (type 17), not `CSS_VALUE_TYPE_KEYWORD`. Updated code to check both types.
 
-#### Issue 2: Primitive Content Measurement - ⏳ Pending
+#### Issue 2: Primitive Content Measurement - ✅ FIXED
 
-Grid's `measure_grid_item_intrinsic()` uses crude estimation:
-```cpp
-// Current: ~8px per character assumption
-int estimated_width = text_len * 8;
-int estimated_height = 20;
-```
+Updated grid measurement to use the unified intrinsic sizing API (same as flex):
 
-Flex uses accurate FreeType-based measurement via `intrinsic_sizing.cpp`:
 ```cpp
-TextIntrinsicWidths measure_text_intrinsic_widths(lycon, text, length);
-// Returns actual glyph-based min/max content widths
+// Now uses: measure_element_intrinsic_widths() and calculate_min/max_content_height()
+IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
+*min_width = sizes.min_content;
+*max_width = sizes.max_content;
 ```
 
 #### Issue 3: Static Auto-Placement State - ✅ FIXED
@@ -72,9 +80,44 @@ grid->auto_row_cursor = 1;
 grid->auto_col_cursor = 1;
 ```
 
+#### Issue 4: Memory Ownership in GridTrack - ✅ FIXED
+
+Added `owns_size` flag to `GridTrack` to prevent double-free crashes:
+```cpp
+typedef struct GridTrack {
+    GridTrackSize* size;
+    bool owns_size;  // true if this track owns the size pointer
+    // ...
+} GridTrack;
+```
+
+Cleanup now respects ownership:
+```cpp
+if (grid->computed_rows[i].owns_size) {
+    destroy_grid_track_size(grid->computed_rows[i].size);
+}
+```
+
+#### Issue 5: `fr` Unit Parsing in grid-auto-rows/columns - ✅ FIXED
+
+Single-value `fr` units were being parsed as pixels. Now uses `parse_css_value_to_track_size()`:
+```cpp
+// Before: GRID_TRACK_SIZE_LENGTH with value=1 (wrong!)
+// After:  GRID_TRACK_SIZE_FR with value=100 (correct - 1.00fr)
+GridTrackSize* track_size = parse_css_value_to_track_size(value);
+```
+
+#### Issue 6: Test Framework Text Node Comparison - ✅ FIXED
+
+Fixed three issues in `test/layout/test_radiant_layout.js`:
+
+1. **`getAllChildren()`**: Browser reference stores text nodes in separate `textNodes` array
+2. **`filterForComparison()`**: Browser text nodes have `rects` at top level, not under `layout`
+3. **Text node layout comparison**: Fixed extraction of browser layout from `rects` array
+
 ## Implementation Log
 
-### Changes Made
+### Phase 1 Changes
 
 #### 1. view_pool.cpp - Added `alloc_grid_item_prop()`
 ```cpp
@@ -108,93 +151,93 @@ int auto_row_cursor;
 int auto_col_cursor;
 ```
 
-## Proposed Changes - Phase 2
+### Phase 2 Changes
 
-### Phase 2: Measurement Improvements (Priority: High)
-case CSS_PROPERTY_GRID_ROW:
-    // Parse shorthand "start / end" or "span N"
+#### 5. layout_grid_multipass.cpp - Unified intrinsic sizing
+- Replaced primitive character-based estimation with `measure_element_intrinsic_widths()`
+- Added proper height calculation using `calculate_min_content_height()` / `calculate_max_content_height()`
+- Grid measurement now matches flex layout accuracy
 
-case CSS_PROPERTY_GRID_AREA:
-    // Parse "row-start / col-start / row-end / col-end" or named area
-
-case CSS_PROPERTY_GRID_AUTO_FLOW:
-    // Parse "row", "column", "dense", "row dense", "column dense"
-```
-
-### Phase 2: Reuse Flex Measurement Infrastructure
-
-Replace primitive measurement in `layout_grid_multipass.cpp`:
-
-**Before:**
+#### 6. view.hpp - GridProp additions
 ```cpp
-void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item, ...) {
-    // Simple estimation: ~8px per character
-    int text_len = strlen(text);
-    int estimated_width = text_len * 8;
-}
+// Added fields for auto track sizing:
+GridTrackList* grid_auto_rows;
+GridTrackList* grid_auto_columns;
 ```
 
-**After:**
+#### 7. grid.hpp - Memory ownership tracking
 ```cpp
-void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item, ...) {
-    // Use unified intrinsic sizing (same as flex)
-    IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, (DomElement*)item);
-    *min_width = sizes.min_content;
-    *max_width = sizes.max_content;
-    // ... height measurement using same approach
-}
+// Added to GridTrack:
+bool owns_size;  // Tracks ownership of size pointer
 ```
 
-### Phase 3: Fix Auto-Placement State
+#### 8. grid_sizing.cpp - Ownership initialization
+- Sets `owns_size = false` for tracks that share pointers from templates
+- Sets `owns_size = true` for newly created auto sizes
 
-Move static variables to `GridContainerLayout`:
+#### 9. layout_grid.cpp - Safe cleanup
+- Only destroys track sizes where `owns_size == true`
 
-```cpp
-struct GridContainerLayout : GridProp {
-    // ... existing fields ...
+#### 10. resolve_css_style.cpp - `fr` unit handling
+- `CSS_PROPERTY_GRID_AUTO_ROWS`: Now uses `parse_css_value_to_track_size()` for proper `fr` handling
+- `CSS_PROPERTY_GRID_AUTO_COLUMNS`: Same fix applied
 
-    // Auto-placement cursor (replaces static variables)
-    int auto_cursor_row;
-    int auto_cursor_column;
-};
-```
+#### 11. test/layout/test_radiant_layout.js - Text comparison fixes
+- `getAllChildren()`: Added handling for browser `textNodes` array
+- `filterForComparison()`: Added check for `child.node.rects`
+- Text layout comparison: Fixed browser layout extraction from `rects[0]`
 
-Initialize in `init_grid_container()` and reset per-container.
+## Remaining Issues to Address
 
-## Implementation Plan
+### Priority 1: Grid Item Alignment Properties
+| Property | Status | Impact |
+|----------|--------|--------|
+| `justify-self` | ❌ Not implemented | Items stretch to fill cell instead of aligning |
+| `align-self` | ❌ Not implemented | Items stretch vertically instead of aligning |
 
-### Step 1: Add `alloc_grid_item_prop()` helper
-Create helper function in `resolve_css_style.cpp` (similar to `alloc_flex_item_prop()`).
+**Example failure (grid_109_justify_self.html):**
+- Items have `width=376` (full row) instead of `width=80` (specified)
+- Items should be positioned at start/center/end based on `justify-self` value
 
-### Step 2: Add CSS property cases
-Add switch cases for all missing grid properties.
+### Priority 2: Grid Container Alignment Properties
+| Property | Status | Impact |
+|----------|--------|--------|
+| `justify-content` | ❌ Not implemented | Grid tracks don't align within container |
+| `align-content` | ❌ Not implemented | Grid tracks don't align vertically |
 
-### Step 3: Update measurement
-Replace primitive measurement with calls to `intrinsic_sizing.cpp` functions.
+### Priority 3: Advanced Grid Features
+| Feature | Status | Impact |
+|---------|--------|--------|
+| `grid-auto-flow: dense` | ❌ Not implemented | Sparse placement instead of dense packing |
+| Negative line numbers | ❌ Not implemented | `grid-column: -1` doesn't work |
+| `grid-area` shorthand | ❌ Not implemented | Can't use `grid-area: 1 / 2 / 3 / 4` |
+| Named grid lines | ❌ Partial | `[name]` syntax not fully supported |
+| `order` property | ❌ Not implemented | Visual order differs from DOM order |
 
-### Step 4: Fix auto-placement
-Remove static variables, use per-container state.
+### Priority 4: Nested Grid Support
+- Nested grids partially work but may have sizing issues
+- Need to verify intrinsic sizing of nested grid containers
 
-## Code Reuse from Flex Layout
+## Expected Test Improvements
 
-| Flex Component | Grid Equivalent | Action |
-|----------------|-----------------|--------|
-| `intrinsic_sizing.cpp` functions | Grid measurement | Direct reuse |
-| `measurement_cache` | Grid measurement | Already shared |
-| `init_flex_item_view()` pattern | `init_grid_item_view()` | Similar structure |
-| `layout_flex_absolute_children()` | `layout_grid_absolute_children()` | Nearly identical |
+After implementing alignment properties (`justify-self`, `align-self`):
+- `grid_109_justify_self.html` - Should pass
+- `grid_110_align_self.html` - Should pass
+- Several other tests that depend on item alignment
 
-## Expected Outcomes
+After implementing container alignment (`justify-content`, `align-content`):
+- `grid_111_justify_content.html` - Should improve
+- `grid_112_align_content.html` - Should improve
 
-After implementation:
-1. Tests using `grid-column`, `grid-row`, `span` will work
-2. Content-based track sizing will be accurate
-3. Nested grids will work correctly
-4. Many of the 39 grid tests should pass
+## Files Modified
 
-## Files to Modify
-
-1. `radiant/resolve_css_style.cpp` - Add CSS property handling
-2. `radiant/layout_grid_multipass.cpp` - Update measurement
-3. `radiant/layout_grid.cpp` - Fix auto-placement state
-4. `radiant/grid.hpp` - Add auto-cursor fields if needed
+| File | Changes |
+|------|---------|
+| `radiant/resolve_css_style.cpp` | CSS property handling, `fr` unit fix |
+| `radiant/layout_grid_multipass.cpp` | Unified intrinsic sizing |
+| `radiant/layout_grid.cpp` | Auto-placement state, cleanup safety |
+| `radiant/grid_sizing.cpp` | Track ownership initialization |
+| `radiant/grid.hpp` | `owns_size` field in GridTrack |
+| `radiant/view.hpp` | `grid_auto_rows/columns` in GridProp |
+| `radiant/view_pool.cpp` | `alloc_grid_item_prop()` helper |
+| `test/layout/test_radiant_layout.js` | Text node comparison fixes |
