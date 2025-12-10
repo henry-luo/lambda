@@ -2240,7 +2240,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border->top_style_specificity = specificity;
                 // CSS spec: when style is set (and visible) but width is not, default to 'medium' (3px)
                 // none/hidden styles mean no border, so no default width
-                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE && 
+                if (!border.length && border.style->data.keyword != CSS_VALUE_NONE &&
                     border.style->data.keyword != CSS_VALUE_HIDDEN &&
                     specificity >= span->bound->border->width.top_specificity) {
                     span->bound->border->width.top = 3.0f;  // medium
