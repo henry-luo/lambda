@@ -510,7 +510,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
 
     // CSS Grid spec: Without explicit grid-template-columns, there's 1 implicit column
     if (max_columns <= 0) max_columns = 1;
-    
+
     // If span is larger than max_columns, the grid must expand
     if (col_span > max_columns) {
         max_columns = col_span;
@@ -551,7 +551,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
                 grid_layout->auto_row_cursor++;
             }
         }
-        
+
         if (!placed) {
             log_error("Failed to auto-place grid item after %d iterations", iterations);
             // Force placement at cursor as fallback
@@ -593,7 +593,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
                 grid_layout->auto_col_cursor++;
             }
         }
-        
+
         if (!placed) {
             log_error("Failed to auto-place grid item (column-flow) after %d iterations", iterations);
             item->gi->computed_grid_row_start = 1;
