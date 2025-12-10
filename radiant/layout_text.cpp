@@ -375,6 +375,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     LAYOUT_TEXT:
+    // Check if we're already past the line end before starting new text
+    // This can happen after an inline-block that's wider than the container
+    {
+        float line_right = lycon->line.has_float_intrusion ?
+                           lycon->line.effective_right : lycon->line.right;
+        // Only break if we're strictly past the end, not just at the end
+        // Being exactly at the end is fine - whitespace might be collapsed
+        if (lycon->line.advance_x > line_right && !lycon->line.is_line_start) {
+            log_debug("Text starts past line end (advance_x=%.1f > line_right=%.1f), breaking line",
+                      lycon->line.advance_x, line_right);
+            line_break(lycon);
+        }
+    }
     if (!text_view) {
         text_view = (ViewText*)set_view(lycon, RDT_VIEW_TEXT, text_node);
         text_view->font = lycon->font.style;
