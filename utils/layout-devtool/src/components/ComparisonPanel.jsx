@@ -1,16 +1,101 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 
-function ComparisonPanel({ test, lambdaRenderPath }) {
+const ComparisonPanel = forwardRef(function ComparisonPanel({ test, lambdaRenderPath }, ref) {
   const [browserView, setBrowserView] = useState(null);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
   const [splitPos, setSplitPos] = useState(50);
   const isDragging = useRef(false);
   const containerRef = useRef(null);
+  const iframeRef = useRef(null);
+  const leftPanelRef = useRef(null);
+  const cachedContentHeight = useRef(800);
+
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    // Get the browser panel width and content height for rendering
+    getBrowserDimensions: () => {
+      const dimensions = { width: 1200, height: 800 }; // defaults
+
+      // Get the left panel (browser view) width
+      if (leftPanelRef.current) {
+        const panelContent = leftPanelRef.current.querySelector('.panel-content');
+        if (panelContent) {
+          dimensions.width = Math.round(panelContent.clientWidth);
+        }
+      }
+
+      // Use cached content height if available
+      if (cachedContentHeight.current > 0) {
+        dimensions.height = cachedContentHeight.current;
+      }
+
+      console.log('Browser dimensions:', dimensions);
+      return dimensions;
+    }
+  }));
+
+  // Handle iframe load event to cache content height
+  const handleIframeLoad = () => {
+    setIframeLoaded(true);
+    if (iframeRef.current) {
+      try {
+        const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
+        if (iframeDoc) {
+          // Use a small delay to ensure styles are applied and layout is complete
+          setTimeout(() => {
+            try {
+              // Get the actual content height from the document
+              const docEl = iframeDoc.documentElement;
+              const body = iframeDoc.body;
+
+              if (docEl && body) {
+                // Log all height values for debugging
+                console.log('Height measurements:', {
+                  'body.scrollHeight': body.scrollHeight,
+                  'body.offsetHeight': body.offsetHeight,
+                  'body.clientHeight': body.clientHeight,
+                  'docEl.scrollHeight': docEl.scrollHeight,
+                  'docEl.offsetHeight': docEl.offsetHeight,
+                  'docEl.clientHeight': docEl.clientHeight,
+                  'iframe.clientHeight': iframeRef.current?.clientHeight
+                });
+
+                // scrollHeight should give the full scrollable content height
+                const contentHeight = Math.max(
+                  body.scrollHeight,
+                  docEl.scrollHeight
+                );
+
+                if (contentHeight > 0) {
+                  cachedContentHeight.current = contentHeight;
+                  console.log('Cached iframe content height:', contentHeight);
+                }
+              }
+            } catch (innerE) {
+              console.log('Could not measure content height:', innerE.message);
+            }
+          }, 200);  // Increased delay for more reliable measurement
+        }
+      } catch (e) {
+        console.log('Could not access iframe content on load:', e.message);
+        // Fallback to panel height
+        if (leftPanelRef.current) {
+          const panelContent = leftPanelRef.current.querySelector('.panel-content');
+          if (panelContent) {
+            cachedContentHeight.current = Math.round(panelContent.clientHeight);
+          }
+        }
+      }
+    }
+  };
 
   useEffect(() => {
     if (test) {
+      setIframeLoaded(false);
       loadViews(test);
     } else {
       setBrowserView(null);
+      setIframeLoaded(false);
     }
   }, [test]);
 
@@ -20,10 +105,10 @@ function ComparisonPanel({ test, lambdaRenderPath }) {
       // The path is relative to the project root where main.js resolves it
       const testPath = `test/layout/data/${test.category}/${test.testFile}`;
 
-      // For browser view, we need to construct a file:// URL
-      // Since we're in the renderer, we can use the file protocol
+      // Use the custom testfile:// protocol to avoid cross-origin issues
+      // This protocol is registered in main.js and serves local files
       const absolutePath = await getAbsolutePath(testPath);
-      setBrowserView(`file://${absolutePath}`);
+      setBrowserView(`testfile://${absolutePath}`);
     } catch (error) {
       console.error('Failed to load views:', error);
     }
@@ -68,7 +153,7 @@ function ComparisonPanel({ test, lambdaRenderPath }) {
 
   return (
     <div className="comparison-panel" ref={containerRef}>
-      <div className="panel left-panel" style={{ width: `${splitPos}%` }}>
+      <div className="panel left-panel" ref={leftPanelRef} style={{ width: `${splitPos}%` }}>
         <div className="panel-header">
           <span>Browser View</span>
           <span className="panel-info">{test.testFile}</span>
@@ -76,10 +161,12 @@ function ComparisonPanel({ test, lambdaRenderPath }) {
         <div className="panel-content">
           {browserView ? (
             <iframe
+              ref={iframeRef}
               src={browserView}
               title="Browser View"
               className="browser-iframe"
               sandbox="allow-same-origin allow-scripts"
+              onLoad={handleIframeLoad}
             />
           ) : (
             <div className="loading">Loading...</div>
@@ -115,6 +202,6 @@ function ComparisonPanel({ test, lambdaRenderPath }) {
       </div>
     </div>
   );
-}
+});
 
 export default ComparisonPanel;
