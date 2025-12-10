@@ -3,6 +3,7 @@
 #include "grid.hpp"
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
+#include "intrinsic_sizing.hpp"
 
 extern "C" {
 #include "../lib/log.h"
@@ -280,81 +281,52 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
         return;
     }
 
-    // Use existing flex measurement infrastructure
-    // This measures text and nested content
-    int measured_width = 0, measured_height = 0;
-    int content_width = 0, content_height = 0;
+    // Initialize output values
+    *min_width = *max_width = *min_height = *max_height = 0;
 
     // Check if item has explicit dimensions from CSS
+    bool has_explicit_width = false, has_explicit_height = false;
     if (item->blk) {
         if (item->blk->given_width > 0) {
             *min_width = *max_width = (int)item->blk->given_width;
+            has_explicit_width = true;
         }
         if (item->blk->given_height > 0) {
             *min_height = *max_height = (int)item->blk->given_height;
+            has_explicit_height = true;
         }
 
         // If both dimensions are explicit, we're done
-        if (item->blk->given_width > 0 && item->blk->given_height > 0) {
+        if (has_explicit_width && has_explicit_height) {
             log_debug("Grid item %s has explicit dimensions: %dx%d",
                       item->node_name(), *min_width, *min_height);
             return;
         }
     }
 
-    // Measure content for auto-sized dimensions
-    // Use a simplified measurement approach similar to flex
-    DomNode* child = item->first_child;
-    int total_height = 0;
-    int max_child_width = 0;
-
-    while (child) {
-        if (child->is_text()) {
-            // Estimate text dimensions
-            const char* text = (const char*)child->text_data();
-            if (text && strlen(text) > 0) {
-                // Simple estimation: ~8px per character, ~20px line height
-                int text_len = strlen(text);
-                int estimated_width = text_len * 8;
-                int estimated_height = 20;
-
-                if (estimated_width > max_child_width) {
-                    max_child_width = estimated_width;
-                }
-                total_height += estimated_height;
-            }
-        } else if (child->is_element()) {
-            // Recursively measure nested elements
-            ViewBlock* child_block = (ViewBlock*)child->as_element();
-            int child_min_w = 0, child_max_w = 0, child_min_h = 0, child_max_h = 0;
-
-            // Check for explicit dimensions on nested element
-            if (child_block->blk) {
-                if (child_block->blk->given_width > 0) {
-                    child_max_w = (int)child_block->blk->given_width;
-                }
-                if (child_block->blk->given_height > 0) {
-                    child_max_h = (int)child_block->blk->given_height;
-                }
-            }
-
-            // Use estimated values if not explicit
-            if (child_max_w <= 0) child_max_w = 100;  // Default estimate
-            if (child_max_h <= 0) child_max_h = 30;   // Default estimate
-
-            if (child_max_w > max_child_width) {
-                max_child_width = child_max_w;
-            }
-            total_height += child_max_h;
-        }
-        child = child->next_sibling;
+    // Use unified intrinsic sizing API (same as flex layout)
+    // This uses FreeType for accurate text measurement
+    if (!has_explicit_width) {
+        float min_w = calculate_min_content_width(lycon, (DomNode*)item);
+        float max_w = calculate_max_content_width(lycon, (DomNode*)item);
+        *min_width = (int)(min_w + 0.5f);
+        *max_width = (int)(max_w + 0.5f);
     }
 
-    // Apply measured values if not already set
-    if (*min_width == 0) *min_width = max_child_width > 0 ? max_child_width : 50;
-    if (*max_width == 0) *max_width = max_child_width > 0 ? max_child_width : 200;
-    if (*min_height == 0) *min_height = total_height > 0 ? total_height : 20;
-    if (*max_height == 0) *max_height = total_height > 0 ? total_height : 50;
+    if (!has_explicit_height) {
+        // Height depends on width for proper text wrapping
+        float width_for_height = (float)*max_width;
+        float min_h = calculate_min_content_height(lycon, (DomNode*)item, width_for_height);
+        float max_h = calculate_max_content_height(lycon, (DomNode*)item, width_for_height);
+        *min_height = (int)(min_h + 0.5f);
+        *max_height = (int)(max_h + 0.5f);
+    }
+
+    // Ensure minimum sizes (prevent 0-sized items)
+    if (*min_width <= 0) *min_width = 1;
+    if (*max_width <= 0) *max_width = 1;
+    if (*min_height <= 0) *min_height = 1;
+    if (*max_height <= 0) *max_height = 1;
 
     // Add padding and border to the measurements (grid items use border-box sizing)
     if (item->bound) {
@@ -374,8 +346,6 @@ void measure_grid_item_intrinsic(LayoutContext* lycon, ViewBlock* item,
             *min_height += border_v;
             *max_height += border_v;
         }
-    } else {
-        log_debug("item->bound is NULL, no padding added");
     }
 
     // Store in cache

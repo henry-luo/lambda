@@ -364,13 +364,29 @@ class RadiantLayoutTester {
                 });
             }
         } else {
-            // Browser format: elements and text nodes are mixed in children array
+            // Browser format: elements in children array, text nodes in separate textNodes array
+            // We need to combine them in document order
+
+            // First, collect element children
             if (node.children && Array.isArray(node.children)) {
                 node.children.forEach((child, index) => {
                     children.push({
                         type: child.nodeType === 'text' ? 'text' : 'element',
                         node: child,
                         index: index
+                    });
+                });
+            }
+
+            // Then, add text nodes from the textNodes array
+            // Text nodes are stored separately in browser format and need to be included
+            if (node.textNodes && Array.isArray(node.textNodes)) {
+                node.textNodes.forEach((textNode, index) => {
+                    // Mark it as a text node with nodeType for comparison
+                    children.push({
+                        type: 'text',
+                        node: { ...textNode, nodeType: 'text' },
+                        index: children.length + index
                     });
                 });
             }
@@ -420,7 +436,9 @@ class RadiantLayoutTester {
             if (child.type === 'text') {
                 // Only keep text nodes that have visible layout
                 if (child.node.layout && child.node.layout.rects) {
-                    return child.node.layout.rects.length > 0; // Browser format
+                    return child.node.layout.rects.length > 0; // Browser format with nested rects
+                } else if (child.node.rects && child.node.rects.length > 0) {
+                    return true; // Browser text nodes have rects at top level
                 } else if (child.node.layout && child.node.layout.width > 0) {
                     return true; // Radiant format
                 }
@@ -521,14 +539,23 @@ class RadiantLayoutTester {
             }
 
             const contentMatch = (radiantNode.content || '').trim() === (browserNode.text || '').trim();
-            if (contentMatch && radiantNode.layout && browserNode.layout) {
+
+            // Browser text nodes have rects at top level, not under layout
+            const browserHasLayout = browserNode.layout || (browserNode.rects && browserNode.rects.length > 0);
+
+            if (contentMatch && radiantNode.layout && browserHasLayout) {
                 // Compare layout - browser may have multiple rects for wrapped text
                 const radiantLayout = radiantNode.layout;
-                let browserLayout = browserNode.layout;
+                let browserLayout;
 
-                // If browser has rects array, use the first rect for comparison
-                if (browserNode.layout.rects && browserNode.layout.rects.length > 0) {
+                // If browser has rects at top level (text node format), use the first rect
+                if (browserNode.rects && browserNode.rects.length > 0) {
+                    browserLayout = browserNode.rects[0];
+                } else if (browserNode.layout && browserNode.layout.rects && browserNode.layout.rects.length > 0) {
+                    // If browser has rects nested under layout
                     browserLayout = browserNode.layout.rects[0];
+                } else {
+                    browserLayout = browserNode.layout;
                 }
 
                 // Check if text is center-aligned (from parent's computed styles)

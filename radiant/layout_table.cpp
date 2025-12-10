@@ -3536,7 +3536,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 // =============================================================================
 
 // Main table layout entry point
-void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
+void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue display) {
     log_debug("=== TABLE LAYOUT START ===");
     log_debug("Starting table layout");
     log_debug("Initial layout context - line.left=%d, advance_y=%d", lycon->line.left, lycon->block.advance_y);

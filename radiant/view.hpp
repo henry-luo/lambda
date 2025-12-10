@@ -586,6 +586,11 @@ typedef struct GridProp {
     GridTrackList* grid_template_rows;
     GridTrackList* grid_template_columns;
     GridTrackList* grid_template_areas;
+
+    // Grid auto track sizing
+    GridTrackList* grid_auto_rows;
+    GridTrackList* grid_auto_columns;
+
     int computed_row_count;
     int computed_column_count;
     // Grid areas

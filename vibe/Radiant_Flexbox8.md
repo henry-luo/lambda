@@ -447,7 +447,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
                 return;
             }
-            resolve_lambda_css_styles(dom_elem, lycon);
+            resolve_css_styles(dom_elem, lycon);
             dom_elem->styles_resolved = true;
             log_debug("[CSS] Resolved styles for <%s> - marked as resolved",
                 dom_elem->tag_name ? dom_elem->tag_name : "unknown");

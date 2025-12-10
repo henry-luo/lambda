@@ -61,7 +61,7 @@ After each phase:
 **Location:** `radiant/layout_table.cpp`
 
 **Tasks:**
-- [ ] In `layout_table()`: Ensure `setup_font()` uses table's computed font, not re-computes em values
+- [ ] In `layout_table_content()`: Ensure `setup_font()` uses table's computed font, not re-computes em values
 - [ ] In `layout_table_cell_content()`: Save and restore font context properly
 - [ ] In `measure_cell_intrinsic_width()`: Use cell's computed font directly
 - [ ] Add debug logging to trace font size at each stage
