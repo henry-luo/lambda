@@ -413,7 +413,15 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             layout_block(lycon, node, display);
             break;
         case CSS_VALUE_INLINE:
-            layout_inline(lycon, node, display);
+            // CSS 2.1 Section 10.3.2: Inline replaced elements (img, video, etc.)
+            // are laid out like inline-block because they have intrinsic dimensions
+            if (display.inner == RDT_DISPLAY_REPLACED) {
+                // Treat inline replaced elements as inline-block for layout
+                display.outer = CSS_VALUE_INLINE_BLOCK;
+                layout_block(lycon, node, display);
+            } else {
+                layout_inline(lycon, node, display);
+            }
             break;
         case CSS_VALUE_NONE:
             log_debug("skipping element of display: none");
