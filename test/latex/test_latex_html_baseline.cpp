@@ -6,6 +6,7 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/url.h"
+#include "../../lib/log.h"
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -15,6 +16,9 @@
 class LatexHtmlFixtureTest : public ::testing::Test {
 protected:
     void SetUp() override {
+        // Initialize logging
+        log_init(NULL);
+        
         // Initialize memory pool
         pool = pool_create();
         ASSERT_NE(pool, nullptr);
