@@ -42,7 +42,7 @@ layout_block() → layout_block_content() → setup_inline() → layout_block_in
                                      │         layout_flow_node() for children │
                                      │ - FLEX: layout_flex_content()           │
                                      │ - GRID: layout_grid_content()           │
-                                     │ - TABLE: layout_table()                 │
+                                     │ - TABLE: layout_table_content()                 │
                                      └─────────────────────────────────────────┘
                                                                ↓
                                             finalize_block_flow()

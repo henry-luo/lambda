@@ -177,7 +177,7 @@ switch (display.inner) {
         layout_grid_content(lycon, block);   // CSS Grid
         break;
     case CSS_VALUE_TABLE:
-        layout_table(lycon, elmt, display);  // Table
+        layout_table_content(lycon, elmt, display);  // Table
         break;
 }
 ```
@@ -285,7 +285,7 @@ Pass 4: Item Layout
 
 ### 4.5 Table Layout
 
-**Entry:** `layout_table()` in `layout_table.cpp`
+**Entry:** `layout_table_content()` in `layout_table.cpp`
 
 **Algorithm:**
 1. Build table structure (rows, columns, cells)
@@ -332,7 +332,7 @@ HTML entities are processed during parsing (`input-html.cpp`):
 
 ### 5.1 Style Cascade
 
-**Entry:** `resolve_lambda_css_styles()` in `resolve_css_style.cpp`
+**Entry:** `resolve_css_styles()` in `resolve_css_style.cpp`
 
 **Process:**
 1. Inherit values from parent
@@ -444,7 +444,7 @@ Lambda Element Tree            CssStylesheet (rules)
                    │
                    ▼
       dom_node_resolve_style()
-      resolve_lambda_css_styles()
+      resolve_css_styles()
                    │
                    ▼
          Computed Styles → Layout
@@ -455,7 +455,7 @@ Lambda Element Tree            CssStylesheet (rules)
 - **Embedded:** `<style>` tags → `parse_style_element()`
 - **Inline:** `style=""` attribute → `parse_inline_style()`
 
-**Style Application:** `resolve_lambda_css_styles()` in `resolve_css_style.cpp`:
+**Style Application:** `resolve_css_styles()` in `resolve_css_style.cpp`:
 1. Apply user-agent defaults
 2. Match selectors using `CssSelectorMatcher`
 3. Apply rules respecting cascade order
