@@ -529,8 +529,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .outer { position: static; width: 300px; height: 100px; background: red; }\n   .inner { width: 200%; height: 200%; font: 100px/1 Ahem; color: green; }\n  ",
-                "length": 250,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../../font/Ahem.ttf') format('truetype');\n        }\n           .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .outer { position: static; width: 300px; height: 100px; background: red; }\n   .inner { width: 200%; height: 200%; font: 100px/1 Ahem; color: green; }\n  ",
+                "length": 386,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

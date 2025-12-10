@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            #wrapper\n            {\n                background: red;\n                float: left;\n            }\n            #test\n            {\n                color: green;\n                font: normal 1in ahem;\n                line-height: 1em;\n            }\n            #reference\n            {\n                background: green;\n                height: 1in;\n                width: 1in;\n            }\n        ",
-                "length": 412,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../../font/Ahem.ttf') format('truetype');\n        }\n                    #wrapper\n            {\n                background: red;\n                float: left;\n            }\n            #test\n            {\n                color: green;\n                font: normal 1in ahem;\n                line-height: 1em;\n            }\n            #reference\n            {\n                background: green;\n                height: 1in;\n                width: 1in;\n            }\n        ",
+                "length": 548,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],

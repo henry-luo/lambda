@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                font: 20px/1em ahem;\n            }\n            #test span\n            {\n                color: blue;\n                margin: 5em;\n            }\n            span\n            {\n                color: white;\n            }\n            .color1\n            {\n                color: orange;\n            }\n        ",
-                "length": 353,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../../font/Ahem.ttf') format('truetype');\n        }\n                    div\n            {\n                font: 20px/1em ahem;\n            }\n            #test span\n            {\n                color: blue;\n                margin: 5em;\n            }\n            span\n            {\n                color: white;\n            }\n            .color1\n            {\n                color: orange;\n            }\n        ",
+                "length": 489,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
