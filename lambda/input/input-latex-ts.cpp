@@ -75,6 +75,10 @@ static const std::unordered_map<std::string, NodeCategory> node_classification =
     {"label", NODE_LEAF},
     {"path", NODE_LEAF},
     {"uri", NODE_LEAF},
+    {"{", NODE_LEAF},                 // Brace delimiters - skip these
+    {"}", NODE_LEAF},
+    {"[", NODE_LEAF},
+    {"]", NODE_LEAF},
     
     // Text nodes (raw text content)
     {"word", NODE_TEXT},
@@ -217,6 +221,12 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
     
     // Line comment -> skip for now
     if (strcmp(node_type, "line_comment") == 0) {
+        return {.item = ITEM_NULL};
+    }
+    
+    // Delimiters ({, }, [, ]) -> skip these, they're structural only
+    if (strcmp(node_type, "{") == 0 || strcmp(node_type, "}") == 0 ||
+        strcmp(node_type, "[") == 0 || strcmp(node_type, "]") == 0) {
         return {.item = ITEM_NULL};
     }
     

@@ -603,6 +603,7 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
 static void append_indent(StringBuf* html_buf, int depth);
 static void close_paragraph(StringBuf* html_buf, bool add_newline);
 static void open_paragraph(StringBuf* html_buf, bool noindent, bool cont);
+static bool is_block_level_element(const char* cmd_name);
 
 // reader-based forward declarations
 static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx);
@@ -1062,14 +1063,17 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
     // Check if we have a valid AST
     if (latex_ast.item == ITEM_NULL) {
+        fprintf(stderr, "DEBUG: format_latex_to_html: latex_ast is NULL\n");
     } else {
         // Process the LaTeX AST without automatic paragraph wrapper
         // Individual text content will be wrapped in paragraphs as needed
-        // printf("DEBUG: About to process LaTeX AST\n");
+        fprintf(stderr, "DEBUG: format_latex_to_html: About to process LaTeX AST, type_id=%d\n", get_type_id(latex_ast));
 
         // use MarkReader API
         ItemReader ast_reader(latex_ast.to_const());
         process_latex_element_reader(html_buf, ast_reader, pool, 1, &font_context);
+        
+        fprintf(stderr, "DEBUG: format_latex_to_html: Finished processing LaTeX AST\n");
     }
 
     // Break down the CSS into smaller chunks to avoid C++ compiler issues with very long string literals
@@ -1293,6 +1297,42 @@ static void generate_latex_css(StringBuf* css_buf) {
     stringbuf_append_str(css_buf, ".tex .xe { position: relative; margin-left: -0.125em; margin-right: -0.1667em; }\n");
 }
 
+// Helper function to check if an element is block-level (should not be wrapped in <p>)
+static bool is_block_level_element(const char* cmd_name) {
+    if (!cmd_name) return false;
+    
+    // List environments
+    if (strcmp(cmd_name, "itemize") == 0) return true;
+    if (strcmp(cmd_name, "enumerate") == 0) return true;
+    if (strcmp(cmd_name, "description") == 0) return true;
+    
+    // Sectioning commands
+    if (strcmp(cmd_name, "section") == 0) return true;
+    if (strcmp(cmd_name, "subsection") == 0) return true;
+    if (strcmp(cmd_name, "subsubsection") == 0) return true;
+    if (strcmp(cmd_name, "chapter") == 0) return true;
+    if (strcmp(cmd_name, "part") == 0) return true;
+    
+    // Display environments
+    if (strcmp(cmd_name, "verbatim") == 0) return true;
+    if (strcmp(cmd_name, "equation") == 0) return true;
+    if (strcmp(cmd_name, "align") == 0) return true;
+    if (strcmp(cmd_name, "displaymath") == 0) return true;
+    if (strcmp(cmd_name, "center") == 0) return true;
+    if (strcmp(cmd_name, "flushleft") == 0) return true;
+    if (strcmp(cmd_name, "flushright") == 0) return true;
+    if (strcmp(cmd_name, "quote") == 0) return true;
+    if (strcmp(cmd_name, "quotation") == 0) return true;
+    if (strcmp(cmd_name, "verse") == 0) return true;
+    
+    // Table and figure environments
+    if (strcmp(cmd_name, "table") == 0) return true;
+    if (strcmp(cmd_name, "tabular") == 0) return true;
+    if (strcmp(cmd_name, "figure") == 0) return true;
+    
+    return false;
+}
+
 // Process a LaTeX element and convert to HTML
 static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth, FontContext* font_ctx) {
     if (item.item == ITEM_NULL) {
@@ -1329,7 +1369,121 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         cmd_name[name_len] = '\0';
 
         // Handle different LaTeX commands
-        if (strcmp(cmd_name, "argument") == 0) {
+        if (strcmp(cmd_name, "latex_document") == 0) {
+            // Root document - handle content with paragraph breaks
+            // Smart paragraph management: don't wrap block-level elements
+            
+            bool in_paragraph = false;
+            bool needs_paragraph = false;  // Track if we need to open a paragraph
+            
+            List* list = (List*)elem;
+            for (size_t i = 0; i < list->length; i++) {
+                Item child = list->items[i];
+                TypeId child_type = get_type_id(child);
+                
+                // Check for parbreak symbol
+                if (child_type == LMD_TYPE_SYMBOL) {
+                    Symbol* sym = (Symbol*)(child.symbol_ptr);
+                    if (sym && strcmp(sym->chars, "parbreak") == 0) {
+                        // Close current paragraph and mark that we need a new one
+                        if (in_paragraph) {
+                            stringbuf_append_str(html_buf, "</p>\n");
+                            in_paragraph = false;
+                        }
+                        needs_paragraph = true;
+                        continue;
+                    }
+                }
+                
+                // Check if this is a block-level element
+                bool is_block = false;
+                if (child_type == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = child.element;
+                    if (child_elem && child_elem->type) {
+                        TypeElmt* child_elmt_type = (TypeElmt*)child_elem->type;
+                        if (child_elmt_type && child_elmt_type->name.str) {
+                            char child_cmd[64];
+                            int child_name_len = child_elmt_type->name.length < 63 ? child_elmt_type->name.length : 63;
+                            strncpy(child_cmd, child_elmt_type->name.str, child_name_len);
+                            child_cmd[child_name_len] = '\0';
+                            is_block = is_block_level_element(child_cmd);
+                        }
+                    }
+                }
+                
+                // Close paragraph before block element
+                if (is_block && in_paragraph) {
+                    stringbuf_append_str(html_buf, "</p>\n");
+                    in_paragraph = false;
+                }
+                
+                // Open paragraph for inline content if needed
+                if (!is_block && !in_paragraph) {
+                    stringbuf_append_str(html_buf, "<p>");
+                    in_paragraph = true;
+                    needs_paragraph = false;
+                }
+                
+                // Handle LIST children (tree-sitter creates lists for mixed content)
+                if (child_type == LMD_TYPE_LIST) {
+                    List* child_list = child.list;
+                    for (size_t j = 0; j < child_list->length; j++) {
+                        Item list_item = child_list->items[j];
+                        
+                        // Check for parbreak in list items
+                        if (get_type_id(list_item) == LMD_TYPE_SYMBOL) {
+                            Symbol* sym = (Symbol*)(list_item.symbol_ptr);
+                            if (sym && strcmp(sym->chars, "parbreak") == 0) {
+                                if (in_paragraph) {
+                                    stringbuf_append_str(html_buf, "</p>\n");
+                                    in_paragraph = false;
+                                }
+                                needs_paragraph = true;
+                                continue;
+                            }
+                        }
+                        
+                        // Check if list item is block-level
+                        bool item_is_block = false;
+                        if (get_type_id(list_item) == LMD_TYPE_ELEMENT) {
+                            Element* item_elem = list_item.element;
+                            if (item_elem && item_elem->type) {
+                                TypeElmt* item_elmt_type = (TypeElmt*)item_elem->type;
+                                if (item_elmt_type && item_elmt_type->name.str) {
+                                    char item_cmd[64];
+                                    int item_name_len = item_elmt_type->name.length < 63 ? item_elmt_type->name.length : 63;
+                                    strncpy(item_cmd, item_elmt_type->name.str, item_name_len);
+                                    item_cmd[item_name_len] = '\0';
+                                    item_is_block = is_block_level_element(item_cmd);
+                                }
+                            }
+                        }
+                        
+                        // Close paragraph before block element
+                        if (item_is_block && in_paragraph) {
+                            stringbuf_append_str(html_buf, "</p>\n");
+                            in_paragraph = false;
+                        }
+                        
+                        // Open paragraph for inline content
+                        if (!item_is_block && !in_paragraph) {
+                            stringbuf_append_str(html_buf, "<p>");
+                            in_paragraph = true;
+                        }
+                        
+                        process_latex_element(html_buf, list_item, pool, depth + 1, font_ctx);
+                    }
+                } else {
+                    process_latex_element(html_buf, child, pool, depth + 1, font_ctx);
+                }
+            }
+            
+            // Close final paragraph if still open
+            if (in_paragraph) {
+                stringbuf_append_str(html_buf, "</p>");
+            }
+            return;
+        } else if (strcmp(cmd_name, "argument") == 0) {
             // Process argument content (nested LaTeX) without paragraph wrapping
             process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
             return;
@@ -1736,6 +1890,48 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Literal characters don't need trailing space - whitespace in source is preserved
             return;
         }
+        // Special character escapes (tree-sitter creates these as elements)
+        else if (strcmp(cmd_name, "#") == 0) {
+            stringbuf_append_char(html_buf, '#');
+            return;
+        }
+        else if (strcmp(cmd_name, "$") == 0) {
+            stringbuf_append_char(html_buf, '$');
+            return;
+        }
+        else if (strcmp(cmd_name, "%") == 0) {
+            stringbuf_append_char(html_buf, '%');
+            return;
+        }
+        else if (strcmp(cmd_name, "&") == 0) {
+            stringbuf_append_str(html_buf, "&amp;");
+            return;
+        }
+        else if (strcmp(cmd_name, "_") == 0) {
+            stringbuf_append_char(html_buf, '_');
+            return;
+        }
+        else if (strcmp(cmd_name, "{") == 0) {
+            stringbuf_append_char(html_buf, '{');
+            return;
+        }
+        else if (strcmp(cmd_name, "}") == 0) {
+            stringbuf_append_char(html_buf, '}');
+            return;
+        }
+        else if (strcmp(cmd_name, "^") == 0) {
+            stringbuf_append_char(html_buf, '^');
+            return;
+        }
+        else if (strcmp(cmd_name, "~") == 0) {
+            stringbuf_append_char(html_buf, '~');
+            return;
+        }
+        else if (strcmp(cmd_name, "-") == 0) {
+            // Soft hyphen for line breaking
+            stringbuf_append_str(html_buf, "\xC2\xAD"); // U+00AD SOFT HYPHEN
+            return;
+        }
         else if (strcmp(cmd_name, "textbackslash") == 0) {
             stringbuf_append_char(html_buf, '\\'); // Render backslash
             stringbuf_append_str(html_buf, "\u200B"); // Add ZWSP for word boundary (matches latex-js)
@@ -1746,6 +1942,115 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                     String* str = child.get_string();
                     stringbuf_append_str_n(html_buf, str->chars, str->len);
                 }
+            }
+            return;
+        }
+        else if (strcmp(cmd_name, "section") == 0 || strcmp(cmd_name, "subsection") == 0 || 
+                 strcmp(cmd_name, "subsubsection") == 0) {
+            // Tree-sitter creates section elements with: \section command, title in curly_group, and content
+            // We need to extract the title and output just the header, then process remaining content outside
+            
+            // Extract title from the curly_group (second child)
+            StringBuf* title_buf = stringbuf_new(pool);
+            
+            if (elem->items && elem->length > 1) {
+                // Second child should be curly_group with title
+                if (get_type_id(elem->items[1]) == LMD_TYPE_ELEMENT) {
+                    Element* title_elem = elem->items[1].element;
+                    // Extract text from title element without processing ZWSP or other formatting
+                    if (title_elem && title_elem->items && title_elem->length > 0) {
+                        for (int64_t j = 0; j < title_elem->length; j++) {
+                            Item title_child = title_elem->items[j];
+                            if (get_type_id(title_child) == LMD_TYPE_STRING) {
+                                String* str = title_child.get_string();
+                                if (str && str->chars) {
+                                    stringbuf_append_str(title_buf, str->chars);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Output the section header
+            const char* tag = "h2";  // Default to h2 for section
+            if (strcmp(cmd_name, "subsection") == 0) tag = "div";
+            else if (strcmp(cmd_name, "subsubsection") == 0) tag = "div";
+            
+            // Increment section counter and output header
+            global_section_id++;
+            stringbuf_append_str(html_buf, "<");
+            stringbuf_append_str(html_buf, tag);
+            if (strcmp(cmd_name, "subsection") == 0) {
+                stringbuf_append_str(html_buf, " class=\"latex-subsection\"");
+            } else if (strcmp(cmd_name, "subsubsection") == 0) {
+                stringbuf_append_str(html_buf, " class=\"latex-subsubsection\"");
+            } else {
+                char id_buf[32];
+                snprintf(id_buf, sizeof(id_buf), " id=\"sec-%d\"", global_section_id);
+                stringbuf_append_str(html_buf, id_buf);
+            }
+            stringbuf_append_str(html_buf, ">");
+            
+            // Output section number (simplified - just use global counter for now)
+            if (strcmp(cmd_name, "section") == 0) {
+                char num_buf[16];
+                snprintf(num_buf, sizeof(num_buf), "%d ", global_section_id);
+                stringbuf_append_str(html_buf, num_buf);
+            }
+            
+            // Output title
+            if (title_buf->length > 0) {
+                String* title_str = stringbuf_to_string(title_buf);
+                if (title_str && title_str->chars) {
+                    append_escaped_text(html_buf, title_str->chars);
+                }
+            }
+            
+            stringbuf_free(title_buf);
+            
+            stringbuf_append_str(html_buf, "</");
+            stringbuf_append_str(html_buf, tag);
+            stringbuf_append_str(html_buf, ">\n");
+            
+            // Process remaining content (everything after title) as normal document content
+            // This should be wrapped in paragraphs as needed
+            bool in_para = false;
+            for (int64_t i = 2; i < elem->length; i++) {
+                Item content_item = elem->items[i];
+                TypeId content_type = get_type_id(content_item);
+                
+                // Check if it's a block element
+                bool is_block = false;
+                if (content_type == LMD_TYPE_ELEMENT) {
+                    Element* content_elem = content_item.element;
+                    if (content_elem && content_elem->type) {
+                        TypeElmt* content_elmt_type = (TypeElmt*)content_elem->type;
+                        if (content_elmt_type && content_elmt_type->name.str) {
+                            char content_cmd[64];
+                            int content_name_len = content_elmt_type->name.length < 63 ? content_elmt_type->name.length : 63;
+                            strncpy(content_cmd, content_elmt_type->name.str, content_name_len);
+                            content_cmd[content_name_len] = '\0';
+                            is_block = is_block_level_element(content_cmd);
+                        }
+                    }
+                }
+                
+                // Manage paragraphs
+                if (is_block && in_para) {
+                    stringbuf_append_str(html_buf, "</p>\n");
+                    in_para = false;
+                }
+                if (!is_block && !in_para) {
+                    stringbuf_append_str(html_buf, "<p>");
+                    in_para = true;
+                }
+                
+                process_latex_element(html_buf, content_item, pool, depth + 1, font_ctx);
+            }
+            
+            if (in_para) {
+                stringbuf_append_str(html_buf, "</p>");
             }
             return;
         }
@@ -1971,6 +2276,40 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Apply ligature conversion based on font context
             bool is_tt = (font_ctx && font_ctx->family == FONT_FAMILY_TYPEWRITER);
             append_escaped_text_with_ligatures(html_buf, str->chars, is_tt);
+        }
+    }
+    else if (type == LMD_TYPE_SYMBOL) {
+        // Handle special character symbols from tree-sitter parser
+        Symbol* sym = (Symbol*)(item.symbol_ptr);
+        if (sym && sym->chars) {
+            // Map LaTeX escaped characters to their actual characters
+            if (strcmp(sym->chars, "#") == 0) {
+                stringbuf_append_str(html_buf, "#");
+            } else if (strcmp(sym->chars, "$") == 0) {
+                stringbuf_append_str(html_buf, "$");
+            } else if (strcmp(sym->chars, "%") == 0) {
+                stringbuf_append_str(html_buf, "%");
+            } else if (strcmp(sym->chars, "&") == 0) {
+                stringbuf_append_str(html_buf, "&amp;");
+            } else if (strcmp(sym->chars, "_") == 0) {
+                stringbuf_append_str(html_buf, "_");
+            } else if (strcmp(sym->chars, "{") == 0) {
+                stringbuf_append_str(html_buf, "{");
+            } else if (strcmp(sym->chars, "}") == 0) {
+                stringbuf_append_str(html_buf, "}");
+            } else if (strcmp(sym->chars, "^") == 0) {
+                stringbuf_append_str(html_buf, "^");
+            } else if (strcmp(sym->chars, "~") == 0) {
+                stringbuf_append_str(html_buf, "~");
+            } else if (strcmp(sym->chars, "\\") == 0 || strcmp(sym->chars, "textbackslash") == 0) {
+                stringbuf_append_str(html_buf, "\\");
+            } else if (strcmp(sym->chars, "parbreak") == 0) {
+                // parbreak should be handled at document level, ignore here
+                return;
+            } else {
+                // Unknown symbol - output as-is
+                stringbuf_append_str(html_buf, sym->chars);
+            }
         }
     }
     else if (type == LMD_TYPE_ARRAY) {
@@ -2738,7 +3077,9 @@ static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int 
                 Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView child_name = ((TypeElmt*)child_elem->type)->name;
-                    if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
+                    // Handle both old parser "item" and tree-sitter "enum_item"
+                    if ((child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) ||
+                        (child_name.length == 9 && strncmp(child_name.str, "enum_item", 9) == 0)) {
                         process_item(html_buf, child_elem, pool, depth + 1, font_ctx, list_depth, false, 0);
                     }
                 }
@@ -2765,7 +3106,9 @@ static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, in
                 Element* child_elem = child.element;
                 if (child_elem && child_elem->type) {
                     StrView child_name = ((TypeElmt*)child_elem->type)->name;
-                    if (child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) {
+                    // Handle both old parser "item" and tree-sitter "enum_item"
+                    if ((child_name.length == 4 && strncmp(child_name.str, "item", 4) == 0) ||
+                        (child_name.length == 9 && strncmp(child_name.str, "enum_item", 9) == 0)) {
                         bool has_custom_label = process_item(html_buf, child_elem, pool, depth + 1, font_ctx, list_depth, true, local_counter);
                         // Only increment counter if this item doesn't have a custom label
                         if (!has_custom_label) {
@@ -3549,12 +3892,16 @@ static void process_element_content_reader(StringBuf* html_buf, const ElementRea
 
 // main LaTeX element processor using reader API
 static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& item, Pool* pool, int depth, FontContext* font_ctx) {
+    fprintf(stderr, "DEBUG: process_latex_element_reader called, depth=%d\n", depth);
+    
     if (item.isNull()) {
+        fprintf(stderr, "DEBUG: process_latex_element_reader: item is null\n");
         return;
     }
 
     if (item.isString()) {
         String* str = item.asString();
+        fprintf(stderr, "DEBUG: process_latex_element_reader: item is string: %s\n", str ? str->chars : "NULL");
         if (str && str->chars) {
             append_escaped_text(html_buf, str->chars);
         }
@@ -3562,21 +3909,34 @@ static void process_latex_element_reader(StringBuf* html_buf, const ItemReader& 
     }
 
     if (!item.isElement()) {
+        fprintf(stderr, "DEBUG: process_latex_element_reader: item is not element (type=%d)\n", item.getType());
         return;
     }
 
     ElementReader elem = item.asElement();
     const char* cmd_name = elem.tagName();
-    if (!cmd_name) return;
+    fprintf(stderr, "DEBUG: process_latex_element_reader: Processing element: %s, children=%lld\n", 
+            cmd_name ? cmd_name : "NULL", elem.childCount());
+    
+    fprintf(stderr, "DEBUG: elem.element() = %p\n", elem.element());
+    
+    if (!cmd_name) {
+        fprintf(stderr, "DEBUG: cmd_name is NULL, returning\n");
+        return;
+    }
 
     // handle different LaTeX commands - delegate to existing handlers for now
     // convert reader back to Item/Element for compatibility with existing code
     if (elem.element()) {
         Element* raw_elem = (Element*)elem.element();
+        fprintf(stderr, "DEBUG: Converting element to Item and calling process_latex_element\n");
         Item raw_item;
         raw_item.element = raw_elem;
         raw_item._type_id = LMD_TYPE_ELEMENT;
 
         process_latex_element(html_buf, raw_item, pool, depth, font_ctx);
+        fprintf(stderr, "DEBUG: Returned from process_latex_element\n");
+    } else {
+        fprintf(stderr, "DEBUG: elem.element() returned NULL!\n");
     }
 }
