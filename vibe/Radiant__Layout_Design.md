@@ -68,7 +68,7 @@ struct LayoutContext {
     ViewGroup* view;         // Current view being processed
     DomElement* elmt;        // Current DOM element
 
-    BlockContext block;          // Block formatting context state
+    BlockContext block;      // Block formatting context state
     Linebox line;            // Inline formatting context state
     FontBox font;            // Current font state
 
@@ -451,14 +451,14 @@ View tree JSON output shows:
 
 ## 10. Current Status
 
-| Layout Mode | Status | Notes |
-|-------------|--------|-------|
-| Block | ✅ Complete | Full CSS2.1 conformance |
-| Inline | ✅ Complete | Text wrapping, vertical-align |
-| Flex | ✅ Complete | Full flexbox spec, nested support |
-| Grid | 🔄 In Progress | Basic grid, track sizing, CSS integration |
-| Table | ✅ Complete | Auto/fixed layout, spanning cells |
-| Positioned | ✅ Complete | absolute, relative, fixed |
+| Layout Mode | Status         | Notes                                     |
+| ----------- | -------------- | ----------------------------------------- |
+| Block       | 🔄 In Progress | Full CSS2.1 conformance                   |
+| Inline      | 🔄 In Progress | Text wrapping, vertical-align             |
+| Flex        | 🔄 In Progress | Full flexbox spec, nested support         |
+| Grid        | 🔄 In Progress | Basic grid, track sizing, CSS integration |
+| Table       | 🔄 In Progress | Auto/fixed layout, spanning cells         |
+| Positioned  | 🔄 In Progress | absolute, relative, fixed                 |
 
 ---
 
