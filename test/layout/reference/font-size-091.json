@@ -936,11 +936,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 43,
-                      "width": 69.33,
-                      "height": 110,
-                      "right": 77.33,
-                      "bottom": 153,
+                      "y": 50,
+                      "width": 96,
+                      "height": 96,
+                      "right": 104,
+                      "bottom": 146,
                       "text": "\n            X\n            ",
                       "startIndex": 0,
                       "endIndex": 27
@@ -1025,9 +1025,9 @@
                         {
                           "x": 8,
                           "y": 193,
-                          "width": 0.7,
+                          "width": 0.97,
                           "height": 1,
-                          "right": 8.7,
+                          "right": 8.97,
                           "bottom": 194,
                           "text": "X",
                           "startIndex": 0,

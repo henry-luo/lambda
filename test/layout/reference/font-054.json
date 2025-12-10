@@ -858,7 +858,7 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 126,
+                  "y": 123,
                   "width": 92.44,
                   "height": 37,
                   "contentWidth": 0,
@@ -919,11 +919,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 126,
+                          "y": 123,
                           "width": 92.44,
                           "height": 37,
                           "right": 100.44,
-                          "bottom": 163,
+                          "bottom": 160,
                           "text": "XXXX",
                           "startIndex": 0,
                           "endIndex": 4

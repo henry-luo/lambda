@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 76,
+      "height": 77,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 52,
+          "height": 53,
           "contentWidth": 1184,
-          "contentHeight": 52,
+          "contentHeight": 53,
           "scrollWidth": 1184,
-          "scrollHeight": 52
+          "scrollHeight": 53
         },
         "computed": {
           "display": "block",
@@ -877,11 +877,11 @@
               "x": 8,
               "y": 50,
               "width": 1184,
-              "height": 18,
+              "height": 19,
               "contentWidth": 1184,
-              "contentHeight": 18,
+              "contentHeight": 19,
               "scrollWidth": 1184,
-              "scrollHeight": 18
+              "scrollHeight": 19
             },
             "computed": {
               "display": "block",
@@ -935,9 +935,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 55,
-                  "width": 6.5,
-                  "height": 10,
+                  "y": 56,
+                  "width": 9,
+                  "height": 9,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -996,10 +996,10 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 55,
-                          "width": 6.5,
-                          "height": 10,
-                          "right": 14.5,
+                          "y": 56,
+                          "width": 9,
+                          "height": 9,
+                          "right": 17,
                           "bottom": 65,
                           "text": "X",
                           "startIndex": 0,
@@ -1024,10 +1024,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 14.5,
-                  "y": 49,
-                  "width": 11.56,
-                  "height": 18,
+                  "x": 17,
+                  "y": 50,
+                  "width": 16,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1085,12 +1085,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 14.5,
-                          "y": 49,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 26.06,
-                          "bottom": 67,
+                          "x": 17,
+                          "y": 50,
+                          "width": 16,
+                          "height": 16,
+                          "right": 33,
+                          "bottom": 66,
                           "text": "X",
                           "startIndex": 0,
                           "endIndex": 1

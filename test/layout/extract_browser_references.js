@@ -81,10 +81,10 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
         });
         console.log('✅ Browser ready');
 
-        // Load HTML file
+        // Load HTML file using file:// URL to preserve relative paths for @font-face
         console.log('📄 Loading HTML file...');
-        const htmlContent = await fs.readFile(htmlFilePath, 'utf8');
-        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+        const fileUrl = `file://${htmlFilePath}`;
+        await page.goto(fileUrl, { waitUntil: 'networkidle0' });
 
         // Wait for fonts and layout to stabilize
         await page.evaluate(() => document.fonts.ready);
