@@ -340,7 +340,7 @@ DisplayValue resolve_display_value(void* child) {
                         CssDeclaration* decl = style_node->winning_decl;
                         if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
                             CssEnum keyword = decl->value->data.keyword;
-                            log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK);
+                            log_debug("[CSS] display keyword value = %d (FLEX=%d, BLOCK=%d, GRID=%d)", keyword, CSS_VALUE_FLEX, CSS_VALUE_BLOCK, CSS_VALUE_GRID);
                             // Map keyword to display values
                             if (keyword == CSS_VALUE_FLEX) {
                                 log_debug("[CSS] ✅ MATCHED FLEX! Setting display to BLOCK+FLEX");
@@ -353,8 +353,10 @@ DisplayValue resolve_display_value(void* child) {
                                 display.inner = CSS_VALUE_FLEX;
                                 return display;
                             } else if (keyword == CSS_VALUE_GRID) {
+                                log_debug("[CSS] ✅ MATCHED GRID! Setting display to BLOCK+GRID");
                                 display.outer = CSS_VALUE_BLOCK;
                                 display.inner = CSS_VALUE_GRID;
+                                log_debug("[CSS] ✅ Returning outer=%d, inner=%d for GRID", display.outer, display.inner);
                                 return display;
                             } else if (keyword == CSS_VALUE_INLINE_GRID) {
                                 display.outer = CSS_VALUE_INLINE;
@@ -3871,16 +3873,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            // Handle single length value (e.g., "100px")
+            // Handle single length/fr value (e.g., "100px" or "1fr")
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (!grid->grid_auto_rows) {
                     grid->grid_auto_rows = create_grid_track_list(1);
                 }
-                // Create a GridTrackSize for the length value
-                GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)value->data.length.value);
-                grid->grid_auto_rows->tracks[0] = track_size;
-                grid->grid_auto_rows->track_count = 1;
-                log_debug("[CSS] grid-auto-rows: %.2fpx", value->data.length.value);
+                // Use parse_css_value_to_track_size to properly handle fr units
+                GridTrackSize* track_size = parse_css_value_to_track_size(value);
+                if (track_size) {
+                    grid->grid_auto_rows->tracks[0] = track_size;
+                    grid->grid_auto_rows->track_count = 1;
+                    log_debug("[CSS] grid-auto-rows: single track size set (type=%d, value=%d)",
+                              track_size->type, track_size->value);
+                }
                 break;
             }
 
@@ -3914,16 +3919,19 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 break;
             }
 
-            // Handle single length value (e.g., "100px")
+            // Handle single length/fr value (e.g., "100px" or "1fr")
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (!grid->grid_auto_columns) {
                     grid->grid_auto_columns = create_grid_track_list(1);
                 }
-                // Create a GridTrackSize for the length value
-                GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, (int)value->data.length.value);
-                grid->grid_auto_columns->tracks[0] = track_size;
-                grid->grid_auto_columns->track_count = 1;
-                log_debug("[CSS] grid-auto-columns: %.2fpx", value->data.length.value);
+                // Use parse_css_value_to_track_size to properly handle fr units
+                GridTrackSize* track_size = parse_css_value_to_track_size(value);
+                if (track_size) {
+                    grid->grid_auto_columns->tracks[0] = track_size;
+                    grid->grid_auto_columns->track_count = 1;
+                    log_debug("[CSS] grid-auto-columns: single track size set (type=%d, value=%d)",
+                              track_size->type, track_size->value);
+                }
                 break;
             }
 
