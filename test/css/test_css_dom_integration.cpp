@@ -2550,3 +2550,121 @@ TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't use it
 }
+
+// ============================================================================
+// Sibling Selector with Text Nodes Between Elements
+// Bug fix: selector_matcher was casting DomNode* to DomElement* without checking
+// is_element(), causing crashes when text nodes were between sibling elements.
+// ============================================================================
+
+TEST_F(DomIntegrationTest, AdjacentSiblingSelector_WithTextNodesBetween) {
+    // Test that h1 + p correctly finds the adjacent sibling even when there are
+    // text nodes (whitespace) between the elements.
+    // Structure: <container><h1/> text <p/></container>
+    // The text node between h1 and p should be skipped when finding prev sibling.
+
+    DomElement* container = create_element_with_backing("div");
+    DomElement* heading = create_element_with_backing("h1");
+    DomElement* para = create_element_with_backing("p");
+
+    // Add h1 first
+    dom_element_append_child(container, heading);
+
+    // Add a text node (whitespace) between h1 and p
+    dom_element_append_text(container, "\n    ");
+
+    // Add p after the text node
+    dom_element_append_child(container, para);
+
+    // Create h1 selector for matching
+    CssCompoundSelector* h1_selector = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
+    h1_selector->simple_selectors = (CssSimpleSelector**)pool_alloc(pool, sizeof(CssSimpleSelector*));
+    h1_selector->simple_selectors[0] = create_type_selector("h1");
+    h1_selector->simple_selector_count = 1;
+
+    // Test: h1 + p should match because h1 is the previous element sibling
+    // (text nodes should be skipped)
+    EXPECT_TRUE(selector_matcher_has_prev_sibling(matcher, h1_selector, para))
+        << "Adjacent sibling selector should skip text nodes and find h1 as previous element";
+}
+
+TEST_F(DomIntegrationTest, AdjacentSiblingSelector_MultipleTextNodes) {
+    // Test with multiple text nodes between elements
+    // Structure: <container><h1/> text1 text2 <p/></container>
+
+    DomElement* container = create_element_with_backing("div");
+    DomElement* heading = create_element_with_backing("h1");
+    DomElement* para = create_element_with_backing("p");
+
+    dom_element_append_child(container, heading);
+    dom_element_append_text(container, "whitespace");
+    dom_element_append_text(container, "more text");
+    dom_element_append_child(container, para);
+
+    CssCompoundSelector* h1_selector = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
+    h1_selector->simple_selectors = (CssSimpleSelector**)pool_alloc(pool, sizeof(CssSimpleSelector*));
+    h1_selector->simple_selectors[0] = create_type_selector("h1");
+    h1_selector->simple_selector_count = 1;
+
+    EXPECT_TRUE(selector_matcher_has_prev_sibling(matcher, h1_selector, para))
+        << "Should skip multiple text nodes to find h1";
+}
+
+TEST_F(DomIntegrationTest, AdjacentSiblingSelector_TextNodeAtStart) {
+    // Test with text node at start of container
+    // Structure: <container>text <h1/><p/></container>
+
+    DomElement* container = create_element_with_backing("div");
+    DomElement* heading = create_element_with_backing("h1");
+    DomElement* para = create_element_with_backing("p");
+
+    dom_element_append_text(container, "leading text");
+    dom_element_append_child(container, heading);
+    dom_element_append_child(container, para);
+
+    CssCompoundSelector* h1_selector = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
+    h1_selector->simple_selectors = (CssSimpleSelector**)pool_alloc(pool, sizeof(CssSimpleSelector*));
+    h1_selector->simple_selectors[0] = create_type_selector("h1");
+    h1_selector->simple_selector_count = 1;
+
+    EXPECT_TRUE(selector_matcher_has_prev_sibling(matcher, h1_selector, para))
+        << "h1 + p should match when h1 immediately precedes p";
+
+    // h1's previous sibling is a text node, so it shouldn't match h1 + h1
+    EXPECT_FALSE(selector_matcher_has_prev_sibling(matcher, h1_selector, heading))
+        << "h1 has no previous element sibling (only a text node)";
+}
+
+TEST_F(DomIntegrationTest, GeneralSiblingSelector_WithTextNodes) {
+    // Test general sibling (~) with text nodes scattered throughout
+    // Structure: <container>text1 <h1/> text2 <div/> text3 <p/></container>
+
+    DomElement* container = create_element_with_backing("section");
+    DomElement* heading = create_element_with_backing("h1");
+    DomElement* div_elem = create_element_with_backing("div");
+    DomElement* para = create_element_with_backing("p");
+
+    dom_element_append_text(container, "text1");
+    dom_element_append_child(container, heading);
+    dom_element_append_text(container, "text2");
+    dom_element_append_child(container, div_elem);
+    dom_element_append_text(container, "text3");
+    dom_element_append_child(container, para);
+
+    CssCompoundSelector* h1_selector = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
+    h1_selector->simple_selectors = (CssSimpleSelector**)pool_alloc(pool, sizeof(CssSimpleSelector*));
+    h1_selector->simple_selectors[0] = create_type_selector("h1");
+    h1_selector->simple_selector_count = 1;
+
+    // h1 ~ p should match (p follows h1 somewhere)
+    EXPECT_TRUE(selector_matcher_has_preceding_sibling(matcher, h1_selector, para))
+        << "General sibling should find h1 among preceding siblings despite text nodes";
+
+    // h1 ~ div should also match
+    EXPECT_TRUE(selector_matcher_has_preceding_sibling(matcher, h1_selector, div_elem))
+        << "General sibling should find h1 before div despite text nodes";
+
+    // h1 shouldn't be preceded by h1
+    EXPECT_FALSE(selector_matcher_has_preceding_sibling(matcher, h1_selector, heading))
+        << "h1 has no preceding h1 element";
+}

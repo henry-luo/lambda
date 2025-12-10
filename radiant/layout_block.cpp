@@ -870,32 +870,49 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 // todo: use a placeholder
             }
         }
-        if (block->embed->img) {
+        if (block->embed && block->embed->img) {
             ImageSurface* img = block->embed->img;
-            if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
-                // scale image by pixel ratio
-                float w = img->width * lycon->ui_context->pixel_ratio;
-                float h = img->height * lycon->ui_context->pixel_ratio;
-                log_debug("image intrinsic dims: %f x %f, given: %f x %f", w, h,
-                    lycon->block.given_width, lycon->block.given_height);
-                if (lycon->block.given_width >= 0) { // scale unspecified height
+            // scale image by pixel ratio
+            float w = img->width * lycon->ui_context->pixel_ratio;
+            float h = img->height * lycon->ui_context->pixel_ratio;
+
+            // Check if width was specified as percentage but resolved to 0
+            // This happens when parent has auto/0 width - use intrinsic width instead
+            bool width_is_zero_percent = (lycon->block.given_width == 0 &&
+                                          block->blk && !isnan(block->blk->given_width_percent));
+
+            log_debug("image intrinsic dims: %f x %f, given: %f x %f, zero_percent=%d", w, h,
+                lycon->block.given_width, lycon->block.given_height, width_is_zero_percent);
+
+            if (lycon->block.given_width < 0 || lycon->block.given_height < 0 || width_is_zero_percent) {
+                if (lycon->block.given_width >= 0 && !width_is_zero_percent) {
+                    // Width specified, scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
                 }
-                else if (lycon->block.given_height >= 0) { // scale unspecified width
+                else if (lycon->block.given_height >= 0 && lycon->block.given_width < 0) {
+                    // Height specified, scale unspecified width
                     lycon->block.given_width = lycon->block.given_height * w / h;
                 }
-                else { // both width and height unspecified
+                else {
+                    // Both width and height unspecified, or width was 0% on 0-width parent
                     if (img->format == IMAGE_FORMAT_SVG) {
-                        // scale to parent block width
-                        lycon->block.given_width = lycon->block.parent ? lycon->block.parent->content_width : 0;
+                        // For SVG, try to use parent width, but fall back to intrinsic if parent is 0
+                        float parent_width = lycon->block.parent ? lycon->block.parent->content_width : 0;
+                        if (parent_width > 0) {
+                            lycon->block.given_width = parent_width;
+                        } else {
+                            // Parent has no width, use intrinsic SVG dimensions
+                            lycon->block.given_width = w;
+                        }
                         lycon->block.given_height = lycon->block.given_width * h / w;
                     }
                     else { // use image intrinsic dimensions
-                        lycon->block.given_width = w;  lycon->block.given_height = h;
+                        lycon->block.given_width = w;
+                        lycon->block.given_height = h;
                     }
                 }
             }
-            // else both width and height specified
+            // else both width and height specified (non-zero)
             if (img->format == IMAGE_FORMAT_SVG) {
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
