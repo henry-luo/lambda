@@ -541,8 +541,12 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
     // This is critical: the first line needs to start AFTER the float, not at x=0
     //
     // Use unified BlockContext for float space queries
-    if (lycon->block.left_float_count > 0 || lycon->block.right_float_count > 0) {
-        log_debug("[FLOAT PRE-SCAN] Adjusting initial line bounds for pre-scanned floats");
+    // IMPORTANT: Floats are registered to the BFC (parent chain), not lycon->block
+    // So we need to check the BFC's float counts, not the current block's
+    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+    if (bfc && (bfc->left_float_count > 0 || bfc->right_float_count > 0)) {
+        log_debug("[FLOAT PRE-SCAN] Adjusting initial line bounds for pre-scanned floats (bfc=%p, left=%d, right=%d)",
+                  (void*)bfc, bfc->left_float_count, bfc->right_float_count);
 
         float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 16.0f;
 
@@ -551,7 +555,7 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         float bfc_y_offset = 0.0f;
         float bfc_x_offset = 0.0f;
         ViewElement* walker = parent_block;
-        ViewBlock* bfc_elem = lycon->block.establishing_element;
+        ViewBlock* bfc_elem = bfc->establishing_element;
         while (walker && walker != bfc_elem) {
             bfc_y_offset += walker->y;
             bfc_x_offset += walker->x;
@@ -570,8 +574,8 @@ static void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child
         // Query at the BFC-relative Y position of this block's first line
         float query_y = bfc_y_offset + lycon->block.advance_y;
         log_debug("[FLOAT PRE-SCAN] querying space at bfc_y=%.1f, line_height=%.1f, left_count=%d",
-               query_y, line_height, lycon->block.left_float_count);
-        FloatAvailableSpace space = block_context_space_at_y(&lycon->block, query_y, line_height);
+               query_y, line_height, bfc->left_float_count);
+        FloatAvailableSpace space = block_context_space_at_y(bfc, query_y, line_height);
         log_debug("[FLOAT PRE-SCAN] space=(%.1f, %.1f), has_left=%d, has_right=%d",
                space.left, space.right, space.has_left_float, space.has_right_float);
 
@@ -849,6 +853,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // Reset float lists for new BFC
         block_context_reset_floats(&lycon->block);
         log_debug("[BlockContext] Block %s establishes new BFC", block->node_name());
+    } else {
+        // Clear is_bfc_root so we don't inherit it from parent
+        // This ensures block_context_find_bfc walks up to the actual BFC root
+        lycon->block.is_bfc_root = false;
+        lycon->block.establishing_element = nullptr;
+        // Don't reset floats - they belong to the parent BFC
     }
 
     uintptr_t elmt_name = block->tag();
@@ -933,8 +943,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Check if this is a floated element with auto width
     // CSS 2.2 Section 10.3.5: Floats with auto width use shrink-to-fit width
     // We'll do a post-layout adjustment after content is laid out
-    bool is_float_auto_width = element_has_float(block) &&
-        lycon->block.given_width < 0 && (!block->blk || block->blk->given_width_type == CSS_VALUE_AUTO);
+    // Note: width is "auto" if either explicitly set to auto (CSS_VALUE_AUTO=84) or unset (CSS_VALUE__UNDEF=0)
+    bool width_is_auto = !block->blk ||
+                         block->blk->given_width_type == CSS_VALUE_AUTO ||
+                         block->blk->given_width_type == CSS_VALUE__UNDEF;
+    bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && width_is_auto;
 
     if (is_float_auto_width) {
         // For floats with auto width, initially use available width for layout
@@ -1109,12 +1122,32 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
     // check for margin collapsing with children
     if (block->bound) {
-        // collapse bottom margin with last child block
+        // collapse bottom margin with last in-flow child block
+        // Skip absolutely positioned and floated children - they're out of normal flow
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
             block->bound->padding.bottom == 0 && block->first_child) {
-            View* last_placed = block->last_placed_child();
-            if (last_placed && last_placed->is_block() && ((ViewBlock*)last_placed)->bound) {
-                ViewBlock* last_child_block = (ViewBlock*)last_placed;
+            // Find last in-flow child (skip abs-positioned and floated elements)
+            View* last_in_flow = nullptr;
+            View* child = (View*)block->first_child;
+            while (child) {
+                if (child->view_type && child->is_block()) {
+                    ViewBlock* vb = (ViewBlock*)child;
+                    bool is_out_of_flow = (vb->position &&
+                        (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                         vb->position->position == CSS_VALUE_FIXED ||
+                         element_has_float(vb)));
+                    if (!is_out_of_flow) {
+                        last_in_flow = child;
+                    }
+                } else if (child->view_type) {
+                    // Non-block placed children (like inline elements) count as in-flow
+                    last_in_flow = child;
+                }
+                child = (View*)child->next_sibling;
+            }
+
+            if (last_in_flow && last_in_flow->is_block() && ((ViewBlock*)last_in_flow)->bound) {
+                ViewBlock* last_child_block = (ViewBlock*)last_in_flow;
                 if (last_child_block->bound->margin.bottom > 0) {
                     float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
                     block->height -= last_child_block->bound->margin.bottom;
