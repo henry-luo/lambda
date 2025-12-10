@@ -386,7 +386,85 @@ GridProp* alloc_grid_prop(LayoutContext* lycon);
 
 ---
 
-## 7. File Organization
+## 7. HTML/CSS Parser
+
+### 7.1 HTML Parsing
+
+**Entry:** `parse_html_impl()` in `lambda/input/input-html.cpp`
+
+**Key Components:**
+- `HtmlParser` - Parsing context wrapping MarkBuilder and state
+- `HtmlState` - HTML5-compliant tokenization state machine
+- `ListBuilder` - Accumulates element children
+- Results stored in `Input->root` as Lambda data structures
+
+**Entity Handling:**
+
+| Entity Type    | Example            | Resolution                |
+| -------------- | ------------------ | ------------------------- |
+| ASCII escapes  | `&lt;` `&amp;`     | Decoded inline to `<` `&` |
+| Numeric refs   | `&#169;` `&#x1F;`  | Decoded to UTF-8          |
+| Named entities | `&copy;` `&mdash;` | Stored as Lambda Symbol   |
+
+### 7.2 CSS Parsing
+
+**Entry:** `css_parse_stylesheet()` in `lambda/input/css/css_engine.cpp`
+
+**Key Files:**
+
+| File | Purpose |
+|------|---------|
+| `css_engine.cpp` | Main stylesheet parsing and cascade engine |
+| `css_parser.cpp` | Selector and declaration parsing |
+| `css_value.cpp` | CSS value types and unit handling |
+| `css_value_parser.cpp` | Property-specific value parsing |
+| `selector_matcher.cpp` | Selector-to-element matching |
+| `css_style_node.cpp` | Per-property cascade resolution |
+
+**Processing Flow:**
+1. **Tokenization:** `CssTokenizer` breaks CSS into tokens
+2. **Rule Parsing:** `CssParser` parses selectors and declarations
+3. **Storage:** Rules added to `CssStylesheet` with specificity metadata
+4. **Cascade:** Specificity `(inline, ids, classes, elements)` determines winning rules
+
+### 7.3 Integration Pipeline
+
+```
+HTML Input                          CSS Input
+    │                                   │
+    ▼                                   ▼
+parse_html_impl()              css_parse_stylesheet()
+    │                                   │
+    ▼                                   ▼
+Lambda Element Tree            CssStylesheet (rules)
+    │                                   │
+    └──────────────┬───────────────────┘
+                   ▼
+            DomDocument
+                   │
+                   ▼
+      dom_node_resolve_style()
+      resolve_lambda_css_styles()
+                   │
+                   ▼
+         Computed Styles → Layout
+```
+
+**Stylesheet Collection:**
+- **External:** `<link>` elements → `load_external_stylesheets()`
+- **Embedded:** `<style>` tags → `parse_style_element()`
+- **Inline:** `style=""` attribute → `parse_inline_style()`
+
+**Style Application:** `resolve_lambda_css_styles()` in `resolve_css_style.cpp`:
+1. Apply user-agent defaults
+2. Match selectors using `CssSelectorMatcher`
+3. Apply rules respecting cascade order
+4. Resolve computed values (lengths, colors, calc())
+5. Store in DomElement property structures
+
+---
+
+## 8. File Organization
 
 | File | Purpose |
 |------|---------|
@@ -408,16 +486,16 @@ GridProp* alloc_grid_prop(LayoutContext* lycon);
 
 ---
 
-## 8. Testing Infrastructure
+## 9. Testing Infrastructure
 
-### 8.1 Test Architecture
+### 9.1 Test Architecture
 
 - **HTML Test Files:** `test/layout/data/basic/`
 - **Reference Data:** Browser-rendered JSON from Puppeteer
 - **Comparison:** Element-by-element position/size matching
 - **Tolerance:** 1-2px for floating-point variations
 
-### 8.2 Commands
+### 9.2 Commands
 
 ```bash
 make build                # Build layout engine
@@ -427,7 +505,7 @@ make layout test=file_name      # Run specific layout and compare against browse
 ./lambda.exe render file.html -o output.png  # Render to PNG image
 ```
 
-### 8.3 Debug Output
+### 9.3 Debug Output
 
 View tree JSON output shows:
 - Position: `x`, `y` (relative to parent)
@@ -437,7 +515,7 @@ View tree JSON output shows:
 
 ---
 
-## 9. Design Principles
+## 10. Design Principles
 
 1. **Extend, Don't Replace:** New features extend existing infrastructure
 2. **CSS Conformance:** Follow W3C specifications
@@ -449,7 +527,7 @@ View tree JSON output shows:
 
 ---
 
-## 10. Current Status
+## 11. Current Status
 
 | Layout Mode | Status         | Notes                                     |
 | ----------- | -------------- | ----------------------------------------- |
@@ -462,7 +540,7 @@ View tree JSON output shows:
 
 ---
 
-## 11. Future Enhancements
+## 12. Future Enhancements
 
 ### Near-term
 - Grid: subgrid, named lines, auto-fill/auto-fit
