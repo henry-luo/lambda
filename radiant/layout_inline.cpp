@@ -1,6 +1,7 @@
 #include "layout.hpp"
 
 // Compute bounding box of a ViewSpan based on union of child views
+// The bounding box includes the span's own border and padding
 void compute_span_bounding_box(ViewSpan* span) {
     View* child = span->first_child;
     if (!child) {
@@ -33,11 +34,23 @@ void compute_span_bounding_box(ViewSpan* span) {
         child = child->next();
     }
 
-    // Update span's bounding box
+    // Get border widths if span has border
+    float border_top = 0, border_right = 0, border_bottom = 0, border_left = 0;
+    if (span->bound && span->bound->border) {
+        border_top = span->bound->border->width.top;
+        border_right = span->bound->border->width.right;
+        border_bottom = span->bound->border->width.bottom;
+        border_left = span->bound->border->width.left;
+    }
+
+    // Update span's bounding box - expand to include vertical border only
+    // For inline elements that may span multiple lines, the horizontal border
+    // only appears at start/end of the overall inline box, but vertical border
+    // affects each line. The bounding box Y position should include top border.
     span->x = min_x;
-    span->y = min_y;
+    span->y = min_y - (int)border_top;
     span->width = max_x - min_x;
-    span->height = max_y - min_y;
+    span->height = (max_y - min_y) + (int)border_top + (int)border_bottom;
 }
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
