@@ -7,10 +7,13 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../lambda/mark_reader.hpp"
-#include "../lambda/print.cpp"
+#include "../lambda/input/input.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+
+// Import print functions
+extern void print_item(Item item, int depth);
 
 // External parser function
 extern "C" {
@@ -24,14 +27,12 @@ protected:
     Input* input;
 
     void SetUp() override {
-        pool = pool_create(1024 * 1024);  // 1MB pool
-        arena = arena_create(1024 * 1024); // 1MB arena
-        input = input_create(pool, arena);
+        pool = pool_create();
+        input = Input::create(pool, nullptr);
+        arena = input->arena;  // arena is created by Input::create
     }
 
     void TearDown() override {
-        input_destroy(input);
-        arena_destroy(arena);
         pool_destroy(pool);
     }
 };
@@ -66,10 +67,11 @@ TEST_F(LatexTreeSitterTest, SimpleCommand) {
     
     if (root_type == LMD_TYPE_ELEMENT) {
         Element* doc = input->root.element;
-        EXPECT_STREQ(doc->tag_name->chars, "latex_document");
+        TypeElmt* doc_type = (TypeElmt*)doc->type;
+        EXPECT_STREQ(doc_type->name.str, "latex_document");
         
         // Should have at least one child
-        EXPECT_GT(doc->list.length, 0);
+        EXPECT_GT(doc->length, 0);
     }
 }
 
@@ -90,16 +92,18 @@ TEST_F(LatexTreeSitterTest, SpacingCommand) {
     
     if (root_type == LMD_TYPE_ELEMENT) {
         Element* doc = input->root.element;
+        List* list = (List*)doc;  // Element extends List
         
         // Look for \quad in children - should be Symbol, not Element
-        for (int64_t i = 0; i < doc->list.length; i++) {
-            Item child = doc->list.items[i];
+        for (int64_t i = 0; i < list->length; i++) {
+            Item child = list->items[i];
             TypeId child_type = get_type_id(child);
             
             if (child_type == LMD_TYPE_SYMBOL) {
-                Symbol* sym = child.symbol;
-                printf("Found Symbol: %s (Memory efficient!)\n", sym->chars);
-                EXPECT_TRUE(strcmp(sym->chars, "quad") == 0 || strcmp(sym->chars, "\\quad") == 0);
+                // Extract Symbol pointer (Symbol is typedef of String)
+                Symbol* sym = (Symbol*)(child.item & 0x00FFFFFFFFFFFFFF);
+                printf("Found Symbol: %.*s (Memory efficient!)\n", (int)sym->len, sym->chars);
+                EXPECT_TRUE(strncmp(sym->chars, "quad", 4) == 0);
             }
         }
     }

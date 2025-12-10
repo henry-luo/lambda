@@ -587,15 +587,15 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_html_impl(input, source);
         }
         else if (strcmp(effective_type, "latex") == 0) {
-            // Disable string merging for LaTeX parsing to preserve separate elements
+            // Tree-sitter LaTeX parser (now default)
+            parse_latex_ts(input, source);
+        }
+        else if (strcmp(effective_type, "latex-old") == 0) {
+            // Old hand-written LaTeX parser (fallback)
             bool prev_disable_string_merging = input_context->disable_string_merging;
             input_context->disable_string_merging = true;
             parse_latex(input, source);
             input_context->disable_string_merging = prev_disable_string_merging;
-        }
-        else if (strcmp(effective_type, "latex-ts") == 0) {
-            // Tree-sitter LaTeX parser (experimental)
-            parse_latex_ts(input, source);
         }
         else if (strcmp(effective_type, "rtf") == 0) {
             parse_rtf(input, source);
