@@ -288,7 +288,7 @@ layout_html_doc()
         │           ├── CSS_VALUE_FLOW → layout_flow_node()
         │           ├── CSS_VALUE_FLEX → layout_flex_content()
         │           ├── CSS_VALUE_GRID → layout_grid_container()
-        │           └── CSS_VALUE_TABLE → layout_table()
+        │           └── CSS_VALUE_TABLE → layout_table_content()
         └── finalize_block_flow()
 ```
 

@@ -51,9 +51,9 @@ HTML Document
 7. Resolve CSS Properties to ViewTree
    (radiant/lambda_css_resolve.cpp)
    - dom_node_resolve_style() dispatches on node->type
-   - MARK_ELEMENT → resolve_lambda_css_styles()
+   - MARK_ELEMENT → resolve_css_styles()
    - Iterate DomElement AVL tree
-   - resolve_lambda_css_property() for each property
+   - resolve_css_property() for each property
    - Set ViewSpan/ViewBlock properties
     ↓
 8. Radiant Layout Engine
@@ -127,9 +127,9 @@ HTML Document
 **Lambda CSS Property Resolution** (`radiant/lambda_css_resolve.h/cpp`)
 - Parallel implementation to Lexbor's `resolve_element_style()`
 - Key functions:
-  - `resolve_lambda_css_styles()`: Iterates DomElement AVL tree
+  - `resolve_css_styles()`: Iterates DomElement AVL tree
   - `resolve_property_callback()`: Extracts StyleNode from AVL
-  - `resolve_lambda_css_property()`: Maps CSS properties to ViewTree
+  - `resolve_css_property()`: Maps CSS properties to ViewTree
 - Direct compatibility with Radiant layout engine
 
 **Layout Engine** (`radiant/layout.cpp`)
@@ -138,7 +138,7 @@ HTML Document
   if (node->type == LEXBOR_ELEMENT) {
       resolve_element_style(...);  // Lexbor path
   } else if (node->type == MARK_ELEMENT) {
-      resolve_lambda_css_styles(...);  // Lambda CSS path
+      resolve_css_styles(...);  // Lambda CSS path
   }
   ```
 - Box model computation with FreeType text measurement
@@ -419,7 +419,7 @@ The integration includes:
 1. ✅ **CSS cascade** - External stylesheets, `<style>` elements, inline attributes
 2. ✅ **DomElement tree** - Complete style information in AVL trees
 3. ✅ **DomNode unified interface** - Bridges Lambda CSS and Lexbor elements
-4. ✅ **Property resolution** - `resolve_lambda_css_property()` maps CSS to ViewTree
+4. ✅ **Property resolution** - `resolve_css_property()` maps CSS to ViewTree
 5. ✅ **Layout computation** - Full box model with FreeType text measurement
 6. ✅ **ViewTree output** - JSON with computed dimensions and positions
 
@@ -490,7 +490,7 @@ Example log output:
 [DEBG] resolving style for element 'html' of type 1
 [DEBG] Lambda CSS element - resolving styles
 [DEBG] Processing property ID: -1
-[DEBG] [Lambda CSS Property] resolve_lambda_css_property called: prop_id=-1
+[DEBG] [Lambda CSS Property] resolve_css_property called: prop_id=-1
 [DEBG] [Lambda CSS Property] Processing property -1, value type=0
 [DEBG] Layout computed: width=800.00, height=54.00
 ```
@@ -842,7 +842,7 @@ layout_html_doc(doc, &root_node, lycon)
                 if (node->type == LEXBOR_ELEMENT)
                     → resolve_element_style()  // Lexbor path
                 else if (node->type == MARK_ELEMENT)
-                    → resolve_lambda_css_styles()  // Lambda CSS path
+                    → resolve_css_styles()  // Lambda CSS path
                         ↓
                         [AVL Tree Iteration]
                         avl_tree_traverse(dom_element->specified_style)
@@ -851,7 +851,7 @@ layout_html_doc(doc, &root_node, lycon)
                             StyleNode* = (StyleNode*)avl_node->declaration
                             CssDeclaration* = style_node->winning_decl
                             ↓
-                            resolve_lambda_css_property(prop_id, decl, lycon)
+                            resolve_css_property(prop_id, decl, lycon)
                                 ↓
                                 [Property Resolution]
                                 switch (prop_id) {
@@ -952,9 +952,9 @@ StyleNode* style_node = (StyleNode*)avl_node->declaration;
 **New Files**:
 - `radiant/lambda_css_resolve.h` - Lambda CSS resolution declarations
 - `radiant/lambda_css_resolve.cpp` - Parallel style resolution implementation (447 lines)
-  - `resolve_lambda_css_styles()`: AVL tree traversal entry point
+  - `resolve_css_styles()`: AVL tree traversal entry point
   - `resolve_property_callback()`: Extracts StyleNode and calls property resolver
-  - `resolve_lambda_css_property()`: Maps CSS properties to ViewTree (150+ properties to implement)
+  - `resolve_css_property()`: Maps CSS properties to ViewTree (150+ properties to implement)
 
 **Modified Files**:
 - `radiant/layout.cpp` - Updated `dom_node_resolve_style()` with type-based dispatch
@@ -966,9 +966,9 @@ StyleNode* style_node = (StyleNode*)avl_node->declaration;
 **Key Functions**:
 ```cpp
 // radiant/lambda_css_resolve.cpp
-void resolve_lambda_css_styles(DomElement* element, ViewSpan* target, LayoutContext* lycon);
+void resolve_css_styles(DomElement* element, ViewSpan* target, LayoutContext* lycon);
 bool resolve_property_callback(AvlNode* node, void* context);
-void resolve_lambda_css_property(CssPropertyId prop_id, CssDeclaration* decl, LayoutContext* lycon);
+void resolve_css_property(CssPropertyId prop_id, CssDeclaration* decl, LayoutContext* lycon);
 
 // lambda/cmd_layout.cpp
 Document* load_lambda_html_doc(const char* filename, const char* css_file, Pool* pool);
@@ -1040,8 +1040,8 @@ The Lambda CSS system provides:
 
 ```
 Lambda HTML Parser → DomElement Tree (AVL CSS) → DomNode (Unified) →
-Type Dispatch (MARK_ELEMENT) → resolve_lambda_css_styles() →
-AVL Tree Traversal → resolve_lambda_css_property() →
+Type Dispatch (MARK_ELEMENT) → resolve_css_styles() →
+AVL Tree Traversal → resolve_css_property() →
 ViewTree Properties → Layout Engine → Computed Layout
 ```
 

@@ -14,7 +14,7 @@ View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 // void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);  // Removed: lexbor dependency
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
-void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line);
 
@@ -671,7 +671,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             else if (block->display.inner == CSS_VALUE_TABLE) {
                 log_debug("TABLE LAYOUT TRIGGERED! outer=%d, inner=%d, element=%s",
                     block->display.outer, block->display.inner, block->node_name());
-                layout_table(lycon, block, block->display);
+                layout_table_content(lycon, block, block->display);
                 return;
             }
             else {

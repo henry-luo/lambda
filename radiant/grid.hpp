@@ -71,6 +71,7 @@ typedef struct GridTrack {
     float growth_limit;          // Growth limit for fr calculations
     bool is_flexible;            // Has fr units
     bool is_implicit;            // Created by auto-placement
+    bool owns_size;              // True if we created size and should free it
 } GridTrack;
 
 // Named grid area
@@ -91,9 +92,7 @@ typedef struct GridLineName {
 
 // Grid container layout state
 typedef struct GridContainerLayout : GridProp {
-    // Grid auto properties
-    GridTrackList* grid_auto_rows;
-    GridTrackList* grid_auto_columns;
+    // Note: grid_auto_rows and grid_auto_columns are inherited from GridProp
 
     // Computed grid properties
     GridTrack* computed_rows;
