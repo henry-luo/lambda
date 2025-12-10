@@ -1667,6 +1667,10 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         else if (child->view_type == RDT_VIEW_INLINE) {
             // Nested inline elements
             print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
+        }
+        else if (child->is_block()) {
+            // Block inside inline (block-in-inline case per CSS 2.1 Section 9.2.1.1)
+            print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         } else {
             // Handle other child types
             strbuf_append_char_n(buf, ' ', indent + 4);

@@ -12,8 +12,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Reference data
   loadReference: (testName, category) => ipcRenderer.invoke('load-reference', testName, category),
 
-  // Lambda render
-  renderLambdaView: (testPath) => ipcRenderer.invoke('render-lambda-view', testPath),
+  // Lambda render with viewport dimensions
+  renderLambdaView: (testPath, viewportWidth, viewportHeight) =>
+    ipcRenderer.invoke('render-lambda-view', testPath, viewportWidth, viewportHeight),
+
+  // Measure page content height
+  measurePageHeight: (testPath, viewportWidth) =>
+    ipcRenderer.invoke('measure-page-height', testPath, viewportWidth),
 
   // Log file
   readLogFile: () => ipcRenderer.invoke('read-log-file'),

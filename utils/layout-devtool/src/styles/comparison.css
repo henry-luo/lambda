@@ -38,9 +38,19 @@
 
 .panel-content {
   flex: 1;
-  overflow: auto;
+  overflow: hidden;
   background: #ffffff;
   position: relative;
+}
+
+/* Left panel (browser view) - iframe handles its own scrolling */
+.left-panel .panel-content {
+  overflow: hidden;
+}
+
+/* Right panel (Lambda render) - needs scrollbars for large images */
+.right-panel .panel-content {
+  overflow: auto;
 }
 
 .panel-content::-webkit-scrollbar {
