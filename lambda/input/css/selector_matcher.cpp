@@ -234,8 +234,15 @@ bool selector_matcher_matches(SelectorMatcher* matcher,
 
                 case CSS_COMBINATOR_NEXT_SIBLING:
                     combinator_matches = selector_matcher_has_prev_sibling(matcher, left, current_element);
-                    if (combinator_matches && current_element->prev_sibling) {
-                        current_element = static_cast<DomElement*>(current_element->prev_sibling);
+                    if (combinator_matches) {
+                        // Find previous element sibling (skip text nodes)
+                        DomNode* prev_node = current_element->prev_sibling;
+                        while (prev_node && !prev_node->is_element()) {
+                            prev_node = prev_node->prev_sibling;
+                        }
+                        if (prev_node) {
+                            current_element = static_cast<DomElement*>(prev_node);
+                        }
                     }
                     break;
 
@@ -313,11 +320,13 @@ static void traverse_and_collect_matches(SelectorMatcher* matcher,
         arraylist_append(matched, element);
     }
 
-    // Traverse children
-    DomElement* child = static_cast<DomElement*>(element->first_child);
-    while (child) {
-        traverse_and_collect_matches(matcher, selector, child, matched);
-        child = static_cast<DomElement*>(child->next_sibling);
+    // Traverse children (only element nodes)
+    DomNode* child_node = element->first_child;
+    while (child_node) {
+        if (child_node->is_element()) {
+            traverse_and_collect_matches(matcher, selector, static_cast<DomElement*>(child_node), matched);
+        }
+        child_node = child_node->next_sibling;
     }
 }
 
@@ -773,12 +782,15 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
             if (!element->parent) return true;
             {
                 DomElement* parent = static_cast<DomElement*>(element->parent);
-                DomElement* sibling = static_cast<DomElement*>(parent->first_child);
-                while (sibling) {
-                    if (selector_matcher_same_tag(sibling, element)) {
-                        return sibling == element;
+                DomNode* sibling_node = parent->first_child;
+                while (sibling_node) {
+                    if (sibling_node->is_element()) {
+                        DomElement* sibling = static_cast<DomElement*>(sibling_node);
+                        if (selector_matcher_same_tag(sibling, element)) {
+                            return sibling == element;
+                        }
                     }
-                    sibling = static_cast<DomElement*>(sibling->next_sibling);
+                    sibling_node = sibling_node->next_sibling;
                 }
             }
             return false;
@@ -788,13 +800,16 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
             if (!element->parent) return true;
             {
                 DomElement* parent = static_cast<DomElement*>(element->parent);
-                DomElement* sibling = static_cast<DomElement*>(parent->first_child);
+                DomNode* sibling_node = parent->first_child;
                 DomElement* last_of_type = NULL;
-                while (sibling) {
-                    if (selector_matcher_same_tag(sibling, element)) {
-                        last_of_type = sibling;
+                while (sibling_node) {
+                    if (sibling_node->is_element()) {
+                        DomElement* sibling = static_cast<DomElement*>(sibling_node);
+                        if (selector_matcher_same_tag(sibling, element)) {
+                            last_of_type = sibling;
+                        }
                     }
-                    sibling = static_cast<DomElement*>(sibling->next_sibling);
+                    sibling_node = sibling_node->next_sibling;
                 }
                 return last_of_type == element;
             }
@@ -805,13 +820,16 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
             {
                 int count = 0;
                 DomElement* parent = static_cast<DomElement*>(element->parent);
-                DomElement* sibling = static_cast<DomElement*>(parent->first_child);
-                while (sibling) {
-                    if (selector_matcher_same_tag(sibling, element)) {
-                        count++;
-                        if (count > 1) return false;
+                DomNode* sibling_node = parent->first_child;
+                while (sibling_node) {
+                    if (sibling_node->is_element()) {
+                        DomElement* sibling = static_cast<DomElement*>(sibling_node);
+                        if (selector_matcher_same_tag(sibling, element)) {
+                            count++;
+                            if (count > 1) return false;
+                        }
                     }
-                    sibling = static_cast<DomElement*>(sibling->next_sibling);
+                    sibling_node = sibling_node->next_sibling;
                 }
                 return count == 1;
             }
@@ -930,11 +948,18 @@ bool selector_matcher_has_parent(SelectorMatcher* matcher,
 bool selector_matcher_has_prev_sibling(SelectorMatcher* matcher,
                                        CssCompoundSelector* selector,
                                        DomElement* element) {
-    if (!matcher || !selector || !element || !element->prev_sibling) {
+    if (!matcher || !selector || !element) {
         return false;
     }
 
-    return selector_matcher_matches_compound(matcher, selector, static_cast<DomElement*>(element->prev_sibling));
+    // Find the previous element sibling (skip text nodes, comments)
+    DomNode* sibling = element->prev_sibling;
+    while (sibling && !sibling->is_element()) {
+        sibling = sibling->prev_sibling;
+    }
+    if (!sibling) return false;
+
+    return selector_matcher_matches_compound(matcher, selector, static_cast<DomElement*>(sibling));
 }
 
 bool selector_matcher_has_preceding_sibling(SelectorMatcher* matcher,
@@ -944,12 +969,15 @@ bool selector_matcher_has_preceding_sibling(SelectorMatcher* matcher,
         return false;
     }
 
-    DomElement* sibling = static_cast<DomElement*>(element->prev_sibling);
-    while (sibling) {
-        if (selector_matcher_matches_compound(matcher, selector, sibling)) {
-            return true;
+    DomNode* sibling_node = element->prev_sibling;
+    while (sibling_node) {
+        if (sibling_node->is_element()) {
+            DomElement* sibling = static_cast<DomElement*>(sibling_node);
+            if (selector_matcher_matches_compound(matcher, selector, sibling)) {
+                return true;
+            }
         }
-        sibling = static_cast<DomElement*>(sibling->prev_sibling);
+        sibling_node = sibling_node->prev_sibling;
     }
 
     return false;

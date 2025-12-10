@@ -560,7 +560,7 @@ void print_view_group(ViewElement* view_group, StrBuf* buf, int indent) {
 void write_string_to_file(const char *filename, const char *text) {
     FILE *file = fopen(filename, "w"); // Open file in write mode
     if (file == NULL) {
-        perror("Error opening file");
+        // silently skip if output directory doesn't exist (diagnostic output)
         return;
     }
     fprintf(file, "%s", text); // Write string to file
