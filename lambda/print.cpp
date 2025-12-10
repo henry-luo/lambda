@@ -616,6 +616,14 @@ extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) 
     print_item(strbuf, item, depth, indent);
 }
 
+// Convenience wrapper for testing - prints to stdout
+void print_item(Item item, int depth) {
+    StrBuf *strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, item, depth, nullptr);
+    printf("%s", strbuf->str);
+    strbuf_free(strbuf);
+}
+
 // print the type of the AST node
 char* format_type(Type *type) {
     if (!type) { return "null*"; }

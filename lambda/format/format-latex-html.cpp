@@ -805,6 +805,12 @@ typedef enum {
     ALIGN_RAGGEDLEFT   // \raggedleft command
 } AlignmentMode;
 
+// Paragraph state context for CSS class management
+typedef struct {
+    bool after_block_element;   // True if we just exited a block-level element
+    bool noindent_next;         // True if next paragraph should have noindent class
+} ParagraphState;
+
 static void generate_latex_css(StringBuf* css_buf);
 static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth, FontContext* font_ctx);
 static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx);
@@ -1317,6 +1323,15 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     stringbuf_append_str(css_buf, "  color: #333;\n");
     stringbuf_append_str(css_buf, "}\n");
 
+    // Paragraph styles
+    stringbuf_append_str(css_buf, "p.noindent {\n");
+    stringbuf_append_str(css_buf, "  text-indent: 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+    
+    stringbuf_append_str(css_buf, "p.continue {\n");
+    stringbuf_append_str(css_buf, "  text-indent: 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
     // Title styles
     stringbuf_append_str(css_buf, ".latex-title {\n");
     stringbuf_append_str(css_buf, "  text-align: center;\n");
@@ -1638,6 +1653,9 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             bool in_paragraph = false;
             bool needs_paragraph = false;  // Track if we need to open a paragraph
             
+            // Initialize paragraph state for CSS class management
+            ParagraphState para_state = {false, false};
+            
             List* list = (List*)elem;
             for (size_t i = 0; i < list->length; i++) {
                 Item child = list->items[i];
@@ -1647,9 +1665,9 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                 if (child_type == LMD_TYPE_SYMBOL) {
                     Symbol* sym = (Symbol*)(child.symbol_ptr);
                     if (sym && strcmp(sym->chars, "parbreak") == 0) {
-                        // Close current paragraph and mark that we need a new one
+                        // Close paragraph using helper that removes empty ones
                         if (in_paragraph) {
-                            stringbuf_append_str(html_buf, "</p>\n");
+                            close_paragraph(html_buf, true);  // Will remove if empty
                             in_paragraph = false;
                         }
                         needs_paragraph = true;
@@ -1659,6 +1677,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                 
                 // Check if this is a block-level element
                 bool is_block = false;
+                const char* child_cmd_name = nullptr;
                 if (child_type == LMD_TYPE_ELEMENT) {
                     Element* child_elem = child.element;
                     if (child_elem && child_elem->type) {
@@ -1668,7 +1687,14 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                             int child_name_len = child_elmt_type->name.length < 63 ? child_elmt_type->name.length : 63;
                             strncpy(child_cmd, child_elmt_type->name.str, child_name_len);
                             child_cmd[child_name_len] = '\0';
+                            child_cmd_name = child_cmd;
                             is_block = is_block_level_element(child_cmd);
+                            
+                            // Check for \noindent command
+                            if (strcmp(child_cmd, "noindent") == 0) {
+                                para_state.noindent_next = true;
+                                continue;  // Don't render \noindent itself
+                            }
                         }
                     }
                 }
@@ -1677,17 +1703,29 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                 if (is_block && in_paragraph) {
                     stringbuf_append_str(html_buf, "</p>\n");
                     in_paragraph = false;
-                }
-                
-                // Reset needs_paragraph flag when we encounter a block element
-                // (don't open empty paragraphs between consecutive blocks)
-                if (is_block) {
                     needs_paragraph = false;
                 }
                 
                 // Open paragraph for inline content if needed
                 if (!is_block && !in_paragraph) {
-                    stringbuf_append_str(html_buf, "<p>");
+                    // Determine CSS class for paragraph
+                    const char* para_class = nullptr;
+                    if (para_state.noindent_next) {
+                        para_class = "noindent";
+                        para_state.noindent_next = false;
+                    } else if (para_state.after_block_element) {
+                        para_class = "continue";
+                        para_state.after_block_element = false;
+                    }
+                    
+                    // Open paragraph with appropriate class
+                    if (para_class) {
+                        stringbuf_append_str(html_buf, "<p class=\"");
+                        stringbuf_append_str(html_buf, para_class);
+                        stringbuf_append_str(html_buf, "\">");
+                    } else {
+                        stringbuf_append_str(html_buf, "<p>");
+                    }
                     in_paragraph = true;
                     needs_paragraph = false;
                 }
@@ -1703,7 +1741,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                             Symbol* sym = (Symbol*)(list_item.symbol_ptr);
                             if (sym && strcmp(sym->chars, "parbreak") == 0) {
                                 if (in_paragraph) {
-                                    stringbuf_append_str(html_buf, "</p>\n");
+                                    close_paragraph(html_buf, true);  // Will remove if empty
                                     in_paragraph = false;
                                 }
                                 needs_paragraph = true;
@@ -1711,7 +1749,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                             }
                         }
                         
-                        // Check if list item is block-level
+                        // Check if list item is block-level or special command
                         bool item_is_block = false;
                         if (get_type_id(list_item) == LMD_TYPE_ELEMENT) {
                             Element* item_elem = list_item.element;
@@ -1723,6 +1761,12 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                                     strncpy(item_cmd, item_elmt_type->name.str, item_name_len);
                                     item_cmd[item_name_len] = '\0';
                                     item_is_block = is_block_level_element(item_cmd);
+                                    
+                                    // Check for \noindent command in list
+                                    if (strcmp(item_cmd, "noindent") == 0) {
+                                        para_state.noindent_next = true;
+                                        continue;  // Don't render \noindent itself
+                                    }
                                 }
                             }
                         }
@@ -1733,9 +1777,31 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                             in_paragraph = false;
                         }
                         
+                        // Set flag when we process a block element in list
+                        if (item_is_block) {
+                            para_state.after_block_element = true;
+                        }
+                        
                         // Open paragraph for inline content
                         if (!item_is_block && !in_paragraph) {
-                            stringbuf_append_str(html_buf, "<p>");
+                            // Determine CSS class for paragraph
+                            const char* para_class = nullptr;
+                            if (para_state.noindent_next) {
+                                para_class = "noindent";
+                                para_state.noindent_next = false;
+                            } else if (para_state.after_block_element) {
+                                para_class = "continue";
+                                para_state.after_block_element = false;
+                            }
+                            
+                            // Open paragraph with appropriate class
+                            if (para_class) {
+                                stringbuf_append_str(html_buf, "<p class=\"");
+                                stringbuf_append_str(html_buf, para_class);
+                                stringbuf_append_str(html_buf, "\">");
+                            } else {
+                                stringbuf_append_str(html_buf, "<p>");
+                            }
                             in_paragraph = true;
                         }
                         
@@ -1743,6 +1809,12 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                     }
                 } else {
                     process_latex_element(html_buf, child, pool, depth + 1, font_ctx);
+                }
+                
+                // After processing block element, set flag for next paragraph
+                if (is_block) {
+                    para_state.after_block_element = true;
+                    needs_paragraph = true;
                 }
             }
             
