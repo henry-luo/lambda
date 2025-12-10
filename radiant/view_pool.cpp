@@ -1388,14 +1388,21 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
                              block->view_type == RDT_VIEW_TABLE_CELL);
     if (block->fi && !is_table_element) {
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"flexGrow\": %.0f,\n", block->fi->flex_grow);
+        // Handle NaN values - output 0 instead of nan for valid JSON
+        float flex_grow = block->fi->flex_grow;
+        if (flex_grow != flex_grow) flex_grow = 0;  // NaN check
+        strbuf_append_format(buf, "\"flexGrow\": %.0f,\n", flex_grow);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"flexShrink\": %.0f,\n", block->fi->flex_shrink);
+        float flex_shrink = block->fi->flex_shrink;
+        if (flex_shrink != flex_shrink) flex_shrink = 0;  // NaN check
+        strbuf_append_format(buf, "\"flexShrink\": %.0f,\n", flex_shrink);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        if (block->fi->flex_basis == -1) {
+        float flex_basis = block->fi->flex_basis;
+        if (flex_basis != flex_basis) flex_basis = -1;  // NaN check -> treat as auto
+        if (flex_basis == -1) {
             strbuf_append_str(buf, "\"flexBasis\": \"auto\",\n");
         } else {
-            strbuf_append_format(buf, "\"flexBasis\": \"%dpx\",\n", block->fi->flex_basis);
+            strbuf_append_format(buf, "\"flexBasis\": \"%dpx\",\n", (int)flex_basis);
         }
         strbuf_append_char_n(buf, ' ', indent + 4);
         const char* align_self_str = "auto";
