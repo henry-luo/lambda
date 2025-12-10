@@ -112,7 +112,8 @@ void cleanup_grid_container(LayoutContext* lycon) {
     // Free computed tracks
     if (grid->computed_rows) {
         for (int i = 0; i < grid->computed_row_count; i++) {
-            if (grid->computed_rows[i].size) {
+            // Only free size if we own it (created during init, not shared)
+            if (grid->computed_rows[i].size && grid->computed_rows[i].owns_size) {
                 destroy_grid_track_size(grid->computed_rows[i].size);
             }
         }
@@ -121,7 +122,8 @@ void cleanup_grid_container(LayoutContext* lycon) {
 
     if (grid->computed_columns) {
         for (int i = 0; i < grid->computed_column_count; i++) {
-            if (grid->computed_columns[i].size) {
+            // Only free size if we own it (created during init, not shared)
+            if (grid->computed_columns[i].size && grid->computed_columns[i].owns_size) {
                 destroy_grid_track_size(grid->computed_columns[i].size);
             }
         }
