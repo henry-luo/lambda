@@ -19,6 +19,18 @@ int get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout
 // Overflow Alignment Fallback (Yoga-inspired)
 // ============================================================================
 
+// Check if a view element is an empty flex container (no children)
+// Used to determine if a flex item should get 0 height or minimum height
+// Note: Called during init_flex_container when tree may not be fully linked,
+// so we can only check the immediate children, not descendants
+static bool is_empty_flex_container(ViewElement* elem) {
+    if (!elem) return true;
+    // If it's a flex container with no children, it's empty
+    // Note: We can't rely on display.inner here as styles may not be resolved yet
+    // Just check if it has children - if no children, assume empty
+    return elem->first_child == nullptr;
+}
+
 // When free_space < 0, space-* alignments fall back to safe alignment
 int fallback_alignment(int align) {
     switch (align) {
@@ -240,8 +252,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                     // Use flex-basis if it's a height value
                                     if (item->fi->flex_basis >= 0 && !item->fi->flex_basis_is_percent) {
                                         // For row flex, flex-basis is width, not height
-                                        // Estimate height from content or use minimum
-                                        item_height = 20;  // One line of text minimum
+                                        // Empty flex items (no children) get 0 height
+                                        // Items with children get minimum height (may have content)
+                                        if (!is_empty_flex_container(item)) {
+                                            item_height = 20;  // Minimum for items with content
+                                        }
+                                        // else: empty flex items get 0
                                     }
                                 }
                                 // Add padding and border to item height
@@ -259,7 +275,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         }
                         child = child->next();
                     }
-                    calculated_cross_size = max_item_height > 0 ? max_item_height : 20;  // Minimum fallback
+                    // Use calculated height, no minimum fallback for empty containers
+                    calculated_cross_size = max_item_height;
                     log_debug("ROW FLEX: auto-height calculated as %d from items", calculated_cross_size);
                 } else {
                     // Use existing content height if available
@@ -293,8 +310,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                                 } else if (item->height > 0) {
                                     item_height = item->height;
                                 } else {
-                                    // Estimate minimum height for content
-                                    item_height = 20;  // Minimum height for one line of text
+                                    // Empty flex items (no children) get 0 height
+                                    // Items with children get minimum height (may have content)
+                                    if (!is_empty_flex_container(item)) {
+                                        item_height = 20;  // Minimum for items with content
+                                    }
+                                    // else: empty flex items get 0
                                 }
                                 total_item_height += item_height;
                                 log_debug("COLUMN FLEX: item height contribution = %d", item_height);
@@ -312,13 +333,10 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     if (child_count > 1) {
                         total_item_height += flex_layout->row_gap * (child_count - 1);
                     }
-                    if (total_item_height > 0) {
+                    if (total_item_height >= 0) {
                         flex_layout->main_axis_size = (float)total_item_height;
                         container->height = total_item_height;
                         log_debug("COLUMN FLEX: auto-height calculated as %d from items", total_item_height);
-                    } else {
-                        flex_layout->main_axis_size = 100.0f;  // Minimum fallback
-                        log_debug("COLUMN FLEX: using fallback height 100");
                     }
                 } else {
                     flex_layout->main_axis_size = (float)content_height;
@@ -548,6 +566,29 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         log_debug("Phase 9: Aligning line %d on cross axis", i);
         align_items_cross_axis(flex_layout, &flex_layout->lines[i]);
         log_debug("Phase 9: Completed aligning line %d on cross axis", i);
+    }
+
+    // Phase 9.5: Store first line's baseline in container's FlexProp
+    // This is used when this flex container participates in parent's baseline alignment
+    if (line_count > 0 && container->embed && container->embed->flex) {
+        FlexLineInfo* first_line = &flex_layout->lines[0];
+        // Check if first line has baseline-aligned items
+        bool has_baseline_child = false;
+        for (int i = 0; i < first_line->item_count; i++) {
+            ViewElement* item = (ViewElement*)first_line->items[i]->as_element();
+            if (item && item->fi && item->fi->align_self == ALIGN_BASELINE) {
+                has_baseline_child = true;
+                break;
+            }
+        }
+        // Also check container's align-items: baseline
+        if (!has_baseline_child && flex_layout->align_items == ALIGN_BASELINE) {
+            has_baseline_child = true;
+        }
+        container->embed->flex->first_baseline = first_line->baseline;
+        container->embed->flex->has_baseline_child = has_baseline_child;
+        log_debug("Phase 9.5: Stored first_baseline=%d, has_baseline_child=%d",
+                  first_line->baseline, has_baseline_child);
     }
 
     // Note: wrap-reverse item positioning is now handled in align_items_cross_axis
@@ -1337,6 +1378,25 @@ int calculate_item_baseline(ViewElement* item) {
         return margin_top + item->fi->baseline_offset;
     }
 
+    // Check if item is a flex container with stored baseline
+    // This handles cases where the flex container has baseline-aligned items
+    ViewBlock* item_block = (ViewBlock*)item;
+    if (item_block->embed && item_block->embed->flex &&
+        item_block->embed->flex->has_baseline_child) {
+        // Use the stored first baseline from this flex container's first line
+        int parent_offset_y = 0;
+        if (item->bound) {
+            parent_offset_y = item->bound->padding.top;
+            if (item->bound->border) {
+                parent_offset_y += item->bound->border->width.top;
+            }
+        }
+        int result = margin_top + parent_offset_y + item_block->embed->flex->first_baseline;
+        log_debug("calculate_item_baseline: flex container item=%p, first_baseline=%d, result=%d",
+                  item, item_block->embed->flex->first_baseline, result);
+        return result;
+    }
+
     // Check if item has laid-out children - use first baseline-participating child
     View* child_view = (View*)item->first_child;
     while (child_view) {
@@ -1514,6 +1574,25 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
 
             // The final position relative to container
             int final_pos = line_cross_pos + new_cross_pos;
+
+            // CRITICAL: Preserve relative positioning offset (position: relative with top/bottom)
+            // Phase 10 already applied the offset to the old position, but we're recalculating
+            // the position from scratch, so we need to re-apply the relative offset.
+            ViewBlock* item_block = (ViewBlock*)item;
+            if (item_block && item_block->position &&
+                item_block->position->position == CSS_VALUE_RELATIVE) {
+                // For row flex, cross axis is vertical, so we care about top/bottom
+                float relative_offset = 0;
+                if (item_block->position->has_top) {
+                    relative_offset = item_block->position->top;
+                } else if (item_block->position->has_bottom) {
+                    relative_offset = -item_block->position->bottom;
+                }
+                if (relative_offset != 0) {
+                    final_pos += (int)relative_offset;
+                    log_debug("Item %d: Adding relative offset %.0f to final_pos", i, relative_offset);
+                }
+            }
 
             log_debug("Item %d: item_baseline=%d, max_baseline=%d, old_pos=%d, new_pos=%d (line_pos=%d + offset=%d)",
                       i, item_baseline, max_baseline, old_cross_pos, final_pos, line_cross_pos, new_cross_pos);

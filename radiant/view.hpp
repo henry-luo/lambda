@@ -567,6 +567,10 @@ typedef struct FlexProp {
     bool column_gap_is_percent;   // true if column_gap is a percentage
     WritingMode writing_mode;
     TextDirection text_direction;
+    // First baseline of this flex container (computed after layout)
+    // Used when this container participates in parent's baseline alignment
+    int first_baseline;
+    bool has_baseline_child;       // true if first line has baseline-aligned items
 } FlexProp;
 
 typedef struct GridTrackList GridTrackList;
