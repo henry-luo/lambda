@@ -239,6 +239,7 @@ std::vector<LatexHtmlFixture> load_baseline_fixtures() {
     std::set<std::string> baseline_files = {
         "basic_test.tex",
         "basic_text.tex",
+        "counters.tex",
         "environments.tex",
         "formatting.tex",
         "sectioning.tex"
@@ -277,6 +278,7 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
     std::set<std::string> baseline_files = {
         "basic_test.tex",
         "basic_text.tex",
+        "counters.tex",
         "environments.tex",
         "formatting.tex",
         "sectioning.tex"

@@ -244,7 +244,7 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         "environments.tex",
         "sectioning.tex",
         "whitespace.tex",
-        "groups.tex",
+        // "groups.tex" - all tests moved to extended (ZWSP issues)
         // New baseline files (some tests passing, some moved to extended)
         "counters.tex",
         "formatting.tex",
@@ -261,7 +261,7 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
     // These require features not yet fully implemented or have known issues
     // Key: filename -> set of test IDs to include in extended (using ID for precise matching)
     std::map<std::string, std::set<int>> extended_from_baseline_by_id = {
-        {"counters.tex", {1, 2}},                  // Counter system not implemented
+        {"counters.tex", {1}},                     // ID 1 requires expression evaluator, ID 2 moved to baseline
         {"spacing.tex", {2, 3, 4}},                // Complex spacing commands
         {"symbols.tex", {1, 2, 3, 4}},             // \char, ^^, \symbol, \textellipsis
         {"preamble.tex", {1}},                     // Preamble handling issues
@@ -275,7 +275,7 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         {"whitespace.tex", {2, 5, 6, 7, 8, 12, 13, 14, 17, 18, 19, 20, 21}},  
                                                    // Various whitespace handling issues
                                                    // ID 1, 16 moved to baseline
-        {"groups.tex", {2, 3}},                    // Group scope issues
+        // "groups.tex" removed - all tests now in extended (not selective)
         {"macros.tex", {2, 3, 4, 5, 6}},           // ID 1 in baseline, rest in extended
         {"fonts.tex", {3, 4, 5, 7, 8}},            // ID 1, 6 in baseline (font declarations, typewriter ligatures)
                                                    // ID 2 moved to baseline (em/textit double-nesting fixed)
@@ -328,10 +328,9 @@ std::vector<LatexHtmlFixture> load_ongoing_fixtures() {
         {"formatting.tex", {
             "text alignment",         // ID 6 - alignment commands
         }},
-        {"counters.tex", {
-            "counters",               // ID 1 - counter system
-            "clear inner counters",   // ID 2 - counter system
-        }},
+        // {"counters.tex", {...}} - removed, now using ID-based exclusion above
+        // ID 1 in extended (expression evaluator needed)
+        // ID 2 moved to baseline (nested counters - passing)
     };
 
     if (!std::filesystem::exists(fixtures_dir)) {
