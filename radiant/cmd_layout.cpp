@@ -43,7 +43,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
-void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio);
+// print_view_tree is declared in layout.hpp
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
 
 // Forward declarations
@@ -1047,6 +1047,7 @@ struct LayoutOptions {
     const char* input_file;
     const char* output_file;
     const char* css_file;
+    const char* view_output_file;  // Custom output path for view_tree.json
     int viewport_width;
     int viewport_height;
     bool debug;
@@ -1057,6 +1058,7 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
     opts->input_file = nullptr;
     opts->output_file = nullptr;
     opts->css_file = nullptr;
+    opts->view_output_file = nullptr;  // Default to /tmp/view_tree.json
     opts->viewport_width = 1200;  // Standard viewport width for layout tests (matches browser reference)
     opts->viewport_height = 800;  // Standard viewport height for layout tests (matches browser reference)
     opts->debug = false;
@@ -1068,6 +1070,14 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
                 opts->output_file = argv[++i];
             } else {
                 log_error("Error: -o requires an argument");
+                return false;
+            }
+        }
+        else if (strcmp(argv[i], "--view-output") == 0) {
+            if (i + 1 < argc) {
+                opts->view_output_file = argv[++i];
+            } else {
+                log_error("Error: --view-output requires an argument");
                 return false;
             }
         }
@@ -1211,11 +1221,11 @@ int cmd_layout(int argc, char** argv) {
     log_debug("[Layout] Preparing output...");
 
     // Use print_view_tree to generate complete layout tree JSON
-    // It writes to /tmp/view_tree.json which is what the test framework expects
+    // It writes to /tmp/view_tree.json or custom path if --view-output is specified
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("[Layout] Calling print_view_tree for complete layout output...");
-        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, 1.0f);
-        log_debug("[Layout] Layout tree written to /tmp/view_tree.json");
+        print_view_tree((ViewElement*)doc->view_tree->root, doc->url, 1.0f, opts.view_output_file);
+        log_debug("[Layout] Layout tree written to %s", opts.view_output_file ? opts.view_output_file : "/tmp/view_tree.json");
     } else {
         log_warn("No view tree available to output");
     }

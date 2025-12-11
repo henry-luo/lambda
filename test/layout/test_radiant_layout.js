@@ -25,46 +25,64 @@ class RadiantLayoutTester {
         this.verbose = options.verbose || false;
         this.json = options.json || false; // JSON output mode
         this.projectRoot = options.projectRoot || process.cwd();
+        this.maxConcurrency = options.maxConcurrency || 5; // Max parallel tests
+        this.testIdCounter = 0; // Counter for unique test IDs
+    }
+
+    /**
+     * Generate a unique output file path for parallel test execution
+     */
+    getUniqueOutputFile() {
+        const testId = ++this.testIdCounter;
+        return `/tmp/view_tree_${process.pid}_${testId}.json`;
     }
 
     /**
      * Run layout engine on a test file
+     * @param {string} htmlFile - Path to the HTML file to test
+     * @param {string} outputFile - Optional unique output file path for parallel execution
      */
-    async runRadiantLayout(htmlFile) {
+    async runRadiantLayout(htmlFile, outputFile = null) {
         return new Promise((resolve, reject) => {
             // Always use standard viewport size (1200x800) to match browser reference
             // Note: Lambda defaults to 1200x800, but we pass args explicitly for clarity
             const args = ['layout', htmlFile, '--width', '1200', '--height', '800'];
-            const process = spawn(this.radiantExe, args, {
+
+            // Add view output file argument if specified (for parallel execution)
+            if (outputFile) {
+                args.push('--view-output', outputFile);
+            }
+
+            const proc = spawn(this.radiantExe, args, {
                 cwd: this.projectRoot
             });
 
             let stdout = '';
             let stderr = '';
 
-            process.stdout.on('data', (data) => {
+            proc.stdout.on('data', (data) => {
                 stdout += data.toString();
             });
 
-            process.stderr.on('data', (data) => {
+            proc.stderr.on('data', (data) => {
                 stderr += data.toString();
             });
 
             const timeout = setTimeout(() => {
-                process.kill();
+                proc.kill();
                 reject(new Error(`${this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant'} execution timeout (30s)`));
             }, 30000);
 
-            process.on('close', (code) => {
+            proc.on('close', (code) => {
                 clearTimeout(timeout);
                 if (code === 0) {
-                    resolve({ stdout, stderr });
+                    resolve({ stdout, stderr, outputFile });
                 } else {
                     reject(new Error(`${this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant'} failed with exit code ${code}: ${stderr}`));
                 }
             });
 
-            process.on('error', (error) => {
+            proc.on('error', (error) => {
                 clearTimeout(timeout);
                 reject(error);
             });
@@ -72,12 +90,15 @@ class RadiantLayoutTester {
     }
 
     /**
-     * Load Radiant output from /tmp/view_tree.json
+     * Load Radiant output from specified file or default /tmp/view_tree.json
+     * @param {string} testContext - Context for error messages
+     * @param {string} outputFile - Optional specific output file to read
      */
-    async loadRadiantOutput(testContext = '') {
+    async loadRadiantOutput(testContext = '', outputFile = null) {
+        const fileToRead = outputFile || this.outputFile;
         let content = '';
         try {
-            content = await fs.readFile(this.outputFile, 'utf8');
+            content = await fs.readFile(fileToRead, 'utf8');
             return JSON.parse(content);
         } catch (error) {
             if (error instanceof SyntaxError) {
@@ -975,8 +996,11 @@ class RadiantLayoutTester {
 
     /**
      * Test a single HTML file
+     * @param {string} htmlFile - Path to the HTML file
+     * @param {string} category - Test category name
+     * @param {string} outputFile - Optional unique output file for parallel execution
      */
-    async testSingleFile(htmlFile, category) {
+    async testSingleFile(htmlFile, category, outputFile = null) {
         // Handle both .html and .htm extensions
         const ext = htmlFile.endsWith('.htm') && !htmlFile.endsWith('.html') ? '.htm' : '.html';
         const testName = path.basename(htmlFile, ext);
@@ -984,9 +1008,19 @@ class RadiantLayoutTester {
         // console.log(`\n🧪 Testing: ${testName}`);
 
         try {
-            // Run Radiant layout
-            await this.runRadiantLayout(htmlFile);
-            const radiantData = await this.loadRadiantOutput(testFileName);
+            // Run Radiant layout with optional unique output file
+            const layoutResult = await this.runRadiantLayout(htmlFile, outputFile);
+            const actualOutputFile = layoutResult.outputFile || this.outputFile;
+            const radiantData = await this.loadRadiantOutput(testFileName, actualOutputFile);
+
+            // Clean up unique output file if used
+            if (outputFile) {
+                try {
+                    await fs.unlink(outputFile);
+                } catch (e) {
+                    // Ignore cleanup errors
+                }
+            }
 
             // Load browser reference
             const browserData = await this.loadBrowserReference(testName, category);
@@ -1080,6 +1114,59 @@ class RadiantLayoutTester {
     }
 
     /**
+     * Run tests in parallel with a dynamic pool of up to maxConcurrency tests
+     * @param {Array} testTasks - Array of {htmlFile, category} objects
+     * @returns {Array} - Array of test results
+     */
+    async runTestsInPool(testTasks) {
+        const results = [];
+        const pool = new Map(); // Map of testId -> Promise
+        let taskIndex = 0;
+
+        // Helper to start a new test and add it to the pool
+        const startNextTest = () => {
+            if (taskIndex >= testTasks.length) return null;
+
+            const task = testTasks[taskIndex++];
+            const outputFile = this.getUniqueOutputFile();
+            const testId = this.testIdCounter;
+
+            const testPromise = this.testSingleFile(task.htmlFile, task.category, outputFile)
+                .then(result => ({ testId, result }))
+                .catch(error => ({ testId, result: { error: error.message } }));
+
+            pool.set(testId, testPromise);
+            return testPromise;
+        };
+
+        // Fill the initial pool up to maxConcurrency
+        while (pool.size < this.maxConcurrency && taskIndex < testTasks.length) {
+            startNextTest();
+        }
+
+        // Process tests as they complete, maintaining pool size
+        while (pool.size > 0) {
+            // Wait for any test in the pool to complete
+            const completed = await Promise.race(pool.values());
+
+            // Remove completed test from pool
+            pool.delete(completed.testId);
+
+            // Store result
+            if (completed.result) {
+                results.push(completed.result);
+            }
+
+            // Start next test if there are more tasks
+            if (taskIndex < testTasks.length) {
+                startNextTest();
+            }
+        }
+
+        return results;
+    }
+
+    /**
      * Test all files in a category
      */
     async testCategory(category) {
@@ -1105,18 +1192,21 @@ class RadiantLayoutTester {
                 return;
             }
 
-            const results = [];
+            // Prepare test tasks
+            const testTasks = htmlFiles.map(htmlFile => ({
+                htmlFile: path.join(categoryDir, htmlFile),
+                category: category
+            }));
+
+            // Run tests in parallel with pool management
+            const results = await this.runTestsInPool(testTasks);
+
             let errorCount = 0;
             const errorFiles = [];
-
-            for (const htmlFile of htmlFiles) {
-                const result = await this.testSingleFile(path.join(categoryDir, htmlFile), category);
-                if (result) {
-                    results.push(result);
-                    if (result.error) {
-                        errorCount++;
-                        errorFiles.push(result.testFile || result.testName);
-                    }
+            for (const result of results) {
+                if (result && result.error) {
+                    errorCount++;
+                    errorFiles.push(result.testFile || result.testName);
                 }
             }
 
@@ -1206,10 +1296,17 @@ class RadiantLayoutTester {
 
                 if (matchingFiles.length > 0) {
                     console.log(`\n📂 Found ${matchingFiles.length} matching files in ${category}:`);
+                    matchingFiles.forEach(f => console.log(`   🎯 ${f}`));
 
-                    for (const htmlFile of matchingFiles) {
-                        console.log(`   🎯 ${htmlFile}`);
-                        const result = await this.testSingleFile(path.join(categoryDir, htmlFile), category);
+                    // Prepare test tasks for this category
+                    const testTasks = matchingFiles.map(htmlFile => ({
+                        htmlFile: path.join(categoryDir, htmlFile),
+                        category: category
+                    }));
+
+                    // Run tests in parallel with pool management
+                    const categoryResults = await this.runTestsInPool(testTasks);
+                    for (const result of categoryResults) {
                         if (result) {
                             allResults.push(result);
                             totalMatches++;
@@ -1308,7 +1405,8 @@ async function main() {
         tolerance: 5.2,
         verbose: false,
         engine: 'radiant', // default to radiant engine
-        json: false // JSON output mode
+        json: false, // JSON output mode
+        maxConcurrency: 5 // Max parallel tests
     };
 
     let category = null;
@@ -1362,6 +1460,14 @@ async function main() {
             case '--json':
                 options.json = true;
                 break;
+            case '--concurrency':
+            case '-j':
+                options.maxConcurrency = parseInt(args[++i], 10);
+                if (isNaN(options.maxConcurrency) || options.maxConcurrency < 1) {
+                    console.error('Invalid concurrency value. Must be a positive integer.');
+                    process.exit(1);
+                }
+                break;
             default:
                 console.error(`Unknown argument: ${arg}`);
                 showHelp = true;
@@ -1382,6 +1488,7 @@ Options:
   --tolerance <pixels>     Layout difference tolerance in pixels (default: 5.0)
   --element-threshold <pct> Element match threshold percentage (default: 80.0)
   --text-threshold <pct>   Text match threshold percentage (default: 70.0)
+  --concurrency, -j <n>    Number of parallel tests to run (default: 5)
   --verbose, -v            Show detailed output
   --json                   Output results in JSON format
   --radiant-exe <path>     Path to layout engine executable (default: ./lambda.exe)
@@ -1400,6 +1507,7 @@ Examples:
   node test/layout/test_radiant_layout.js --tolerance 2.0              # Use 2px tolerance
   node test/layout/test_radiant_layout.js --element-threshold 90       # Require 90% element match
   node test/layout/test_radiant_layout.js --text-threshold 80          # Require 80% text match
+  node test/layout/test_radiant_layout.js -j 10                        # Run 10 tests in parallel
   node test/layout/test_radiant_layout.js -v                           # Verbose output
 
 Note: Run this script from the project root directory.
