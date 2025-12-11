@@ -2058,6 +2058,31 @@ static const char* get_counter_name_from_curly_group(Element* elem) {
     return nullptr;
 }
 
+// Helper to extract parent counter name from optional brack_group_word (e.g., \newcounter{foo}[parent])
+static const char* get_parent_from_brack_group(Element* elem) {
+    if (!elem || !elem->items || elem->length == 0) return nullptr;
+    
+    // Iterate through children to find brack_group_word
+    for (int i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem->type && strncmp(((TypeElmt*)child_elem->type)->name.str, "brack_group_word", 16) == 0) {
+                // Found brack_group_word - extract the string inside
+                if (child_elem->items && child_elem->length > 0) {
+                    Item word_item = child_elem->items[0];
+                    if (get_type_id(word_item) == LMD_TYPE_STRING) {
+                        String* str = it2s(word_item);
+                        return str->chars;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return nullptr;
+}
+
 // Helper to extract integer value from curly_group_value
 // curly_group_value contains a 'text' field with the value as a string
 static int get_value_from_curly_group(Element* elem) {
@@ -2086,8 +2111,16 @@ static int get_value_from_curly_group(Element* elem) {
 
 static void handle_newcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
     const char* counter_name = get_counter_name_from_curly_group(elem);
+    const char* parent_name = get_parent_from_brack_group(elem);
+    
     if (counter_name) {
-        ctx->define_counter(counter_name);
+        if (parent_name) {
+            // Create counter with parent relationship
+            ctx->new_counter(std::string(counter_name), std::string(parent_name));
+        } else {
+            // Create counter without parent
+            ctx->define_counter(counter_name);
+        }
     }
     (void)html_buf; (void)pool; (void)depth;
 }
