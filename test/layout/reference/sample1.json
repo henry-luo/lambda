@@ -2781,13 +2781,13 @@
                 "classes": [],
                 "layout": {
                   "x": 38.25,
-                  "y": 439.44,
+                  "y": 399.41,
                   "width": 60,
-                  "height": 0,
+                  "height": 40.03,
                   "contentWidth": 60,
-                  "contentHeight": 0,
+                  "contentHeight": 40,
                   "scrollWidth": 60,
-                  "scrollHeight": 0
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline",
@@ -2870,13 +2870,13 @@
                 "classes": [],
                 "layout": {
                   "x": 138.28,
-                  "y": 439.44,
+                  "y": 399.41,
                   "width": 60,
-                  "height": 0,
+                  "height": 40.03,
                   "contentWidth": 60,
-                  "contentHeight": 0,
+                  "contentHeight": 40,
                   "scrollWidth": 60,
-                  "scrollHeight": 0
+                  "scrollHeight": 40
                 },
                 "computed": {
                   "display": "inline",
