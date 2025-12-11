@@ -3399,18 +3399,15 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             current_alignment = saved_alignment;  // Restore alignment scope
 
             // Add zero-width space after group for word boundary (U+200B)
-            // Empty groups {} are explicitly used in LaTeX for word boundary
-            // Non-empty groups also need ZWSP unless they end with whitespace
+            // LaTeX groups create word boundaries - always add ZWSP after closing brace
+            // This matches latex-js behavior and LaTeX semantics
             bool is_empty_group = (html_buf->length == before_len);
             if (is_empty_group) {
                 // Empty {} is explicitly a word boundary marker
                 stringbuf_append_str(html_buf, "\xE2\x80\x8B");
             } else {
-                char last_char = html_buf->str->chars[html_buf->length - 1];
-                bool ends_with_space = (last_char == ' ' || last_char == '\t' || last_char == '\n');
-                if (has_nested_groups || !ends_with_space) {
-                    stringbuf_append_str(html_buf, "\xE2\x80\x8B");
-                }
+                // Non-empty groups always get ZWSP (closing brace creates word boundary)
+                stringbuf_append_str(html_buf, "\xE2\x80\x8B");
             }
             return;
         } else if (strcmp(cmd_name, "emph") == 0) {
