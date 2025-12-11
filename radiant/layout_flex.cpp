@@ -11,6 +11,10 @@ extern "C" {
 // NOTE: All conversion functions removed - enums now align directly with Lexbor constants
 // This eliminates the need for any enum conversion throughout the flex layout system
 
+// Forward declarations
+int get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
+int get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout);
+
 // ============================================================================
 // Overflow Alignment Fallback (Yoga-inspired)
 // ============================================================================
@@ -1017,6 +1021,55 @@ int calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     return basis;
 }
 
+// Calculate the hypothetical main size for an item (flex-basis clamped by min/max constraints)
+// This is used for line breaking decisions per CSS Flexbox spec 9.3
+// IMPORTANT: For wrapping purposes, only use EXPLICITLY SET min/max constraints,
+// not the automatic minimum (min-content) that is used for flex shrinking
+int calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* flex_layout) {
+    int basis = calculate_flex_basis(item, flex_layout);
+
+    if (!item->fi) return basis;
+
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+
+    // Get EXPLICIT min/max constraints from CSS (not automatic minimum)
+    // Only use explicitly set min-width/min-height values, not resolved auto values
+    int min_main = 0, max_main = INT_MAX;
+    if (is_horizontal) {
+        // Only use explicitly set min-width (given_min_width > 0)
+        if (item->blk && item->blk->given_min_width > 0) {
+            min_main = (int)item->blk->given_min_width;
+        }
+        if (item->blk && item->blk->given_max_width > 0) {
+            max_main = (int)item->blk->given_max_width;
+        }
+    } else {
+        // Only use explicitly set min-height (given_min_height > 0)
+        if (item->blk && item->blk->given_min_height > 0) {
+            min_main = (int)item->blk->given_min_height;
+        }
+        if (item->blk && item->blk->given_max_height > 0) {
+            max_main = (int)item->blk->given_max_height;
+        }
+    }
+
+    // Clamp basis by explicit min/max constraints
+    int hypothetical = basis;
+    if (min_main > 0 && hypothetical < min_main) {
+        hypothetical = min_main;
+        log_debug("calculate_hypothetical_main_size: clamped to min=%d (basis=%d)", min_main, basis);
+    }
+    if (max_main < INT_MAX && hypothetical > max_main) {
+        hypothetical = max_main;
+        log_debug("calculate_hypothetical_main_size: clamped to max=%d (basis=%d)", max_main, basis);
+    }
+
+    log_debug("calculate_hypothetical_main_size: item=%p, basis=%d, min=%d, max=%d, result=%d",
+              item, basis, min_main, max_main, hypothetical);
+
+    return hypothetical;
+}
+
 // ============================================================================
 // Constraint Resolution for Flex Items
 // ============================================================================
@@ -1043,7 +1096,11 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
 
     // Resolve 'auto' min-width/height for flex items
     // Per CSS Flexbox spec, min-width: auto = min-content size (automatic minimum)
-    if (min_width <= 0 && !item->fi->has_explicit_width) {
+    // Check for explicit width/height from CSS directly (more reliable than has_explicit flags)
+    bool has_css_width = item->blk && item->blk->given_width > 0;
+    bool has_css_height = item->blk && item->blk->given_height > 0;
+
+    if (min_width <= 0 && !has_css_width) {
         // For flex items, min-width: auto uses min-content size as the minimum
         if (!item->fi->has_intrinsic_width) {
             calculate_item_intrinsic_sizes(item, flex_layout);
@@ -1052,7 +1109,7 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
         log_debug("resolve_flex_item_constraints: auto min-width resolved to min-content: %d", min_width);
     }
 
-    if (min_height <= 0 && !item->fi->has_explicit_height) {
+    if (min_height <= 0 && !has_css_height) {
         if (!item->fi->has_intrinsic_height) {
             calculate_item_intrinsic_sizes(item, flex_layout);
         }
@@ -1214,10 +1271,12 @@ int apply_flex_constraint(
     }
 
     // Apply min constraint (takes precedence over max)
-    if (min_size > 0 && clamped < min_size) {
-        clamped = min_size;
+    // Note: min_size <= 0 means "no explicit minimum", but we still enforce 0 as absolute minimum
+    int effective_min = (min_size > 0) ? min_size : 0;
+    if (clamped < effective_min) {
+        clamped = effective_min;
         if (hit_min) *hit_min = true;
-        log_debug("CONSTRAINT: clamped to min=%d (wanted %d)", min_size, computed_size);
+        log_debug("CONSTRAINT: clamped to min=%d (wanted %d)", effective_min, computed_size);
     }
 
     if (clamped != computed_size) {
@@ -1521,30 +1580,31 @@ int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int item_c
         while (current_item < item_count) {
             ViewElement* item = (ViewElement*)items[current_item]->as_element();
             if (!item) { current_item++;  continue; }
-            int item_basis = calculate_flex_basis(item, flex_layout);
+
+            // Use hypothetical main size (flex-basis clamped by min/max) for wrapping decisions
+            // Per CSS Flexbox spec 9.3, line breaking uses the item's hypothetical main size
+            int item_hypothetical = calculate_hypothetical_main_size(item, flex_layout);
 
             // Add gap space if not the first item
             int gap_space = line->item_count > 0 ?
                 (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) : 0;
 
-            log_debug("LINE %d - item %d: basis=%d, gap=%d, line_size=%d, container=%d",
-                   flex_layout->line_count, current_item, item_basis, gap_space, main_size, container_main_size);
+            log_debug("LINE %d - item %d: hypothetical=%d, gap=%d, line_size=%d, container=%d",
+                   flex_layout->line_count, current_item, item_hypothetical, gap_space, main_size, container_main_size);
 
             // Check if we need to wrap (only if not the first item in line)
-            // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
-            // Check if we need to wrap (only if not the first item in line)
-            // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
+            // Use hypothetical main size (clamped by min/max) for wrapping decision
             if (flex_layout->wrap != WRAP_NOWRAP &&
                 line->item_count > 0 &&
-                main_size + item_basis + gap_space > container_main_size) {
+                main_size + item_hypothetical + gap_space > container_main_size) {
                 log_debug("WRAP - item %d needs new line (would be %d > %d)",
-                       current_item, main_size + item_basis + gap_space, container_main_size);
+                       current_item, main_size + item_hypothetical + gap_space, container_main_size);
                 break;
             }
 
             line->items[line->item_count] = item;
             line->item_count++;
-            main_size += item_basis + gap_space;
+            main_size += item_hypothetical + gap_space;
             current_item++;
         }
 
@@ -1597,20 +1657,36 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     if (!item_flex_basis) return;
 
     int total_basis_size = 0;
+    int total_margin_size = 0;  // Track margins in main axis direction
+    bool is_horizontal = is_main_axis_horizontal(flex_layout);
+
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
         int basis = calculate_flex_basis(item, flex_layout);
         item_flex_basis[i] = basis;  // Store for scaled shrink calculation
         set_main_axis_size(item, basis, flex_layout);
         total_basis_size += basis;
+
+        // Add margins in the main axis direction
+        if (item->bound) {
+            if (is_horizontal) {
+                total_margin_size += item->bound->margin.left + item->bound->margin.right;
+            } else {
+                total_margin_size += item->bound->margin.top + item->bound->margin.bottom;
+            }
+        }
     }
 
     // Calculate gap space
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
 
-    // Calculate free space: container size minus item basis sizes minus gap space
-    int free_space = container_main_size - total_basis_size - gap_space;
+    // Calculate free space: container size minus item basis sizes minus margins minus gap space
+    // Per CSS Flexbox spec, margins are part of the item's outer size
+    int free_space = container_main_size - total_basis_size - total_margin_size - gap_space;
     line->free_space = free_space;
+
+    log_debug("FLEX FREE_SPACE: container=%d, basis=%d, margins=%d, gaps=%d, free=%d",
+              container_main_size, total_basis_size, total_margin_size, gap_space, free_space);
 
     log_info("ITERATIVE_FLEX START - container=%d, basis=%d, gap=%d, free_space=%d",
               container_main_size, total_basis_size, gap_space, free_space);
@@ -1791,16 +1867,17 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     log_info("MAIN_AXIS_ALIGN - container_size=%d, item_count=%d, justify=%d",
              container_size, line->item_count, flex_layout->justify);
 
-    // *** FIX 1: Calculate total item size WITHOUT gaps (gaps handled separately) ***
+    // *** FIX 1: Calculate total item size INCLUDING margins for positioning ***
+    // CSS Flexbox: margins are part of the item's outer size for justify-content
     int total_item_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         ViewElement* item = (ViewElement*)line->items[i]->as_element();
         if (!item) continue;
-        int item_size = get_main_axis_size(item, flex_layout);
-        log_debug("MAIN_AXIS_ALIGN - item %d size: %d", i, item_size);
+        int item_size = get_main_axis_outer_size(item, flex_layout);
+        log_debug("MAIN_AXIS_ALIGN - item %d outer size: %d", i, item_size);
         total_item_size += item_size;
     }
-    log_info("MAIN_AXIS_ALIGN - total_item_size=%d (without gaps)", total_item_size);
+    log_info("MAIN_AXIS_ALIGN - total_item_size=%d (with margins, without gaps)", total_item_size);
 
     // Check for auto margins on main axis
     int auto_margin_count = 0;
@@ -1920,13 +1997,33 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
                 if (right_auto) current_pos += (int)auto_margin_size;
             }
         } else {
-            // *** FIX 5: Set position, advance by item size, add spacing, then add gap ***
+            // *** FIX 5: Set position with margins ***
+            // CSS Flexbox: item position includes its margin-start offset
             int item_size = get_main_axis_size(item, flex_layout);
+
+            // Get item margins in main axis direction
+            int margin_start = 0, margin_end = 0;
+            if (item->bound) {
+                if (is_main_axis_horizontal(flex_layout)) {
+                    margin_start = item->bound->margin.left;
+                    margin_end = item->bound->margin.right;
+                } else {
+                    margin_start = item->bound->margin.top;
+                    margin_end = item->bound->margin.bottom;
+                }
+            }
+
+            // Add margin-start before positioning
+            current_pos += margin_start;
+
             int order_val = item && item->fi ? item->fi->order : -999;
-            log_debug("align_items_main_axis: Positioning item %d (order=%d, ptr=%p) at position %d, size=%d", i, order_val, item, current_pos, item_size);
+            log_debug("align_items_main_axis: Positioning item %d (order=%d, ptr=%p) at position %d (margin_start=%d), size=%d",
+                      i, order_val, item, current_pos, margin_start, item_size);
             set_main_axis_position(item, current_pos, flex_layout);
             log_debug("align_items_main_axis: After set, item->x=%d, item->y=%d", item->x, item->y);
-            current_pos += item_size;
+
+            // Advance by item size + margin-end
+            current_pos += item_size + margin_end;
 
             // Add justify-content spacing (for space-between, space-around, etc.)
             if (spacing > 0 && i < line->item_count - 1) {
@@ -1991,9 +2088,32 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                 }
 
                 // For non-stretch items, set cross-axis size from intrinsic size
+                // EXCEPTION: Row flex containers with wrapping need available width to wrap properly
                 if (!is_horizontal) {
                     // Column flex: cross-axis is width
-                    if (item->width <= 0 && item->fi->has_intrinsic_width) {
+                    // Check if item is a row flex container with wrap - these need available width
+                    bool is_row_flex_with_wrap = false;
+                    ViewBlock* item_block = (ViewBlock*)item;
+                    if (item_block && item_block->embed && item_block->embed->flex) {
+                        FlexProp* item_flex = item_block->embed->flex;
+                        // Row or row-reverse with wrap or wrap-reverse
+                        bool is_row = (item_flex->direction == CSS_VALUE_ROW ||
+                                       item_flex->direction == CSS_VALUE_ROW_REVERSE);
+                        bool is_wrap = (item_flex->wrap == CSS_VALUE_WRAP ||
+                                        item_flex->wrap == CSS_VALUE_WRAP_REVERSE);
+                        is_row_flex_with_wrap = is_row && is_wrap;
+                    }
+
+                    if (is_row_flex_with_wrap) {
+                        // Row flex containers with wrap should use available width for proper wrapping
+                        // Set width to container's cross-axis size (available width)
+                        int available_width = (int)flex_layout->cross_axis_size;
+                        if (available_width > 0 && item->width <= 0) {
+                            item->width = available_width;
+                            log_debug("ROW_FLEX_WRAP_WIDTH: Set item width=%d from available width (align=%d)",
+                                      available_width, align_type);
+                        }
+                    } else if (item->width <= 0 && item->fi->has_intrinsic_width) {
                         int intrinsic_width = item->fi->intrinsic_width.max_content;
                         if (intrinsic_width > 0) {
                             item->width = intrinsic_width;
@@ -2326,18 +2446,22 @@ int get_border_offset_top(ViewBlock* item) {
 
 // Utility functions for axis-agnostic positioning
 int get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout) {
-    // CRITICAL FIX: Use border-box dimensions for flex calculations (like browsers do)
-    // This matches browser behavior where flex layout works with border-box sizes
+    // Returns the CONTENT SIZE (border-box) of the item, WITHOUT margins
+    // Margins are handled separately in free space and positioning calculations
+    // This matches CSS Flexbox spec: flex-grow/shrink operates on content sizes
+    int base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
+    return base_size;
+}
+
+// Get the outer size including margins - used for justify-content calculations
+int get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     int base_size = is_main_axis_horizontal(flex_layout) ? get_border_box_width(item) : item->height;
 
-    // ENHANCED: Include margins in main axis size for proper justify-content calculations
-    // CSS Flexbox spec: margins are part of the item's total space requirements
+    // Include margins in main axis size for positioning calculations
     if (item->bound) {
         if (is_main_axis_horizontal(flex_layout)) {
-            // Include left and right margins for horizontal flex containers
             base_size += item->bound->margin.left + item->bound->margin.right;
         } else {
-            // Include top and bottom margins for vertical flex containers
             base_size += item->bound->margin.top + item->bound->margin.bottom;
         }
     }
