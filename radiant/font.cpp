@@ -26,15 +26,15 @@ static const char** resolve_generic_family(const char* family) {
     static const char* monospace_fonts[] = {"Courier New", "Courier", "Monaco", NULL};
     static const char* cursive_fonts[] = {"Comic Sans MS", "Apple Chancery", NULL};
     static const char* fantasy_fonts[] = {"Impact", "Papyrus", NULL};
-    
+
     if (!family) return NULL;
-    
+
     if (strcmp(family, "serif") == 0) return serif_fonts;
     if (strcmp(family, "sans-serif") == 0) return sans_serif_fonts;
     if (strcmp(family, "monospace") == 0) return monospace_fonts;
     if (strcmp(family, "cursive") == 0) return cursive_fonts;
     if (strcmp(family, "fantasy") == 0) return fantasy_fonts;
-    
+
     return NULL;  // not a generic family
 }
 typedef struct FontfaceEntry {
