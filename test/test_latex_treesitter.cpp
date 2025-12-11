@@ -15,33 +15,53 @@
 // Import print functions
 extern void print_item(Item item, int depth);
 
-// External parser function
+// External API functions
 extern "C" {
-    void parse_latex_ts(Input* input, const char* latex_string);
+    Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor);
+    Url* url_parse(const char* input);
+    void url_destroy(Url* url);
+}
+
+// Helper to create a Lambda String
+static String* create_lambda_string(const char* text) {
+    if (!text) return nullptr;
+    size_t len = strlen(text);
+    String* result = (String*)malloc(sizeof(String) + len + 1);
+    if (!result) return nullptr;
+    result->len = len;
+    result->ref_cnt = 1;
+    strcpy(result->chars, text);
+    return result;
 }
 
 class LatexTreeSitterTest : public ::testing::Test {
 protected:
-    Pool* pool;
-    Arena* arena;
-    Input* input;
+    Url* dummy_url;
+    String* type_str;
 
     void SetUp() override {
-        pool = pool_create();
-        input = Input::create(pool, nullptr);
-        arena = input->arena;  // arena is created by Input::create
+        dummy_url = url_parse("file://./test.tex");
+        type_str = create_lambda_string("latex");
     }
 
     void TearDown() override {
-        pool_destroy(pool);
+        url_destroy(dummy_url);
+        free(type_str);
+    }
+
+    // Helper to parse LaTeX content
+    Input* parse_latex(const char* latex_content) {
+        char* latex_copy = strdup(latex_content);
+        Input* input = input_from_source(latex_copy, dummy_url, type_str, nullptr);
+        return input;
     }
 };
 
 TEST_F(LatexTreeSitterTest, BasicText) {
     const char* latex = "Hello world";
     
-    parse_latex_ts(input, latex);
-    
+    Input* input = parse_latex(latex);
+    ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
     
     // Print the tree for inspection
@@ -53,8 +73,8 @@ TEST_F(LatexTreeSitterTest, BasicText) {
 TEST_F(LatexTreeSitterTest, SimpleCommand) {
     const char* latex = "\\textbf{bold text}";
     
-    parse_latex_ts(input, latex);
-    
+    Input* input = parse_latex(latex);
+    ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
     
     printf("\n=== SimpleCommand Tree ===\n");
@@ -78,8 +98,8 @@ TEST_F(LatexTreeSitterTest, SimpleCommand) {
 TEST_F(LatexTreeSitterTest, SpacingCommand) {
     const char* latex = "word1 \\quad word2";
     
-    parse_latex_ts(input, latex);
-    
+    Input* input = parse_latex(latex);
+    ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
     
     printf("\n=== SpacingCommand Tree ===\n");
@@ -112,8 +132,8 @@ TEST_F(LatexTreeSitterTest, SpacingCommand) {
 TEST_F(LatexTreeSitterTest, ControlSymbol) {
     const char* latex = "Price: \\$5.00";
     
-    parse_latex_ts(input, latex);
-    
+    Input* input = parse_latex(latex);
+    ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
     
     printf("\n=== ControlSymbol Tree ===\n");
@@ -124,8 +144,8 @@ TEST_F(LatexTreeSitterTest, ControlSymbol) {
 TEST_F(LatexTreeSitterTest, DiactricCommand) {
     const char* latex = "\\'e";  // é
     
-    parse_latex_ts(input, latex);
-    
+    Input* input = parse_latex(latex);
+    ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
     
     printf("\n=== DiactricCommand Tree ===\n");
@@ -136,8 +156,8 @@ TEST_F(LatexTreeSitterTest, DiactricCommand) {
 TEST_F(LatexTreeSitterTest, Environment) {
     const char* latex = "\\begin{center}Centered\\end{center}";
     
-    parse_latex_ts(input, latex);
-    
+    Input* input = parse_latex(latex);
+    ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
     
     printf("\n=== Environment Tree ===\n");
