@@ -403,7 +403,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     rect->start_index = str - text_start;
     float font_height = lycon->font.ft_face->size->metrics.height / 64.0;
     rect->x = lycon->line.advance_x;
-    rect->height = font_height;  // should text->height be lycon->block.line_height or font_height?
+    rect->height = font_height;  // use font_height for text rect (browsers measure text bounds using font metrics)
 
     // lead_y applies to baseline aligned text; not other vertical aligns
     if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
