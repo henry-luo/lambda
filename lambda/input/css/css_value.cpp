@@ -415,6 +415,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"fit-content", 11, CSS_VALUE_FIT_CONTENT, CSS_VALUE_GROUP_SIZE},
     {"fr", 2, CSS_VALUE_FR, CSS_VALUE_GROUP_MISC},
     {"dense", 5, CSS_VALUE_DENSE, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
+    {"auto-fill", 9, CSS_VALUE_AUTO_FILL, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
+    {"auto-fit", 8, CSS_VALUE_AUTO_FIT, CSS_VALUE_GROUP_GRID_AUTO_FLOW},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

@@ -934,6 +934,99 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 
 // Parse a single CssValue into a GridTrackSize
 // Returns NULL if the value cannot be converted to a track size
+// Forward declaration for recursive parsing
+static GridTrackSize* parse_css_value_to_track_size(const CssValue* val);
+
+// Parse minmax() function to GridTrackSize
+static GridTrackSize* parse_minmax_function(const CssValue* val) {
+    if (!val || val->type != CSS_VALUE_TYPE_FUNCTION) return NULL;
+    if (!val->data.function->name || strcmp(val->data.function->name, "minmax") != 0) return NULL;
+    if (val->data.function->arg_count < 2) return NULL;
+
+    GridTrackSize* min_size = parse_css_value_to_track_size(val->data.function->args[0]);
+    GridTrackSize* max_size = parse_css_value_to_track_size(val->data.function->args[1]);
+
+    if (!min_size && !max_size) return NULL;
+
+    GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_MINMAX, 0);
+    if (track_size) {
+        track_size->min_size = min_size;
+        track_size->max_size = max_size;
+        log_debug("[CSS]   parsed minmax(%s, %s)",
+                  min_size ? "valid" : "null", max_size ? "valid" : "null");
+    }
+    return track_size;
+}
+
+// Parse repeat() function including auto-fill/auto-fit
+static GridTrackSize* parse_repeat_function(const CssValue* val) {
+    if (!val || val->type != CSS_VALUE_TYPE_FUNCTION) return NULL;
+    if (!val->data.function->name || strcmp(val->data.function->name, "repeat") != 0) return NULL;
+    if (val->data.function->arg_count < 2) return NULL;
+
+    CssValue* count_val = val->data.function->args[0];
+    bool is_auto_fill = false;
+    bool is_auto_fit = false;
+    int repeat_count = 0;
+
+    // Check if first arg is auto-fill, auto-fit, or a number
+    if (count_val->type == CSS_VALUE_TYPE_KEYWORD) {
+        if (count_val->data.keyword == CSS_VALUE_AUTO_FILL) {
+            is_auto_fill = true;
+            log_debug("[CSS] repeat(auto-fill, ...) detected");
+        } else if (count_val->data.keyword == CSS_VALUE_AUTO_FIT) {
+            is_auto_fit = true;
+            log_debug("[CSS] repeat(auto-fit, ...) detected");
+        }
+    } else if (count_val->type == CSS_VALUE_TYPE_NUMBER) {
+        repeat_count = (int)count_val->data.number.value;
+        log_debug("[CSS] repeat(%d, ...) detected", repeat_count);
+    }
+
+    if (!is_auto_fill && !is_auto_fit && repeat_count <= 0) {
+        log_debug("[CSS] Invalid repeat() count");
+        return NULL;
+    }
+
+    // Parse the track sizes in the repeat pattern
+    int track_count = val->data.function->arg_count - 1;
+    GridTrackSize** repeat_tracks = (GridTrackSize**)calloc(track_count, sizeof(GridTrackSize*));
+    if (!repeat_tracks) return NULL;
+
+    int actual_track_count = 0;
+    for (int i = 1; i < val->data.function->arg_count && actual_track_count < track_count; i++) {
+        GridTrackSize* ts = parse_css_value_to_track_size(val->data.function->args[i]);
+        if (ts) {
+            repeat_tracks[actual_track_count++] = ts;
+        }
+    }
+
+    if (actual_track_count == 0) {
+        free(repeat_tracks);
+        return NULL;
+    }
+
+    // Create the repeat track size
+    GridTrackSize* track_size = (GridTrackSize*)calloc(1, sizeof(GridTrackSize));
+    if (!track_size) {
+        free(repeat_tracks);
+        return NULL;
+    }
+
+    track_size->type = GRID_TRACK_SIZE_REPEAT;
+    track_size->repeat_count = repeat_count;
+    track_size->repeat_tracks = repeat_tracks;
+    track_size->repeat_track_count = actual_track_count;
+    track_size->is_auto_fill = is_auto_fill;
+    track_size->is_auto_fit = is_auto_fit;
+
+    log_debug("[CSS]   parsed repeat(%s%d, %d tracks)",
+              is_auto_fill ? "auto-fill, " : (is_auto_fit ? "auto-fit, " : ""),
+              repeat_count, actual_track_count);
+
+    return track_size;
+}
+
 static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
     if (!val) return NULL;
 
@@ -967,6 +1060,16 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
             track_size = create_grid_track_size(GRID_TRACK_SIZE_MAX_CONTENT, 0);
             log_debug("[CSS]   parsed track: max-content");
         }
+    } else if (val->type == CSS_VALUE_TYPE_FUNCTION) {
+        // Handle function types: minmax(), repeat(), fit-content()
+        const char* func_name = val->data.function->name;
+        if (func_name) {
+            if (strcmp(func_name, "minmax") == 0) {
+                track_size = parse_minmax_function(val);
+            } else if (strcmp(func_name, "repeat") == 0) {
+                track_size = parse_repeat_function(val);
+            }
+        }
     }
 
     return track_size;
@@ -974,33 +1077,54 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
 
 // Parse grid track list from CSS value list, handling repeat() functions
 // The list may contain: lengths, percentages, keywords, or repeat(count, track-size)
-// When repeat() is detected by CUSTOM type with name "repeat(" followed by number and track size
+// Parse grid track list from CSS value list
+// Now supports: lengths, percentages, keywords, minmax(), repeat() with auto-fill/auto-fit
 static void parse_grid_track_list(const CssValue* value, GridTrackList** track_list_ptr) {
     if (!value || value->type != CSS_VALUE_TYPE_LIST || !track_list_ptr) return;
 
     int count = value->data.list.count;
     CssValue** values = value->data.list.values;
 
-    // First pass: calculate total tracks needed (including repeat expansions)
+    log_debug("[CSS] Parsing grid track list with %d values", count);
+
+    // First pass: count tracks (auto-fill/auto-fit get 1 track as placeholder)
     int total_tracks = 0;
     for (int i = 0; i < count; i++) {
         CssValue* val = values[i];
         if (!val) continue;
 
-        // Check for repeat() pattern: CUSTOM("repeat(") followed by NUMBER followed by track values
-        if (val->type == CSS_VALUE_TYPE_CUSTOM && val->data.custom_property.name) {
+        if (val->type == CSS_VALUE_TYPE_FUNCTION) {
+            const char* func_name = val->data.function->name;
+            if (func_name && strcmp(func_name, "repeat") == 0) {
+                CssValue* count_val = val->data.function->arg_count > 0 ? val->data.function->args[0] : NULL;
+                if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
+                    // Fixed repeat count - expand
+                    int repeat_count = (int)count_val->data.number.value;
+                    int track_vals = val->data.function->arg_count - 1;
+                    total_tracks += repeat_count * (track_vals > 0 ? track_vals : 1);
+                } else {
+                    // auto-fill or auto-fit - just count as 1 (will be expanded at layout time)
+                    total_tracks += 1;
+                }
+            } else {
+                // minmax(), fit-content() - count as 1 track
+                total_tracks += 1;
+            }
+        } else if (val->type == CSS_VALUE_TYPE_LENGTH ||
+                   val->type == CSS_VALUE_TYPE_PERCENTAGE ||
+                   val->type == CSS_VALUE_TYPE_KEYWORD) {
+            total_tracks++;
+        }
+        // Legacy CUSTOM handling for old-style parsing
+        else if (val->type == CSS_VALUE_TYPE_CUSTOM && val->data.custom_property.name) {
             const char* name = val->data.custom_property.name;
-            // Check if this is "repeat(" (possibly with trailing characters)
             if (strncmp(name, "repeat(", 7) == 0 || strcmp(name, "repeat") == 0) {
-                // Next value should be the repeat count
                 if (i + 1 < count && values[i + 1] && values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
                     int repeat_count = (int)values[i + 1]->data.number.value;
-                    // Count remaining track values until we hit another CUSTOM or end
                     int track_values = 0;
                     for (int j = i + 2; j < count; j++) {
                         CssValue* tv = values[j];
-                        if (!tv) break;
-                        if (tv->type == CSS_VALUE_TYPE_CUSTOM) break; // End of repeat args (closing paren)
+                        if (!tv || tv->type == CSS_VALUE_TYPE_CUSTOM) break;
                         if (tv->type == CSS_VALUE_TYPE_LENGTH ||
                             tv->type == CSS_VALUE_TYPE_PERCENTAGE ||
                             tv->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1008,14 +1132,8 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                         }
                     }
                     total_tracks += repeat_count * (track_values > 0 ? track_values : 1);
-                    log_debug("[CSS] repeat(%d, %d track values) = %d total tracks",
-                              repeat_count, track_values, repeat_count * (track_values > 0 ? track_values : 1));
                 }
             }
-        } else if (val->type == CSS_VALUE_TYPE_LENGTH ||
-                   val->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                   val->type == CSS_VALUE_TYPE_KEYWORD) {
-            total_tracks++;
         }
     }
 
@@ -1032,7 +1150,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
     }
     GridTrackList* track_list = *track_list_ptr;
 
-    log_debug("[CSS] Parsing %d track values into %d total tracks", count, total_tracks);
+    log_debug("[CSS] Parsing %d values into %d allocated tracks", count, total_tracks);
 
     // Second pass: parse values
     int i = 0;
@@ -1040,30 +1158,63 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
         CssValue* val = values[i];
         if (!val) { i++; continue; }
 
-        // Check for repeat() pattern
+        // Handle FUNCTION type (modern parsing)
+        if (val->type == CSS_VALUE_TYPE_FUNCTION) {
+            const char* func_name = val->data.function->name;
+            if (func_name && strcmp(func_name, "repeat") == 0) {
+                // Check if auto-fill/auto-fit or fixed count
+                CssValue* count_val = val->data.function->arg_count > 0 ? val->data.function->args[0] : NULL;
+                bool is_auto = count_val && count_val->type == CSS_VALUE_TYPE_KEYWORD &&
+                               (count_val->data.keyword == CSS_VALUE_AUTO_FILL ||
+                                count_val->data.keyword == CSS_VALUE_AUTO_FIT);
+
+                if (is_auto) {
+                    // Keep repeat() as a single track - will be expanded at layout time
+                    GridTrackSize* ts = parse_repeat_function(val);
+                    if (ts) {
+                        track_list->tracks[track_list->track_count++] = ts;
+                        track_list->is_repeat = true;
+                    }
+                } else if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
+                    // Fixed repeat count - expand inline
+                    int repeat_count = (int)count_val->data.number.value;
+                    for (int r = 0; r < repeat_count && track_list->track_count < track_list->allocated_tracks; r++) {
+                        for (int a = 1; a < val->data.function->arg_count && track_list->track_count < track_list->allocated_tracks; a++) {
+                            GridTrackSize* ts = parse_css_value_to_track_size(val->data.function->args[a]);
+                            if (ts) {
+                                track_list->tracks[track_list->track_count++] = ts;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // minmax() or other function
+                GridTrackSize* ts = parse_css_value_to_track_size(val);
+                if (ts) {
+                    track_list->tracks[track_list->track_count++] = ts;
+                }
+            }
+            i++;
+            continue;
+        }
+
+        // Legacy CUSTOM handling for old-style parsing
         if (val->type == CSS_VALUE_TYPE_CUSTOM && val->data.custom_property.name) {
             const char* name = val->data.custom_property.name;
             if (strncmp(name, "repeat(", 7) == 0 || strcmp(name, "repeat") == 0) {
-                // Get repeat count
                 i++; // Move past "repeat("
                 if (i >= count || !values[i] || values[i]->type != CSS_VALUE_TYPE_NUMBER) {
-                    log_debug("[CSS] repeat() missing count");
                     continue;
                 }
                 int repeat_count = (int)values[i]->data.number.value;
                 i++; // Move past count
 
-                // Collect track values in repeat
-                const CssValue* repeat_tracks[16]; // Max 16 track sizes in a repeat
+                const CssValue* repeat_tracks[16];
                 int repeat_track_count = 0;
                 while (i < count && repeat_track_count < 16) {
                     CssValue* tv = values[i];
                     if (!tv) break;
-                    if (tv->type == CSS_VALUE_TYPE_CUSTOM) {
-                        // Closing paren or next repeat - skip and break
-                        i++;
-                        break;
-                    }
+                    if (tv->type == CSS_VALUE_TYPE_CUSTOM) { i++; break; }
                     if (tv->type == CSS_VALUE_TYPE_LENGTH ||
                         tv->type == CSS_VALUE_TYPE_PERCENTAGE ||
                         tv->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -1072,8 +1223,6 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                     i++;
                 }
 
-                // Expand repeat
-                log_debug("[CSS] Expanding repeat(%d, %d tracks)", repeat_count, repeat_track_count);
                 for (int r = 0; r < repeat_count && track_list->track_count < track_list->allocated_tracks; r++) {
                     for (int t = 0; t < repeat_track_count && track_list->track_count < track_list->allocated_tracks; t++) {
                         GridTrackSize* ts = parse_css_value_to_track_size(repeat_tracks[t]);
@@ -1082,9 +1231,8 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
                         }
                     }
                 }
-                continue; // Don't increment i again
+                continue;
             }
-            // Other CUSTOM values (like closing paren) - skip
             i++;
             continue;
         }
@@ -3685,7 +3833,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         // Grid Template Properties
         case CSS_PROPERTY_GRID_TEMPLATE_COLUMNS: {
-            log_debug("[CSS] Processing grid-template-columns property");
+            log_debug("[CSS] Processing grid-template-columns property, view_type=%d, block=%p",
+                      lycon->view->view_type, (void*)block);
             if (!block) {
                 log_debug("[CSS] grid-template-columns: Cannot apply to non-block element");
                 break;
@@ -3693,6 +3842,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             alloc_grid_prop(lycon, block);
             GridProp* grid = block->embed->grid;
+            log_debug("[CSS] grid-template-columns: value_type=%d, grid=%p", value->type, (void*)grid);
 
             // Handle "none" keyword
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
@@ -3706,10 +3856,48 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             // Parse list of track sizes using helper function
             if (value->type == CSS_VALUE_TYPE_LIST) {
-                log_debug("[CSS] grid-template-columns: using parse_grid_track_list helper");
+                log_debug("[CSS] grid-template-columns: using parse_grid_track_list helper (LIST)");
                 parse_grid_track_list(value, &grid->grid_template_columns);
                 log_debug("[CSS] grid-template-columns: %d tracks parsed",
                           grid->grid_template_columns ? grid->grid_template_columns->track_count : 0);
+            }
+            // Handle single function value (e.g., repeat(...))
+            else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                log_debug("[CSS] grid-template-columns: handling single FUNCTION value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    // For fixed-count repeat(), expand immediately
+                    if (ts->type == GRID_TRACK_SIZE_REPEAT && !ts->is_auto_fill && !ts->is_auto_fit && ts->repeat_count > 0) {
+                        int total = ts->repeat_count * ts->repeat_track_count;
+                        log_debug("[CSS] grid-template-columns: expanding fixed repeat(%d, ...) -> %d tracks",
+                                  ts->repeat_count, total);
+                        if (!grid->grid_template_columns || grid->grid_template_columns->allocated_tracks < total) {
+                            if (grid->grid_template_columns) destroy_grid_track_list(grid->grid_template_columns);
+                            grid->grid_template_columns = create_grid_track_list(total);
+                        } else {
+                            grid->grid_template_columns->track_count = 0;
+                        }
+                        for (int r = 0; r < ts->repeat_count; r++) {
+                            for (int t = 0; t < ts->repeat_track_count; t++) {
+                                grid->grid_template_columns->tracks[grid->grid_template_columns->track_count++] = ts->repeat_tracks[t];
+                            }
+                        }
+                    } else {
+                        // auto-fill/auto-fit or other function - store as single track for layout-time expansion
+                        if (!grid->grid_template_columns) {
+                            grid->grid_template_columns = create_grid_track_list(1);
+                        } else {
+                            grid->grid_template_columns->track_count = 0;
+                        }
+                        grid->grid_template_columns->tracks[0] = ts;
+                        grid->grid_template_columns->track_count = 1;
+                        if (ts->type == GRID_TRACK_SIZE_REPEAT) {
+                            grid->grid_template_columns->is_repeat = true;
+                        }
+                    }
+                    log_debug("[CSS] grid-template-columns: parsed FUNCTION -> %d tracks",
+                              grid->grid_template_columns->track_count);
+                }
             }
             break;
         }
@@ -3740,6 +3928,44 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 parse_grid_track_list(value, &grid->grid_template_rows);
                 log_debug("[CSS] grid-template-rows: %d tracks parsed",
                           grid->grid_template_rows ? grid->grid_template_rows->track_count : 0);
+            }
+            // Handle single function value (e.g., repeat(...))
+            else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                log_debug("[CSS] grid-template-rows: handling single FUNCTION value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    // For fixed-count repeat(), expand immediately
+                    if (ts->type == GRID_TRACK_SIZE_REPEAT && !ts->is_auto_fill && !ts->is_auto_fit && ts->repeat_count > 0) {
+                        int total = ts->repeat_count * ts->repeat_track_count;
+                        log_debug("[CSS] grid-template-rows: expanding fixed repeat(%d, ...) -> %d tracks",
+                                  ts->repeat_count, total);
+                        if (!grid->grid_template_rows || grid->grid_template_rows->allocated_tracks < total) {
+                            if (grid->grid_template_rows) destroy_grid_track_list(grid->grid_template_rows);
+                            grid->grid_template_rows = create_grid_track_list(total);
+                        } else {
+                            grid->grid_template_rows->track_count = 0;
+                        }
+                        for (int r = 0; r < ts->repeat_count; r++) {
+                            for (int t = 0; t < ts->repeat_track_count; t++) {
+                                grid->grid_template_rows->tracks[grid->grid_template_rows->track_count++] = ts->repeat_tracks[t];
+                            }
+                        }
+                    } else {
+                        // auto-fill/auto-fit or other function
+                        if (!grid->grid_template_rows) {
+                            grid->grid_template_rows = create_grid_track_list(1);
+                        } else {
+                            grid->grid_template_rows->track_count = 0;
+                        }
+                        grid->grid_template_rows->tracks[0] = ts;
+                        grid->grid_template_rows->track_count = 1;
+                        if (ts->type == GRID_TRACK_SIZE_REPEAT) {
+                            grid->grid_template_rows->is_repeat = true;
+                        }
+                    }
+                    log_debug("[CSS] grid-template-rows: parsed FUNCTION -> %d tracks",
+                              grid->grid_template_rows->track_count);
+                }
             }
             break;
         }
