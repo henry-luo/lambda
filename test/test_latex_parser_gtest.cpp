@@ -151,7 +151,8 @@ TEST_F(LatexParserTest, ParseDocumentClass) {
     Input* input = parse_latex(latex);
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
-    EXPECT_GE(count_elements_by_tag(input->root, "documentclass"), 1);
+    // Tree-sitter parser uses "class_include" not "documentclass"
+    EXPECT_GE(count_elements_by_tag(input->root, "class_include"), 1);
 }
 
 TEST_F(LatexParserTest, ParseSection) {
@@ -198,7 +199,8 @@ TEST_F(LatexParserTest, ParseItemizeEnvironment) {
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
     EXPECT_GE(count_elements_by_tag(input->root, "itemize"), 1);
-    EXPECT_GE(count_elements_by_tag(input->root, "item"), 2);
+    // Tree-sitter parser uses "enum_item" not "item"
+    EXPECT_GE(count_elements_by_tag(input->root, "enum_item"), 2);
 }
 
 TEST_F(LatexParserTest, ParseEnumerateEnvironment) {
@@ -238,7 +240,8 @@ TEST_F(LatexParserTest, ParseVerbatimEnvironment) {
     Input* input = parse_latex(latex);
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
-    EXPECT_GE(count_elements_by_tag(input->root, "verbatim"), 1);
+    // Tree-sitter parser uses "verbatim_environment" not "verbatim"
+    EXPECT_GE(count_elements_by_tag(input->root, "verbatim_environment"), 1);
 }
 
 // =============================================================================
@@ -293,7 +296,8 @@ TEST_F(LatexParserTest, ParseUsepackage) {
     Input* input = parse_latex(latex);
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
-    EXPECT_GE(count_elements_by_tag(input->root, "usepackage"), 1);
+    // Tree-sitter parser uses "package_include" not "usepackage"
+    EXPECT_GE(count_elements_by_tag(input->root, "package_include"), 1);
 }
 
 TEST_F(LatexParserTest, ParseTitleAuthorDate) {
@@ -304,8 +308,9 @@ TEST_F(LatexParserTest, ParseTitleAuthorDate) {
     Input* input = parse_latex(latex);
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
-    EXPECT_GE(count_elements_by_tag(input->root, "title"), 1);
-    EXPECT_GE(count_elements_by_tag(input->root, "author"), 1);
+    // Tree-sitter parser uses "title_declaration", "author_declaration", but "date" (not date_declaration)
+    EXPECT_GE(count_elements_by_tag(input->root, "title_declaration"), 1);
+    EXPECT_GE(count_elements_by_tag(input->root, "author_declaration"), 1);
     EXPECT_GE(count_elements_by_tag(input->root, "date"), 1);
 }
 
@@ -322,7 +327,8 @@ TEST_F(LatexParserTest, ParseVerb) {
     Input* input = parse_latex(latex);
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
-    EXPECT_GE(count_elements_by_tag(input->root, "verb"), 1);
+    // Tree-sitter parser uses "verb_command" not "verb"
+    EXPECT_GE(count_elements_by_tag(input->root, "verb_command"), 1);
 }
 
 // =============================================================================
@@ -367,7 +373,8 @@ TEST_F(LatexParserTest, ParseBasicTestTex) {
     EXPECT_TRUE(verify_ast_valid(input));
 
     // basic_test.tex should have document structure
-    EXPECT_GE(count_elements_by_tag(input->root, "documentclass"), 1);
+    // Tree-sitter parser uses "class_include" not "documentclass"
+    EXPECT_GE(count_elements_by_tag(input->root, "class_include"), 1);
     EXPECT_GE(count_elements_by_tag(input->root, "document"), 1);
     EXPECT_GE(count_elements_by_tag(input->root, "section"), 1);
 }
@@ -407,7 +414,8 @@ TEST_F(LatexParserTest, DISABLED_ParseComprehensiveTex) {
     EXPECT_TRUE(verify_ast_valid(input));
 
     // comprehensive.tex is a full document
-    EXPECT_GE(count_elements_by_tag(input->root, "documentclass"), 1);
+    // Tree-sitter parser uses "class_include" not "documentclass"
+    EXPECT_GE(count_elements_by_tag(input->root, "class_include"), 1);
 }
 
 TEST_F(LatexParserTest, DISABLED_ParseTestTex) {
@@ -472,7 +480,8 @@ TEST_F(LatexParserTest, ParseComplexDocumentNoMath) {
     EXPECT_TRUE(verify_ast_valid(input));
 
     // Verify structure
-    EXPECT_GE(count_elements_by_tag(input->root, "documentclass"), 1);
+    // Tree-sitter parser uses "class_include" not "documentclass"
+    EXPECT_GE(count_elements_by_tag(input->root, "class_include"), 1);
     EXPECT_GE(count_elements_by_tag(input->root, "document"), 1);
     EXPECT_GE(count_elements_by_tag(input->root, "section"), 2);
     EXPECT_GE(count_elements_by_tag(input->root, "subsection"), 1);
@@ -526,7 +535,8 @@ TEST_F(LatexParserTest, ParseGroup) {
     Input* input = parse_latex(latex);
     ASSERT_NE(input, nullptr);
     EXPECT_TRUE(verify_ast_valid(input));
-    EXPECT_GE(count_elements_by_tag(input->root, "group"), 1);
+    // Tree-sitter parser uses "curly_group" not "group"
+    EXPECT_GE(count_elements_by_tag(input->root, "curly_group"), 1);
 }
 
 // Main function
