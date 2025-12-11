@@ -244,8 +244,19 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("block: given_height: %f, height: %f, flow height: %f", lycon->block.given_height, block->height, flow_height);
     }
     else {
-        log_debug("finalize block flow, set block height to flow height: %f", flow_height);
-        block->height = flow_height;
+        // For non-flex containers, set height to flow height
+        // For flex containers, the height is already set by flex algorithm
+        bool has_embed = block->embed != nullptr;
+        bool has_flex = has_embed && block->embed->flex != nullptr;
+        log_debug("finalize block flow: has_embed=%d, has_flex=%d, block=%s",
+                  has_embed, has_flex, block->node_name());
+        if (!has_flex) {
+            log_debug("finalize block flow, set block height to flow height: %f", flow_height);
+            block->height = flow_height;
+        } else {
+            log_debug("finalize block flow: flex container, keeping height: %f (flow=%f)",
+                      block->height, flow_height);
+        }
     }
     // Update scroller clip if height changed and scroller has clipping enabled
     // This ensures the clip region is correct after auto-height is calculated
