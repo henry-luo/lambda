@@ -333,6 +333,9 @@
                 "lambda/validator/error_reporting.cpp",
                 "lambda/validator/suggestions.cpp",
                 "lambda/format/format.cpp",
+                "lambda/format/html_writer.cpp",
+                "lambda/format/latex_generator.cpp",
+                "lambda/format/html_generator.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/parse_error.cpp",
@@ -1975,6 +1978,19 @@
                         ],
                         "special_flags": "-std=c++17 -I/opt/homebrew/include",
                         "icon": "📄"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_lists_envs.cpp",
+                        "name": "LaTeX-to-HTML V2: Lists & Environments Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_lists_envs.exe",
+                        "icon": "📋"
                     }
                 ],
                 "type": "input",
