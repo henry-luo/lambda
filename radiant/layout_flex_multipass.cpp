@@ -37,6 +37,15 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
     log_enter();
     log_debug("=== LAYING OUT ABSOLUTE POSITIONED CHILDREN ===");
 
+    // Get flex direction from the container parameter directly (not lycon->flex_container!)
+    // This is critical for nested flex containers - lycon->flex_container points to the
+    // outer flex container, but we need the direction of the actual container being processed.
+    int flex_direction = CSS_VALUE_ROW;  // default
+    if (container->embed && container->embed->flex) {
+        flex_direction = container->embed->flex->direction;
+        log_debug("Container %s has flex-direction: %d", container->node_name(), flex_direction);
+    }
+
     DomNode* child = container->first_child;
     while (child) {
         if (child->is_element()) {
@@ -53,6 +62,11 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
                 BlockContext pa_block = lycon->block;
                 Linebox pa_line = lycon->line;
 
+                // Determine if we need reverse static position adjustment
+                bool is_row = (flex_direction == CSS_VALUE_ROW || flex_direction == CSS_VALUE_ROW_REVERSE);
+                bool is_reverse = (flex_direction == CSS_VALUE_ROW_REVERSE || flex_direction == CSS_VALUE_COLUMN_REVERSE);
+                bool needs_reverse_adjustment = is_reverse;
+
                 // Set up lycon->block dimensions from the child's CSS
                 // This is needed because layout_abs_block expects given_width/given_height
                 // to be set in the lycon->block context
@@ -66,6 +80,57 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
 
                 // Lay out the absolute positioned block
                 layout_abs_block(lycon, child, child_block, &pa_block, &pa_line);
+
+                // CRITICAL: For flex containers with reverse direction, adjust the static
+                // position AFTER layout (when we know the item's size).
+                // Per CSS Flexbox spec section 4.1: the static position of an absolute element
+                // is where it would be if it were the only flex item in the flex container.
+                // For reverse containers, this is at the end of the container minus item size.
+                if (needs_reverse_adjustment && child_block->position) {
+                    // Calculate container's content area (excluding padding and border)
+                    float container_content_width = container->width;
+                    float container_content_height = container->height;
+                    float border_offset_x = 0, border_offset_y = 0;
+
+                    if (container->bound) {
+                        container_content_width -= container->bound->padding.left + container->bound->padding.right;
+                        container_content_height -= container->bound->padding.top + container->bound->padding.bottom;
+                        border_offset_x = container->bound->padding.left;
+                        border_offset_y = container->bound->padding.top;
+                        if (container->bound->border) {
+                            container_content_width -= container->bound->border->width.left + container->bound->border->width.right;
+                            container_content_height -= container->bound->border->width.top + container->bound->border->width.bottom;
+                            border_offset_x += container->bound->border->width.left;
+                            border_offset_y += container->bound->border->width.top;
+                        }
+                    }
+
+                    if (is_row) {
+                        // row-reverse: adjust X if using static position (no left/right specified)
+                        if (!child_block->position->has_left && !child_block->position->has_right) {
+                            float static_x = container_content_width - child_block->width + border_offset_x;
+                            // For row-reverse, margin-right acts like margin-start (at the end)
+                            if (child_block->bound) {
+                                static_x -= child_block->bound->margin.right;
+                            }
+                            log_debug("row-reverse: adjusting static X from %.1f to %.1f (content_w=%.1f - item_w=%.1f + offset=%.1f)",
+                                      child_block->x, static_x, container_content_width, child_block->width, border_offset_x);
+                            child_block->x = static_x;
+                        }
+                    } else {
+                        // column-reverse: adjust Y if using static position (no top/bottom specified)
+                        if (!child_block->position->has_top && !child_block->position->has_bottom) {
+                            float static_y = container_content_height - child_block->height + border_offset_y;
+                            // For column-reverse, margin-bottom acts like margin-start (at the end)
+                            if (child_block->bound) {
+                                static_y -= child_block->bound->margin.bottom;
+                            }
+                            log_debug("column-reverse: adjusting static Y from %.1f to %.1f (content_h=%.1f - item_h=%.1f + offset=%.1f)",
+                                      child_block->y, static_y, container_content_height, child_block->height, border_offset_y);
+                            child_block->y = static_y;
+                        }
+                    }
+                }
 
                 // Restore parent context
                 lycon->block = pa_block;
