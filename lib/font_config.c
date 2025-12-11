@@ -1295,10 +1295,16 @@ static FontEntry* create_font_placeholder(const char* file_path, Arena* arena) {
     // Simple heuristics for common font families based on filename
     if (strstr(filename, "Arial") || strstr(filename, "arial")) {
         font->family_name = arena_strdup(arena, "Arial");
+    } else if (strstr(filename, "Times New Roman") || strstr(filename, "times new roman")) {
+        // Must check "Times New Roman" before "Times" since strstr("Times New Roman", "Times") == true
+        font->family_name = arena_strdup(arena, "Times New Roman");
     } else if (strstr(filename, "Times") || strstr(filename, "times")) {
         font->family_name = arena_strdup(arena, "Times");
     } else if (strstr(filename, "Helvetica") || strstr(filename, "helvetica")) {
         font->family_name = arena_strdup(arena, "Helvetica");
+    } else if (strstr(filename, "Courier New") || strstr(filename, "courier new")) {
+        // Must check "Courier New" before "Courier"
+        font->family_name = arena_strdup(arena, "Courier New");
     } else if (strstr(filename, "Courier") || strstr(filename, "courier")) {
         font->family_name = arena_strdup(arena, "Courier");
     } else if (strstr(filename, "Georgia") || strstr(filename, "georgia")) {
