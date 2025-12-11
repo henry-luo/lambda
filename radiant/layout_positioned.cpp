@@ -224,14 +224,14 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     assert(content_height >= 0);
 
     if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+        // for border-box, CSS width includes padding and border, so subtract them to get content width
         content_width = adjust_min_max_width(block, content_width);
         if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         content_height = adjust_min_max_height(block, content_height);
         if (block->bound) content_height = adjust_border_padding_height(block, content_height);
     } else {
-        content_width = adjust_border_padding_width(block, content_width);
+        // for content-box (default), CSS width IS the content width, don't subtract padding/border
         if (block->bound) content_width = adjust_min_max_width(block, content_width);
-        content_height = adjust_border_padding_height(block, content_height);
         if (block->bound) content_height = adjust_min_max_height(block, content_height);
     }
     lycon->block.content_width = content_width;  lycon->block.content_height = content_height;

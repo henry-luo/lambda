@@ -1455,20 +1455,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     // Validate the parsed value before returning
     if (decl->value) {
+        // Check if this property disallows negative values
         bool disallow_negative = false;
-        float value_to_check = 0;
-
-        // Check if this is a length or number value
-        if (decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            value_to_check = decl->value->data.length.value;
-        } else if (decl->value->type == CSS_VALUE_TYPE_NUMBER) {
-            value_to_check = decl->value->data.number.value;
-        } else {
-            // Not a numeric value, skip validation
-            return decl;
-        }
-
-        // Properties that cannot have negative values
         switch (decl->property_id) {
             // width, height, and their min/max variants cannot be negative
             case CSS_PROPERTY_WIDTH:
@@ -1477,7 +1465,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             case CSS_PROPERTY_MIN_HEIGHT:
             case CSS_PROPERTY_MAX_WIDTH:
             case CSS_PROPERTY_MAX_HEIGHT:
-            // padding properties cannot be negative
+            // padding properties (including shorthand) cannot be negative
+            case CSS_PROPERTY_PADDING:
             case CSS_PROPERTY_PADDING_TOP:
             case CSS_PROPERTY_PADDING_RIGHT:
             case CSS_PROPERTY_PADDING_BOTTOM:
@@ -1503,12 +1492,38 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 break;
         }
 
-        if (disallow_negative && value_to_check < 0) {
-            // reject negative value for properties that don't allow it
-            // per CSS spec, return NULL to prevent invalid declaration from entering cascade
-            log_debug("[CSS Parse] Rejecting negative value %.2f for property ID %d",
-                   value_to_check, decl->property_id);
-            return NULL;
+        if (disallow_negative) {
+            // Helper lambda to check a single value for negative
+            auto check_negative = [](const CssValue* v) -> bool {
+                if (!v) return false;
+                if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                    return v->data.length.value < 0;
+                } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                    return v->data.number.value < 0;
+                }
+                return false;
+            };
+
+            bool has_negative = false;
+            if (decl->value->type == CSS_VALUE_TYPE_LIST) {
+                // Check each value in the list (for shorthand properties like padding)
+                for (int i = 0; i < decl->value->data.list.count; i++) {
+                    if (check_negative(decl->value->data.list.values[i])) {
+                        has_negative = true;
+                        break;
+                    }
+                }
+            } else {
+                has_negative = check_negative(decl->value);
+            }
+
+            if (has_negative) {
+                // reject negative value for properties that don't allow it
+                // per CSS spec, return NULL to prevent invalid declaration from entering cascade
+                log_debug("[CSS Parse] Rejecting negative value for property ID %d",
+                       decl->property_id);
+                return NULL;
+            }
         }
     }
 
