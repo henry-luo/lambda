@@ -10,6 +10,33 @@
 
 /* Explicit strdup declaration for compatibility */
 extern char *strdup(const char *s);
+
+/**
+ * Resolve CSS generic font family to system font names.
+ * Chrome default fonts (macOS):
+ * - serif: Times New Roman
+ * - sans-serif: Arial
+ * - monospace: Courier New
+ * Returns a list of font names to try in order.
+ */
+static const char** resolve_generic_family(const char* family) {
+    // Chrome default fonts for macOS
+    static const char* serif_fonts[] = {"Times New Roman", "Times", "Georgia", NULL};
+    static const char* sans_serif_fonts[] = {"Arial", "Helvetica", NULL};
+    static const char* monospace_fonts[] = {"Courier New", "Courier", "Monaco", NULL};
+    static const char* cursive_fonts[] = {"Comic Sans MS", "Apple Chancery", NULL};
+    static const char* fantasy_fonts[] = {"Impact", "Papyrus", NULL};
+
+    if (!family) return NULL;
+
+    if (strcmp(family, "serif") == 0) return serif_fonts;
+    if (strcmp(family, "sans-serif") == 0) return sans_serif_fonts;
+    if (strcmp(family, "monospace") == 0) return monospace_fonts;
+    if (strcmp(family, "cursive") == 0) return cursive_fonts;
+    if (strcmp(family, "fantasy") == 0) return fantasy_fonts;
+
+    return NULL;  // not a generic family
+}
 typedef struct FontfaceEntry {
     char* name;
     FT_Face face;
@@ -403,20 +430,33 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     // If @font-face loading failed, fall back to original method
     if (!fbox->ft_face) {
-        // Early-exit optimization: Check if font family exists in database before expensive lookups
-        ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_to_load);
-        bool family_exists = (family_matches && family_matches->length > 0);
-        int match_count = family_matches ? family_matches->length : 0;
-
-        if (family_exists) {
-            // Family exists in database - do full styled lookup (weight, style matching)
-            log_debug("Font family '%s' exists in database (%d matches), doing styled lookup", family_to_load, match_count);
-            arraylist_free(family_matches);
-            fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
+        // Check if this is a CSS generic font family (serif, sans-serif, monospace, etc.)
+        const char** generic_fonts = resolve_generic_family(family_to_load);
+        if (generic_fonts) {
+            // Try each font in the generic family's preference list
+            for (int i = 0; generic_fonts[i] && !fbox->ft_face; i++) {
+                log_debug("Resolving generic family '%s' to '%s'", family_to_load, generic_fonts[i]);
+                fbox->ft_face = load_styled_font(uicon, generic_fonts[i], fprop);
+                if (fbox->ft_face) {
+                    log_info("Resolved generic family '%s' to '%s'", family_to_load, generic_fonts[i]);
+                }
+            }
         } else {
-            // Family doesn't exist in database - skip expensive platform lookup, go straight to fallbacks
-            log_debug("Font family '%s' not in database, skipping styled lookup (early-exit)", family_to_load);
-            if (family_matches) arraylist_free(family_matches);
+            // Not a generic family - check database for exact match
+            ArrayList* family_matches = font_database_find_all_matches(uicon->font_db, family_to_load);
+            bool family_exists = (family_matches && family_matches->length > 0);
+            int match_count = family_matches ? family_matches->length : 0;
+
+            if (family_exists) {
+                // Family exists in database - do full styled lookup (weight, style matching)
+                log_debug("Font family '%s' exists in database (%d matches), doing styled lookup", family_to_load, match_count);
+                arraylist_free(family_matches);
+                fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
+            } else {
+                // Family doesn't exist in database - skip expensive platform lookup, go straight to fallbacks
+                log_debug("Font family '%s' not in database, skipping styled lookup (early-exit)", family_to_load);
+                if (family_matches) arraylist_free(family_matches);
+            }
         }
     }
 

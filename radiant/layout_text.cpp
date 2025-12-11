@@ -5,6 +5,28 @@
 
 #include "../lib/log.h"
 
+// Platform-specific font metrics function (defined in font_lookup_platform.c)
+// Returns 1 if metrics were retrieved, 0 to fall back to FreeType
+extern "C" int get_font_metrics_platform(const char* font_family, float font_size,
+                                          float* out_ascent, float* out_descent, float* out_line_height);
+
+// Get font cell height (ascent + descent) for text rect height
+// This matches browser's Range.getClientRects() which uses font metrics, not CSS line-height
+static float get_font_cell_height(FT_Face face) {
+    const char* family = face->family_name;
+    float font_size = (float)face->size->metrics.y_ppem;
+
+    // Try platform-specific implementation first (CoreText on macOS)
+    float ascent, descent, line_height;
+    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+        // Return ascent + descent (without leading)
+        return ascent + descent;
+    }
+
+    // Fallback: use FreeType metrics.height
+    return face->size->metrics.height / 64.0f;
+}
+
 // ============================================================================
 // Intrinsic Sizing Mode Helpers
 // ============================================================================
@@ -403,7 +425,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     rect->start_index = str - text_start;
     float font_height = lycon->font.ft_face->size->metrics.height / 64.0;
     rect->x = lycon->line.advance_x;
-    rect->height = font_height;  // should text->height be lycon->block.line_height or font_height?
+    // browser text rect height uses font metrics (ascent+descent), NOT CSS line-height
+    // CSS line-height affects line spacing/positioning, but text rect height is font-based
+    // Use platform-specific metrics (CoreText on macOS) for accurate ascent+descent
+    rect->height = get_font_cell_height(lycon->font.ft_face);
 
     // lead_y applies to baseline aligned text; not other vertical aligns
     if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
