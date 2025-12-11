@@ -6,9 +6,9 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; font-size: 14px; }
-    
+
     .label { font-size: 12px; color: #666; margin: 10px 0 5px; }
-    
+
     /* Test 1: minmax(200px, 1fr) */
     .grid1 {
       display: grid;
@@ -18,7 +18,7 @@
       padding: 10px;
       margin-bottom: 20px;
     }
-    
+
     /* Test 2: minmax(100px, 300px) with fixed max */
     .grid2 {
       display: grid;
@@ -28,7 +28,7 @@
       padding: 10px;
       margin-bottom: 20px;
     }
-    
+
     /* Test 3: minmax(auto, 1fr) */
     .grid3 {
       display: grid;
@@ -38,7 +38,7 @@
       padding: 10px;
       margin-bottom: 20px;
     }
-    
+
     .item {
       background: #66bb6a;
       color: white;
@@ -53,13 +53,13 @@
     <div class="item">Column 1</div>
     <div class="item">Column 2</div>
   </div>
-  
+
   <div class="label">minmax(100px, 300px) - fixed max</div>
   <div class="grid2">
     <div class="item">Column 1</div>
     <div class="item">Column 2</div>
   </div>
-  
+
   <div class="label">minmax(auto, 1fr) - 3 columns</div>
   <div class="grid3">
     <div class="item">A</div>
