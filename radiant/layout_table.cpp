@@ -2732,7 +2732,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_width = explicit_table_width;
     }
 
-    log_debug("Final table width for layout: %dpx", table_width);
+    log_debug("Final table width for layout: %.0fpx", table_width);
     log_debug("===== CSS 2.1 TABLE LAYOUT COMPLETE =====");
 
     // Step 4: Position cells and calculate row heights with CSS 2.1 border model
@@ -2904,28 +2904,121 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
         caption->x = 0;
         caption->y = 0;
+
+        // Check if caption needs re-layout due to width change
+        // This happens because caption was laid out before table width was calculated
+        float old_width = caption->width;
         caption->width = table_width;
 
-        // Re-align caption text content now that we know the correct width
-        // This fixes centering which was calculated with wrong width during mark_table_node
-        if (caption->blk && caption->blk->text_align == CSS_VALUE_CENTER) {
-            for (View* child = caption->first_child; child; child = child->next_sibling) {
-                if (child->view_type == RDT_VIEW_TEXT) {
-                    ViewText* text = (ViewText*)child;
-                    // Center the text within the caption width
-                    float text_width = text->width;
-                    float offset = (table_width - text_width) / 2.0f;
-                    if (offset > 0) {
-                        text->x = offset;
-                        if (text->rect) {
-                            text->rect->x = offset;
+        // If the width increased, re-layout caption content to potentially unwrap text
+        if (table_width > old_width + 0.5f) {
+            log_debug("Caption width changed: %.1f -> %.1f, re-laying out content", old_width, table_width);
+
+            // Reset child views before re-layout
+            // This is necessary because the DOM children still have their old view state
+            DomElement* dom_elem = static_cast<DomElement*>(caption);
+            if (dom_elem) {
+                for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+                    if (child->is_text()) {
+                        // Reset text node's view state
+                        child->view_type = RDT_VIEW_NONE;
+                        ViewText* text_view = (ViewText*)child;
+                        text_view->rect = nullptr;
+                        text_view->width = 0;
+                        text_view->height = 0;
+                    }
+                }
+            }
+
+            // Note: We do NOT clear caption->first_child because that's the DOM tree link!
+            // The views share memory with DOM nodes (ViewElement extends DomElement)
+
+            // Save and set up layout context for caption
+            BlockContext saved_block = lycon->block;
+            Linebox saved_line = lycon->line;
+            View* saved_view = lycon->view;
+
+            lycon->view = (View*)caption;
+            lycon->block.content_width = (float)table_width;
+            lycon->block.content_height = 10000;
+            lycon->block.advance_y = 0;
+            lycon->line.left = 0;
+            lycon->line.right = table_width;
+            lycon->line.advance_x = 0;
+            lycon->line.is_line_start = true;
+            line_reset(lycon);
+
+            // Propagate text-align from caption's resolved style
+            if (caption->blk && caption->blk->text_align) {
+                lycon->block.text_align = caption->blk->text_align;
+            }
+
+            // Re-layout caption content
+            if (dom_elem) {
+                DomNode* child = dom_elem->first_child;
+                log_debug("Caption re-layout: dom_elem=%p, first_child=%p", dom_elem, child);
+                for (; child; child = child->next_sibling) {
+                    log_debug("Caption re-layout: laying out child %s (%p)", child->node_name(), child);
+                    layout_flow_node(lycon, child);
+                }
+                log_debug("Caption re-layout: after children, advance_y=%.1f, is_line_start=%d",
+                          lycon->block.advance_y, lycon->line.is_line_start);
+                if (!lycon->line.is_line_start) { line_break(lycon); }
+            }
+
+            caption->height = lycon->block.advance_y;
+            log_debug("Caption re-layout complete: width=%.1f, height=%.1f", table_width, caption->height);
+
+            // Recalculate caption_height since we re-laid out the caption
+            float padding_v = 0;
+            float border_v = 0;
+            float margin_v = 0;
+            if (caption->bound) {
+                padding_v = caption->bound->padding.top + caption->bound->padding.bottom;
+                if (table->tb && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
+                    margin_v = caption->bound->margin.bottom;
+                } else {
+                    margin_v = caption->bound->margin.top;
+                }
+                if (caption->bound->border) {
+                    border_v = caption->bound->border->width.top + caption->bound->border->width.bottom;
+                }
+            }
+            caption_height = (int)(caption->height + padding_v + border_v + margin_v);
+            log_debug("Caption height recalculated after re-layout: %d", caption_height);
+
+            // Update current_y since caption_height changed
+            // current_y was set before re-layout with old caption_height
+            current_y = caption_height + table_border_top + table_padding_top;
+            if (!table->tb->border_collapse && table->tb->border_spacing_v > 0) {
+                current_y += table->tb->border_spacing_v;
+            }
+            log_debug("Updated current_y after caption re-layout: %d", current_y);
+
+            lycon->block = saved_block;
+            lycon->line = saved_line;
+            lycon->view = saved_view;
+        } else {
+            // Just re-align caption text content for centering
+            if (caption->blk && caption->blk->text_align == CSS_VALUE_CENTER) {
+                for (View* child = caption->first_child; child; child = child->next_sibling) {
+                    if (child->view_type == RDT_VIEW_TEXT) {
+                        ViewText* text = (ViewText*)child;
+                        // Center the text within the caption width
+                        float text_width = text->width;
+                        float offset = (table_width - text_width) / 2.0f;
+                        if (offset > 0) {
+                            text->x = offset;
+                            if (text->rect) {
+                                text->rect->x = offset;
+                            }
                         }
                     }
                 }
             }
         }
 
-        log_debug("Positioned caption at top: y=0, width=%d", table_width);
+        log_debug("Positioned caption at top: y=0, width=%.1f", table_width);
     }
 
     // Global row index for tracking row positions across all row groups
