@@ -270,7 +270,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             log_debug("AXIS INIT - vertical branch");
             if (flex_layout->main_axis_size == 0.0f) {
                 // For column flex with auto height, calculate height based on flex items
-                if (content_height <= 0) {
+                // CRITICAL: Only calculate auto-height if container does NOT have explicit height
+                bool has_explicit_height = container->blk && container->blk->given_height > 0;
+                if (content_height <= 0 && !has_explicit_height) {
                     // Auto-height column flex: calculate from flex items' intrinsic heights
                     int total_item_height = 0;
                     View* child = container->first_child;
@@ -1596,13 +1598,21 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 
             if (is_growing && item->fi->flex_grow > 0) {
                 // FLEX-GROW: Distribute positive free space
+                // Per CSS Flexbox spec: when sum(flex_grow) < 1.0, only distribute
+                // sum * free_space instead of all free space
+                // The distribution ratio is still normalized by total_flex_factor
+                double effective_free_space = (total_flex_factor < 1.0)
+                    ? remaining_free_space * total_flex_factor  // Distribute only sum * free_space
+                    : remaining_free_space;                     // Distribute all if sum >= 1
+
+                // Always normalize the ratio by total_flex_factor
                 double grow_ratio = item->fi->flex_grow / total_flex_factor;
-                int grow_amount = (int)round(grow_ratio * remaining_free_space);
+                int grow_amount = (int)round(grow_ratio * effective_free_space);
                 target_size = current_size + grow_amount;
                 total_distributed += grow_amount;
 
-                log_debug("ITERATIVE_FLEX - item %d: grow_ratio=%.4f, grow_amount=%d, %d→%d",
-                          i, grow_ratio, grow_amount, current_size, target_size);
+                log_debug("ITERATIVE_FLEX - item %d: total_flex=%.2f, effective_free=%.1f, grow_ratio=%.4f, grow_amount=%d, %d→%d",
+                          i, total_flex_factor, effective_free_space, grow_ratio, grow_amount, current_size, target_size);
 
             } else if (is_shrinking && item->fi->flex_shrink > 0) {
                 // FLEX-SHRINK: Distribute negative space using scaled shrink factor
