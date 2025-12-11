@@ -2,10 +2,51 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "intrinsic_sizing.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 
 #include "../lib/log.h"
 #include <float.h>
 #include <limits.h>
+
+// Helper to get explicit CSS width from DOM element's specified_style
+// Returns -1 if no explicit width is set, otherwise returns the width in pixels
+static float get_explicit_css_width(LayoutContext* lycon, ViewElement* elem) {
+    if (!elem || !elem->specified_style) return -1;
+
+    CssDeclaration* width_decl = style_tree_get_declaration(
+        elem->specified_style, CSS_PROPERTY_WIDTH);
+
+    if (!width_decl || !width_decl->value) return -1;
+
+    // Only consider absolute length values (not percentages, auto, etc.)
+    if (width_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        float width = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, width_decl->value);
+        if (!isnan(width) && width > 0) {
+            return width;
+        }
+    }
+
+    return -1;
+}
+
+// Helper to get explicit CSS height from DOM element's specified_style
+static float get_explicit_css_height(LayoutContext* lycon, ViewElement* elem) {
+    if (!elem || !elem->specified_style) return -1;
+
+    CssDeclaration* height_decl = style_tree_get_declaration(
+        elem->specified_style, CSS_PROPERTY_HEIGHT);
+
+    if (!height_decl || !height_decl->value) return -1;
+
+    if (height_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+        float height = resolve_length_value(lycon, CSS_PROPERTY_HEIGHT, height_decl->value);
+        if (!isnan(height) && height > 0) {
+            return height;
+        }
+    }
+
+    return -1;
+}
 
 // Content measurement for multi-pass flex layout
 // This file implements the first pass of the multi-pass flex layout algorithm
@@ -210,32 +251,67 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         elem_height = li_count * 18;  // ~18px per list item
                     }
                     else if (tag == HTM_TAG_DIV) {
-                        // Nested div - check if it has actual content
+                        // Nested div - check if it's a flex container and has actual content
                         // For empty divs (especially flex items), height should be 0
-                        bool has_content = false;
-                        if (elem) {
-                            DomNode* content = elem->first_child;
-                            while (content && !has_content) {
-                                if (content->is_element()) {
-                                    // Has nested element
-                                    has_content = true;
-                                } else if (content->is_text()) {
-                                    // Check if text is non-whitespace
-                                    const char* text = (const char*)content->text_data();
-                                    if (text) {
-                                        for (const char* p = text; *p; p++) {
-                                            if (!is_space((unsigned char)*p)) {
-                                                has_content = true;
-                                                break;
+                        // For nested flex containers, DON'T use estimation - let flex layout
+                        // determine height based on actual content
+
+                        // Check if this is a flex container by looking at DOM's specified_style
+                        // (display.inner may not be resolved yet during measurement pass)
+                        bool is_nested_flex = false;
+
+                        // First check view's display.inner if already resolved
+                        ViewElement* nested_view = (ViewElement*)elem;
+                        if (nested_view && nested_view->display.inner == CSS_VALUE_FLEX) {
+                            is_nested_flex = true;
+                        }
+
+                        // If not resolved, check DOM's specified CSS style
+                        if (!is_nested_flex && elem && elem->specified_style) {
+                            CssDeclaration* display_decl = style_tree_get_declaration(
+                                elem->specified_style, CSS_PROPERTY_DISPLAY);
+                            if (display_decl && display_decl->value &&
+                                display_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum display_value = display_decl->value->data.keyword;
+                                if (display_value == CSS_VALUE_FLEX ||
+                                    display_value == CSS_VALUE_INLINE_FLEX) {
+                                    is_nested_flex = true;
+                                    log_debug("Nested flex container detected via specified_style");
+                                }
+                            }
+                        }
+
+                        if (is_nested_flex) {
+                            // Nested flex container - don't estimate, use 0
+                            // The flex layout will determine actual height from content
+                            elem_height = 0;
+                            log_debug("Nested flex container: using 0 for height estimation");
+                        } else {
+                            bool has_content = false;
+                            if (elem) {
+                                DomNode* content = elem->first_child;
+                                while (content && !has_content) {
+                                    if (content->is_element()) {
+                                        // Has nested element
+                                        has_content = true;
+                                    } else if (content->is_text()) {
+                                        // Check if text is non-whitespace
+                                        const char* text = (const char*)content->text_data();
+                                        if (text) {
+                                            for (const char* p = text; *p; p++) {
+                                                if (!is_space((unsigned char)*p)) {
+                                                    has_content = true;
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
+                                    content = content->next_sibling;
                                 }
-                                content = content->next_sibling;
                             }
+                            // Only estimate height if div has actual content
+                            elem_height = has_content ? 56 : 0;
                         }
-                        // Only estimate height if div has actual content
-                        elem_height = has_content ? 56 : 0;
                     }
                     else elem_height = 20;  // Default element height
 
@@ -521,14 +597,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         return;
     }
 
-    // Skip if already calculated
-    bool is_horizontal = is_main_axis_horizontal(flex_layout);
-    if (is_horizontal && item->fi->has_intrinsic_width) {
-        log_debug("calculate_item_intrinsic_sizes: width already calculated");
-        return;
-    }
-    if (!is_horizontal && item->fi->has_intrinsic_height) {
-        log_debug("calculate_item_intrinsic_sizes: height already calculated");
+    // Skip if BOTH intrinsic sizes are already calculated
+    // We need both because cross-axis alignment may need the cross-axis intrinsic size
+    if (item->fi->has_intrinsic_width && item->fi->has_intrinsic_height) {
+        log_debug("calculate_item_intrinsic_sizes: both sizes already calculated");
         return;
     }
 
@@ -615,75 +687,19 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             }
         }
 
-        // Only use cached width if item has explicit width or cache has valid intrinsic data
-        if (cached && cached->measured_width > 0 && has_explicit_width) {
-            // Use cached measurements from earlier measurement pass
-            min_width = cached->measured_width;
-            max_width = cached->measured_width;
-            log_debug("Using cached width for complex content (has explicit width): width=%d",
-                      min_width);
-        } else {
-            // Item doesn't have explicit width - intrinsic width is 0 for empty flex items
-            // or needs to be calculated from content
-            min_width = max_width = 0;
-            log_debug("Using 0 for min-width (no explicit width, intrinsic is 0)");
-        }
+        // First, try to calculate intrinsic sizes from children
+        // This handles both width and height by traversing child elements
+        int max_child_width = 0;
+        int total_child_height = 0;
 
-        if (cached && cached->measured_height > 0 && has_explicit_height) {
-            min_height = cached->measured_height;
-            max_height = cached->measured_height;
-            log_debug("Using cached height for complex content (has explicit height): height=%d",
-                      min_height);
-        } else if (cached && cached->measured_height > 0 && !is_row_flex_container) {
-            // For height, we can use cache even without explicit height
-            // BUT NOT for row flex containers (cache may have summed heights incorrectly)
-            min_height = cached->measured_height;
-            max_height = cached->measured_height;
-            log_debug("Using cached height for complex content: height=%d", min_height);
-        } else if (is_row_flex_container) {
-            // For row flex containers, recalculate height as max of children
-            // Don't use the cached value which might have summed heights
-            int max_child_height = 0;
-            DomNode* c = child;
-            while (c) {
-                if (c->is_text()) {
-                    max_child_height = max(max_child_height, 20);  // Text line height
-                } else if (c->is_element()) {
-                    ViewElement* child_view = (ViewElement*)c->as_element();
-                    if (child_view) {
-                        int child_h = 0;
-                        if (child_view->blk && child_view->blk->given_height > 0) {
-                            child_h = (int)child_view->blk->given_height;
-                        } else if (child_view->height > 0) {
-                            child_h = child_view->height;
-                        } else {
-                            // Estimate from padding
-                            child_h = 20;  // Default text height
-                            if (child_view->bound) {
-                                child_h += child_view->bound->padding.top + child_view->bound->padding.bottom;
-                            }
-                        }
-                        max_child_height = max(max_child_height, child_h);
-                    }
-                }
-                c = c->next_sibling;
-            }
-            min_height = max_height = max_child_height > 0 ? max_child_height : 20;
-            log_debug("Row flex container: recalculated height as max of children: %d", min_height);
-        } else {
-            // No cache available - traverse children to estimate sizes
-            // This is a fallback when measurement pass hasn't run yet
-            int child_count = 0;
-            int total_text_height = 0;
-            int max_child_width = 0;
+        {
             DomNode* c = child;
             LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
+
             while (c) {
-                child_count++;
                 if (c->is_text()) {
                     const char* text = (const char*)c->text_data();
                     if (text) {
-                        // Skip whitespace-only text nodes
                         bool is_whitespace_only = true;
                         for (const char* p = text; *p; p++) {
                             if (!is_space((unsigned char)*p)) {
@@ -693,64 +709,140 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         }
 
                         if (!is_whitespace_only) {
-                            // Text contributes to height and width
                             int text_len = strlen(text);
                             int text_width, text_height;
                             if (lycon) {
-                                // Use unified intrinsic sizing API
                                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, text_len);
                                 text_width = widths.max_content;
                                 text_height = (lycon->font.style && lycon->font.style->font_size > 0) ?
                                     (int)(lycon->font.style->font_size + 0.5f) : 20;
                             } else {
-                                // Fallback: rough estimation
                                 text_width = text_len * 10;
                                 text_height = 20;
                             }
-                            total_text_height += text_height;
                             max_child_width = max(max_child_width, text_width);
-                            log_debug("Text child contributes: len=%d, width=%d", text_len, text_width);
+                            total_child_height += text_height;
                         }
                     }
                 } else if (c->is_element()) {
-                    // Element children contribute their sizes ONLY if they have explicit dimensions
                     ViewElement* child_view = (ViewElement*)c->as_element();
                     if (child_view) {
-                        // CRITICAL FIX: Only use child's explicit dimensions, not pre-set values
-                        // which may be based on container size
-                        bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height > 0);
+                        // First check View-level resolved dimensions
                         bool child_has_explicit_width = (child_view->blk && child_view->blk->given_width > 0);
+                        bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height > 0);
 
-                        if (child_has_explicit_height && child_view->height > 0) {
-                            total_text_height += child_view->height;
-                        }
-                        // Don't add default height for flex items without explicit height
+                        // If View-level dimensions aren't set yet, check DOM CSS
+                        // This handles the case where intrinsic sizing runs before CSS resolution
+                        float dom_css_width = -1;
+                        float dom_css_height = -1;
+                        LayoutContext* lycon = flex_layout ? flex_layout->lycon : nullptr;
 
-                        if (child_has_explicit_width && child_view->width > 0) {
-                            max_child_width = max(max_child_width, child_view->width);
+                        if (!child_has_explicit_width && lycon) {
+                            dom_css_width = get_explicit_css_width(lycon, child_view);
+                            if (dom_css_width > 0) {
+                                child_has_explicit_width = true;
+                                log_debug("Got explicit CSS width from DOM: %.1f", dom_css_width);
+                            }
                         }
-                        // Don't use pre-set width for flex items without explicit width
+
+                        if (!child_has_explicit_height && lycon) {
+                            dom_css_height = get_explicit_css_height(lycon, child_view);
+                            if (dom_css_height > 0) {
+                                child_has_explicit_height = true;
+                                log_debug("Got explicit CSS height from DOM: %.1f", dom_css_height);
+                            }
+                        }
+
+                        int child_width = 0;
+                        int child_height = 0;
+
+                        // Get child width - explicit (from View or DOM) or intrinsic
+                        if (child_has_explicit_width) {
+                            if (child_view->blk && child_view->blk->given_width > 0) {
+                                child_width = (int)child_view->blk->given_width;
+                            } else if (dom_css_width > 0) {
+                                child_width = (int)dom_css_width;
+                            }
+                        } else if (child_view->fi) {
+                            // Child has fi - use cached intrinsic or calculate
+                            if (!child_view->fi->has_intrinsic_width) {
+                                calculate_item_intrinsic_sizes(child_view, flex_layout);
+                            }
+                            if (child_view->fi->has_intrinsic_width) {
+                                child_width = child_view->fi->intrinsic_width.max_content;
+                            }
+                        } else if (lycon) {
+                            // Child doesn't have fi yet - use measure_element_intrinsic_widths
+                            // This handles the case where intrinsic sizing runs before fi is initialized
+                            IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, (DomElement*)child_view);
+                            child_width = child_sizes.max_content;
+                            log_debug("Used measure_element_intrinsic_widths for child: width=%d", child_width);
+                        }
+
+                        // Get child height - explicit (from View or DOM) or intrinsic
+                        if (child_has_explicit_height) {
+                            if (child_view->blk && child_view->blk->given_height > 0) {
+                                child_height = (int)child_view->blk->given_height;
+                            } else if (dom_css_height > 0) {
+                                child_height = (int)dom_css_height;
+                            }
+                        } else if (child_view->fi) {
+                            if (child_view->fi->has_intrinsic_height) {
+                                child_height = child_view->fi->intrinsic_height.max_content;
+                            }
+                        }
+                        // Note: For height, we may not have a good fallback - leave as 0
+
+                        max_child_width = max(max_child_width, child_width);
+
+                        // For height, column flex containers sum heights, row flex takes max
+                        if (is_row_flex_container) {
+                            total_child_height = max(total_child_height, child_height);
+                        } else {
+                            total_child_height += child_height;
+                        }
+
+                        log_debug("Child element: width=%d, height=%d (explicit=%d/%d)",
+                                  child_width, child_height, child_has_explicit_width, child_has_explicit_height);
                     }
                 }
                 c = c->next_sibling;
             }
 
-            // Use calculated values - but DON'T use fallback values
-            // For flex items without content, intrinsic size should be 0
-            if (child_count > 0) {
-                min_width = max_child_width;  // Could be 0 if no children had explicit width
-                max_width = max_child_width;
-                min_height = total_text_height;  // Could be 0 if no children had explicit height
-                max_height = total_text_height;
-                log_debug("Estimated intrinsic sizes from %d children: width=%d, height=%d",
-                          child_count, min_width, min_height);
-            } else {
-                // Truly empty element with no children
-                min_width = max_width = item->width > 0 ? item->width : 0;
-                min_height = max_height = item->height > 0 ? item->height : 0;
-                log_debug("Empty element - using explicit dimensions: width=%d, height=%d",
-                          min_width, min_height);
-            }
+            log_debug("Traversed children: max_width=%d, total_height=%d", max_child_width, total_child_height);
+        }
+
+        // Use cached width if available and item has explicit width, otherwise use calculated
+        if (cached && cached->measured_width > 0 && has_explicit_width) {
+            min_width = cached->measured_width;
+            max_width = cached->measured_width;
+            log_debug("Using cached width for complex content (has explicit width): width=%d", min_width);
+        } else if (max_child_width > 0) {
+            min_width = max_child_width;
+            max_width = max_child_width;
+            log_debug("Using calculated width from children: width=%d", min_width);
+        } else {
+            min_width = max_width = 0;
+            log_debug("No width from children or cache, using 0");
+        }
+
+        // Use cached height if available and item has explicit height, otherwise use calculated
+        if (cached && cached->measured_height > 0 && has_explicit_height) {
+            min_height = cached->measured_height;
+            max_height = cached->measured_height;
+            log_debug("Using cached height for complex content (has explicit height): height=%d", min_height);
+        } else if (total_child_height > 0) {
+            min_height = total_child_height;
+            max_height = total_child_height;
+            log_debug("Using calculated height from children: height=%d", min_height);
+        } else if (cached && cached->measured_height > 0) {
+            // Fallback to cache without explicit height requirement
+            min_height = cached->measured_height;
+            max_height = cached->measured_height;
+            log_debug("Using cached height for complex content: height=%d", min_height);
+        } else {
+            min_height = max_height = 0;
+            log_debug("No height from children or cache, using 0");
         }
     }
 

@@ -217,6 +217,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int inline_min_sum = 0;  // Sum of min-content widths for inline children
     int inline_max_sum = 0;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
+    
+    // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
+    bool is_flex_container = false;
+    ViewBlock* view_block = (ViewBlock*)element;
+    if (view_block->display.inner == CSS_VALUE_FLEX) {
+        is_flex_container = true;
+    }
 
     // Measure children recursively
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -224,8 +231,27 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         bool is_inline = false;
 
         if (child->is_text()) {
+            // Skip text nodes for flex containers - they become anonymous flex items
+            // but don't contribute to the container's intrinsic min-content width
+            if (is_flex_container) {
+                continue;
+            }
+            
             const char* text = (const char*)child->text_data();
             if (text) {
+                // Skip whitespace-only text nodes
+                bool is_whitespace_only = true;
+                for (const char* p = text; *p; p++) {
+                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+                        is_whitespace_only = false;
+                        break;
+                    }
+                }
+                
+                if (is_whitespace_only) {
+                    continue;
+                }
+                
                 TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
                     lycon, text, strlen(text));
                 child_sizes.min_content = text_widths.min_content;
