@@ -362,7 +362,6 @@ project "lambda"
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
         "lambda/input/input-jsx.cpp",
-        "lambda/input/input-latex.cpp",
         "lambda/input/input_file_cache.cpp",
         "lambda/input/input-vcf.cpp",
         "lambda/input/input-man.cpp",
@@ -442,6 +441,7 @@ project "lambda"
         "lambda/format/format-css.cpp",
         "lambda/format/format-math-ascii.cpp",
         "lambda/format/format-html.cpp",
+        "lambda/format/html_encoder.cpp",
         "lambda/format/format-mdx.cpp",
         "lambda/format/format-rst.cpp",
         "lambda/format/format-latex-html.cpp",
@@ -7058,6 +7058,69 @@ project "test_latex_treesitter"
     filter {}
     
 
+project "test_html_encoder_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetname "test_html_encoder_gtest"
+    targetextension ".exe"
+    
+    files {
+        "test/test_html_encoder_gtest.cpp",
+        "lambda/format/html_encoder.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/opt/freetype/include/freetype2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
+        "/usr/local/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+        "-fms-extensions",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
 project "test_latex_html_baseline"
     kind "ConsoleApp"
     language "C++"
@@ -7070,7 +7133,6 @@ project "test_latex_html_baseline"
         "test/latex/test_latex_html_baseline.cpp",
         "test/latex/fixture_loader.cpp",
         "test/latex/html_comparison.cpp",
-        "lambda/input/input-latex.cpp",
     }
     
     includedirs {
@@ -7889,7 +7951,6 @@ project "test_latex_html_extended"
         "test/latex/test_latex_html_extended.cpp",
         "test/latex/fixture_loader.cpp",
         "test/latex/html_comparison.cpp",
-        "lambda/input/input-latex.cpp",
     }
     
     includedirs {

@@ -96,6 +96,38 @@ static NodeCategory classify_node_type(const char* node_type) {
     return NODE_CONTAINER;
 }
 
+// LaTeX diacritic commands that need ZWSP when used with empty braces
+struct DiacriticInfo {
+    char cmd;              // The command character (e.g., '^' for \^)
+    const char* standalone; // Standalone character when no base given (e.g., \^{})
+};
+
+static const DiacriticInfo diacritic_table[] = {
+    {'\'', "\u00B4"},   // acute accent
+    {'`',  "\u0060"},   // grave accent
+    {'^',  "\u005E"},   // circumflex (caret)
+    {'"',  "\u00A8"},   // umlaut/diaeresis
+    {'~',  "\u007E"},   // tilde
+    {'=',  "\u00AF"},   // macron
+    {'.',  "\u02D9"},   // dot above
+    {'u',  "\u02D8"},   // breve
+    {'v',  "\u02C7"},   // caron/háček
+    {'H',  "\u02DD"},   // double acute
+    {'c',  "\u00B8"},   // cedilla
+    {0, nullptr}        // sentinel
+};
+
+static const DiacriticInfo* find_diacritic(const char* cmd_name) {
+    if (!cmd_name || cmd_name[0] == '\0' || cmd_name[1] != '\0') {
+        return nullptr; // Not a single-character command
+    }
+    char cmd_char = cmd_name[0];
+    for (const DiacriticInfo* d = diacritic_table; d->cmd != 0; d++) {
+        if (d->cmd == cmd_char) return d;
+    }
+    return nullptr;
+}
+
 // Forward declarations
 static Item convert_latex_node(InputContext& ctx, TSNode node, const char* source);
 static Item convert_command(InputContext& ctx, TSNode node, const char* source);
@@ -403,6 +435,47 @@ static Item convert_command(InputContext& ctx, TSNode node, const char* source) 
     // Skip backslash if present
     if (cmd_name[0] == '\\') {
         cmd_name++;
+    }
+    
+    // Check if this is a diacritic command with empty braces: \^{}, \~{}, etc.
+    const DiacriticInfo* diacritic = find_diacritic(cmd_name);
+    if (diacritic) {
+        // Check if it has an empty curly_group argument
+        uint32_t child_count = ts_node_child_count(node);
+        bool has_empty_group = false;
+        
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* child_type = ts_node_type(child);
+            
+            if (strcmp(child_type, "curly_group") == 0) {
+                // Count non-brace children in the group
+                uint32_t arg_child_count = ts_node_child_count(child);
+                int content_count = 0;
+                for (uint32_t j = 0; j < arg_child_count; j++) {
+                    TSNode arg_child = ts_node_child(child, j);
+                    const char* arg_child_type = ts_node_type(arg_child);
+                    if (strcmp(arg_child_type, "{") != 0 && strcmp(arg_child_type, "}") != 0) {
+                        content_count++;
+                    }
+                }
+                if (content_count == 0) {
+                    has_empty_group = true;
+                }
+                break;
+            }
+        }
+        
+        // If diacritic with empty group, return standalone + ZWSP as string
+        if (has_empty_group) {
+            MarkBuilder& builder = ctx.builder;
+            StringBuf* sb = ctx.sb;
+            stringbuf_reset(sb);
+            stringbuf_append_str(sb, diacritic->standalone);
+            stringbuf_append_str(sb, "\u200B"); // Zero-width space
+            String* result = stringbuf_to_string(sb);
+            return {.item = s2it(result)};
+        }
     }
     
     // Create element with command name as tag
