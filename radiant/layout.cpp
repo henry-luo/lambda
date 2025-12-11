@@ -74,36 +74,48 @@ TypoMetrics get_os2_typo_metrics(FT_Face face) {
     return result;
 }
 
-// Calculate normal line height following CSS Inline Layout Module Level 3 spec
-// and Chrome Blink implementation (simple_font_data.cc PlatformInit)
-// Chrome uses OS/2 sTypo* metrics when USE_TYPO_METRICS flag is set.
-// Otherwise it uses HHEA metrics.
-// Formula: round(ascender) + round(descender) + round(line_gap)
-float calc_normal_line_height(FT_Face face) {
-    // Get OS/2 sTypo metrics
-    TypoMetrics typo = get_os2_typo_metrics(face);
+// Platform-specific font metrics function (defined in font_lookup_platform.c)
+// Returns 1 if metrics were retrieved, 0 to fall back to FreeType
+extern "C" int get_font_metrics_platform(const char* font_family, float font_size,
+                                          float* out_ascent, float* out_descent, float* out_line_height);
 
-    // Only use sTypo metrics when USE_TYPO_METRICS flag is set (fsSelection bit 7)
-    // Chrome checks this flag to decide which metrics to use for line-height
-    if (typo.valid && typo.use_typo_metrics) {
-        // Chrome formula: round each component separately, then sum
-        long asc_r = lroundf(typo.ascender);
-        long desc_r = lroundf(typo.descender);
-        long gap_r = lroundf(typo.line_gap);
-        float line_height = (float)(asc_r + desc_r + gap_r);
-        log_debug("Normal line height (sTypo, USE_TYPO_METRICS=1): %.2f (asc=%ld + desc=%ld + gap=%ld) for %s",
-                  line_height, asc_r, desc_r, gap_r, face->family_name);
+// Calculate normal line height following Chrome Blink implementation exactly
+// Reference: simple_font_data.cc PlatformInit(), font_metrics.cc AscentDescentWithHacks()
+//
+// Chrome's algorithm:
+// 1. Get ascent/descent from Skia (which uses CoreText on macOS, FreeType on Linux)
+// 2. Round ascent and descent individually: SkScalarRoundToScalar()
+// 3. On macOS only: for Times, Helvetica, Courier - apply 15% adjustment to ascent
+//    ascent += floorf(((ascent + descent) * 0.15f) + 0.5f)
+// 4. LineSpacing = lroundf(ascent) + lroundf(descent) + lroundf(line_gap)
+float calc_normal_line_height(FT_Face face) {
+    const char* family = face->family_name;
+    float font_size = (float)face->size->metrics.y_ppem;
+
+    // Try platform-specific implementation first (CoreText on macOS)
+    float ascent, descent, line_height;
+    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+        log_debug("Normal line height (platform): %.2f for %s@%.1f", line_height, family, font_size);
         return line_height;
     }
 
-    // Use FreeType's computed metrics (HHEA-based) when:
-    // 1. No OS/2 table available, OR
-    // 2. USE_TYPO_METRICS flag is NOT set
-    // Note: Use FreeType's height directly as it represents the recommended line spacing
-    float ft_height = face->size->metrics.height / 64.0f;
-    float line_height = roundf(ft_height);
-    log_debug("Normal line height (HHEA height): %.2f for %s",
-              line_height, face->family_name);
+    // Fallback: use FreeType HHEA metrics (Chrome on Linux uses this via Skia)
+    ascent = face->size->metrics.ascender / 64.0f;
+    descent = -face->size->metrics.descender / 64.0f;  // Make positive
+    float leading = (face->size->metrics.height / 64.0f) - ascent - descent;
+    if (leading < 0) leading = 0;
+
+    // Round each component individually
+    float rounded_ascent = roundf(ascent);
+    float rounded_descent = roundf(descent);
+    float rounded_leading = roundf(leading);
+
+    // LineSpacing = ascent + descent + leading
+    line_height = rounded_ascent + rounded_descent + rounded_leading;
+
+    log_debug("Normal line height (FreeType): %.2f (asc=%.2f->%.0f, desc=%.2f->%.0f, lead=%.2f->%.0f) for %s",
+              line_height, ascent, rounded_ascent, descent, rounded_descent,
+              leading, rounded_leading, family);
     return line_height;
 }
 
@@ -155,8 +167,16 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         value.type == CSS_VALUE_TYPE_NUMBER ?
             value.data.number.value * lycon->font.current_font_size :
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
-        lycon->block.line_height = resolved_height;
-        log_debug("resolved line height: %f", lycon->block.line_height);
+        
+        // CSS 2.1: "Negative values are not allowed" for line-height
+        // If negative, fall back to 'normal' (use default line height)
+        if (resolved_height < 0) {
+            log_debug("invalid negative line-height: %f, falling back to normal", resolved_height);
+            lycon->block.line_height = calc_normal_line_height(lycon->font.ft_face);
+        } else {
+            lycon->block.line_height = resolved_height;
+            log_debug("resolved line height: %f", lycon->block.line_height);
+        }
     }
 }
 
