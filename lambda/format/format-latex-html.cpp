@@ -1740,7 +1740,8 @@ static void init_command_registry() {
     // Text/spacing commands
     command_registry["verb"] = {handle_verb, CMD_TEXT, false, "Verbatim text"};
     command_registry["thinspace"] = {handle_thinspace, CMD_SPACING, false, "Thin space"};
-    command_registry[","] = {handle_comma, CMD_SPACING, false, "Thin space (comma)"};
+    // NOTE: "," entry removed - literal commas are handled by single-char fallback
+    // The \, command is already handled via 'thinspace' symbol in the AST
     command_registry["mbox"] = {handle_mbox, CMD_TEXT, false, "Horizontal box"};
     command_registry["makebox"] = {handle_makebox, CMD_TEXT, false, "Make box"};
     command_registry["hbox"] = {handle_hbox, CMD_TEXT, false, "Horizontal box"};
@@ -2922,15 +2923,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         strncpy(cmd_name, name.str, name_len);
         cmd_name[name_len] = '\0';
 
-        // Handle single-character element names FIRST (punctuation from tree-sitter)
-        // These are elements like "," "." ";" ":" "?" "!" etc. that have no children
-        if (name_len == 1 && !isalpha(cmd_name[0])) {
-            // Output the punctuation character directly
-            stringbuf_append_str(html_buf, cmd_name);
-            return;
-        }
-
-        // Try new command registry first (O(1) lookup for 88 migrated commands)
+        // Try new command registry FIRST (O(1) lookup for 88+ migrated commands)
+        // MUST check registry before single-char shortcut to handle &, #, %, etc.
         if (g_render_ctx) {
             auto it = command_registry.find(cmd_name);
             if (it != command_registry.end()) {
@@ -2952,6 +2946,15 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                     return;
                 }
             }
+        }
+
+        // Handle single-character element names (punctuation from tree-sitter)
+        // These are elements like "," "." ";" ":" "?" "!" etc. that have no children
+        // Checked AFTER registry to allow handlers for special chars (e.g., & → &amp;)
+        if (name_len == 1 && !isalpha(cmd_name[0])) {
+            // Output the punctuation character directly
+            stringbuf_append_str(html_buf, cmd_name);
+            return;
         }
 
         // Check if this is a user-defined macro and expand it

@@ -1541,6 +1541,95 @@ Phase 9 achieved **partial success**:
 
 ---
 
+## Final Implementation Results (Dec 11, 2025)
+
+### HTML Entity Escaping Fix (Phase 9A - COMPLETED)
+
+**Problem**: `\&` was outputting raw `&` instead of `&amp;`
+
+**Root Cause**: In `format-latex-html.cpp:process_latex_element()`, single-character element shortcut was checked BEFORE command registry, so `<&>` element hit the fallback instead of `handle_ampersand()`.
+
+**Solution**: Reordered checks to prioritize command registry:
+```cpp
+// NEW ORDER (lines 2926-2960):
+// 1. Check command registry FIRST
+if (g_render_ctx) {
+    auto it = command_registry.find(cmd_name);
+    if (it != command_registry.end()) {
+        it->second.handler(...);  // Calls handle_ampersand() for &
+        return;
+    }
+}
+
+// 2. THEN check single-char shortcut for punctuation
+if (name_len == 1 && !isalpha(cmd_name[0])) {
+    stringbuf_append_str(html_buf, cmd_name);
+    return;
+}
+```
+
+**Side Effect**: Broke literal comma handling - `,` was hitting comma registry entry and outputting space.
+
+**Final Fix**: Removed `command_registry[","]` entry (line 1743) because:
+- Literal commas `<,>` should use single-char fallback → outputs `,`
+- The `\,` thin-space command is already handled as `'thinspace'` symbol → outputs thin space
+
+**Verification**:
+```bash
+printf 'Test \\& ampersand' | convert → <p>Test &amp; ampersand</p>  ✅
+printf 'quotes," test' | convert → <p>quotes," test</p>  ✅
+```
+
+**Test Results**:
+- ✅ Baseline: **35/35 passing** (100%) ⬆️ Improved from 34/35
+- ❌ Extended: **0/74 passing** (0%) - No change
+
+### Other Blocking Issues Verified
+
+**`\textbackslash` (WORKING)**:
+- Tested: `printf '\\textbackslash'` → outputs `\`
+- Already implemented correctly
+- Previous test failures were due to bash interpreting `\t` as tab
+
+**Soft Hyphen `\-` (WORKING)**:
+- Tested: `printf 'shelf\\-ful'` → outputs `shelf&shy;ful`
+- Already implemented correctly
+
+### Extended Test Analysis
+
+Extended tests still at 0/74 due to missing advanced features:
+- Counter arithmetic (`3 * -(2+1)` not evaluated)
+- Spacing commands (`\negthinspace`, `\enspace`, `\quad`, `\qquad`)
+- Line breaks with dimensions (`\\[1cm]`)
+- Vertical spacing (`\vspace{}`, `\smallskip`, `\medskip`, `\bigskip`)
+- Many other advanced LaTeX features
+
+**HTML escaping fix alone cannot improve extended tests** - they require substantial new feature implementation.
+
+### Files Modified
+
+**`lambda/format/format-latex-html.cpp`**:
+- Lines 2926-2960: Reordered registry check before single-char shortcut
+- Line 1743: Removed comma registry entry with explanatory comment
+
+### Conclusion
+
+**Phase 9A Successfully Completed** ✅
+- HTML entity escaping for `&` → `&amp;` now working
+- Baseline tests improved to 100% (35/35)
+- Extended tests remain blocked by missing features
+- Foundation laid for future entity escaping work
+
+**Key Learning**: Single HTML escaping fix has **limited impact** on extended tests. The test suite requires comprehensive feature implementation, not just quick fixes. The baseline improvement (34→35) demonstrates the fix works, but extended tests need:
+1. Counter expression evaluation
+2. Advanced spacing/positioning commands
+3. Dimension parsing and CSS conversion
+4. Many other LaTeX features
+
+**Recommendation**: Focus next phase on **systematic feature implementation** rather than individual quick fixes. Extended tests require coordinated effort across multiple subsystems.
+
+---
+
 ## Conclusion (ORIGINAL PLAN)
 
 Phase 9 represents a **high-ROI investment**: approximately 6-9 hours of focused work yields a **40% improvement** in extended test pass rate. These "quick wins" provide:
