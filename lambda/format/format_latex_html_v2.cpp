@@ -673,6 +673,8 @@ void LatexProcessor::initCommandTable() {
     command_table_["enumerate"] = cmd_enumerate;
     command_table_["description"] = cmd_description;
     command_table_["item"] = cmd_item;
+    command_table_["enum_item"] = cmd_item;  // Tree-sitter node type for \item
+    command_table_["\\item"] = cmd_item;     // Command form with backslash
     
     // Basic environments
     command_table_["quote"] = cmd_quote;
@@ -794,7 +796,6 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     
     // Unknown command - just output children
-    log_debug("processCommand: unknown command '%s', outputting children", cmd_name);
     processChildren(elem);
 }
 
