@@ -406,6 +406,29 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     calculate_line_cross_sizes(flex_layout);
     log_debug("Phase 5: Completed calculating line cross sizes");
 
+    // Phase 5b: Apply min-height/min-width constraint to container BEFORE alignment
+    // This must happen BEFORE Phase 6 (main axis alignment) so justify-content
+    // has the correct container size to distribute space
+    if (container->blk) {
+        if (is_main_axis_horizontal(flex_layout)) {
+            // Row flex: min-height affects cross_axis_size
+            if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
+                log_debug("Phase 5b: Applying min-height to cross axis: %.1f -> %.1f",
+                          container->height, container->blk->given_min_height);
+                container->height = container->blk->given_min_height;
+                flex_layout->cross_axis_size = container->blk->given_min_height;
+            }
+        } else {
+            // Column flex: min-height affects main_axis_size (and justify-content)
+            if (container->blk->given_min_height > 0 && container->height < container->blk->given_min_height) {
+                log_debug("Phase 5b: Applying min-height to main axis: %.1f -> %.1f",
+                          container->height, container->blk->given_min_height);
+                container->height = container->blk->given_min_height;
+                flex_layout->main_axis_size = container->blk->given_min_height;
+            }
+        }
+    }
+
     // Phase 6: Align items on main axis
     log_debug("Phase 6: About to align items on main axis for %d lines", line_count);
     for (int i = 0; i < line_count; i++) {
@@ -488,6 +511,23 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
+    // Phase 7b: Apply min-height constraint to container
+    // This must happen AFTER content-based height calculation but BEFORE align_content
+    // so that justify-content/align-content have the correct container size to work with
+    if (container->blk && container->blk->given_min_height > 0) {
+        float min_height = container->blk->given_min_height;
+        if (container->height < min_height) {
+            log_debug("Phase 7b: Applying min-height constraint: %.1f -> %.1f", container->height, min_height);
+            container->height = min_height;
+            // Update flex_layout dimensions for alignment calculations
+            if (is_main_axis_horizontal(flex_layout)) {
+                flex_layout->cross_axis_size = min_height;
+            } else {
+                flex_layout->main_axis_size = min_height;
+            }
+        }
+    }
+
     // Phase 8: Align content (distribute space among lines)
     // Note: align-content applies to flex containers with flex-wrap: wrap or wrap-reverse
     // CRITICAL: This must happen BEFORE align_items_cross_axis so line cross-sizes are final
@@ -509,12 +549,43 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     // Note: wrap-reverse item positioning is now handled in align_items_cross_axis
     // by positioning items at the end of the line when they have explicit cross-axis sizes
 
+    // Phase 10: Apply relative positioning offsets to flex items
+    // CSS spec: position: relative with top/right/bottom/left should offset the item
+    // from its normal flow position (which has been calculated by the flex algorithm)
+    log_debug("Phase 10: Applying relative positioning to flex items");
+    for (int i = 0; i < item_count; i++) {
+        View* item = items[i];
+        ViewBlock* item_block = (ViewBlock*)item->as_element();
+        if (item_block && item_block->position &&
+            item_block->position->position == CSS_VALUE_RELATIVE) {
+            float offset_x = 0, offset_y = 0;
+            // horizontal offset
+            if (item_block->position->has_left) {
+                offset_x = item_block->position->left;
+            } else if (item_block->position->has_right) {
+                offset_x = -item_block->position->right;
+            }
+            // vertical offset
+            if (item_block->position->has_top) {
+                offset_y = item_block->position->top;
+            } else if (item_block->position->has_bottom) {
+                offset_y = -item_block->position->bottom;
+            }
+            if (offset_x != 0 || offset_y != 0) {
+                log_debug("Phase 10: Applying relative offset (%.0f, %.0f) to item %d at (%.0f, %.0f)",
+                          offset_x, offset_y, i, item->x, item->y);
+                item->x += offset_x;
+                item->y += offset_y;
+            }
+        }
+    }
+
     log_debug("FINAL FLEX POSITIONS:");
     for (int i = 0; i < item_count; i++) {
         View* item = items[i];
         ViewElement* item_elmt = (ViewElement*)item->as_element();
         int order_val = item_elmt && item_elmt->fi ? item_elmt->fi->order : -999;
-        log_debug("FINAL_ITEM %d (order=%d, ptr=%p) - pos: (%d,%d), size: %dx%d", i, order_val, item, item->x, item->y, item->width, item->height);
+        log_debug("FINAL_ITEM %d (order=%d, ptr=%p) - pos: (%.0f,%.0f), size: %.0fx%.0f", i, order_val, item, item->x, item->y, item->width, item->height);
     }
 
     flex_layout->needs_reflow = false;
@@ -825,6 +896,29 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
             if (isnan(item->blk->given_height_percent) && item->blk->given_height > 0) {
                 log_debug("Applying CSS height: %.1f", item->blk->given_height);
                 item->height = item->blk->given_height;
+            }
+        }
+
+        // Step 6b: For nested flex containers without explicit cross-axis size,
+        // set their size to the available cross-axis size from the parent.
+        // This is critical for flex-wrap containers to wrap correctly.
+        // NOTE: We use flex_layout->cross_axis_size because:
+        // - In column flex, cross-axis is width (horizontal)
+        // - In row flex, cross-axis is height (vertical)
+        // Block-level flex containers naturally fill available width in cross-axis.
+        bool is_row = is_main_axis_horizontal(flex_layout);
+        if (item->display.inner == CSS_VALUE_FLEX) {
+            // This is a nested flex container
+            if (!is_row) {
+                // Parent is column flex: cross-axis is width
+                if (item->width <= 0 && flex_layout->cross_axis_size > 0) {
+                    log_debug("NESTED_FLEX_ITEM: Setting width=%.1f from parent cross-axis (column)",
+                              flex_layout->cross_axis_size);
+                    item->width = flex_layout->cross_axis_size;
+                }
+            } else {
+                // Parent is row flex: cross-axis is height
+                // Don't auto-set height - let it be calculated from content
             }
         }
 
