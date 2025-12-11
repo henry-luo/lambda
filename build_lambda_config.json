@@ -1941,6 +1941,20 @@
                         "icon": "🌲"
                     },
                     {
+                        "source": "test/test_html_encoder_gtest.cpp",
+                        "name": "HTML Entity Encoder Tests",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_html_encoder_gtest.exe",
+                        "additional_sources": [
+                            "lambda/format/html_encoder.cpp"
+                        ],
+                        "icon": "🔒"
+                    },
+                    {
                         "source": "test/latex/test_latex_html_baseline.cpp",
                         "name": "LaTeX to HTML Baseline Tests",
                         "dependencies": [
@@ -1954,8 +1968,7 @@
                         "binary": "test_latex_html_baseline.exe",
                         "additional_sources": [
                             "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp",
-                            "lambda/input/input-latex.cpp"
+                            "test/latex/html_comparison.cpp"
                         ],
                         "includes": [
                             "test/latex"
@@ -2127,8 +2140,7 @@
                         "binary": "test_latex_html_extended.exe",
                         "additional_sources": [
                             "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp",
-                            "lambda/input/input-latex.cpp"
+                            "test/latex/html_comparison.cpp"
                         ],
                         "includes": [
                             "test/latex"

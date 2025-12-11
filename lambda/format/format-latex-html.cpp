@@ -2562,6 +2562,12 @@ static void handle_group(StringBuf* html_buf, Element* elem, Pool* pool, int dep
             }
         }
     }
+    
+    // Phase 9C: Add ZWSP (Zero-Width Space, U+200B) after EMPTY groups only
+    // Empty groups (like \^{} or \~{}) need ZWSP to prevent ligature formation
+    if (elem->length == 0) {
+        stringbuf_append_str(html_buf, "\u200B");
+    }
 }
 
 static void handle_curly_group(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
@@ -4333,7 +4339,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Check symbol table for known symbols
             const char* symbol = lookup_symbol(cmd_name);
             if (symbol) {
-                stringbuf_append_str(html_buf, symbol);
+                // Phase 9A: Escape HTML entities in symbols (e.g., \& → &amp;)
+                append_escaped_text(html_buf, symbol);
                 return;
             }
             // Generic element - process children
@@ -5996,7 +6003,8 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
         else if (*p == '-') {
             stringbuf_append_char(html_buf, '-'); // U+002D hyphen-minus (regular hyphen)
         }
-        // HTML entity escaping
+        // HTML entity escaping (Phase 9A)
+        // Note: We DON'T escape " (double quote) in text content - only needed in attributes
         else if (*p == '<') {
             stringbuf_append_str(html_buf, "&lt;");
         }
@@ -6006,7 +6014,6 @@ static void append_escaped_text_with_ligatures(StringBuf* html_buf, const char* 
         else if (*p == '&') {
             stringbuf_append_str(html_buf, "&amp;");
         }
-        // Note: We don't escape " to &quot; - quotes are valid in HTML text content
         else {
             stringbuf_append_char(html_buf, *p);
         }
