@@ -199,10 +199,31 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     log_enter();
     log_info("ENHANCED FLEX ALGORITHM START: container=%p (%s)", flex_container, flex_container->node_name());
 
+    // CRITICAL FIX: For nested flex containers without explicit width/height in a COLUMN parent,
+    // use the available cross-axis size from the parent flex layout.
+    // This ensures flex-wrap containers can properly wrap their content.
+    // NOTE: We only do this for column parent flex because:
+    // - In column flex, items naturally stretch to fill the cross-axis (width) unless align-items prevents it
+    // - In row flex, items should shrink to their content width
+    FlexContainerLayout* pa_flex = lycon->flex_container;
+    if (pa_flex && flex_container->fi) {
+        bool is_parent_horizontal = is_main_axis_horizontal(pa_flex);
+        
+        // Only set width for column parent flex (cross-axis is width)
+        if (!is_parent_horizontal) {
+            if ((!flex_container->blk || flex_container->blk->given_width <= 0) &&
+                flex_container->width <= 0 && pa_flex->cross_axis_size > 0) {
+                log_debug("NESTED_FLEX_WIDTH: Setting width=%.1f from parent cross axis (column parent)",
+                          pa_flex->cross_axis_size);
+                flex_container->width = pa_flex->cross_axis_size;
+            }
+        }
+        // For row parent flex, don't auto-set width - let flex algorithm determine it from content
+    }
+
     // CRITICAL: Initialize flex container properties for this container
     // This must be done BEFORE running the flex algorithm so it uses
     // the correct direction, wrap, justify, etc. from CSS
-    FlexContainerLayout* pa_flex = lycon->flex_container;
     init_flex_container(lycon, flex_container);
 
     log_debug("ENHANCED FLEX LAYOUT STARTING");
