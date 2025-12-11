@@ -16,11 +16,11 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 792.69,
+      "height": 921.14,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
-      "scrollHeight": 800
+      "scrollHeight": 921
     },
     "computed": {
       "display": "block",
@@ -392,83 +392,6 @@
           },
           {
             "nodeType": "element",
-            "selector": "link",
-            "tag": "link",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 0,
-              "y": 0,
-              "width": 0,
-              "height": 0,
-              "contentWidth": 0,
-              "contentHeight": 0,
-              "scrollWidth": 0,
-              "scrollHeight": 0
-            },
-            "computed": {
-              "display": "none",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 0,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Times",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 7,
-            "children": []
-          },
-          {
-            "nodeType": "text",
-            "text": "\n    ",
-            "length": 5,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": false,
-              "parentDisplay": "none",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 8,
-            "children": []
-          },
-          {
-            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -525,12 +448,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-            "elementIndex": 9,
+            "elementIndex": 7,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        body {\n            font-family: 'Poppins', sans-serif;\n            margin: 0;\n            padding: 0;\n            background: linear-gradient(135deg, #0f172a, #1e293b);\n            color: white;\n            text-align: center;\n        }\n        .container {\n            max-width: 1200px;\n            margin: auto;\n            padding: 50px 20px;\n        }\n        header {\n            background: rgba(15, 23, 42, 0.9);\n            position: fixed;\n            width: 100%;\n            top: 0;\n            left: 0;\n            z-index: 1000;\n            padding: 15px 0;\n            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);\n        }\n        header .container {\n            display: flex;\n            justify-content: space-between;\n            align-items: center;\n        }\n        .logo a {\n            font-size: 1.8rem;\n            font-weight: bold;\n            color: #ff6f61;\n            text-decoration: none;\n        }\n        nav ul {\n            list-style: none;\n            display: flex;\n            gap: 20px;\n            padding: 0;\n        }\n        nav a {\n            font-size: 1.1rem;\n            color: white;\n            text-decoration: none;\n            transition: color 0.3s;\n        }\n        nav a:hover {\n            color: #ff6f61;\n        }\n        .cta-button {\n            background: #ff6f61;\n            padding: 10px 20px;\n            border-radius: 5px;\n            transition: background 0.3s;\n        }\n        .cta-button:hover {\n            background: #ff3b2f;\n        }\n        .hero-section {\n            display: flex;\n            align-items: center;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            padding: 100px 0 40px;\n        }\n        .hero-text {\n            flex: 1;\n            text-align: left;\n            padding: 20px;\n        }\n        .hero-image {\n            flex: 1;\n            max-width: 500px;\n        }\n        .features {\n            display: flex;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            margin-top: 50px;\n        }\n        .feature {\n            flex: 1;\n            min-width: 300px;\n            padding: 20px;\n            background: rgba(255, 255, 255, 0.1);\n            border-radius: 10px;\n            margin: 10px;\n            text-align: center;\n        }\n        .feature i {\n            font-size: 3rem;\n            color: #ff6f61;\n            margin-bottom: 15px;\n        }\n        body {\n            padding-top: 70px;\n        }\n    ",
-                "length": 2509,
+                "text": "\n        body {\n            font-family: 'Poppins', sans-serif;\n            margin: 0;\n            padding: 0;\n            background: linear-gradient(135deg, #0f172a, #1e293b);\n            color: white;\n            text-align: center;\n        }\n        .container {\n            max-width: 1200px;\n            margin: auto;\n            padding: 50px 20px;\n        }\n        header {\n            background: rgba(15, 23, 42, 0.9);\n            position: fixed;\n            width: 100%;\n            top: 0;\n            left: 0;\n            z-index: 1000;\n            padding: 15px 0;\n            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);\n        }\n        header .container {\n            display: flex;\n            justify-content: space-between;\n            align-items: center;\n        }\n        .logo a {\n            font-size: 1.8rem;\n            font-weight: bold;\n            color: #ff6f61;\n            text-decoration: none;\n        }\n        nav ul {\n            list-style: none;\n            display: flex;\n            gap: 20px;\n            padding: 0;\n        }\n        nav a {\n            font-size: 1.1rem;\n            color: white;\n            text-decoration: none;\n            transition: color 0.3s;\n        }\n        nav a:hover {\n            color: #ff6f61;\n        }\n        .cta-button {\n            background: #ff6f61;\n            padding: 10px 20px;\n            border-radius: 5px;\n            transition: background 0.3s;\n        }\n        .cta-button:hover {\n            background: #ff3b2f;\n        }\n        .hero-section {\n            display: flex;\n            align-items: center;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            padding: 100px 0 40px;\n        }\n        .hero-text {\n            flex: 1;\n            text-align: left;\n            padding: 20px;\n        }\n        .hero-image {\n            flex: 1;\n            max-width: 500px;\n        }\n        .features {\n            display: flex;\n            justify-content: space-between;\n            flex-wrap: wrap;\n            margin-top: 50px;\n        }\n        .feature {\n            flex: 1;\n            min-width: 300px;\n            padding: 20px;\n            background: rgba(255, 255, 255, 0.1);\n            border-radius: 10px;\n            margin: 10px;\n            text-align: center;\n        }\n        .feature .icon {\n            width: 48px;\n            height: 48px;\n            margin: 0 auto 15px;\n        }\n        .feature .icon svg {\n            width: 100%;\n            height: 100%;\n            fill: #ff6f61;\n        }\n        body {\n            padding-top: 70px;\n        }\n    ",
+                "length": 2624,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -558,7 +481,7 @@
               "parentVisibility": "visible"
             },
             "depth": 2,
-            "nodeIndex": 10,
+            "nodeIndex": 8,
             "children": []
           }
         ]
@@ -573,11 +496,11 @@
           "x": 0,
           "y": 0,
           "width": 1200,
-          "height": 792.69,
+          "height": 921.14,
           "contentWidth": 1200,
-          "contentHeight": 793,
+          "contentHeight": 921,
           "scrollWidth": 1200,
-          "scrollHeight": 793
+          "scrollHeight": 921
         },
         "computed": {
           "display": "block",
@@ -1649,11 +1572,11 @@
               "x": 0,
               "y": 70,
               "width": 1200,
-              "height": 722.69,
+              "height": 851.14,
               "contentWidth": 1200,
-              "contentHeight": 723,
+              "contentHeight": 851,
               "scrollWidth": 1200,
-              "scrollHeight": 723
+              "scrollHeight": 851
             },
             "computed": {
               "display": "block",
@@ -1711,11 +1634,11 @@
                   "x": 20,
                   "y": 120,
                   "width": 1160,
-                  "height": 329.88,
+                  "height": 473.33,
                   "contentWidth": 1160,
-                  "contentHeight": 330,
+                  "contentHeight": 473,
                   "scrollWidth": 1160,
-                  "scrollHeight": 330
+                  "scrollHeight": 473
                 },
                 "computed": {
                   "display": "flex",
@@ -1771,7 +1694,7 @@
                     ],
                     "layout": {
                       "x": 20,
-                      "y": 220,
+                      "y": 291.72,
                       "width": 660,
                       "height": 189.88,
                       "contentWidth": 660,
@@ -1831,7 +1754,7 @@
                         "classes": [],
                         "layout": {
                           "x": 40,
-                          "y": 261.44,
+                          "y": 333.16,
                           "width": 620,
                           "height": 37,
                           "contentWidth": 620,
@@ -1892,11 +1815,11 @@
                               "rects": [
                                 {
                                   "x": 40,
-                                  "y": 261.44,
+                                  "y": 333.16,
                                   "width": 142.23,
                                   "height": 37,
                                   "right": 182.23,
-                                  "bottom": 298.44,
+                                  "bottom": 370.16,
                                   "text": "AI CodeX",
                                   "startIndex": 0,
                                   "endIndex": 8
@@ -1921,7 +1844,7 @@
                         "classes": [],
                         "layout": {
                           "x": 40,
-                          "y": 319.88,
+                          "y": 391.59,
                           "width": 620,
                           "height": 36,
                           "contentWidth": 620,
@@ -1982,11 +1905,11 @@
                               "rects": [
                                 {
                                   "x": 40,
-                                  "y": 319.88,
+                                  "y": 391.59,
                                   "width": 601.2,
                                   "height": 18,
                                   "right": 641.2,
-                                  "bottom": 337.88,
+                                  "bottom": 409.59,
                                   "text": "Empower your development workflow with AI-driven coding solutions. Experience the ",
                                   "startIndex": 0,
                                   "endIndex": 82
@@ -2010,11 +1933,11 @@
                               "rects": [
                                 {
                                   "x": 40,
-                                  "y": 337.88,
+                                  "y": 409.59,
                                   "width": 251.72,
                                   "height": 18,
                                   "right": 291.72,
-                                  "bottom": 355.88,
+                                  "bottom": 427.59,
                                   "text": "next generation of code assistance.",
                                   "startIndex": 0,
                                   "endIndex": 35
@@ -2041,7 +1964,7 @@
                         ],
                         "layout": {
                           "x": 40,
-                          "y": 361.88,
+                          "y": 433.59,
                           "width": 121.83,
                           "height": 38,
                           "contentWidth": 0,
@@ -2102,11 +2025,11 @@
                               "rects": [
                                 {
                                   "x": 60,
-                                  "y": 371.88,
+                                  "y": 443.59,
                                   "width": 81.83,
                                   "height": 18,
                                   "right": 141.83,
-                                  "bottom": 389.88,
+                                  "bottom": 461.59,
                                   "text": "Get Started",
                                   "startIndex": 0,
                                   "endIndex": 11
@@ -2135,13 +2058,13 @@
                     ],
                     "layout": {
                       "x": 680,
-                      "y": 305.94,
+                      "y": 220,
                       "width": 500,
-                      "height": 18,
+                      "height": 333.33,
                       "contentWidth": 500,
-                      "contentHeight": 18,
+                      "contentHeight": 333,
                       "scrollWidth": 500,
-                      "scrollHeight": 18
+                      "scrollHeight": 333
                     },
                     "computed": {
                       "display": "block",
@@ -2200,13 +2123,13 @@
                 ],
                 "layout": {
                   "x": 20,
-                  "y": 499.88,
+                  "y": 643.33,
                   "width": 1160,
-                  "height": 242.81,
+                  "height": 227.81,
                   "contentWidth": 1160,
-                  "contentHeight": 243,
+                  "contentHeight": 228,
                   "scrollWidth": 1160,
-                  "scrollHeight": 243
+                  "scrollHeight": 228
                 },
                 "computed": {
                   "display": "flex",
@@ -2262,13 +2185,13 @@
                     ],
                     "layout": {
                       "x": 30,
-                      "y": 509.88,
+                      "y": 653.33,
                       "width": 366.67,
-                      "height": 222.81,
+                      "height": 207.81,
                       "contentWidth": 367,
-                      "contentHeight": 223,
+                      "contentHeight": 208,
                       "scrollWidth": 367,
-                      "scrollHeight": 223
+                      "scrollHeight": 208
                     },
                     "computed": {
                       "display": "block",
@@ -2316,30 +2239,29 @@
                     "children": [
                       {
                         "nodeType": "element",
-                        "selector": "i.fas.fa-bolt",
-                        "tag": "i",
+                        "selector": "div.icon",
+                        "tag": "div",
                         "id": null,
                         "classes": [
-                          "fas",
-                          "fa-bolt"
+                          "icon"
                         ],
                         "layout": {
-                          "x": 195.33,
-                          "y": 529.88,
-                          "width": 36,
+                          "x": 189.33,
+                          "y": 673.33,
+                          "width": 48,
                           "height": 48,
-                          "contentWidth": 36,
+                          "contentWidth": 48,
                           "contentHeight": 48,
-                          "scrollWidth": 36,
-                          "scrollHeight": 48
+                          "scrollWidth": 48,
+                          "scrollHeight": 52
                         },
                         "computed": {
-                          "display": "inline-block",
+                          "display": "block",
                           "position": "static",
                           "marginTop": 0,
-                          "marginRight": 0,
+                          "marginRight": 139.344,
                           "marginBottom": 15,
-                          "marginLeft": 0,
+                          "marginLeft": 139.328,
                           "paddingTop": 0,
                           "paddingRight": 0,
                           "paddingBottom": 0,
@@ -2359,10 +2281,10 @@
                           "alignSelf": "auto",
                           "order": 0,
                           "gap": "normal",
-                          "fontSize": 48,
-                          "lineHeight": "48px",
-                          "fontFamily": "\"Font Awesome 6 Free\"",
-                          "fontWeight": "900",
+                          "fontSize": 16,
+                          "lineHeight": "normal",
+                          "fontFamily": "Poppins, sans-serif",
+                          "fontWeight": "400",
                           "textAlign": "center",
                           "verticalAlign": "baseline",
                           "top": "auto",
@@ -2376,7 +2298,131 @@
                         },
                         "depth": 5,
                         "elementIndex": 1,
-                        "children": []
+                        "children": [
+                          {
+                            "nodeType": "element",
+                            "selector": "svg",
+                            "tag": "svg",
+                            "id": null,
+                            "classes": [],
+                            "layout": {
+                              "x": 189.33,
+                              "y": 673.33,
+                              "width": 48,
+                              "height": 48,
+                              "contentWidth": 48,
+                              "contentHeight": 48,
+                              "scrollWidth": 48,
+                              "scrollHeight": 48
+                            },
+                            "computed": {
+                              "display": "inline",
+                              "position": "static",
+                              "marginTop": 0,
+                              "marginRight": 0,
+                              "marginBottom": 0,
+                              "marginLeft": 0,
+                              "paddingTop": 0,
+                              "paddingRight": 0,
+                              "paddingBottom": 0,
+                              "paddingLeft": 0,
+                              "borderTopWidth": 0,
+                              "borderRightWidth": 0,
+                              "borderBottomWidth": 0,
+                              "borderLeftWidth": 0,
+                              "flexDirection": "row",
+                              "flexWrap": "nowrap",
+                              "justifyContent": "normal",
+                              "alignItems": "normal",
+                              "alignContent": "normal",
+                              "flexGrow": 0,
+                              "flexShrink": 1,
+                              "flexBasis": "auto",
+                              "alignSelf": "auto",
+                              "order": 0,
+                              "gap": "normal",
+                              "fontSize": 16,
+                              "lineHeight": "normal",
+                              "fontFamily": "Poppins, sans-serif",
+                              "fontWeight": "400",
+                              "textAlign": "center",
+                              "verticalAlign": "baseline",
+                              "top": "auto",
+                              "right": "auto",
+                              "bottom": "auto",
+                              "left": "auto",
+                              "zIndex": "auto",
+                              "overflow": "hidden",
+                              "overflowX": "hidden",
+                              "overflowY": "hidden"
+                            },
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
+                              {
+                                "nodeType": "element",
+                                "selector": "path",
+                                "tag": "path",
+                                "id": null,
+                                "classes": [],
+                                "layout": {
+                                  "x": 195.32,
+                                  "y": 673.33,
+                                  "width": 36.01,
+                                  "height": 48,
+                                  "contentWidth": 0,
+                                  "contentHeight": 0,
+                                  "scrollWidth": 0,
+                                  "scrollHeight": 0
+                                },
+                                "computed": {
+                                  "display": "inline",
+                                  "position": "static",
+                                  "marginTop": 0,
+                                  "marginRight": 0,
+                                  "marginBottom": 0,
+                                  "marginLeft": 0,
+                                  "paddingTop": 0,
+                                  "paddingRight": 0,
+                                  "paddingBottom": 0,
+                                  "paddingLeft": 0,
+                                  "borderTopWidth": 0,
+                                  "borderRightWidth": 0,
+                                  "borderBottomWidth": 0,
+                                  "borderLeftWidth": 0,
+                                  "flexDirection": "row",
+                                  "flexWrap": "nowrap",
+                                  "justifyContent": "normal",
+                                  "alignItems": "normal",
+                                  "alignContent": "normal",
+                                  "flexGrow": 0,
+                                  "flexShrink": 1,
+                                  "flexBasis": "auto",
+                                  "alignSelf": "auto",
+                                  "order": 0,
+                                  "gap": "normal",
+                                  "fontSize": 16,
+                                  "lineHeight": "normal",
+                                  "fontFamily": "Poppins, sans-serif",
+                                  "fontWeight": "400",
+                                  "textAlign": "center",
+                                  "verticalAlign": "baseline",
+                                  "top": "auto",
+                                  "right": "auto",
+                                  "bottom": "auto",
+                                  "left": "auto",
+                                  "zIndex": "auto",
+                                  "overflow": "visible",
+                                  "overflowX": "visible",
+                                  "overflowY": "visible"
+                                },
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": []
+                              }
+                            ]
+                          }
+                        ]
                       },
                       {
                         "nodeType": "element",
@@ -2386,7 +2432,7 @@
                         "classes": [],
                         "layout": {
                           "x": 50,
-                          "y": 612.78,
+                          "y": 741.23,
                           "width": 326.67,
                           "height": 28,
                           "contentWidth": 327,
@@ -2447,11 +2493,11 @@
                               "rects": [
                                 {
                                   "x": 125.98,
-                                  "y": 612.78,
+                                  "y": 741.23,
                                   "width": 174.7,
                                   "height": 28,
                                   "right": 300.69,
-                                  "bottom": 640.78,
+                                  "bottom": 769.23,
                                   "text": "Fast & Efficient",
                                   "startIndex": 0,
                                   "endIndex": 16
@@ -2476,7 +2522,7 @@
                         "classes": [],
                         "layout": {
                           "x": 50,
-                          "y": 660.69,
+                          "y": 789.14,
                           "width": 326.67,
                           "height": 36,
                           "contentWidth": 327,
@@ -2537,11 +2583,11 @@
                               "rects": [
                                 {
                                   "x": 56.33,
-                                  "y": 660.69,
+                                  "y": 789.14,
                                   "width": 314,
                                   "height": 18,
                                   "right": 370.33,
-                                  "bottom": 678.69,
+                                  "bottom": 807.14,
                                   "text": "Leverage AI-powered tools to speed up your ",
                                   "startIndex": 0,
                                   "endIndex": 43
@@ -2565,11 +2611,11 @@
                               "rects": [
                                 {
                                   "x": 157.3,
-                                  "y": 678.69,
+                                  "y": 807.14,
                                   "width": 112.06,
                                   "height": 18,
                                   "right": 269.36,
-                                  "bottom": 696.69,
+                                  "bottom": 825.14,
                                   "text": "coding process.",
                                   "startIndex": 0,
                                   "endIndex": 15
@@ -2598,13 +2644,13 @@
                     ],
                     "layout": {
                       "x": 416.67,
-                      "y": 509.88,
+                      "y": 653.33,
                       "width": 366.67,
-                      "height": 222.81,
+                      "height": 207.81,
                       "contentWidth": 367,
-                      "contentHeight": 223,
+                      "contentHeight": 208,
                       "scrollWidth": 367,
-                      "scrollHeight": 223
+                      "scrollHeight": 208
                     },
                     "computed": {
                       "display": "block",
@@ -2652,30 +2698,29 @@
                     "children": [
                       {
                         "nodeType": "element",
-                        "selector": "i.fas.fa-shield-alt",
-                        "tag": "i",
+                        "selector": "div.icon",
+                        "tag": "div",
                         "id": null,
                         "classes": [
-                          "fas",
-                          "fa-shield-alt"
+                          "icon"
                         ],
                         "layout": {
                           "x": 576,
-                          "y": 529.88,
+                          "y": 673.33,
                           "width": 48,
                           "height": 48,
                           "contentWidth": 48,
                           "contentHeight": 48,
                           "scrollWidth": 48,
-                          "scrollHeight": 48
+                          "scrollHeight": 52
                         },
                         "computed": {
-                          "display": "inline-block",
+                          "display": "block",
                           "position": "static",
                           "marginTop": 0,
-                          "marginRight": 0,
+                          "marginRight": 139.344,
                           "marginBottom": 15,
-                          "marginLeft": 0,
+                          "marginLeft": 139.328,
                           "paddingTop": 0,
                           "paddingRight": 0,
                           "paddingBottom": 0,
@@ -2695,10 +2740,10 @@
                           "alignSelf": "auto",
                           "order": 0,
                           "gap": "normal",
-                          "fontSize": 48,
-                          "lineHeight": "48px",
-                          "fontFamily": "\"Font Awesome 6 Free\"",
-                          "fontWeight": "900",
+                          "fontSize": 16,
+                          "lineHeight": "normal",
+                          "fontFamily": "Poppins, sans-serif",
+                          "fontWeight": "400",
                           "textAlign": "center",
                           "verticalAlign": "baseline",
                           "top": "auto",
@@ -2712,7 +2757,131 @@
                         },
                         "depth": 5,
                         "elementIndex": 1,
-                        "children": []
+                        "children": [
+                          {
+                            "nodeType": "element",
+                            "selector": "svg",
+                            "tag": "svg",
+                            "id": null,
+                            "classes": [],
+                            "layout": {
+                              "x": 576,
+                              "y": 673.33,
+                              "width": 48,
+                              "height": 48,
+                              "contentWidth": 48,
+                              "contentHeight": 48,
+                              "scrollWidth": 48,
+                              "scrollHeight": 48
+                            },
+                            "computed": {
+                              "display": "inline",
+                              "position": "static",
+                              "marginTop": 0,
+                              "marginRight": 0,
+                              "marginBottom": 0,
+                              "marginLeft": 0,
+                              "paddingTop": 0,
+                              "paddingRight": 0,
+                              "paddingBottom": 0,
+                              "paddingLeft": 0,
+                              "borderTopWidth": 0,
+                              "borderRightWidth": 0,
+                              "borderBottomWidth": 0,
+                              "borderLeftWidth": 0,
+                              "flexDirection": "row",
+                              "flexWrap": "nowrap",
+                              "justifyContent": "normal",
+                              "alignItems": "normal",
+                              "alignContent": "normal",
+                              "flexGrow": 0,
+                              "flexShrink": 1,
+                              "flexBasis": "auto",
+                              "alignSelf": "auto",
+                              "order": 0,
+                              "gap": "normal",
+                              "fontSize": 16,
+                              "lineHeight": "normal",
+                              "fontFamily": "Poppins, sans-serif",
+                              "fontWeight": "400",
+                              "textAlign": "center",
+                              "verticalAlign": "baseline",
+                              "top": "auto",
+                              "right": "auto",
+                              "bottom": "auto",
+                              "left": "auto",
+                              "zIndex": "auto",
+                              "overflow": "hidden",
+                              "overflowX": "hidden",
+                              "overflowY": "hidden"
+                            },
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
+                              {
+                                "nodeType": "element",
+                                "selector": "path",
+                                "tag": "path",
+                                "id": null,
+                                "classes": [],
+                                "layout": {
+                                  "x": 577.5,
+                                  "y": 673.33,
+                                  "width": 45,
+                                  "height": 47.74,
+                                  "contentWidth": 0,
+                                  "contentHeight": 0,
+                                  "scrollWidth": 0,
+                                  "scrollHeight": 0
+                                },
+                                "computed": {
+                                  "display": "inline",
+                                  "position": "static",
+                                  "marginTop": 0,
+                                  "marginRight": 0,
+                                  "marginBottom": 0,
+                                  "marginLeft": 0,
+                                  "paddingTop": 0,
+                                  "paddingRight": 0,
+                                  "paddingBottom": 0,
+                                  "paddingLeft": 0,
+                                  "borderTopWidth": 0,
+                                  "borderRightWidth": 0,
+                                  "borderBottomWidth": 0,
+                                  "borderLeftWidth": 0,
+                                  "flexDirection": "row",
+                                  "flexWrap": "nowrap",
+                                  "justifyContent": "normal",
+                                  "alignItems": "normal",
+                                  "alignContent": "normal",
+                                  "flexGrow": 0,
+                                  "flexShrink": 1,
+                                  "flexBasis": "auto",
+                                  "alignSelf": "auto",
+                                  "order": 0,
+                                  "gap": "normal",
+                                  "fontSize": 16,
+                                  "lineHeight": "normal",
+                                  "fontFamily": "Poppins, sans-serif",
+                                  "fontWeight": "400",
+                                  "textAlign": "center",
+                                  "verticalAlign": "baseline",
+                                  "top": "auto",
+                                  "right": "auto",
+                                  "bottom": "auto",
+                                  "left": "auto",
+                                  "zIndex": "auto",
+                                  "overflow": "visible",
+                                  "overflowX": "visible",
+                                  "overflowY": "visible"
+                                },
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": []
+                              }
+                            ]
+                          }
+                        ]
                       },
                       {
                         "nodeType": "element",
@@ -2722,7 +2891,7 @@
                         "classes": [],
                         "layout": {
                           "x": 436.67,
-                          "y": 612.78,
+                          "y": 741.23,
                           "width": 326.67,
                           "height": 28,
                           "contentWidth": 327,
@@ -2783,11 +2952,11 @@
                               "rects": [
                                 {
                                   "x": 498.63,
-                                  "y": 612.78,
+                                  "y": 741.23,
                                   "width": 202.77,
                                   "height": 28,
                                   "right": 701.39,
-                                  "bottom": 640.78,
+                                  "bottom": 769.23,
                                   "text": "Secure & Reliable",
                                   "startIndex": 0,
                                   "endIndex": 17
@@ -2812,7 +2981,7 @@
                         "classes": [],
                         "layout": {
                           "x": 436.67,
-                          "y": 660.69,
+                          "y": 789.14,
                           "width": 326.67,
                           "height": 36,
                           "contentWidth": 327,
@@ -2873,11 +3042,11 @@
                               "rects": [
                                 {
                                   "x": 445.7,
-                                  "y": 660.69,
+                                  "y": 789.14,
                                   "width": 308.61,
                                   "height": 18,
                                   "right": 754.31,
-                                  "bottom": 678.69,
+                                  "bottom": 807.14,
                                   "text": "Built with cutting-edge security to keep your ",
                                   "startIndex": 0,
                                   "endIndex": 46
@@ -2901,11 +3070,11 @@
                               "rects": [
                                 {
                                   "x": 564.86,
-                                  "y": 678.69,
+                                  "y": 807.14,
                                   "width": 70.28,
                                   "height": 18,
                                   "right": 635.14,
-                                  "bottom": 696.69,
+                                  "bottom": 825.14,
                                   "text": "data safe.",
                                   "startIndex": 0,
                                   "endIndex": 10
@@ -2934,13 +3103,13 @@
                     ],
                     "layout": {
                       "x": 803.34,
-                      "y": 509.88,
+                      "y": 653.33,
                       "width": 366.67,
-                      "height": 222.81,
+                      "height": 207.81,
                       "contentWidth": 367,
-                      "contentHeight": 223,
+                      "contentHeight": 208,
                       "scrollWidth": 367,
-                      "scrollHeight": 223
+                      "scrollHeight": 208
                     },
                     "computed": {
                       "display": "block",
@@ -2988,30 +3157,29 @@
                     "children": [
                       {
                         "nodeType": "element",
-                        "selector": "i.fas.fa-brain",
-                        "tag": "i",
+                        "selector": "div.icon",
+                        "tag": "div",
                         "id": null,
                         "classes": [
-                          "fas",
-                          "fa-brain"
+                          "icon"
                         ],
                         "layout": {
                           "x": 962.67,
-                          "y": 529.88,
+                          "y": 673.33,
                           "width": 48,
                           "height": 48,
                           "contentWidth": 48,
                           "contentHeight": 48,
                           "scrollWidth": 48,
-                          "scrollHeight": 48
+                          "scrollHeight": 52
                         },
                         "computed": {
-                          "display": "inline-block",
+                          "display": "block",
                           "position": "static",
                           "marginTop": 0,
-                          "marginRight": 0,
+                          "marginRight": 139.344,
                           "marginBottom": 15,
-                          "marginLeft": 0,
+                          "marginLeft": 139.328,
                           "paddingTop": 0,
                           "paddingRight": 0,
                           "paddingBottom": 0,
@@ -3031,10 +3199,10 @@
                           "alignSelf": "auto",
                           "order": 0,
                           "gap": "normal",
-                          "fontSize": 48,
-                          "lineHeight": "48px",
-                          "fontFamily": "\"Font Awesome 6 Free\"",
-                          "fontWeight": "900",
+                          "fontSize": 16,
+                          "lineHeight": "normal",
+                          "fontFamily": "Poppins, sans-serif",
+                          "fontWeight": "400",
                           "textAlign": "center",
                           "verticalAlign": "baseline",
                           "top": "auto",
@@ -3048,7 +3216,131 @@
                         },
                         "depth": 5,
                         "elementIndex": 1,
-                        "children": []
+                        "children": [
+                          {
+                            "nodeType": "element",
+                            "selector": "svg",
+                            "tag": "svg",
+                            "id": null,
+                            "classes": [],
+                            "layout": {
+                              "x": 962.67,
+                              "y": 673.33,
+                              "width": 48,
+                              "height": 48,
+                              "contentWidth": 48,
+                              "contentHeight": 48,
+                              "scrollWidth": 48,
+                              "scrollHeight": 48
+                            },
+                            "computed": {
+                              "display": "inline",
+                              "position": "static",
+                              "marginTop": 0,
+                              "marginRight": 0,
+                              "marginBottom": 0,
+                              "marginLeft": 0,
+                              "paddingTop": 0,
+                              "paddingRight": 0,
+                              "paddingBottom": 0,
+                              "paddingLeft": 0,
+                              "borderTopWidth": 0,
+                              "borderRightWidth": 0,
+                              "borderBottomWidth": 0,
+                              "borderLeftWidth": 0,
+                              "flexDirection": "row",
+                              "flexWrap": "nowrap",
+                              "justifyContent": "normal",
+                              "alignItems": "normal",
+                              "alignContent": "normal",
+                              "flexGrow": 0,
+                              "flexShrink": 1,
+                              "flexBasis": "auto",
+                              "alignSelf": "auto",
+                              "order": 0,
+                              "gap": "normal",
+                              "fontSize": 16,
+                              "lineHeight": "normal",
+                              "fontFamily": "Poppins, sans-serif",
+                              "fontWeight": "400",
+                              "textAlign": "center",
+                              "verticalAlign": "baseline",
+                              "top": "auto",
+                              "right": "auto",
+                              "bottom": "auto",
+                              "left": "auto",
+                              "zIndex": "auto",
+                              "overflow": "hidden",
+                              "overflowX": "hidden",
+                              "overflowY": "hidden"
+                            },
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
+                              {
+                                "nodeType": "element",
+                                "selector": "path",
+                                "tag": "path",
+                                "id": null,
+                                "classes": [],
+                                "layout": {
+                                  "x": 962.67,
+                                  "y": 673.33,
+                                  "width": 48,
+                                  "height": 48,
+                                  "contentWidth": 0,
+                                  "contentHeight": 0,
+                                  "scrollWidth": 0,
+                                  "scrollHeight": 0
+                                },
+                                "computed": {
+                                  "display": "inline",
+                                  "position": "static",
+                                  "marginTop": 0,
+                                  "marginRight": 0,
+                                  "marginBottom": 0,
+                                  "marginLeft": 0,
+                                  "paddingTop": 0,
+                                  "paddingRight": 0,
+                                  "paddingBottom": 0,
+                                  "paddingLeft": 0,
+                                  "borderTopWidth": 0,
+                                  "borderRightWidth": 0,
+                                  "borderBottomWidth": 0,
+                                  "borderLeftWidth": 0,
+                                  "flexDirection": "row",
+                                  "flexWrap": "nowrap",
+                                  "justifyContent": "normal",
+                                  "alignItems": "normal",
+                                  "alignContent": "normal",
+                                  "flexGrow": 0,
+                                  "flexShrink": 1,
+                                  "flexBasis": "auto",
+                                  "alignSelf": "auto",
+                                  "order": 0,
+                                  "gap": "normal",
+                                  "fontSize": 16,
+                                  "lineHeight": "normal",
+                                  "fontFamily": "Poppins, sans-serif",
+                                  "fontWeight": "400",
+                                  "textAlign": "center",
+                                  "verticalAlign": "baseline",
+                                  "top": "auto",
+                                  "right": "auto",
+                                  "bottom": "auto",
+                                  "left": "auto",
+                                  "zIndex": "auto",
+                                  "overflow": "visible",
+                                  "overflowX": "visible",
+                                  "overflowY": "visible"
+                                },
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": []
+                              }
+                            ]
+                          }
+                        ]
                       },
                       {
                         "nodeType": "element",
@@ -3058,7 +3350,7 @@
                         "classes": [],
                         "layout": {
                           "x": 823.34,
-                          "y": 612.78,
+                          "y": 741.23,
                           "width": 326.67,
                           "height": 28,
                           "contentWidth": 327,
@@ -3119,11 +3411,11 @@
                               "rects": [
                                 {
                                   "x": 886.39,
-                                  "y": 612.78,
+                                  "y": 741.23,
                                   "width": 200.56,
                                   "height": 28,
                                   "right": 1086.95,
-                                  "bottom": 640.78,
+                                  "bottom": 769.23,
                                   "text": "Smart Assistance",
                                   "startIndex": 0,
                                   "endIndex": 16
@@ -3148,7 +3440,7 @@
                         "classes": [],
                         "layout": {
                           "x": 823.34,
-                          "y": 660.69,
+                          "y": 789.14,
                           "width": 326.67,
                           "height": 36,
                           "contentWidth": 327,
@@ -3209,11 +3501,11 @@
                               "rects": [
                                 {
                                   "x": 842.16,
-                                  "y": 660.69,
+                                  "y": 789.14,
                                   "width": 289.05,
                                   "height": 18,
                                   "right": 1131.2,
-                                  "bottom": 678.69,
+                                  "bottom": 807.14,
                                   "text": "AI-powered suggestions to optimize your ",
                                   "startIndex": 0,
                                   "endIndex": 40
@@ -3237,11 +3529,11 @@
                               "rects": [
                                 {
                                   "x": 918.63,
-                                  "y": 678.69,
+                                  "y": 807.14,
                                   "width": 136.09,
                                   "height": 18,
                                   "right": 1054.72,
-                                  "bottom": 696.69,
+                                  "bottom": 825.14,
                                   "text": "code and workflow.",
                                   "startIndex": 0,
                                   "endIndex": 18

@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 468.81,
+      "height": 694.81,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -496,11 +496,11 @@
           "x": 0,
           "y": 0,
           "width": 1200,
-          "height": 468.81,
+          "height": 694.81,
           "contentWidth": 1200,
-          "contentHeight": 469,
+          "contentHeight": 695,
           "scrollWidth": 1200,
-          "scrollHeight": 469
+          "scrollHeight": 695
         },
         "computed": {
           "display": "block",
@@ -773,11 +773,11 @@
               "x": 180,
               "y": 110,
               "width": 840,
-              "height": 300.81,
+              "height": 526.81,
               "contentWidth": 840,
-              "contentHeight": 301,
+              "contentHeight": 527,
               "scrollWidth": 840,
-              "scrollHeight": 301
+              "scrollHeight": 527
             },
             "computed": {
               "display": "block",
@@ -1012,14 +1012,14 @@
                   "product-image"
                 ],
                 "layout": {
-                  "x": 539.97,
+                  "x": 420,
                   "y": 251.81,
-                  "width": 120.06,
-                  "height": 18,
-                  "contentWidth": 120,
-                  "contentHeight": 18,
-                  "scrollWidth": 120,
-                  "scrollHeight": 18
+                  "width": 360,
+                  "height": 240,
+                  "contentWidth": 360,
+                  "contentHeight": 240,
+                  "scrollWidth": 360,
+                  "scrollHeight": 240
                 },
                 "computed": {
                   "display": "inline",
@@ -1074,7 +1074,7 @@
                 "classes": [],
                 "layout": {
                   "x": 200,
-                  "y": 305.81,
+                  "y": 531.81,
                   "width": 800,
                   "height": 18,
                   "contentWidth": 800,
@@ -1135,11 +1135,11 @@
                       "rects": [
                         {
                           "x": 356.89,
-                          "y": 305.81,
+                          "y": 531.81,
                           "width": 486.22,
                           "height": 17,
                           "right": 843.11,
-                          "bottom": 322.81,
+                          "bottom": 548.81,
                           "text": "Join thousands of satisfied customers and experience the difference.",
                           "startIndex": 0,
                           "endIndex": 68
@@ -1166,7 +1166,7 @@
                 ],
                 "layout": {
                   "x": 520,
-                  "y": 349.81,
+                  "y": 575.81,
                   "width": 160,
                   "height": 41,
                   "contentWidth": 160,
@@ -1227,11 +1227,11 @@
                       "rects": [
                         {
                           "x": 553.97,
-                          "y": 359.81,
+                          "y": 585.81,
                           "width": 92.06,
                           "height": 20,
                           "right": 646.03,
-                          "bottom": 379.81,
+                          "bottom": 605.81,
                           "text": "Get Started",
                           "startIndex": 0,
                           "endIndex": 11
@@ -1258,7 +1258,7 @@
             "classes": [],
             "layout": {
               "x": 0,
-              "y": 430.81,
+              "y": 656.81,
               "width": 1200,
               "height": 38,
               "contentWidth": 1200,
@@ -1319,11 +1319,11 @@
                   "rects": [
                     {
                       "x": 425.55,
-                      "y": 440.81,
+                      "y": 666.81,
                       "width": 348.89,
                       "height": 17,
                       "right": 774.44,
-                      "bottom": 457.81,
+                      "bottom": 683.81,
                       "text": "© 2025 Simple Landing Page. All rights reserved.",
                       "startIndex": 0,
                       "endIndex": 48
