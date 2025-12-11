@@ -1662,6 +1662,10 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
             tcell->font->family ? tcell->font->family : "default", tcell->font->font_size);
     }
 
+    // Update line_height for the new font (must be after setup_font)
+    // This ensures text rect height calculation uses correct metrics for the cell's font
+    setup_line_height(lycon, tcell);
+
     // Check if parent table uses border-collapse
     ViewTable* parent_table = get_parent_table(tcell);
     bool border_collapse = parent_table && parent_table->tb && parent_table->tb->border_collapse;
