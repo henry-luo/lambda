@@ -10,20 +10,33 @@
 extern "C" int get_font_metrics_platform(const char* font_family, float font_size,
                                           float* out_ascent, float* out_descent, float* out_line_height);
 
-// Get font cell height (ascent + descent) for text rect height
+// Get font cell height for text rect height
 // This matches browser's Range.getClientRects() which uses font metrics, not CSS line-height
+// Note: For most fonts, browser uses FreeType metrics.height. But for Apple's classic fonts
+// (Times, Helvetica, Courier), Chrome applies a 15% ascent hack on macOS for web compatibility.
 static float get_font_cell_height(FT_Face face) {
     const char* family = face->family_name;
     float font_size = (float)face->size->metrics.y_ppem;
 
-    // Try platform-specific implementation first (CoreText on macOS)
-    float ascent, descent, line_height;
-    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
-        // Return ascent + descent (without leading)
-        return ascent + descent;
+    // Check if this is one of Apple's classic fonts that needs the 15% hack
+    // These are the only fonts where CoreText metrics differ significantly from FreeType
+    bool needs_mac_hack = family && (
+        strcmp(family, "Times") == 0 ||
+        strcmp(family, "Helvetica") == 0 ||
+        strcmp(family, "Courier") == 0
+    );
+
+    if (needs_mac_hack) {
+        // Use CoreText with 15% hack for Apple's classic fonts
+        float ascent, descent, line_height;
+        if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+            // Return ascent + descent (without leading) - ascent already has the 15% adjustment
+            return ascent + descent;
+        }
     }
 
-    // Fallback: use FreeType metrics.height
+    // For all other fonts, use FreeType metrics.height directly
+    // This matches browser's Range.getClientRects() behavior
     return face->size->metrics.height / 64.0f;
 }
 
@@ -430,7 +443,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // Use platform-specific metrics (CoreText on macOS) for accurate ascent+descent
     rect->height = get_font_cell_height(lycon->font.ft_face);
 
-    // lead_y applies to baseline aligned text; not other vertical aligns
+    // Text rect y-position based on vertical alignment
+    // CSS half-leading model: text is centered within the line box
+    // When line-height < font height, half_leading can be negative (text extends above line box)
+    // Use FreeType font_height for half-leading calculation (consistent with lead_y calculation)
     if (lycon->line.vertical_align == CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         rect->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
@@ -443,8 +459,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         log_debug("top-aligned-text");
         rect->y = lycon->block.advance_y;
     }
-    else { // baseline
-        rect->y = lycon->block.advance_y + lycon->block.lead_y;
+    else { // baseline - use half-leading model
+        // Calculate half-leading based on FreeType metrics for consistency with lead_y
+        // Allow negative half-leading only when line-height is explicitly less than font height
+        // (e.g., line-height: 1em with large fonts). For normal line-height >= font_height,
+        // use clamped lead_y (compatible with table cell vertical alignment).
+        if (lycon->block.line_height < font_height) {
+            // Explicit tight line-height: text extends above line box
+            float half_leading = (lycon->block.line_height - font_height) / 2;
+            rect->y = lycon->block.advance_y + half_leading;
+        } else {
+            // Normal case: use clamped lead_y (non-negative)
+            rect->y = lycon->block.advance_y + lycon->block.lead_y;
+        }
     }
     log_debug("layout text: '%t', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f, font_face: '%s', font_size: %f",
         str, rect->start_index, rect->x, rect->y, lycon->block.advance_y, lycon->block.lead_y, lycon->font.style->family, lycon->font.style->font_size);
