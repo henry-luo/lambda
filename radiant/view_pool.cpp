@@ -591,7 +591,7 @@ void write_string_to_file(const char *filename, const char *text) {
     fclose(file); // Close file
 }
 
-void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio) {
+void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_view_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
@@ -607,7 +607,7 @@ void print_view_tree(ViewElement* view_root, Url* url, float pixel_ratio) {
     strbuf_free(buf);
 
     // also generate JSON output
-    print_view_tree_json(view_root, url, pixel_ratio);
+    print_view_tree_json(view_root, url, pixel_ratio, output_path);
 }
 
 // Helper function to escape JSON strings
@@ -1726,7 +1726,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 }
 
 // Main JSON generation function
-void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio) {
+void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio, const char* output_path) {
     log_debug("Generating JSON layout data...");
     StrBuf* json_buf = strbuf_new_cap(2048);
 
@@ -1764,6 +1764,8 @@ void print_view_tree_json(ViewElement* view_root, Url* url, float pixel_ratio) {
         log_debug("Writing JSON layout data to: %s", buf);
         write_string_to_file(buf, json_buf->str);
     }
-    write_string_to_file("/tmp/view_tree.json", json_buf->str);
+    // Write to custom output path if specified, otherwise default to /tmp/view_tree.json
+    const char* json_output = output_path ? output_path : "/tmp/view_tree.json";
+    write_string_to_file(json_output, json_buf->str);
     strbuf_free(json_buf);
 }
