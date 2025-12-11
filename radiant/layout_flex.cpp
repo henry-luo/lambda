@@ -284,8 +284,14 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 }
 
                 flex_layout->cross_axis_size = (float)calculated_cross_size;
-                container->height = calculated_cross_size;
-                log_debug("ROW FLEX: final cross_axis_size: %.1f", (float)calculated_cross_size);
+                // Container height should be content + padding (not just content)
+                int padding_height = 0;
+                if (container->bound) {
+                    padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
+                }
+                container->height = calculated_cross_size + padding_height;
+                log_debug("ROW FLEX: final cross_axis_size: %.1f, container->height=%d (content=%d + padding=%d)",
+                          (float)calculated_cross_size, (int)container->height, calculated_cross_size, padding_height);
             }
         } else {
             log_debug("AXIS INIT - vertical branch");
@@ -488,7 +494,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 log_debug("Phase 7: Updating cross_axis_size from %.1f to %d (auto-height)",
                          flex_layout->cross_axis_size, total_line_cross);
                 flex_layout->cross_axis_size = (float)total_line_cross;
-                container->height = total_line_cross;
+                // Container height should be content + padding (not just content)
+                int padding_height = 0;
+                if (container->bound) {
+                    padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
+                }
+                container->height = total_line_cross + padding_height;
             } else {
                 log_debug("Phase 7: Container has explicit height, not updating");
             }
@@ -526,7 +537,12 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 log_debug("Phase 7: (Column) Updating main_axis_size from %.1f to %d (auto-height)",
                          flex_layout->main_axis_size, total_line_main);
                 flex_layout->main_axis_size = (float)total_line_main;
-                container->height = total_line_main;
+                // Container height should be content + padding (not just content)
+                int padding_height = 0;
+                if (container->bound) {
+                    padding_height = (int)(container->bound->padding.top + container->bound->padding.bottom);
+                }
+                container->height = total_line_main + padding_height;
             } else {
                 log_debug("Phase 7: (Column) Container has explicit height, not updating");
             }
