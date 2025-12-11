@@ -250,9 +250,12 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         }
                         elem_height = li_count * 18;  // ~18px per list item
                     }
-                    else if (tag == HTM_TAG_DIV) {
-                        // Nested div - check if it's a flex container and has actual content
-                        // For empty divs (especially flex items), height should be 0
+                    else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION || 
+                             tag == HTM_TAG_ARTICLE || tag == HTM_TAG_NAV ||
+                             tag == HTM_TAG_HEADER || tag == HTM_TAG_FOOTER ||
+                             tag == HTM_TAG_ASIDE || tag == HTM_TAG_MAIN) {
+                        // Container elements - check if it's a flex container and has actual content
+                        // For empty containers (especially flex items), height should be 0
                         // For nested flex containers, DON'T use estimation - let flex layout
                         // determine height based on actual content
 
@@ -309,17 +312,49 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                     content = content->next_sibling;
                                 }
                             }
-                            // Only estimate height if div has actual content
+                            // Only estimate height if container has actual content
                             elem_height = has_content ? 56 : 0;
                         }
                     }
-                    else elem_height = 20;  // Default element height
+                    else {
+                        // For other elements (span, a, etc.), check if they have text content
+                        // and use text_line_height if so
+                        bool has_text_content = false;
+                        if (elem) {
+                            DomNode* content = elem->first_child;
+                            while (content) {
+                                if (content->is_text()) {
+                                    const char* text = (const char*)content->text_data();
+                                    if (text) {
+                                        for (const char* p = text; *p; p++) {
+                                            if (!is_space((unsigned char)*p)) {
+                                                has_text_content = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (has_text_content) break;
+                                content = content->next_sibling;
+                            }
+                        }
+                        if (has_text_content) {
+                            // Use the computed text line height for text-containing elements
+                            elem_height = text_line_height;
+                            log_debug("Element %s has text content, using text_line_height=%d",
+                                      sub_child->node_name(), elem_height);
+                        } else {
+                            elem_height = 20;  // Default element height
+                        }
+                    }
 
                     // Add margins only if element has height
                     if (elem_height > 0) {
                         if (is_row_flex) {
                             // Row flex: use MAX of child heights
-                            int total_elem_height = elem_height + 10;  // Include margin
+                            // Don't add margin for text-containing inline elements
+                            int margin = (elem_height == text_line_height) ? 0 : 10;
+                            int total_elem_height = elem_height + margin;
                             if (total_elem_height > max_child_height) {
                                 max_child_height = total_elem_height;
                             }
@@ -690,7 +725,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         // First, try to calculate intrinsic sizes from children
         // This handles both width and height by traversing child elements
         int max_child_width = 0;
+        int total_child_width = 0;  // For row flex containers: sum of child widths
         int total_child_height = 0;
+        int child_count = 0;  // Count children for gap calculation
 
         {
             DomNode* c = child;
@@ -793,7 +830,13 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                         }
                         // Note: For height, we may not have a good fallback - leave as 0
 
-                        max_child_width = max(max_child_width, child_width);
+                        // For width: row flex sums widths, column flex takes max
+                        if (is_row_flex_container) {
+                            total_child_width += child_width;
+                        } else {
+                            max_child_width = max(max_child_width, child_width);
+                        }
+                        child_count++;
 
                         // For height, column flex containers sum heights, row flex takes max
                         if (is_row_flex_container) {
@@ -809,7 +852,23 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 c = c->next_sibling;
             }
 
-            log_debug("Traversed children: max_width=%d, total_height=%d", max_child_width, total_child_height);
+            // For row flex containers, add gaps to total width
+            if (is_row_flex_container && child_count > 1) {
+                // Get gap from the flex container properties
+                float gap = 0;
+                if (item->view_type == RDT_VIEW_BLOCK) {
+                    ViewBlock* block_view = (ViewBlock*)item;
+                    if (block_view->embed && block_view->embed->flex) {
+                        gap = block_view->embed->flex->column_gap;
+                    }
+                }
+                total_child_width += (int)(gap * (child_count - 1));
+                log_debug("Row flex: added %d gaps of %.1f = %d total gap pixels",
+                          child_count - 1, gap, (int)(gap * (child_count - 1)));
+            }
+
+            log_debug("Traversed children: max_width=%d, total_width=%d, total_height=%d, is_row_flex=%d",
+                      max_child_width, total_child_width, total_child_height, is_row_flex_container);
         }
 
         // Use cached width if available and item has explicit width, otherwise use calculated
@@ -817,6 +876,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             min_width = cached->measured_width;
             max_width = cached->measured_width;
             log_debug("Using cached width for complex content (has explicit width): width=%d", min_width);
+        } else if (is_row_flex_container && total_child_width > 0) {
+            // Row flex container: use sum of child widths + gaps
+            min_width = total_child_width;
+            max_width = total_child_width;
+            log_debug("Using sum of child widths for row flex container: width=%d", min_width);
         } else if (max_child_width > 0) {
             min_width = max_child_width;
             max_width = max_child_width;

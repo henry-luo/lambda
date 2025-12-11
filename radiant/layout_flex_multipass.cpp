@@ -299,9 +299,17 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             child = child->next_sibling;
         }
         if (max_item_height > 0) {
-            flex_layout->cross_axis_size = (float)max_item_height;
-            flex_container->height = (float)max_item_height;
-            log_debug("AUTO-HEIGHT: row flex container height updated to %d from measured items", max_item_height);
+            // Add padding to content height for final container height
+            int padding_top = 0, padding_bottom = 0;
+            if (flex_container->bound) {
+                padding_top = (int)flex_container->bound->padding.top;
+                padding_bottom = (int)flex_container->bound->padding.bottom;
+            }
+            int total_height = max_item_height + padding_top + padding_bottom;
+            flex_layout->cross_axis_size = (float)max_item_height;  // Content height
+            flex_container->height = (float)total_height;  // Total height including padding
+            log_debug("AUTO-HEIGHT: row flex container height updated to %d (content=%d + padding=%d+%d)",
+                      total_height, max_item_height, padding_top, padding_bottom);
         }
     } else if (flex_layout && !is_main_axis_horizontal(flex_layout) && !has_explicit_height) {
         // Column flex with auto height: calculate height from flex items
@@ -333,9 +341,17 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
             total_height += (int)(flex_layout->row_gap * (item_count - 1));
         }
         if (total_height > 0) {
-            flex_layout->main_axis_size = (float)total_height;
-            flex_container->height = (float)total_height;
-            log_debug("AUTO-HEIGHT: column flex container height updated to %d from measured items", total_height);
+            // Add padding to content height for final container height
+            int padding_top = 0, padding_bottom = 0;
+            if (flex_container->bound) {
+                padding_top = (int)flex_container->bound->padding.top;
+                padding_bottom = (int)flex_container->bound->padding.bottom;
+            }
+            int final_height = total_height + padding_top + padding_bottom;
+            flex_layout->main_axis_size = (float)total_height;  // Content height
+            flex_container->height = (float)final_height;  // Total height including padding
+            log_debug("AUTO-HEIGHT: column flex container height updated to %d (content=%d + padding=%d+%d)",
+                      final_height, total_height, padding_top, padding_bottom);
         }
     }
 
