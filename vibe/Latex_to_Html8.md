@@ -11,15 +11,35 @@
 ### Current State After Phase 8C Completion (11 Dec 2025)
 - **Architecture**: Successfully refactored to O(1) command registry with 88 commands migrated
 - **Baseline Tests**: ✅ **34/35 passing (97.1%)** - stable quality gate **[+1 test from Phase 8C, excluded 1 pre-existing failure]**
-- **Extended Tests**: Partially implemented, ongoing development
+- **Extended Tests**: ❌ **0/74 passing (0%)** - systematic architectural gaps identified
+- **Overall Coverage**: 34/109 tests passing (31.2%)
 - **Performance**: ~50x improvement in command lookup via hash map
 - **Code Quality**: Clean handler pattern with `RenderContext` state management
 - **Phase 8C Achievement**: ✅ **Nested counter support with parent-child relationships and cascading reset**
 - **Note**: Discovered and documented `groups_tex_1` as pre-existing failure (ZWSP after groups issue)
 
+### 📊 Extended Test Analysis Complete
+
+**NEW**: Comprehensive structural analysis completed on all 74 failing extended tests.  
+**See**: [`Extended_Test_Analysis.md`](./Extended_Test_Analysis.md) for complete findings and architectural recommendations.
+
+**Key Findings**:
+- **Top 3 Issues**: Whitespace (26 tests), Environments (20 tests), Special Characters (16 tests)
+- **Root Cause**: Missing multi-pass architecture (expansion → normalization → formatting)
+- **Quick Wins**: 4 high-impact fixes (~5 hours) → +30 tests passing (+40%)
+- **Target**: 72/74 extended tests passing (>95%) achievable in 4-5 weeks
+
 ### Critical Analysis: Why Extended Tests Fail
 
 After running and analyzing all 74 extended tests, clear **structural deficiencies** emerge that prevent progress beyond basic functionality. The failures cluster into **systemic architectural gaps** rather than individual bugs.
+
+**Major Architectural Gaps Identified**:
+1. ❌ **Multi-pass processing architecture** - single-pass formatter insufficient
+2. ❌ **Context state machine** - mode/environment/font tracking missing
+3. ❌ **Whitespace normalization engine** - ad-hoc handling inadequate
+4. ❌ **HTML output encoding layer** - entity escaping, accent composition needed
+5. ❌ **Two-pass label/reference system** - forward references unsupported
+6. ❌ **Macro expansion engine** - `\newcommand` not implemented
 
 ---
 
