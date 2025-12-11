@@ -360,6 +360,54 @@ struct DisplayValue {
 };
 ```
 
+### 5.4 Line Height and Font Rect Height
+
+**Normal Line Height Calculation:**
+
+When `line-height: normal`, Radiant follows Chrome's algorithm (ref: Blink `simple_font_data.cc`):
+
+1. **Platform Metrics First:** Query CoreText (macOS) or platform API for ascent, descent, line gap
+2. **Classic Font Hack (macOS only):** For Times, Helvetica, Courier—add 15% to ascent:
+   ```cpp
+   ascent += floor((ascent + descent) * 0.15 + 0.5)
+   ```
+3. **Round Components:** Round ascent, descent, and line gap individually
+4. **Sum:** `line_height = round(ascent) + round(descent) + round(line_gap)`
+5. **Fallback:** If no platform metrics, use FreeType HHEA metrics
+
+**Entry:** `calc_normal_line_height()` in `layout.cpp`
+
+**Font Rect Height (TextRect):**
+
+The height of text rects (as returned by `Range.getClientRects()`) uses font metrics, not CSS line-height. Per CSS2 spec §10.6.1, the content area height "should be based on the font, but this specification does not specify how."
+
+Radiant's empirically-matched behavior:
+
+| Font Type | Height Source |
+|-----------|---------------|
+| Classic Mac fonts (Times, Helvetica, Courier) | CoreText ascent+descent (with 15% hack) |
+| All other fonts | FreeType `metrics.height` (ascender + descender + line gap) |
+
+**Entry:** `get_font_cell_height()` in `layout_text.cpp`
+
+**Half-Leading Model (CSS2 §10.8.1):**
+
+When line-height differs from font height, CSS distributes the difference equally above and below the text:
+
+```
+L = line-height - (A + D)           // Leading (can be negative)
+A' = A + L/2                        // Effective ascent above baseline
+D' = D + L/2                        // Effective descent below baseline
+```
+
+In Radiant:
+```cpp
+float half_leading = (line_height - font_height) / 2;
+text_rect_y = advance_y + half_leading;
+```
+
+When `line_height < font_height`, half-leading is negative and text extends above the line box (per CSS spec: "L may be negative").
+
 ---
 
 ## 6. Memory Management
