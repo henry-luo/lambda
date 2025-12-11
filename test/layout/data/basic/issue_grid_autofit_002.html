@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Grid minmax Track Sizing</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 14px; }
+    
+    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }
+    
+    /* Test 1: minmax(200px, 1fr) */
+    .grid1 {
+      display: grid;
+      grid-template-columns: minmax(200px, 1fr) minmax(200px, 1fr);
+      gap: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    
+    /* Test 2: minmax(100px, 300px) with fixed max */
+    .grid2 {
+      display: grid;
+      grid-template-columns: minmax(100px, 300px) minmax(100px, 300px);
+      gap: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    
+    /* Test 3: minmax(auto, 1fr) */
+    .grid3 {
+      display: grid;
+      grid-template-columns: minmax(auto, 1fr) minmax(auto, 1fr) minmax(auto, 1fr);
+      gap: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .item {
+      background: #66bb6a;
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="label">minmax(200px, 1fr) - 2 columns</div>
+  <div class="grid1">
+    <div class="item">Column 1</div>
+    <div class="item">Column 2</div>
+  </div>
+  
+  <div class="label">minmax(100px, 300px) - fixed max</div>
+  <div class="grid2">
+    <div class="item">Column 1</div>
+    <div class="item">Column 2</div>
+  </div>
+  
+  <div class="label">minmax(auto, 1fr) - 3 columns</div>
+  <div class="grid3">
+    <div class="item">A</div>
+    <div class="item">BB</div>
+    <div class="item">CCC</div>
+  </div>
+</body>
+</html>

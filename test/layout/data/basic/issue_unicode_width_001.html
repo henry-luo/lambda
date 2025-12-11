@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Unicode Glyph Width</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 16px; padding: 20px; }
+    
+    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }
+    
+    .row {
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    
+    .icon {
+      display: inline-block;
+      background: #e3f2fd;
+      padding: 5px 10px;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="label">Checkmark and X symbols</div>
+  <div class="row">
+    <span class="icon">✓</span>
+    <span class="icon">✗</span>
+    <span class="icon">✔</span>
+    <span class="icon">✘</span>
+  </div>
+  
+  <div class="label">Common Unicode symbols</div>
+  <div class="row">
+    <span class="icon">©</span>
+    <span class="icon">®</span>
+    <span class="icon">™</span>
+    <span class="icon">€</span>
+    <span class="icon">£</span>
+    <span class="icon">¥</span>
+  </div>
+  
+  <div class="label">Arrows</div>
+  <div class="row">
+    <span class="icon">←</span>
+    <span class="icon">→</span>
+    <span class="icon">↑</span>
+    <span class="icon">↓</span>
+    <span class="icon">↔</span>
+  </div>
+  
+  <div class="label">Math symbols</div>
+  <div class="row">
+    <span class="icon">±</span>
+    <span class="icon">×</span>
+    <span class="icon">÷</span>
+    <span class="icon">≤</span>
+    <span class="icon">≥</span>
+    <span class="icon">≠</span>
+  </div>
+  
+  <div class="label">Emoji (if supported)</div>
+  <div class="row">
+    <span class="icon">😀</span>
+    <span class="icon">❤️</span>
+    <span class="icon">⭐</span>
+    <span class="icon">🔥</span>
+  </div>
+</body>
+</html>

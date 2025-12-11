@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Grid auto-fit</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 14px; }
+    
+    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }
+    
+    /* Test 1: repeat(auto-fit, minmax(100px, 1fr)) */
+    .grid1 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    
+    /* Test 2: repeat(auto-fill, minmax(100px, 1fr)) */
+    .grid2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+      gap: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    
+    /* Test 3: repeat(4, 1fr) - explicit count for comparison */
+    .grid3 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      background: #f0f0f0;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .item {
+      background: #4a90d9;
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="label">Grid with repeat(auto-fit, minmax(100px, 1fr))</div>
+  <div class="grid1">
+    <div class="item">1</div>
+    <div class="item">2</div>
+    <div class="item">3</div>
+    <div class="item">4</div>
+  </div>
+  
+  <div class="label">Grid with repeat(auto-fill, minmax(100px, 1fr))</div>
+  <div class="grid2">
+    <div class="item">1</div>
+    <div class="item">2</div>
+    <div class="item">3</div>
+    <div class="item">4</div>
+  </div>
+  
+  <div class="label">Grid with repeat(4, 1fr) - explicit</div>
+  <div class="grid3">
+    <div class="item">1</div>
+    <div class="item">2</div>
+    <div class="item">3</div>
+    <div class="item">4</div>
+  </div>
+</body>
+</html>

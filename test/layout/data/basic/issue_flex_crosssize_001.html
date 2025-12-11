@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Flex Container Cross Size</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 14px; padding: 20px; }
+    
+    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }
+    
+    /* Test container height calculation with different align-items */
+    .flex-container {
+      display: flex;
+      background: #f0f0f0;
+      margin-bottom: 20px;
+      padding: 10px;
+    }
+    
+    .item-small { 
+      background: #4a90d9; 
+      color: white; 
+      padding: 10px 20px;
+    }
+    
+    .item-tall { 
+      background: #66bb6a; 
+      color: white; 
+      padding: 30px 20px;
+    }
+    
+    .align-stretch { align-items: stretch; }
+    .align-start { align-items: flex-start; }
+    .align-center { align-items: center; }
+    .align-end { align-items: flex-end; }
+  </style>
+</head>
+<body>
+  <div class="label">align-items: stretch (default)</div>
+  <div class="flex-container align-stretch">
+    <div class="item-small">Short</div>
+    <div class="item-tall">Tall</div>
+    <div class="item-small">Short</div>
+  </div>
+  
+  <div class="label">align-items: flex-start</div>
+  <div class="flex-container align-start">
+    <div class="item-small">Short</div>
+    <div class="item-tall">Tall</div>
+    <div class="item-small">Short</div>
+  </div>
+  
+  <div class="label">align-items: center</div>
+  <div class="flex-container align-center">
+    <div class="item-small">Short</div>
+    <div class="item-tall">Tall</div>
+    <div class="item-small">Short</div>
+  </div>
+  
+  <div class="label">align-items: flex-end</div>
+  <div class="flex-container align-end">
+    <div class="item-small">Short</div>
+    <div class="item-tall">Tall</div>
+    <div class="item-small">Short</div>
+  </div>
+</body>
+</html>

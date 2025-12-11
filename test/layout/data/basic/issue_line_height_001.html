@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Line Height Calculation</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 16px; }
+    
+    /* Test 1: Default line-height (normal) */
+    .test1 { background: #e3f2fd; margin-bottom: 10px; }
+    
+    /* Test 2: Explicit line-height */
+    .test2 { background: #f3e5f5; line-height: 1.5; margin-bottom: 10px; }
+    
+    /* Test 3: Line-height in px */
+    .test3 { background: #e8f5e9; line-height: 24px; margin-bottom: 10px; }
+    
+    /* Test 4: Multiple lines - cumulative height test */
+    .test4 { background: #fff3e0; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="test1">
+    <p>Line 1 with default line-height</p>
+    <p>Line 2 with default line-height</p>
+    <p>Line 3 with default line-height</p>
+  </div>
+  
+  <div class="test2">
+    <p>Line 1 with line-height: 1.5</p>
+    <p>Line 2 with line-height: 1.5</p>
+    <p>Line 3 with line-height: 1.5</p>
+  </div>
+  
+  <div class="test3">
+    <p>Line 1 with line-height: 24px</p>
+    <p>Line 2 with line-height: 24px</p>
+    <p>Line 3 with line-height: 24px</p>
+  </div>
+  
+  <div class="test4">
+    <p>Line 1</p>
+    <p>Line 2</p>
+    <p>Line 3</p>
+    <p>Line 4</p>
+    <p>Line 5</p>
+    <p>Line 6</p>
+    <p>Line 7</p>
+    <p>Line 8</p>
+    <p>Line 9</p>
+    <p>Line 10</p>
+  </div>
+</body>
+</html>
