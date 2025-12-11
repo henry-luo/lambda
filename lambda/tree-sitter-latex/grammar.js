@@ -44,6 +44,9 @@ module.exports = grammar({
   conflicts: $ => [
     // Allow paragraph_break to interrupt text
     [$._text_content, $.text],
+    // Allow counter_value to appear in counter rules
+    [$._command, $.counter_definition],
+    [$._command, $.counter_addition],
   ],
   
   externals: $ => [
@@ -340,7 +343,7 @@ module.exports = grammar({
 
     curly_group_word: $ => seq('{', field('word', $.word), '}'),
 
-    curly_group_value: $ => seq('{', field('value', $.value_literal), '}'),
+    curly_group_value: $ => seq('{', field('value', $.text), '}'),
 
     curly_group_spec: $ =>
       seq('{', repeat(choice($._text_content, '=')), '}'),

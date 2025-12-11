@@ -3446,7 +3446,7 @@
         "required": true,
         "types": [
           {
-            "type": "value_literal",
+            "type": "text",
             "named": true
           }
         ]
@@ -12465,10 +12465,6 @@
   {
     "type": "v",
     "named": false
-  },
-  {
-    "type": "value_literal",
-    "named": true
   },
   {
     "type": "word",
