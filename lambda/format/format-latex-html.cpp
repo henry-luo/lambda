@@ -1595,6 +1595,8 @@ static void handle_real(StringBuf* html_buf, Element* elem, Pool* pool, int dept
 static void handle_counter_typesetting(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
 
 // Label/reference command handlers
+static void handle_label_definition(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_label_reference(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
 static void handle_refstepcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
 static void handle_label(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
 static void handle_ref(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
@@ -1723,6 +1725,8 @@ static void init_command_registry() {
     command_registry["counter_value"] = {handle_value, CMD_COUNTER, false, "Counter value (\\value)"};
     
     // Label/reference commands
+    command_registry["label_definition"] = {handle_label_definition, CMD_LABEL_REF, false, "Label definition wrapper (tree-sitter)"};
+    command_registry["label_reference"] = {handle_label_reference, CMD_LABEL_REF, false, "Label reference wrapper (tree-sitter)"};
     command_registry["refstepcounter"] = {handle_refstepcounter, CMD_LABEL_REF, false, "Step counter and set label"};
     command_registry["label"] = {handle_label, CMD_LABEL_REF, false, "Define label"};
     command_registry["ref"] = {handle_ref, CMD_LABEL_REF, false, "Reference label"};
@@ -2302,6 +2306,107 @@ static void handle_refstepcounter(StringBuf* html_buf, Element* elem, Pool* pool
         ctx->step_counter(counter_name);
     }
     (void)html_buf; (void)pool; (void)depth;
+}
+
+// Handle label_definition wrapper element from tree-sitter parser
+// This element wraps \label{key} and should be transparent (no output)
+static void handle_label_definition(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // The label_definition element contains:
+    //   1. <\label> element (the command itself)
+    //   2. <curly_group_label> element (contains the label name)
+    // We need to extract the label name and store it, but produce NO HTML output
+    
+    // Find the curly_group_label child
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem && child_elem->type) {
+                TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                StrView child_name = child_type->name;
+                
+                // Check if this is curly_group_label
+                if (child_name.length >= 16 && strncmp(child_name.str, "curly_group_label", 17) == 0) {
+                    // Extract label name from the symbol inside
+                    for (int64_t j = 0; j < child_elem->length; j++) {
+                        Item label_item = child_elem->items[j];
+                        if (get_type_id(label_item) == LMD_TYPE_SYMBOL) {
+                            Symbol* label_sym = label_item.get_symbol();
+                            if (label_sym && label_sym->chars) {
+                                // Store the label
+                                ctx->define_label(label_sym->chars, "1", 1); // Placeholder values
+                                // DON'T output anything to HTML
+                                (void)html_buf; (void)pool; (void)depth;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback: try get_first_arg_text in case structure is different
+    const char* label_name = get_first_arg_text(elem);
+    if (label_name) {
+        ctx->define_label(label_name, "1", 1);
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+// Handle label_reference wrapper element from tree-sitter parser
+// This element wraps \ref{key} and should output the reference value
+static void handle_label_reference(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // The label_reference element contains:
+    //   1. <\ref> element (the command itself)
+    //   2. <curly_group_label_list> element (contains the label name)
+    // We need to extract the label name and output the reference value
+    
+    // Find the curly_group_label_list child
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem && child_elem->type) {
+                TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                StrView child_name = child_type->name;
+                
+                // Check if this is curly_group_label_list (note: different from label_definition!)
+                if (child_name.length >= 20 && strncmp(child_name.str, "curly_group_label_list", 22) == 0) {
+                    // Extract label name from the symbol inside
+                    for (int64_t j = 0; j < child_elem->length; j++) {
+                        Item label_item = child_elem->items[j];
+                        if (get_type_id(label_item) == LMD_TYPE_SYMBOL) {
+                            Symbol* label_sym = label_item.get_symbol();
+                            if (label_sym && label_sym->chars) {
+                                // Get the label value and output it
+                                const char* label_value = ctx->get_label_value(label_sym->chars);
+                                if (label_value) {
+                                    stringbuf_append_str(html_buf, label_value);
+                                } else {
+                                    stringbuf_append_str(html_buf, "??");
+                                }
+                                (void)pool; (void)depth;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback: try get_first_arg_text in case structure is different
+    const char* label_name = get_first_arg_text(elem);
+    if (label_name) {
+        const char* label_value = ctx->get_label_value(label_name);
+        if (label_value) {
+            stringbuf_append_str(html_buf, label_value);
+        } else {
+            stringbuf_append_str(html_buf, "??");
+        }
+    }
+    (void)pool; (void)depth;
 }
 
 static void handle_label(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
