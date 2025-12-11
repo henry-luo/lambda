@@ -715,6 +715,132 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
     return result;
 }
 
+// Helper function to resolve margin value with inherit support
+// Returns the resolved margin value in pixels
+// If value is 'inherit', looks up parent element's computed margin value
+static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId prop_id, const CssValue* value) {
+    // Check for inherit keyword
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+        // Look up parent element's computed margin value
+        DomElement* current = (DomElement*)lycon->view;
+        if (current && current->parent && current->parent->is_element()) {
+            DomElement* parent = (DomElement*)current->parent;
+            // Check if parent has bound property
+            if (parent->bound) {
+                switch (prop_id) {
+                    case CSS_PROPERTY_MARGIN_TOP:
+                        log_debug("[CSS] margin-top: inheriting %.2f from parent", parent->bound->margin.top);
+                        return parent->bound->margin.top;
+                    case CSS_PROPERTY_MARGIN_RIGHT:
+                        log_debug("[CSS] margin-right: inheriting %.2f from parent", parent->bound->margin.right);
+                        return parent->bound->margin.right;
+                    case CSS_PROPERTY_MARGIN_BOTTOM:
+                        log_debug("[CSS] margin-bottom: inheriting %.2f from parent", parent->bound->margin.bottom);
+                        return parent->bound->margin.bottom;
+                    case CSS_PROPERTY_MARGIN_LEFT:
+                        log_debug("[CSS] margin-left: inheriting %.2f from parent", parent->bound->margin.left);
+                        return parent->bound->margin.left;
+                    default:
+                        break;
+                }
+            }
+        }
+        // No parent or parent has no margin, use 0
+        log_debug("[CSS] inherit: no parent margin found, using 0");
+        return 0.0f;
+    }
+    // Not inherit, resolve normally
+    return resolve_length_value(lycon, prop_id, value);
+}
+
+// Helper function to copy border side values from parent to child for inherit
+// side: 0=top, 1=right, 2=bottom, 3=left
+static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, int side, int32_t specificity) {
+    DomElement* current = (DomElement*)lycon->view;
+    if (!current || !current->parent || !current->parent->is_element()) return false;
+    DomElement* parent = (DomElement*)current->parent;
+    if (!parent->bound || !parent->bound->border) return false;
+
+    BorderProp* pb = parent->bound->border;
+    switch (side) {
+        case 0: // top
+            span->bound->border->width.top = pb->width.top;
+            span->bound->border->width.top_specificity = specificity;
+            span->bound->border->top_style = pb->top_style;
+            span->bound->border->top_style_specificity = specificity;
+            span->bound->border->top_color = pb->top_color;
+            span->bound->border->top_color_specificity = specificity;
+            log_debug("[CSS] border-top: inherit - width=%.2f", pb->width.top);
+            break;
+        case 1: // right
+            span->bound->border->width.right = pb->width.right;
+            span->bound->border->width.right_specificity = specificity;
+            span->bound->border->right_style = pb->right_style;
+            span->bound->border->right_style_specificity = specificity;
+            span->bound->border->right_color = pb->right_color;
+            span->bound->border->right_color_specificity = specificity;
+            log_debug("[CSS] border-right: inherit - width=%.2f", pb->width.right);
+            break;
+        case 2: // bottom
+            span->bound->border->width.bottom = pb->width.bottom;
+            span->bound->border->width.bottom_specificity = specificity;
+            span->bound->border->bottom_style = pb->bottom_style;
+            span->bound->border->bottom_style_specificity = specificity;
+            span->bound->border->bottom_color = pb->bottom_color;
+            span->bound->border->bottom_color_specificity = specificity;
+            log_debug("[CSS] border-bottom: inherit - width=%.2f", pb->width.bottom);
+            break;
+        case 3: // left
+            span->bound->border->width.left = pb->width.left;
+            span->bound->border->width.left_specificity = specificity;
+            span->bound->border->left_style = pb->left_style;
+            span->bound->border->left_style_specificity = specificity;
+            span->bound->border->left_color = pb->left_color;
+            span->bound->border->left_color_specificity = specificity;
+            log_debug("[CSS] border-left: inherit - width=%.2f", pb->width.left);
+            break;
+    }
+    return true;
+}
+
+// Helper function to resolve padding value with inherit support
+// Returns the resolved padding value in pixels
+// If value is 'inherit', looks up parent element's computed padding value
+static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId prop_id, const CssValue* value) {
+    // Check for inherit keyword
+    if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+        // Look up parent element's computed padding value
+        DomElement* current = (DomElement*)lycon->view;
+        if (current && current->parent && current->parent->is_element()) {
+            DomElement* parent = (DomElement*)current->parent;
+            // Check if parent has bound property
+            if (parent->bound) {
+                switch (prop_id) {
+                    case CSS_PROPERTY_PADDING_TOP:
+                        log_debug("[CSS] padding-top: inheriting %.2f from parent", parent->bound->padding.top);
+                        return parent->bound->padding.top;
+                    case CSS_PROPERTY_PADDING_RIGHT:
+                        log_debug("[CSS] padding-right: inheriting %.2f from parent", parent->bound->padding.right);
+                        return parent->bound->padding.right;
+                    case CSS_PROPERTY_PADDING_BOTTOM:
+                        log_debug("[CSS] padding-bottom: inheriting %.2f from parent", parent->bound->padding.bottom);
+                        return parent->bound->padding.bottom;
+                    case CSS_PROPERTY_PADDING_LEFT:
+                        log_debug("[CSS] padding-left: inheriting %.2f from parent", parent->bound->padding.left);
+                        return parent->bound->padding.left;
+                    default:
+                        break;
+                }
+            }
+        }
+        // No parent or parent has no padding, use 0
+        log_debug("[CSS] padding inherit: no parent padding found, using 0");
+        return 0.0f;
+    }
+    // Not inherit, resolve normally
+    return resolve_length_value(lycon, prop_id, value);
+}
+
 // resolve property 'margin', 'padding', etc.
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     const CssValue *src_space, int32_t specificity, Spacing* trg_spacing) {
@@ -1692,7 +1818,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->margin.top_specificity) {
-                span->bound->margin.top = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_TOP, value);
+                span->bound->margin.top = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_TOP, value);
                 span->bound->margin.top_specificity = specificity;
                 span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
@@ -1704,7 +1830,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->margin.right_specificity) {
-                span->bound->margin.right = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, value);
+                span->bound->margin.right = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_RIGHT, value);
                 span->bound->margin.right_specificity = specificity;
                 span->bound->margin.right_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
@@ -1716,7 +1842,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->margin.bottom_specificity) {
-                span->bound->margin.bottom = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_BOTTOM, value);
+                span->bound->margin.bottom = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_BOTTOM, value);
                 span->bound->margin.bottom_specificity = specificity;
                 span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
@@ -1728,7 +1854,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->margin.left_specificity) {
-                span->bound->margin.left = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, value);
+                span->bound->margin.left = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_LEFT, value);
                 span->bound->margin.left_specificity = specificity;
                 span->bound->margin.left_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
             }
@@ -1741,7 +1867,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->padding.top_specificity) {
-                span->bound->padding.top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, value);
+                span->bound->padding.top = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_TOP, value);
                 span->bound->padding.top_specificity = specificity;
             }
             break;
@@ -1752,7 +1878,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->padding.right_specificity) {
-                span->bound->padding.right = resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, value);
+                span->bound->padding.right = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_RIGHT, value);
                 span->bound->padding.right_specificity = specificity;
             }
             break;
@@ -1763,7 +1889,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->padding.bottom_specificity) {
-                span->bound->padding.bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, value);
+                span->bound->padding.bottom = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_BOTTOM, value);
                 span->bound->padding.bottom_specificity = specificity;
             }
             break;
@@ -1774,7 +1900,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
             if (specificity >= span->bound->padding.left_specificity) {
-                span->bound->padding.left = resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, value);
+                span->bound->padding.left = resolve_padding_with_inherit(lycon, CSS_PROPERTY_PADDING_LEFT, value);
                 span->bound->padding.left_specificity = specificity;
             }
             break;
@@ -2218,6 +2344,42 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
+            // Handle inherit keyword for border shorthand
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                // Find parent with border and copy values
+                DomElement* current = (DomElement*)lycon->view;
+                if (current && current->parent && current->parent->is_element()) {
+                    DomElement* parent = (DomElement*)current->parent;
+                    if (parent->bound && parent->bound->border) {
+                        BorderProp* pb = parent->bound->border;
+                        span->bound->border->width.top = pb->width.top;
+                        span->bound->border->width.right = pb->width.right;
+                        span->bound->border->width.bottom = pb->width.bottom;
+                        span->bound->border->width.left = pb->width.left;
+                        span->bound->border->width.top_specificity = specificity;
+                        span->bound->border->width.right_specificity = specificity;
+                        span->bound->border->width.bottom_specificity = specificity;
+                        span->bound->border->width.left_specificity = specificity;
+                        span->bound->border->top_style = pb->top_style;
+                        span->bound->border->right_style = pb->right_style;
+                        span->bound->border->bottom_style = pb->bottom_style;
+                        span->bound->border->left_style = pb->left_style;
+                        span->bound->border->top_color = pb->top_color;
+                        span->bound->border->right_color = pb->right_color;
+                        span->bound->border->bottom_color = pb->bottom_color;
+                        span->bound->border->left_color = pb->left_color;
+                        span->bound->border->top_color_specificity = specificity;
+                        span->bound->border->right_color_specificity = specificity;
+                        span->bound->border->bottom_color_specificity = specificity;
+                        span->bound->border->left_color_specificity = specificity;
+                        log_debug("[CSS] border: inherit - copied border from parent (width: %.2f)", pb->width.top);
+                    } else {
+                        log_debug("[CSS] border: inherit - no parent border found, using defaults");
+                    }
+                }
+                break;
+            }
+
             // Border shorthand: <width> <style> <color> (any order)
             // Parse values from the list or single value
             float border_width = -1.0f;  CssEnum border_style = CSS_VALUE__UNDEF;  Color border_color = {0};
@@ -2337,6 +2499,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
+            // Handle inherit keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                copy_border_side_inherit(lycon, span, 0, specificity);
+                break;
+            }
             MultiValue border = {0};
             set_multi_value( &border, value);
             if (border.style) {
@@ -2368,6 +2535,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Handle inherit keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                copy_border_side_inherit(lycon, span, 1, specificity);
+                break;
             }
             MultiValue border = {0};
             set_multi_value( &border, value);
@@ -2401,6 +2573,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
+            // Handle inherit keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                copy_border_side_inherit(lycon, span, 2, specificity);
+                break;
+            }
             MultiValue border = {0};
             set_multi_value( &border, value);
             if (border.style) {
@@ -2432,6 +2609,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Handle inherit keyword
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+                copy_border_side_inherit(lycon, span, 3, specificity);
+                break;
             }
             MultiValue border = {0};
             set_multi_value( &border, value);
