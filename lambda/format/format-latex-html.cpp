@@ -11,15 +11,267 @@
 #include <vector>
 
 // =============================================================================
-// Counter System
+// RenderContext Implementation
 // =============================================================================
 
-struct Counter {
-    int value = 0;
-    std::string parent;  // Parent counter name (reset when parent steps)
-    std::vector<std::string> children;  // Child counters to reset when this counter steps
-};
+// Constructor - initialize all state to defaults
+RenderContext::RenderContext(Pool* p) : pool(p) {
+    // Initialize document state
+    doc_state.title = nullptr;
+    doc_state.author = nullptr;
+    doc_state.date = nullptr;
+    doc_state.in_document = false;
+    doc_state.section_counter = 0;
+    
+    // Initialize font context
+    font_ctx.series = FONT_SERIES_NORMAL;
+    font_ctx.shape = FONT_SHAPE_UPRIGHT;
+    font_ctx.family = FONT_FAMILY_ROMAN;
+    font_ctx.size = FONT_SIZE_NORMALSIZE;
+    font_ctx.em_active = false;
+    
+    // Initialize paragraph state
+    para_state.after_block_element = false;
+    para_state.noindent_next = false;
+    
+    // Initialize alignment
+    alignment = ALIGN_NORMAL;
+    
+    // Initialize counters
+    counters_initialized = false;
+    
+    // Initialize labels
+    labels_initialized = false;
+    current_label_anchor = "";
+    current_label_text = "";
+    label_counter = 0;
+    
+    // Initialize macros
+    macros_initialized = false;
+    
+    // Initialize chapter/section tracking
+    chapter_counter = 0;
+    section_counter = 0;
+    global_section_id = 0;
+}
 
+// Counter system methods (implementations moved here from static functions)
+void RenderContext::init_counters() {
+    if (counters_initialized) return;
+    counters_initialized = true;
+    
+    // Standard LaTeX counters with their parent relationships
+    counters["part"] = {0, "", {}};
+    counters["chapter"] = {0, "", {}};
+    counters["section"] = {0, "chapter", {}};
+    counters["subsection"] = {0, "section", {}};
+    counters["subsubsection"] = {0, "subsection", {}};
+    counters["paragraph"] = {0, "subsubsection", {}};
+    counters["subparagraph"] = {0, "paragraph", {}};
+    counters["page"] = {1, "", {}};
+    counters["equation"] = {0, "chapter", {}};
+    counters["figure"] = {0, "chapter", {}};
+    counters["table"] = {0, "chapter", {}};
+    counters["footnote"] = {0, "chapter", {}};
+    counters["mpfootnote"] = {0, "", {}};
+    counters["enumi"] = {0, "", {}};
+    counters["enumii"] = {0, "enumi", {}};
+    counters["enumiii"] = {0, "enumii", {}};
+    counters["enumiv"] = {0, "enumiii", {}};
+    
+    // Set up parent-child relationships
+    counters["chapter"].children.push_back("section");
+    counters["chapter"].children.push_back("equation");
+    counters["chapter"].children.push_back("figure");
+    counters["chapter"].children.push_back("table");
+    counters["chapter"].children.push_back("footnote");
+    counters["section"].children.push_back("subsection");
+    counters["subsection"].children.push_back("subsubsection");
+    counters["subsubsection"].children.push_back("paragraph");
+    counters["paragraph"].children.push_back("subparagraph");
+    counters["enumi"].children.push_back("enumii");
+    counters["enumii"].children.push_back("enumiii");
+    counters["enumiii"].children.push_back("enumiv");
+}
+
+void RenderContext::new_counter(const std::string& name, const std::string& parent) {
+    init_counters();
+    Counter c;
+    c.value = 0;
+    c.parent = parent;
+    counters[name] = c;
+    
+    if (!parent.empty() && counters.count(parent)) {
+        counters[parent].children.push_back(name);
+    }
+}
+
+void RenderContext::set_counter(const std::string& name, int value) {
+    init_counters();
+    if (counters.count(name)) {
+        counters[name].value = value;
+    }
+}
+
+void RenderContext::add_to_counter(const std::string& name, int delta) {
+    init_counters();
+    if (counters.count(name)) {
+        counters[name].value += delta;
+    }
+}
+
+// Forward declaration for recursive reset
+static void reset_counter_recursive_ctx(RenderContext* ctx, const std::string& name);
+
+void RenderContext::step_counter(const std::string& name) {
+    init_counters();
+    if (counters.count(name)) {
+        counters[name].value++;
+        // Reset all children recursively
+        for (const std::string& child : counters[name].children) {
+            reset_counter_recursive_ctx(this, child);
+        }
+    }
+}
+
+int RenderContext::get_counter_value(const std::string& name) {
+    init_counters();
+    if (counters.count(name)) {
+        return counters[name].value;
+    }
+    return 0;
+}
+
+bool RenderContext::counter_exists(const std::string& name) const {
+    return counters.count(name) > 0;
+}
+
+// Label system methods
+void RenderContext::init_labels() {
+    if (labels_initialized) return;
+    labels.clear();
+    labels_initialized = true;
+}
+
+void RenderContext::set_current_label(const std::string& anchor, const std::string& text) {
+    current_label_anchor = anchor;
+    current_label_text = text;
+}
+
+void RenderContext::register_label(const std::string& name) {
+    init_labels();
+    LabelInfo info;
+    info.anchor_id = current_label_anchor;
+    info.ref_text = current_label_text;
+    labels[name] = info;
+}
+
+LabelInfo RenderContext::get_label_info(const std::string& name) {
+    init_labels();
+    if (labels.count(name)) {
+        return labels[name];
+    }
+    // Return empty info if not found
+    LabelInfo empty;
+    empty.anchor_id = "??";
+    empty.ref_text = "??";
+    return empty;
+}
+
+std::string RenderContext::generate_anchor_id(const std::string& prefix) {
+    label_counter++;
+    return prefix + "-" + std::to_string(label_counter);
+}
+
+// Macro system methods
+void RenderContext::init_macros() {
+    if (macros_initialized) return;
+    macros.clear();
+    macros_initialized = true;
+}
+
+void RenderContext::register_macro(const std::string& name, int num_params, Element* definition, bool is_environment) {
+    init_macros();
+    MacroDefinition macro;
+    macro.name = name;
+    macro.num_params = num_params;
+    macro.definition = definition;
+    macro.is_environment = is_environment;
+    macros[name] = macro;
+}
+
+bool RenderContext::is_macro(const std::string& name) {
+    init_macros();
+    return macros.count(name) > 0;
+}
+
+MacroDefinition* RenderContext::get_macro(const std::string& name) {
+    init_macros();
+    if (macros.count(name)) {
+        return &macros[name];
+    }
+    return nullptr;
+}
+
+// Convenience methods for handler implementations
+
+void RenderContext::define_counter(const char* name) {
+    new_counter(std::string(name));
+}
+
+void RenderContext::define_label(const char* name, const char* value, int page) {
+    init_labels();
+    LabelInfo info;
+    info.ref_text = value;
+    info.anchor_id = generate_anchor_id(name);
+    labels[std::string(name)] = info;
+    (void)page; // Page tracking not yet implemented
+}
+
+const char* RenderContext::get_label_value(const char* name) {
+    init_labels();
+    auto it = labels.find(std::string(name));
+    if (it != labels.end()) {
+        return it->second.ref_text.c_str();
+    }
+    return nullptr;
+}
+
+int RenderContext::get_label_page(const char* name) {
+    (void)name;
+    return 1; // Page tracking not yet implemented, always return 1
+}
+
+void RenderContext::define_macro(const char* name, int num_args, const char* definition) {
+    init_macros();
+    MacroDefinition macro;
+    macro.name = name;
+    macro.num_params = num_args;
+    macro.definition = nullptr; // TODO: parse definition string into Element
+    macro.is_environment = false;
+    macros[std::string(name)] = macro;
+    (void)definition; // Definition parsing not yet implemented
+}
+
+// Helper for counter reset recursion
+static void reset_counter_recursive_ctx(RenderContext* ctx, const std::string& name) {
+    ctx->init_counters();
+    if (ctx->counters.count(name)) {
+        ctx->counters[name].value = 0;
+        for (const std::string& child : ctx->counters[name].children) {
+            reset_counter_recursive_ctx(ctx, child);
+        }
+    }
+}
+
+// =============================================================================
+// Legacy Static Functions - Deprecated (use RenderContext methods instead)
+// =============================================================================
+// NOTE: Counter, Label, and Macro systems have been moved to RenderContext
+// These old static functions/variables are kept temporarily for compatibility
+// during migration. They will be removed once all code uses RenderContext.
+
+// Legacy counter registry (DEPRECATED - use ctx->counters)
 static std::map<std::string, Counter> counter_registry;
 
 // Initialize standard LaTeX counters
@@ -179,13 +431,7 @@ static std::string format_alph(int value, bool upper) {
 // Label/Reference System
 // =============================================================================
 
-// Label information struct
-struct LabelInfo {
-    std::string anchor_id;  // HTML anchor ID (e.g., "sec-1", "c-1")
-    std::string ref_text;   // Text to display for \ref (e.g., "1", "1.1")
-};
-
-// Label registry - maps label names to their info
+// Legacy label registry (DEPRECATED - use ctx->labels)
 static std::map<std::string, LabelInfo> label_registry;
 static bool label_registry_initialized = false;
 
@@ -243,16 +489,7 @@ static std::string generate_anchor_id(const std::string& prefix = "ref") {
 // Macro System
 // =============================================================================
 
-// Macro definition struct
-struct MacroDefinition {
-    std::string name;           // Command name (without backslash)
-    int num_params;             // Number of parameters (0-9)
-    std::vector<std::string> default_values;  // Default values for optional params
-    Element* definition;        // The replacement text as an Element tree
-    bool is_environment;        // True if defined with \newenvironment
-};
-
-// Macro registry - maps command names to their definitions
+// Legacy macro registry (DEPRECATED - use ctx->macros)
 static std::map<std::string, MacroDefinition> macro_registry;
 static bool macro_registry_initialized = false;
 
@@ -759,71 +996,11 @@ static int evaluate_counter_expression(Element* elem) {
 }
 
 // =============================================================================
-// Document metadata storage
+// Type Definitions (now in header file format-latex-html.h)
 // =============================================================================
-
-// Document metadata storage
-typedef struct {
-    char* title;
-    char* author;
-    char* date;
-    bool in_document;
-    int section_counter;
-} DocumentState;
-
-// Font context for tracking font declarations
-typedef enum {
-    FONT_SERIES_NORMAL,
-    FONT_SERIES_BOLD
-} FontSeries;
-
-typedef enum {
-    FONT_SHAPE_UPRIGHT,
-    FONT_SHAPE_ITALIC,
-    FONT_SHAPE_SLANTED,
-    FONT_SHAPE_SMALL_CAPS
-} FontShape;
-
-typedef enum {
-    FONT_FAMILY_ROMAN,
-    FONT_FAMILY_SANS_SERIF,
-    FONT_FAMILY_TYPEWRITER
-} FontFamily;
-
-typedef enum {
-    FONT_SIZE_TINY,         // \tiny
-    FONT_SIZE_SCRIPTSIZE,   // \scriptsize
-    FONT_SIZE_FOOTNOTESIZE, // \footnotesize
-    FONT_SIZE_SMALL,        // \small
-    FONT_SIZE_NORMALSIZE,   // \normalsize (default)
-    FONT_SIZE_LARGE,        // \large
-    FONT_SIZE_LARGE_CAP,    // \Large
-    FONT_SIZE_LARGE_2,      // \LARGE
-    FONT_SIZE_HUGE,         // \huge
-    FONT_SIZE_HUGE_CAP      // \Huge
-} FontSize;
-
-typedef struct {
-    FontSeries series;
-    FontShape shape;
-    FontFamily family;
-    FontSize size;
-    bool em_active;  // Track if \em is active (for toggling)
-} FontContext;
-
-// Alignment context for tracking paragraph alignment
-typedef enum {
-    ALIGN_NORMAL,      // Default paragraph alignment
-    ALIGN_CENTERING,   // \centering command
-    ALIGN_RAGGEDRIGHT, // \raggedright command
-    ALIGN_RAGGEDLEFT   // \raggedleft command
-} AlignmentMode;
-
-// Paragraph state context for CSS class management
-typedef struct {
-    bool after_block_element;   // True if we just exited a block-level element
-    bool noindent_next;         // True if next paragraph should have noindent class
-} ParagraphState;
+// NOTE: DocumentState, FontContext, FontSeries, FontShape, FontFamily, FontSize,
+// AlignmentMode, and ParagraphState are now defined in the header file.
+// They are part of the RenderContext structure.
 
 static void generate_latex_css(StringBuf* css_buf);
 static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth, FontContext* font_ctx);
@@ -1312,32 +1489,1112 @@ static double latex_dim_to_pixels(const char* dim_str) {
     return value;
 }
 
+// =============================================================================
+// Command Registry Infrastructure
+// =============================================================================
+
+// Command handler function signature
+typedef void (*CommandHandler)(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Command category enumeration
+enum CommandCategory {
+    CMD_DOCUMENT,      // documentclass, usepackage, setlength
+    CMD_METADATA,      // title, author, date, maketitle
+    CMD_SECTION,       // chapter, section, subsection, etc.
+    CMD_ENVIRONMENT,   // begin, center, quote, verbatim, etc.
+    CMD_FONT,          // textbf, textit, emph, font declarations
+    CMD_TEXT,          // verb, mbox, special chars, symbols
+    CMD_COUNTER,       // newcounter, setcounter, stepcounter, etc.
+    CMD_LABEL_REF,     // label, ref, pageref, refstepcounter
+    CMD_MACRO,         // newcommand, renewcommand definitions
+    CMD_ALIGNMENT,     // centering, raggedright, raggedleft
+    CMD_SPACING,       // linebreak, newline, thinspace
+    CMD_SPECIAL        // par, noindent, group, argument
+};
+
+// Command information structure
+struct CommandInfo {
+    CommandHandler handler;
+    CommandCategory category;
+    bool is_block_level;
+    const char* description;
+};
+
+// Command registry map (will be populated in init function)
+static std::map<std::string, CommandInfo> command_registry;
+static bool command_registry_initialized = false;
+
+// Forward declarations of command handlers
+static void handle_documentclass(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_usepackage(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_setlength(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_par(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_noindent(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Font command handlers
+static void handle_emph(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textbf(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textit(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_texttt(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textrm(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textsf(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textmd(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textnormal(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textup(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textsl(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textsc(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_underline(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_sout(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Font size command handlers
+static void handle_tiny(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_scriptsize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_footnotesize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_small(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_normalsize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_large(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_Large(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_LARGE(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_huge(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_Huge(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Section/metadata command handlers  
+static void handle_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_maketitle(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_chapter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_subsection(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_subsubsection(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Environment command handlers
+static void handle_begin(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_center(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_flushleft(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_flushright(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_quotation(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_verse(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_comment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Counter command handlers
+static void handle_newcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_setcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_stepcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_addtocounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_arabic(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_roman(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_Roman(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_alph(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_Alph(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_fnsymbol(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_value(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_real(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_counter_typesetting(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Label/reference command handlers
+static void handle_refstepcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_label(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_ref(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_pageref(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Macro definition handlers
+static void handle_new_command_definition(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Alignment command handlers
+static void handle_centering(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_raggedright(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_raggedleft(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Text/spacing command handlers
+static void handle_verb(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_thinspace(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_comma(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_mbox(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_makebox(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_hbox(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_literal(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_linebreak(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_newline(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_textbackslash(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Special character handlers
+static void handle_hash(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_dollar(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_percent(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_ampersand(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_underscore(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_lbrace(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_rbrace(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_caret(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_tilde(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_hyphen(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Special structure handlers
+static void handle_argument(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_group(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+static void handle_curly_group(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx);
+
+// Initialize command registry
+static void init_command_registry() {
+    if (command_registry_initialized) return;
+    command_registry_initialized = true;
+    
+    // Document structure commands (silent, no output)
+    command_registry["documentclass"] = {handle_documentclass, CMD_DOCUMENT, false, "Document class declaration"};
+    command_registry["usepackage"] = {handle_usepackage, CMD_DOCUMENT, false, "Package import"};
+    command_registry["setlength"] = {handle_setlength, CMD_DOCUMENT, false, "Length parameter"};
+    
+    // Special commands
+    command_registry["par"] = {handle_par, CMD_SPECIAL, false, "Paragraph break"};
+    
+    // Font formatting commands
+    command_registry["emph"] = {handle_emph, CMD_FONT, false, "Emphasis (toggle italic)"};
+    command_registry["textbf"] = {handle_textbf, CMD_FONT, false, "Bold text"};
+    command_registry["textit"] = {handle_textit, CMD_FONT, false, "Italic text"};
+    command_registry["texttt"] = {handle_texttt, CMD_FONT, false, "Typewriter text"};
+    command_registry["textrm"] = {handle_textrm, CMD_FONT, false, "Roman font"};
+    command_registry["textsf"] = {handle_textsf, CMD_FONT, false, "Sans-serif font"};
+    command_registry["textmd"] = {handle_textmd, CMD_FONT, false, "Medium weight"};
+    command_registry["textnormal"] = {handle_textnormal, CMD_FONT, false, "Normal font"};
+    command_registry["textup"] = {handle_textup, CMD_FONT, false, "Upright shape"};
+    command_registry["textsl"] = {handle_textsl, CMD_FONT, false, "Slanted shape"};
+    command_registry["textsc"] = {handle_textsc, CMD_FONT, false, "Small caps"};
+    command_registry["underline"] = {handle_underline, CMD_FONT, false, "Underlined text"};
+    command_registry["sout"] = {handle_sout, CMD_FONT, false, "Strikethrough text"};
+    
+    // Font size commands
+    command_registry["tiny"] = {handle_tiny, CMD_FONT, false, "Tiny font size"};
+    command_registry["scriptsize"] = {handle_scriptsize, CMD_FONT, false, "Script font size"};
+    command_registry["footnotesize"] = {handle_footnotesize, CMD_FONT, false, "Footnote font size"};
+    command_registry["small"] = {handle_small, CMD_FONT, false, "Small font size"};
+    command_registry["normalsize"] = {handle_normalsize, CMD_FONT, false, "Normal font size"};
+    command_registry["large"] = {handle_large, CMD_FONT, false, "Large font size"};
+    command_registry["Large"] = {handle_Large, CMD_FONT, false, "Larger font size"};
+    command_registry["LARGE"] = {handle_LARGE, CMD_FONT, false, "Very large font size"};
+    command_registry["huge"] = {handle_huge, CMD_FONT, false, "Huge font size"};
+    command_registry["Huge"] = {handle_Huge, CMD_FONT, false, "Largest font size"};
+    
+    // Document metadata commands
+    command_registry["title"] = {handle_title, CMD_METADATA, false, "Document title"};
+    command_registry["author"] = {handle_author, CMD_METADATA, false, "Document author"};
+    command_registry["date"] = {handle_date, CMD_METADATA, false, "Document date"};
+    command_registry["maketitle"] = {handle_maketitle, CMD_METADATA, false, "Create title page"};
+    
+    // Section commands
+    command_registry["chapter"] = {handle_chapter, CMD_SECTION, true, "Chapter heading"};
+    command_registry["section"] = {handle_section, CMD_SECTION, true, "Section heading"};
+    command_registry["subsection"] = {handle_subsection, CMD_SECTION, true, "Subsection heading"};
+    command_registry["subsubsection"] = {handle_subsubsection, CMD_SECTION, true, "Subsubsection heading"};
+    
+    // Environment commands
+    command_registry["begin"] = {handle_begin, CMD_ENVIRONMENT, true, "Begin environment"};
+    command_registry["center"] = {handle_center, CMD_ENVIRONMENT, true, "Center alignment"};
+    command_registry["flushleft"] = {handle_flushleft, CMD_ENVIRONMENT, true, "Left alignment"};
+    command_registry["flushright"] = {handle_flushright, CMD_ENVIRONMENT, true, "Right alignment"};
+    command_registry["quote"] = {handle_quote, CMD_ENVIRONMENT, true, "Quote environment"};
+    command_registry["quotation"] = {handle_quotation, CMD_ENVIRONMENT, true, "Quotation environment"};
+    command_registry["verse"] = {handle_verse, CMD_ENVIRONMENT, true, "Verse environment"};
+    command_registry["verbatim"] = {handle_verbatim, CMD_ENVIRONMENT, true, "Verbatim environment"};
+    command_registry["comment"] = {handle_comment, CMD_ENVIRONMENT, true, "Comment environment"};
+    
+    // Counter commands
+    command_registry["newcounter"] = {handle_newcounter, CMD_COUNTER, false, "Define new counter"};
+    command_registry["setcounter"] = {handle_setcounter, CMD_COUNTER, false, "Set counter value"};
+    command_registry["stepcounter"] = {handle_stepcounter, CMD_COUNTER, false, "Increment counter"};
+    command_registry["addtocounter"] = {handle_addtocounter, CMD_COUNTER, false, "Add to counter"};
+    command_registry["arabic"] = {handle_arabic, CMD_COUNTER, false, "Format as arabic numerals"};
+    command_registry["roman"] = {handle_roman, CMD_COUNTER, false, "Format as lowercase roman"};
+    command_registry["Roman"] = {handle_Roman, CMD_COUNTER, false, "Format as uppercase roman"};
+    command_registry["alph"] = {handle_alph, CMD_COUNTER, false, "Format as lowercase letters"};
+    command_registry["Alph"] = {handle_Alph, CMD_COUNTER, false, "Format as uppercase letters"};
+    command_registry["fnsymbol"] = {handle_fnsymbol, CMD_COUNTER, false, "Format as footnote symbol"};
+    command_registry["value"] = {handle_value, CMD_COUNTER, false, "Counter value"};
+    command_registry["real"] = {handle_real, CMD_COUNTER, false, "Real number"};
+    
+    // Grammar node name aliases for counter commands (tree-sitter generates these node types)
+    command_registry["counter_declaration"] = {handle_newcounter, CMD_COUNTER, false, "Counter declaration (\\newcounter)"};
+    command_registry["counter_definition"] = {handle_setcounter, CMD_COUNTER, false, "Counter definition (\\setcounter)"};
+    command_registry["counter_addition"] = {handle_addtocounter, CMD_COUNTER, false, "Counter addition (\\addtocounter)"};
+    command_registry["counter_increment"] = {handle_stepcounter, CMD_COUNTER, false, "Counter increment (\\stepcounter)"};
+    command_registry["counter_typesetting"] = {handle_counter_typesetting, CMD_COUNTER, false, "Counter typesetting (\\arabic/\\roman/etc)"};
+    command_registry["counter_value"] = {handle_value, CMD_COUNTER, false, "Counter value (\\value)"};
+    
+    // Label/reference commands
+    command_registry["refstepcounter"] = {handle_refstepcounter, CMD_LABEL_REF, false, "Step counter and set label"};
+    command_registry["label"] = {handle_label, CMD_LABEL_REF, false, "Define label"};
+    command_registry["ref"] = {handle_ref, CMD_LABEL_REF, false, "Reference label"};
+    command_registry["pageref"] = {handle_pageref, CMD_LABEL_REF, false, "Page reference"};
+    
+    // Macro definition commands
+    command_registry["new_command_definition"] = {handle_new_command_definition, CMD_MACRO, false, "Define new command"};
+    command_registry["renew_command_definition"] = {handle_new_command_definition, CMD_MACRO, false, "Redefine command"};
+    
+    // Alignment commands
+    command_registry["centering"] = {handle_centering, CMD_ALIGNMENT, false, "Center alignment"};
+    command_registry["raggedright"] = {handle_raggedright, CMD_ALIGNMENT, false, "Ragged right alignment"};
+    command_registry["raggedleft"] = {handle_raggedleft, CMD_ALIGNMENT, false, "Ragged left alignment"};
+    
+    // Text/spacing commands
+    command_registry["verb"] = {handle_verb, CMD_TEXT, false, "Verbatim text"};
+    command_registry["thinspace"] = {handle_thinspace, CMD_SPACING, false, "Thin space"};
+    command_registry[","] = {handle_comma, CMD_SPACING, false, "Thin space (comma)"};
+    command_registry["mbox"] = {handle_mbox, CMD_TEXT, false, "Horizontal box"};
+    command_registry["makebox"] = {handle_makebox, CMD_TEXT, false, "Make box"};
+    command_registry["hbox"] = {handle_hbox, CMD_TEXT, false, "Horizontal box"};
+    command_registry["literal"] = {handle_literal, CMD_TEXT, false, "Literal character"};
+    command_registry["linebreak"] = {handle_linebreak, CMD_SPACING, false, "Line break"};
+    command_registry["linebreak_command"] = {handle_linebreak, CMD_SPACING, false, "Line break command"};
+    command_registry["newline"] = {handle_newline, CMD_SPACING, false, "New line"};
+    command_registry["textbackslash"] = {handle_textbackslash, CMD_TEXT, false, "Backslash"};
+    
+    // Special character commands
+    command_registry["#"] = {handle_hash, CMD_TEXT, false, "Hash character"};
+    command_registry["$"] = {handle_dollar, CMD_TEXT, false, "Dollar sign"};
+    command_registry["%"] = {handle_percent, CMD_TEXT, false, "Percent sign"};
+    command_registry["&"] = {handle_ampersand, CMD_TEXT, false, "Ampersand"};
+    command_registry["_"] = {handle_underscore, CMD_TEXT, false, "Underscore"};
+    command_registry["{"] = {handle_lbrace, CMD_TEXT, false, "Left brace"};
+    command_registry["}"] = {handle_rbrace, CMD_TEXT, false, "Right brace"};
+    command_registry["^"] = {handle_caret, CMD_TEXT, false, "Caret"};
+    command_registry["~"] = {handle_tilde, CMD_TEXT, false, "Non-breaking space"};
+    command_registry["-"] = {handle_hyphen, CMD_TEXT, false, "Soft hyphen"};
+    
+    // Special structure commands
+    command_registry["argument"] = {handle_argument, CMD_SPECIAL, false, "Argument block"};
+    command_registry["group"] = {handle_group, CMD_SPECIAL, false, "Group block"};
+    command_registry["curly_group"] = {handle_curly_group, CMD_SPECIAL, false, "Curly group"};
+}
+
+// Command dispatch function
+static void dispatch_command(const char* cmd_name, StringBuf* html_buf, Element* elem, 
+                            Pool* pool, int depth, RenderContext* ctx) {
+    init_command_registry();
+    
+    auto it = command_registry.find(cmd_name);
+    if (it != command_registry.end()) {
+        // Found in registry - dispatch to handler
+        it->second.handler(html_buf, elem, pool, depth, ctx);
+    } else {
+        // Not in registry yet - fall back to old if-else chain (temporary during migration)
+        // This will be removed once all commands are migrated
+        log_debug("Command '%s' not yet migrated to registry, using legacy dispatch", cmd_name);
+    }
+}
+
+// Command handler implementations for migrated commands
+
+static void handle_documentclass(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Skip documentclass - it's metadata
+    (void)html_buf; (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_usepackage(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Skip usepackage - it's preamble metadata
+    (void)html_buf; (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_setlength(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Skip setlength - it's layout metadata
+    (void)html_buf; (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_par(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // \par command creates a paragraph break
+    // Don't process it here - let the parent content processor handle it via is_par_break logic
+    (void)html_buf; (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_noindent(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // \noindent sets flag for next paragraph
+    ctx->para_state.noindent_next = true;
+    (void)html_buf; (void)elem; (void)pool; (void)depth;
+}
+
+// Font command handlers
+static void handle_emph(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_emph_command(html_buf, elem, pool, depth, &ctx->font_ctx);
+}
+
+static void handle_textbf(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "bf", "span", &ctx->font_ctx);
+}
+
+static void handle_textit(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "it", "span", &ctx->font_ctx);
+}
+
+static void handle_texttt(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_font_scoped_command(html_buf, elem, pool, depth, &ctx->font_ctx, 
+                               FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_TYPEWRITER);
+}
+
+static void handle_textrm(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_font_scoped_command(html_buf, elem, pool, depth, &ctx->font_ctx,
+                               FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
+}
+
+static void handle_textsf(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_font_scoped_command(html_buf, elem, pool, depth, &ctx->font_ctx,
+                               FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_SANS_SERIF);
+}
+
+static void handle_textmd(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_font_scoped_command(html_buf, elem, pool, depth, &ctx->font_ctx,
+                               FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
+}
+
+static void handle_textnormal(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_font_scoped_command(html_buf, elem, pool, depth, &ctx->font_ctx,
+                               FONT_SERIES_NORMAL, FONT_SHAPE_UPRIGHT, FONT_FAMILY_ROMAN);
+}
+
+static void handle_textup(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "up", "span", &ctx->font_ctx);
+}
+
+static void handle_textsl(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "sl", "span", &ctx->font_ctx);
+}
+
+static void handle_textsc(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "sc", "span", &ctx->font_ctx);
+}
+
+static void handle_underline(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "underline", "span", &ctx->font_ctx);
+}
+
+static void handle_sout(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "sout", "span", &ctx->font_ctx);
+}
+
+// Font size command handlers
+static void handle_tiny(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "tiny", "span", &ctx->font_ctx);
+}
+
+static void handle_scriptsize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "scriptsize", "span", &ctx->font_ctx);
+}
+
+static void handle_footnotesize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "footnotesize", "span", &ctx->font_ctx);
+}
+
+static void handle_small(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "small", "span", &ctx->font_ctx);
+}
+
+static void handle_normalsize(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "normalsize", "span", &ctx->font_ctx);
+}
+
+static void handle_large(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "large", "span", &ctx->font_ctx);
+}
+
+static void handle_Large(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "Large", "span", &ctx->font_ctx);
+}
+
+static void handle_LARGE(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "LARGE", "span", &ctx->font_ctx);
+}
+
+static void handle_huge(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "huge", "span", &ctx->font_ctx);
+}
+
+static void handle_Huge(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_text_command(html_buf, elem, pool, depth, "Huge", "span", &ctx->font_ctx);
+}
+
+// Section and metadata command handlers
+static void handle_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_title(html_buf, elem, pool, depth);
+    (void)ctx;
+}
+
+static void handle_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_author(html_buf, elem, pool, depth);
+    (void)ctx;
+}
+
+static void handle_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_date(html_buf, elem, pool, depth);
+    (void)ctx;
+}
+
+static void handle_maketitle(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_maketitle(html_buf, pool, depth);
+    (void)elem; (void)ctx;
+}
+
+static void handle_chapter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_chapter(html_buf, elem, pool, depth, &ctx->font_ctx);
+}
+
+static void handle_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_section_h2(html_buf, elem, pool, depth, &ctx->font_ctx);
+}
+
+static void handle_subsection(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_section(html_buf, elem, pool, depth, "latex-subsection", &ctx->font_ctx);
+}
+
+static void handle_subsubsection(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_section(html_buf, elem, pool, depth, "latex-subsubsection", &ctx->font_ctx);
+}
+
+// Environment command handlers
+static void handle_begin(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_environment(html_buf, elem, pool, depth, &ctx->font_ctx);
+}
+
+static void handle_center(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_alignment_environment(html_buf, elem, pool, depth, "latex-center", &ctx->font_ctx);
+}
+
+static void handle_flushleft(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft", &ctx->font_ctx);
+}
+
+static void handle_flushright(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright", &ctx->font_ctx);
+}
+
+static void handle_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_quote(html_buf, elem, pool, depth, &ctx->font_ctx, "quote");
+}
+
+static void handle_quotation(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_quote(html_buf, elem, pool, depth, &ctx->font_ctx, "quotation");
+}
+
+static void handle_verse(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_quote(html_buf, elem, pool, depth, &ctx->font_ctx, "verse");
+}
+
+static void handle_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    process_verbatim(html_buf, elem, pool, depth);
+    (void)ctx;
+}
+
+static void handle_comment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Comment environment: suppress all content (do nothing)
+    (void)html_buf; (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+// =============================================================================
+// Helper Functions for Handler Implementations
+// =============================================================================
+
+// Extract text from the first child element (typically a curly_group with text)
+static const char* get_first_arg_text(Element* elem) {
+    if (!elem || !elem->items || elem->length == 0) return nullptr;
+    
+    Item child = elem->items[0];
+    if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+        Element* arg_elem = child.element;
+        if (arg_elem->items && arg_elem->length > 0) {
+            Item text_item = arg_elem->items[0];
+            if (get_type_id(text_item) == LMD_TYPE_STRING) {
+                String* str = text_item.get_string();
+                return str ? str->chars : nullptr;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// Extract integer value from nth argument
+static int get_arg_int(Element* elem, int arg_index) {
+    if (!elem || !elem->items || elem->length <= arg_index) return 0;
+    
+    Item child = elem->items[arg_index];
+    if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+        Element* arg_elem = child.element;
+        if (arg_elem->items && arg_elem->length > 0) {
+            Item text_item = arg_elem->items[0];
+            if (get_type_id(text_item) == LMD_TYPE_STRING) {
+                String* str = text_item.get_string();
+                return str ? atoi(str->chars) : 0;
+            }
+        }
+    }
+    return 0;
+}
+
+// =============================================================================
+// Counter Command Handlers
+// =============================================================================
+
+// Helper to extract counter name from counter nodes (counter_declaration, counter_increment, etc.)
+// These nodes have a child element curly_group_word which contains a String with the counter name
+static const char* get_counter_name_from_curly_group(Element* elem) {
+    if (!elem || !elem->items || elem->length == 0) return nullptr;
+    
+    // Iterate through children to find curly_group_word
+    for (int i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem->type && strncmp(((TypeElmt*)child_elem->type)->name.str, "curly_group_word", 16) == 0) {
+                // Found curly_group_word - extract the string inside
+                if (child_elem->items && child_elem->length > 0) {
+                    Item word_item = child_elem->items[0];
+                    if (get_type_id(word_item) == LMD_TYPE_STRING) {
+                        String* str = it2s(word_item);
+                        return str->chars;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// Helper to extract parent counter name from optional brack_group_word (e.g., \newcounter{foo}[parent])
+static const char* get_parent_from_brack_group(Element* elem) {
+    if (!elem || !elem->items || elem->length == 0) return nullptr;
+    
+    // Iterate through children to find brack_group_word
+    for (int i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem->type && strncmp(((TypeElmt*)child_elem->type)->name.str, "brack_group_word", 16) == 0) {
+                // Found brack_group_word - extract the string inside
+                if (child_elem->items && child_elem->length > 0) {
+                    Item word_item = child_elem->items[0];
+                    if (get_type_id(word_item) == LMD_TYPE_STRING) {
+                        String* str = it2s(word_item);
+                        return str->chars;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// Helper to extract integer value from curly_group_value
+// curly_group_value contains a 'text' field with the value as a string
+static int get_value_from_curly_group(Element* elem) {
+    if (!elem || !elem->items || elem->length == 0) return 0;
+    
+    // Iterate through children to find curly_group_value
+    for (int i = 0; i < elem->length; i++) {
+        Item child = elem->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = child.element;
+            if (child_elem->type && strncmp(((TypeElmt*)child_elem->type)->name.str, "curly_group_value", 17) == 0) {
+                // Found curly_group_value - extract the text inside
+                if (child_elem->items && child_elem->length > 0) {
+                    Item text_item = child_elem->items[0];
+                    if (get_type_id(text_item) == LMD_TYPE_STRING) {
+                        String* str = it2s(text_item);
+                        return atoi(str->chars);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
+static void handle_newcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_counter_name_from_curly_group(elem);
+    const char* parent_name = get_parent_from_brack_group(elem);
+    
+    if (counter_name) {
+        if (parent_name) {
+            // Create counter with parent relationship
+            ctx->new_counter(std::string(counter_name), std::string(parent_name));
+        } else {
+            // Create counter without parent
+            ctx->define_counter(counter_name);
+        }
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+static void handle_setcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_counter_name_from_curly_group(elem);
+    int value = get_value_from_curly_group(elem);
+    if (counter_name) {
+        ctx->set_counter(counter_name, value);
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+static void handle_stepcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_counter_name_from_curly_group(elem);
+    if (counter_name) {
+        ctx->step_counter(counter_name);
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+static void handle_addtocounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_counter_name_from_curly_group(elem);
+    int value = get_value_from_curly_group(elem);
+    if (counter_name) {
+        ctx->add_to_counter(counter_name, value);
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+static void handle_arabic(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        stringbuf_append_int(html_buf, value);
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_roman(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        const char* numerals[] = {"", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"};
+        if (value > 0 && value < 11) {
+            stringbuf_append_str(html_buf, numerals[value]);
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_Roman(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        const char* numerals[] = {"", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"};
+        if (value > 0 && value < 11) {
+            stringbuf_append_str(html_buf, numerals[value]);
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_alph(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        if (value > 0 && value <= 26) {
+            char letter = 'a' + (value - 1);
+            stringbuf_append_char(html_buf, letter);
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_Alph(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        if (value > 0 && value <= 26) {
+            char letter = 'A' + (value - 1);
+            stringbuf_append_char(html_buf, letter);
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_fnsymbol(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        const char* symbols[] = {"", "*", "†", "‡", "§", "¶", "‖", "**", "††", "‡‡"};
+        if (value > 0 && value < 10) {
+            stringbuf_append_str(html_buf, symbols[value]);
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_value(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // \value{counter} returns the counter value as an integer (used in expressions)
+    // For now, just output the value like \arabic
+    const char* counter_name = get_counter_name_from_curly_group(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        stringbuf_append_int(html_buf, value);
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_real(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Process as text content
+    if (elem->items) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            if (get_type_id(child) == LMD_TYPE_STRING) {
+                String* str = child.get_string();
+                if (str) stringbuf_append_str(html_buf, str->chars);
+            }
+        }
+    }
+    (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_counter_typesetting(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // counter_typesetting has a 'command' field (e.g., "\\arabic") and a 'counter' field
+    // The 'counter' field is a curly_group_word containing the counter name
+    
+    // Extract the command name (first child should be the command element)
+    const char* command_name = nullptr;
+    if (elem && elem->items && elem->length > 0) {
+        Item first = elem->items[0];
+        if (get_type_id(first) == LMD_TYPE_ELEMENT) {
+            Element* cmd_elem = first.element;
+            if (cmd_elem->type) {
+                command_name = ((TypeElmt*)cmd_elem->type)->name.str;
+            }
+        }
+    }
+    
+    const char* counter_name = get_counter_name_from_curly_group(elem);
+    if (counter_name) {
+        int value = ctx->get_counter_value(counter_name);
+        
+        // Dispatch based on command
+        if (command_name) {
+            if (strcmp(command_name, "\\arabic") == 0) {
+                stringbuf_append_int(html_buf, value);
+            } else if (strcmp(command_name, "\\roman") == 0) {
+                stringbuf_append_str(html_buf, format_roman(value, false).c_str());
+            } else if (strcmp(command_name, "\\Roman") == 0) {
+                stringbuf_append_str(html_buf, format_roman(value, true).c_str());
+            } else if (strcmp(command_name, "\\alph") == 0) {
+                stringbuf_append_str(html_buf, format_alph(value, false).c_str());
+            } else if (strcmp(command_name, "\\Alph") == 0) {
+                stringbuf_append_str(html_buf, format_alph(value, true).c_str());
+            } else if (strcmp(command_name, "\\fnsymbol") == 0) {
+                stringbuf_append_str(html_buf, format_fnsymbol(value).c_str());
+            } else {
+                // Default to arabic if unknown
+                stringbuf_append_int(html_buf, value);
+            }
+        } else {
+            // Default to arabic if no command found
+            stringbuf_append_int(html_buf, value);
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+// =============================================================================
+// Label/Reference Command Handlers
+// =============================================================================
+
+static void handle_refstepcounter(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* counter_name = get_first_arg_text(elem);
+    if (counter_name) {
+        ctx->step_counter(counter_name);
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+static void handle_label(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* label_name = get_first_arg_text(elem);
+    if (label_name) {
+        // Store the current section/counter value
+        ctx->define_label(label_name, "1", 1); // Placeholder values
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+static void handle_ref(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* label_name = get_first_arg_text(elem);
+    if (label_name) {
+        const char* label_value = ctx->get_label_value(label_name);
+        if (label_value) {
+            stringbuf_append_str(html_buf, label_value);
+        } else {
+            stringbuf_append_str(html_buf, "??");
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+static void handle_pageref(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    const char* label_name = get_first_arg_text(elem);
+    if (label_name) {
+        const char* label_value = ctx->get_label_value(label_name);
+        int page = ctx->get_label_page(label_name);
+        if (label_value) {
+            stringbuf_append_int(html_buf, page);
+        } else {
+            stringbuf_append_str(html_buf, "??");
+        }
+    }
+    (void)pool; (void)depth;
+}
+
+// =============================================================================
+// Macro Definition Handler
+// =============================================================================
+
+static void handle_new_command_definition(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Parse \newcommand{\name}[nargs]{definition}
+    if (!elem || !elem->items || elem->length < 2) return;
+    
+    const char* cmd_name = get_first_arg_text(elem);
+    int num_args = 0;
+    const char* definition = nullptr;
+    
+    // Check for optional num_args  (second argument if it's optional)
+    int def_idx = 1;
+    if (elem->length > 2) {
+        // TODO: Check if second arg is optional argument and extract num_args
+        // For now, assume no optional args
+        def_idx = 1;
+    }
+    
+    // Get definition (last argument)
+    if (def_idx < elem->length && elem->items[def_idx].type_id() == LMD_TYPE_ELEMENT) {
+        Element* def_elem = elem->items[def_idx].element;
+        if (def_elem->items && def_elem->length > 0 && def_elem->items[0].type_id() == LMD_TYPE_STRING) {
+            String* str = def_elem->items[0].get_string();
+            definition = str ? str->chars : nullptr;
+        }
+    }
+    
+    if (cmd_name && definition) {
+        ctx->define_macro(cmd_name, num_args, definition);
+    }
+    (void)html_buf; (void)pool; (void)depth;
+}
+
+// =============================================================================
+// Alignment Command Handlers
+// =============================================================================
+
+static void handle_centering(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    ctx->alignment = ALIGN_CENTERING;
+    (void)html_buf; (void)elem; (void)pool; (void)depth;
+}
+
+static void handle_raggedright(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    ctx->alignment = ALIGN_RAGGEDRIGHT;
+    (void)html_buf; (void)elem; (void)pool; (void)depth;
+}
+
+static void handle_raggedleft(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    ctx->alignment = ALIGN_RAGGEDLEFT;
+    (void)html_buf; (void)elem; (void)pool; (void)depth;
+}
+
+// =============================================================================
+// Text/Spacing Command Handlers
+// =============================================================================
+
+static void handle_verb(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "<code>");
+    if (elem->items) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            if (get_type_id(child) == LMD_TYPE_STRING) {
+                String* str = child.get_string();
+                if (str) append_escaped_text(html_buf, str->chars);
+            }
+        }
+    }
+    stringbuf_append_str(html_buf, "</code>");
+    (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_thinspace(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, " ");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_comma(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, " ");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_mbox(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "<span class=\"mbox\">");
+    if (elem->items) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            if (get_type_id(child) == LMD_TYPE_STRING) {
+                String* str = child.get_string();
+                if (str) append_escaped_text(html_buf, str->chars);
+            } else if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                process_latex_element(html_buf, child, pool, depth + 1, &ctx->font_ctx);
+            }
+        }
+    }
+    stringbuf_append_str(html_buf, "</span>");
+    (void)depth;
+}
+
+static void handle_makebox(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Similar to mbox, but may have optional width argument
+    handle_mbox(html_buf, elem, pool, depth, ctx);
+}
+
+static void handle_hbox(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    handle_mbox(html_buf, elem, pool, depth, ctx);
+}
+
+static void handle_literal(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    if (elem->items) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            if (get_type_id(child) == LMD_TYPE_STRING) {
+                String* str = child.get_string();
+                if (str) stringbuf_append_str(html_buf, str->chars);
+            }
+        }
+    }
+    (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_linebreak(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "<br>");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_newline(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "<br>");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_textbackslash(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "\\");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+// =============================================================================
+// Special Character Handlers
+// =============================================================================
+
+static void handle_hash(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "#");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_dollar(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "$");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_percent(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "%");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_ampersand(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "&amp;");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_underscore(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "_");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_lbrace(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "{");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_rbrace(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "}");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_caret(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "^");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_tilde(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "&nbsp;");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+static void handle_hyphen(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    stringbuf_append_str(html_buf, "&shy;");
+    (void)elem; (void)pool; (void)depth; (void)ctx;
+}
+
+// =============================================================================
+// Special Structure Handlers
+// =============================================================================
+
+static void handle_argument(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Process argument content
+    if (elem->items) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            if (get_type_id(child) == LMD_TYPE_STRING) {
+                String* str = child.get_string();
+                if (str) append_escaped_text(html_buf, str->chars);
+            } else if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                process_latex_element(html_buf, child, pool, depth + 1, &ctx->font_ctx);
+            }
+        }
+    }
+}
+
+static void handle_group(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    // Process group content with scope isolation
+    if (elem->items) {
+        for (int i = 0; i < elem->length; i++) {
+            Item child = elem->items[i];
+            if (get_type_id(child) == LMD_TYPE_STRING) {
+                String* str = child.get_string();
+                if (str) append_escaped_text(html_buf, str->chars);
+            } else if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                process_latex_element(html_buf, child, pool, depth + 1, &ctx->font_ctx);
+            }
+        }
+    }
+}
+
+static void handle_curly_group(StringBuf* html_buf, Element* elem, Pool* pool, int depth, RenderContext* ctx) {
+    handle_group(html_buf, elem, pool, depth, ctx);
+}
+
+// =============================================================================
+// Main API Function
+// =============================================================================
+
+// Thread-local context for command dispatch (set by format_latex_to_html entry point)
+static thread_local RenderContext* g_render_ctx = nullptr;
+
 // Main API function
 void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, Pool* pool) {
     if (!html_buf || !css_buf || !pool) {
         return;
     }
 
-    // printf("DEBUG: format_latex_to_html - html_buf=%p, css_buf=%p\n", html_buf, css_buf);
-
-    // Initialize document state
-    memset(&doc_state, 0, sizeof(DocumentState));
-
-    // Initialize font context
-    font_context.series = FONT_SERIES_NORMAL;
-    font_context.shape = FONT_SHAPE_UPRIGHT;
-    font_context.family = FONT_FAMILY_ROMAN;
-    font_context.em_active = false;
-
-    // Reset counters
-    chapter_counter = 0;
-    section_counter = 0;
-    global_section_id = 0;
+    // Create unified render context
+    RenderContext ctx(pool);
+    
+    // Set global context for legacy code paths
+    g_render_ctx = &ctx;
+    
+    // Initialize subsystems
+    ctx.init_counters();
+    ctx.init_labels();
+    ctx.init_macros();
+    init_command_registry();
 
     // Start HTML document container (using "body" class for LaTeX.js compatibility)
     stringbuf_append_str(html_buf, "<div class=\"body\">\n");
-    // printf("DEBUG: Added HTML container to html_buf\n");
-
 
     // Check if we have a valid AST
     if (latex_ast.item == ITEM_NULL) {
@@ -1347,7 +2604,7 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
         // use MarkReader API
         ItemReader ast_reader(latex_ast.to_const());
-        process_latex_element_reader(html_buf, ast_reader, pool, 1, &font_context);
+        process_latex_element_reader(html_buf, ast_reader, pool, 1, &ctx.font_ctx);
         
     }
 
@@ -1579,6 +2836,9 @@ static void generate_latex_css(StringBuf* css_buf) {
     stringbuf_append_str(css_buf, ".latex .e { position: relative; top: 0.5ex; margin-left: -0.1667em; margin-right: -0.125em; text-transform: lowercase; }\n");
     stringbuf_append_str(css_buf, ".latex .epsilon { font-family: serif; font-style: italic; }\n");
     stringbuf_append_str(css_buf, ".tex .xe { position: relative; margin-left: -0.125em; margin-right: -0.1667em; }\n");
+    
+    // Clear global context
+    g_render_ctx = nullptr;
 }
 
 // Helper function to check if an element is block-level (should not be wrapped in <p>)
@@ -1662,6 +2922,30 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Output the punctuation character directly
             stringbuf_append_str(html_buf, cmd_name);
             return;
+        }
+
+        // Try new command registry first (O(1) lookup for 88 migrated commands)
+        if (g_render_ctx) {
+            auto it = command_registry.find(cmd_name);
+            if (it != command_registry.end()) {
+                log_debug("Dispatching command '%s' via registry (handler=%p)", cmd_name, it->second.handler);
+                it->second.handler(html_buf, elem, pool, depth, g_render_ctx);
+                return;  // Command handled by registry - early return
+            }
+            
+            // Check if this is a \the<counter> shorthand (e.g., \thec, \thesection, etc.)
+            // In LaTeX, when you define \newcounter{foo}, it automatically creates \thefoo
+            // which outputs the counter value in the default format (arabic)
+            // Note: element names don't include the backslash, so "thec" not "\thec"
+            if (strncmp(cmd_name, "the", 3) == 0 && strlen(cmd_name) > 3) {
+                const char* counter_name = cmd_name + 3;  // Skip "the"
+                // Check if this counter exists
+                if (g_render_ctx->counter_exists(counter_name)) {
+                    int value = g_render_ctx->get_counter_value(counter_name);
+                    stringbuf_append_int(html_buf, value);
+                    return;
+                }
+            }
         }
 
         // Check if this is a user-defined macro and expand it
