@@ -250,7 +250,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                         }
                         elem_height = li_count * 18;  // ~18px per list item
                     }
-                    else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION || 
+                    else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION ||
                              tag == HTM_TAG_ARTICLE || tag == HTM_TAG_NAV ||
                              tag == HTM_TAG_HEADER || tag == HTM_TAG_FOOTER ||
                              tag == HTM_TAG_ASIDE || tag == HTM_TAG_MAIN) {
