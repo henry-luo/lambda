@@ -1627,6 +1627,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
     }
 
     TypeId type = get_type_id(item);
+    log_debug("process_latex_element: type=%d, depth=%d", type, depth);
 
     // CRITICAL DEBUG: Check for invalid type values
     if (type > LMD_TYPE_ERROR) {
@@ -1812,6 +1813,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                     bool font_span_open = false;
                     bool size_span_open = false;
                     FontSize prev_size = font_ctx->size;  // Track previous size to detect changes
+                    FontShape prev_shape = font_ctx->shape;  // Track previous shape to detect \em toggles
                     
                     for (size_t j = 0; j < child_list->length; j++) {
                         Item list_item = child_list->items[j];
@@ -1819,26 +1821,40 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         
                         log_debug("LIST item %d: type=%d, current font size=%d", (int)j, list_item_type, font_ctx->size);
                         
-                        // Check for parbreak in list items
+                        // Check for parbreak in list items (Symbol or \par command Element)
+                        bool is_par_break_item = false;
                         if (list_item_type == LMD_TYPE_SYMBOL) {
                             Symbol* sym = (Symbol*)(list_item.symbol_ptr);
                             if (sym && strcmp(sym->chars, "parbreak") == 0) {
-                                // Close font and size spans before paragraph
-                                if (font_span_open) {
-                                    stringbuf_append_str(html_buf, "</span>");
-                                    font_span_open = false;
-                                }
-                                if (size_span_open) {
-                                    stringbuf_append_str(html_buf, "</span>");
-                                    size_span_open = false;
-                                }
-                                if (in_paragraph) {
-                                    close_paragraph(html_buf, true);  // Will remove if empty
-                                    in_paragraph = false;
-                                }
-                                needs_paragraph = true;
-                                continue;
+                                is_par_break_item = true;
                             }
+                        } else if (list_item_type == LMD_TYPE_ELEMENT) {
+                            Element* item_elem = list_item.element;
+                            if (item_elem && item_elem->type) {
+                                TypeElmt* item_type = (TypeElmt*)item_elem->type;
+                                if (item_type && item_type->name.length == 3 &&
+                                    strncmp(item_type->name.str, "par", 3) == 0) {
+                                    is_par_break_item = true;
+                                }
+                            }
+                        }
+                        
+                        if (is_par_break_item) {
+                            // Close font and size spans before paragraph
+                            if (font_span_open) {
+                                stringbuf_append_str(html_buf, "</span>");
+                                font_span_open = false;
+                            }
+                            if (size_span_open) {
+                                stringbuf_append_str(html_buf, "</span>");
+                                size_span_open = false;
+                            }
+                            if (in_paragraph) {
+                                close_paragraph(html_buf, true);  // Will remove if empty
+                                in_paragraph = false;
+                            }
+                            needs_paragraph = true;
+                            continue;
                         }
                         
                         // Check if list item is block-level or special command
@@ -1931,6 +1947,25 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                             }
                         }
                         
+                        // Check if this is an \emph command that will create its own spans
+                        bool is_emph_command = false;
+                        if (list_item_type == LMD_TYPE_ELEMENT) {
+                            Element* item_elem = list_item.element;
+                            if (item_elem && item_elem->type) {
+                                TypeElmt* item_type = (TypeElmt*)item_elem->type;
+                                if (item_type && item_type->name.length == 4 && 
+                                    strncmp(item_type->name.str, "emph", 4) == 0) {
+                                    is_emph_command = true;
+                                }
+                            }
+                        }
+                        
+                        // Close font span before \emph command to allow proper segmentation
+                        if (is_emph_command && font_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            font_span_open = false;
+                        }
+                        
                         // Before processing text content, check if we need to open a font span
                         if (list_item_type == LMD_TYPE_STRING && needs_font_span(font_ctx) && !font_span_open) {
                             const char* css_class = get_font_css_class(font_ctx);
@@ -1948,6 +1983,26 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
                         
                         // Process the item (this may change font_ctx for font declaration commands)
                         process_latex_element(html_buf, list_item, pool, depth + 1, font_ctx);
+                        
+                        // After \emph command, reopen font span if still needed
+                        if (is_emph_command && needs_font_span(font_ctx) && !font_span_open) {
+                            const char* css_class = get_font_css_class(font_ctx);
+                            stringbuf_append_str(html_buf, "<span class=\"");
+                            stringbuf_append_str(html_buf, css_class);
+                            stringbuf_append_str(html_buf, "\">");
+                            font_span_open = true;
+                        }
+                        
+                        // AFTER processing, check if font shape has changed from \em toggles
+                        if (font_ctx->shape != prev_shape) {
+                            // Shape changed - close old span and prepare for new span
+                            if (font_span_open) {
+                                stringbuf_append_str(html_buf, "</span>");
+                                font_span_open = false;
+                            }
+                            prev_shape = font_ctx->shape;
+                            // Don't open new span yet - wait for next text to open it
+                        }
                         
                         // AFTER processing, check if font size has changed and manage spans
                         if (font_ctx->size != prev_size) {
@@ -3007,6 +3062,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
     }
     else if (type == LMD_TYPE_STRING) {
+        log_debug("MATCHED STRING case");
         // Handle text content with ligature conversion
         String* str = item.get_string();
         if (str && str->len > 0) {
@@ -3026,6 +3082,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
     }
     else if (type == LMD_TYPE_SYMBOL) {
+        log_debug("MATCHED SYMBOL case");
         // Handle special character symbols from tree-sitter parser
         Symbol* sym = (Symbol*)(item.symbol_ptr);
         if (sym && sym->chars) {
@@ -3064,6 +3121,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
     }
     else if (type == LMD_TYPE_ARRAY) {
+        log_debug("MATCHED ARRAY case");
         // Process array of elements
         Array* arr = item.array;
         if (arr && arr->items) {
@@ -3072,14 +3130,84 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             }
         }
     }
-    else if (type == LMD_TYPE_LIST) {
+    else if (type == LMD_TYPE_LIST || type == LMD_TYPE_BINARY) {
+        log_debug("MATCHED LIST/BINARY case: type=%d, LMD_TYPE_LIST=%d, LMD_TYPE_BINARY=%d", type, LMD_TYPE_LIST, LMD_TYPE_BINARY);
         // Process list of elements (tree-sitter creates lists for mixed content)
+        // This path is used for nested lists (e.g., inside curly groups)
+        // Note: BINARY is also a list-like container
         List* list = item.list;
+        log_debug("Processing LIST/BINARY in process_latex_element: type=%d, length=%d", type, list ? list->length : -1);
         if (list && list->items) {
+            // Track font and size spans, similar to process_element_content_simple
+            bool font_span_open = false;
+            bool size_span_open = false;
+            FontShape span_shape = font_ctx->shape;
+            FontSize span_size = font_ctx->size;
+            
             for (int i = 0; i < list->length; i++) {
-                process_latex_element(html_buf, list->items[i], pool, depth, font_ctx);
+                Item list_item = list->items[i];
+                TypeId list_item_type = get_type_id(list_item);
+                
+                // For STRING items, ensure correct spans are open BEFORE processing
+                if (list_item_type == LMD_TYPE_STRING) {
+                    // Check if font shape changed (from \em toggles)
+                    if (font_ctx->shape != span_shape) {
+                        if (font_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            font_span_open = false;
+                        }
+                        span_shape = font_ctx->shape;
+                    }
+                    
+                    // Open font span if needed
+                    if (needs_font_span(font_ctx) && !font_span_open) {
+                        const char* font_class = get_font_css_class(font_ctx);
+                        stringbuf_append_str(html_buf, "<span class=\"");
+                        stringbuf_append_str(html_buf, font_class);
+                        stringbuf_append_str(html_buf, "\">");
+                        font_span_open = true;
+                    }
+                    
+                    // Close font span if no longer needed
+                    if (!needs_font_span(font_ctx) && font_span_open) {
+                        stringbuf_append_str(html_buf, "</span>");
+                        font_span_open = false;
+                    }
+                    
+                    // Check if size changed
+                    if (font_ctx->size != span_size) {
+                        if (size_span_open) {
+                            stringbuf_append_str(html_buf, "</span>");
+                            size_span_open = false;
+                        }
+                        
+                        if (needs_size_span(font_ctx)) {
+                            const char* size_class = get_size_css_class(font_ctx->size);
+                            stringbuf_append_str(html_buf, "<span class=\"");
+                            stringbuf_append_str(html_buf, size_class);
+                            stringbuf_append_str(html_buf, "\">");
+                            size_span_open = true;
+                        }
+                        
+                        span_size = font_ctx->size;
+                    }
+                }
+                
+                // Process the item (may change font_ctx for declarations)
+                process_latex_element(html_buf, list_item, pool, depth, font_ctx);
+            }
+            
+            // Close any open spans at the end
+            if (font_span_open) {
+                stringbuf_append_str(html_buf, "</span>");
+            }
+            if (size_span_open) {
+                stringbuf_append_str(html_buf, "</span>");
             }
         }
+    }
+    else {
+        log_debug("Unhandled type in process_latex_element: type=%d", type);
     }
 }
 
@@ -3189,6 +3317,7 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
         bool font_span_open = false;
         bool size_span_open = false;
         FontSize span_size = FONT_SIZE_NORMALSIZE;  // Track what size span is currently open
+        FontShape span_shape = FONT_SHAPE_UPRIGHT;  // Track what shape span is currently open
 
         for (int i = 0; i < elem->length; i++) {
             Item content_item = elem->items[i];
@@ -3196,8 +3325,35 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
             
             log_debug("  item %d: type=%d, font_ctx->size=%d, span_size=%d", i, item_type, font_ctx->size, span_size);
 
-            // For STRING items, ensure correct size span is open BEFORE processing
+            // For STRING items, ensure correct size and font spans are open BEFORE processing
             if (item_type == LMD_TYPE_STRING) {
+                // Check if font shape changed (from \em toggles)
+                if (font_ctx->shape != span_shape) {
+                    // Close old font span if one was open
+                    if (font_span_open) {
+                        stringbuf_append_str(html_buf, "</span>");
+                        font_span_open = false;
+                    }
+                    span_shape = font_ctx->shape;
+                }
+                
+                // Open font span if needed and not already open
+                if (needs_font_span(font_ctx) && !font_span_open) {
+                    log_debug("Opening font span in process_element_content_simple: shape=%d, series=%d, family=%d", 
+                             font_ctx->shape, font_ctx->series, font_ctx->family);
+                    const char* font_class = get_font_css_class(font_ctx);
+                    stringbuf_append_str(html_buf, "<span class=\"");
+                    stringbuf_append_str(html_buf, font_class);
+                    stringbuf_append_str(html_buf, "\">");
+                    font_span_open = true;
+                }
+                
+                // Close font span if no longer needed
+                if (!needs_font_span(font_ctx) && font_span_open) {
+                    stringbuf_append_str(html_buf, "</span>");
+                    font_span_open = false;
+                }
+                
                 // Check if we need to change the size span
                 if (font_ctx->size != span_size) {
                     // Close old size span if one was open
@@ -3217,11 +3373,10 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, P
                     
                     span_size = font_ctx->size;
                 }
-                
-                // TODO: Handle font span similarly (for bold/italic/etc)
             }
 
-            // Process the item (this may change font_ctx for declarations like \small)
+            // Process the item (this may change font_ctx for declarations like \small or \em)
+            log_debug("  About to call process_latex_element on item type=%d", item_type);
             process_latex_element(html_buf, content_item, pool, depth, font_ctx);
         }
 
@@ -4120,30 +4275,56 @@ static void process_font_scoped_command(StringBuf* html_buf, Element* elem, Pool
 static void process_emph_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, FontContext* font_ctx) {
     // Save current font context
     FontContext saved_ctx = *font_ctx;
-
-    // Toggle shape: if upright -> italic, if italic/slanted -> upright
+    
+    log_debug("process_emph_command: current shape=%d, em_active=%d", font_ctx->shape, font_ctx->em_active);
+    
+    // Determine the toggled shape
+    FontShape toggled_shape;
     if (font_ctx->shape == FONT_SHAPE_UPRIGHT) {
-        font_ctx->shape = FONT_SHAPE_ITALIC;
+        toggled_shape = FONT_SHAPE_ITALIC;
     } else {
-        font_ctx->shape = FONT_SHAPE_UPRIGHT;
+        toggled_shape = FONT_SHAPE_UPRIGHT;
     }
 
+    // If we're in a non-default font context AND em_active (from \em declaration),
+    // wrap in current context first. This creates the double-wrapping like:
+    // <span class="it"><span class="up">...</span></span>
+    // But if we're just inside another \emph{}, don't double-wrap
+    bool needs_outer_wrap = needs_font_span(font_ctx) && font_ctx->em_active;
+    if (needs_outer_wrap) {
+        log_debug("Opening outer wrap span");
+        const char* outer_class = get_font_css_class(font_ctx);
+        stringbuf_append_str(html_buf, "<span class=\"");
+        stringbuf_append_str(html_buf, outer_class);
+        stringbuf_append_str(html_buf, "\">");
+    }
+    
     // Wrap content in span with the toggled font class
-    const char* css_class = get_font_css_class(font_ctx);
+    FontContext toggled_ctx = saved_ctx;
+    toggled_ctx.shape = toggled_shape;
+    const char* css_class = get_font_css_class(&toggled_ctx);
+    log_debug("Opening toggled span with class '%s'", css_class);
     stringbuf_append_str(html_buf, "<span class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
 
-    // Reset font context to default so text inside doesn't add redundant spans
+    // Set font context to neutral so nested content doesn't add redundant spans
+    // Since we've already opened a span with the correct style, process content with neutral context
+    // IMPORTANT: em_active always stays FALSE because \emph{} is NOT a declaration like \em
     font_ctx->series = FONT_SERIES_NORMAL;
     font_ctx->shape = FONT_SHAPE_UPRIGHT;
     font_ctx->family = FONT_FAMILY_ROMAN;
     font_ctx->em_active = false;
 
-    // Process content with neutral context
+    // Process content
     process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
 
     stringbuf_append_str(html_buf, "</span>");
+    
+    // Close outer span if we opened one
+    if (needs_outer_wrap) {
+        stringbuf_append_str(html_buf, "</span>");
+    }
 
     // Restore saved context
     *font_ctx = saved_ctx;
@@ -4151,17 +4332,30 @@ static void process_emph_command(StringBuf* html_buf, Element* elem, Pool* pool,
 
 // Process text formatting commands
 static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag, FontContext* font_ctx) {
+    // Save current font context
+    FontContext saved_ctx = *font_ctx;
+    
     stringbuf_append_str(html_buf, "<");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, " class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
 
+    // Set font context to neutral so nested content doesn't add redundant spans
+    // Since we've already opened a span with the correct style, process content with neutral context
+    font_ctx->series = FONT_SERIES_NORMAL;
+    font_ctx->shape = FONT_SHAPE_UPRIGHT;
+    font_ctx->family = FONT_FAMILY_ROMAN;
+    font_ctx->em_active = false;
+    
     process_element_content_simple(html_buf, elem, pool, depth, font_ctx);
 
     stringbuf_append_str(html_buf, "</");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, ">");
+    
+    // Restore font context
+    *font_ctx = saved_ctx;
 }
 
 // Process item command with proper LaTeX.js structure
