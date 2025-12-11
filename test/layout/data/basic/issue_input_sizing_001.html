@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Input Element Sizing</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 14px; padding: 20px; }
+    
+    .label { font-size: 12px; color: #666; margin: 10px 0 5px; }
+    .row { margin-bottom: 15px; background: #f0f0f0; padding: 10px; }
+  </style>
+</head>
+<body>
+  <div class="label">Text input (default size)</div>
+  <div class="row">
+    <input type="text" placeholder="Text input">
+  </div>
+  
+  <div class="label">Checkbox input</div>
+  <div class="row">
+    <input type="checkbox"> Checkbox label
+  </div>
+  
+  <div class="label">Radio input</div>
+  <div class="row">
+    <input type="radio" name="test"> Radio label
+  </div>
+  
+  <div class="label">Submit button</div>
+  <div class="row">
+    <input type="submit" value="Submit">
+  </div>
+  
+  <div class="label">Inline text with checkbox</div>
+  <div class="row">
+    Some text <input type="checkbox"> followed by more text
+  </div>
+  
+  <div class="label">Inline text with text input</div>
+  <div class="row">
+    Name: <input type="text" placeholder="Enter name"> end
+  </div>
+</body>
+</html>

@@ -46,7 +46,19 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
             track->computed_size = 0;
             track->base_size = 0;
             track->growth_limit = INFINITY;
-            track->is_flexible = (track->size && track->size->type == GRID_TRACK_SIZE_FR);
+            // Check if track is flexible (has fr units)
+            if (track->size) {
+                if (track->size->type == GRID_TRACK_SIZE_FR) {
+                    track->is_flexible = true;
+                } else if (track->size->type == GRID_TRACK_SIZE_MINMAX &&
+                           track->size->max_size && track->size->max_size->type == GRID_TRACK_SIZE_FR) {
+                    track->is_flexible = true;
+                } else {
+                    track->is_flexible = false;
+                }
+            } else {
+                track->is_flexible = false;
+            }
         }
     }
 
@@ -82,7 +94,19 @@ void initialize_track_sizes(GridContainerLayout* grid_layout) {
             track->computed_size = 0;
             track->base_size = 0;
             track->growth_limit = INFINITY;
-            track->is_flexible = (track->size && track->size->type == GRID_TRACK_SIZE_FR);
+            // Check if track is flexible (has fr units)
+            if (track->size) {
+                if (track->size->type == GRID_TRACK_SIZE_FR) {
+                    track->is_flexible = true;
+                } else if (track->size->type == GRID_TRACK_SIZE_MINMAX &&
+                           track->size->max_size && track->size->max_size->type == GRID_TRACK_SIZE_FR) {
+                    track->is_flexible = true;
+                } else {
+                    track->is_flexible = false;
+                }
+            } else {
+                track->is_flexible = false;
+            }
         }
     }
 
@@ -401,12 +425,25 @@ void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int avai
     float total_fr = 0;
     int flexible_count = 0;
     for (int i = 0; i < track_count; i++) {
-        if (tracks[i].is_flexible && tracks[i].size && tracks[i].size->type == GRID_TRACK_SIZE_FR) {
-            // Convert from stored integer (multiplied by 100) back to float
-            float fr_value = tracks[i].size->value / 100.0f;
-            total_fr += fr_value;
-            flexible_count++;
-            log_debug(" Track %d is flexible: %.2ffr (stored as %d)\n", i, fr_value, tracks[i].size->value);
+        if (tracks[i].is_flexible && tracks[i].size) {
+            float fr_value = 0;
+            if (tracks[i].size->type == GRID_TRACK_SIZE_FR) {
+                // Direct fr value - convert from stored integer (multiplied by 100) back to float
+                fr_value = tracks[i].size->value / 100.0f;
+            } else if (tracks[i].size->type == GRID_TRACK_SIZE_MINMAX && tracks[i].size->max_size) {
+                // minmax with fr max - extract fr value from max_size
+                if (tracks[i].size->max_size->type == GRID_TRACK_SIZE_FR) {
+                    fr_value = tracks[i].size->max_size->value / 100.0f;
+                }
+            }
+            if (fr_value > 0) {
+                total_fr += fr_value;
+                flexible_count++;
+                log_debug(" Track %d is flexible: %.2ffr\n", i, fr_value);
+            } else {
+                log_debug(" Track %d marked flexible but no fr value found: type=%d\n",
+                       i, tracks[i].size->type);
+            }
         } else {
             log_debug(" Track %d is not flexible: type=%d, is_flexible=%d\n",
                    i, tracks[i].size ? tracks[i].size->type : -1, tracks[i].is_flexible);
@@ -426,13 +463,22 @@ void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int avai
 
     for (int i = 0; i < track_count; i++) {
         GridTrack* track = &tracks[i];
-        if (track->is_flexible && track->size && track->size->type == GRID_TRACK_SIZE_FR) {
-            // Convert from stored integer (multiplied by 100) back to float
-            float fr_value = track->size->value / 100.0f;
-            track->computed_size = (int)(fr_value * fr_size);
-
-            log_debug(" Flexible track %d: %.2ffr × %.2f = %dpx\n", i, fr_value, fr_size, track->computed_size);
-            log_debug("Flexible track %d: %.2ffr = %dpx\n", i, fr_value, track->computed_size);
+        if (track->is_flexible && track->size) {
+            float fr_value = 0;
+            if (track->size->type == GRID_TRACK_SIZE_FR) {
+                // Direct fr value
+                fr_value = track->size->value / 100.0f;
+            } else if (track->size->type == GRID_TRACK_SIZE_MINMAX && track->size->max_size) {
+                // minmax with fr max
+                if (track->size->max_size->type == GRID_TRACK_SIZE_FR) {
+                    fr_value = track->size->max_size->value / 100.0f;
+                }
+            }
+            if (fr_value > 0) {
+                track->computed_size = (int)(fr_value * fr_size);
+                log_debug(" Flexible track %d: %.2ffr × %.2f = %dpx\n", i, fr_value, fr_size, track->computed_size);
+                log_debug("Flexible track %d: %.2ffr = %dpx\n", i, fr_value, track->computed_size);
+            }
         }
     }
 }

@@ -474,6 +474,8 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_FIT_CONTENT,
     CSS_VALUE_FR,
     CSS_VALUE_DENSE,
+    CSS_VALUE_AUTO_FILL,
+    CSS_VALUE_AUTO_FIT,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

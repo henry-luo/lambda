@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Issue: Flex Header Height with Centered Items</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 16px; }
+    
+    /* Test 1: Header with padding and centered items */
+    .header1 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #333;
+      color: white;
+      padding: 1rem 2rem;
+    }
+    
+    .header1 h1 {
+      font-size: 1.5rem;
+    }
+    
+    .header1 nav {
+      display: flex;
+      gap: 1.5rem;
+    }
+    
+    /* Test 2: Header with min-height */
+    .header2 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #4a90d9;
+      color: white;
+      padding: 0 2rem;
+      min-height: 60px;
+      margin-top: 20px;
+    }
+    
+    /* Test 3: Header with explicit height */
+    .header3 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #66bb6a;
+      color: white;
+      padding: 0 2rem;
+      height: 80px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header class="header1">
+    <h1>Dashboard</h1>
+    <nav>
+      <a>Overview</a>
+      <a>Analytics</a>
+      <a>Settings</a>
+    </nav>
+  </header>
+  
+  <header class="header2">
+    <h1>With min-height: 60px</h1>
+    <nav>
+      <a>Link 1</a>
+      <a>Link 2</a>
+    </nav>
+  </header>
+  
+  <header class="header3">
+    <h1>With height: 80px</h1>
+    <nav>
+      <a>Link 1</a>
+      <a>Link 2</a>
+    </nav>
+  </header>
+</body>
+</html>
