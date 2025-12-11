@@ -900,26 +900,29 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         }
 
         // Step 6b: For nested flex containers without explicit cross-axis size,
-        // set their size to the available cross-axis size from the parent.
+        // set their size to the available cross-axis size ONLY when align-items: stretch.
         // This is critical for flex-wrap containers to wrap correctly.
-        // NOTE: We use flex_layout->cross_axis_size because:
-        // - In column flex, cross-axis is width (horizontal)
-        // - In row flex, cross-axis is height (vertical)
-        // Block-level flex containers naturally fill available width in cross-axis.
+        // NOTE: With align-items: center/start/end, items should use intrinsic size.
         bool is_row = is_main_axis_horizontal(flex_layout);
         if (item->display.inner == CSS_VALUE_FLEX) {
             // This is a nested flex container
-            if (!is_row) {
-                // Parent is column flex: cross-axis is width
+            // Only auto-set width when:
+            // 1. Parent is column flex (cross-axis is width)
+            // 2. align-items is stretch (or auto which defaults to stretch)
+            // 3. Item has no explicit align-self override
+            int align_type = (item->fi && item->fi->align_self != ALIGN_AUTO) ?
+                             item->fi->align_self : flex_layout->align_items;
+            bool should_stretch = (align_type == ALIGN_STRETCH);
+
+            if (!is_row && should_stretch) {
+                // Parent is column flex with align-items: stretch
                 if (item->width <= 0 && flex_layout->cross_axis_size > 0) {
-                    log_debug("NESTED_FLEX_ITEM: Setting width=%.1f from parent cross-axis (column)",
+                    log_debug("NESTED_FLEX_ITEM: Setting width=%.1f from parent cross-axis (column, stretch)",
                               flex_layout->cross_axis_size);
                     item->width = flex_layout->cross_axis_size;
                 }
-            } else {
-                // Parent is row flex: cross-axis is height
-                // Don't auto-set height - let it be calculated from content
             }
+            // For align-items: center/start/end, let the item use its intrinsic width
         }
 
         // Step 7: Add to flex items array
@@ -1972,6 +1975,45 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         int align_type = item->fi->align_self != ALIGN_AUTO ? item->fi->align_self : flex_layout->align_items;
         log_debug("ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d",
                i, item->fi->align_self, ALIGN_AUTO, flex_layout->align_items);
+
+        // For non-stretch items without explicit cross-axis size, calculate intrinsic size
+        // This ensures center/start/end alignment uses content-based size
+        if (align_type != ALIGN_STRETCH) {
+            bool is_horizontal = is_main_axis_horizontal(flex_layout);
+            bool has_explicit_cross_size = is_horizontal ?
+                (item->blk && item->blk->given_height > 0) :
+                (item->blk && item->blk->given_width > 0);
+
+            if (!has_explicit_cross_size && item->fi) {
+                // Ensure intrinsic sizes are calculated
+                if (!item->fi->has_intrinsic_width || !item->fi->has_intrinsic_height) {
+                    calculate_item_intrinsic_sizes(item, flex_layout);
+                }
+
+                // For non-stretch items, set cross-axis size from intrinsic size
+                if (!is_horizontal) {
+                    // Column flex: cross-axis is width
+                    if (item->width <= 0 && item->fi->has_intrinsic_width) {
+                        int intrinsic_width = item->fi->intrinsic_width.max_content;
+                        if (intrinsic_width > 0) {
+                            item->width = intrinsic_width;
+                            log_debug("INTRINSIC_WIDTH: Set item width=%d from intrinsic content (align=%d)",
+                                      intrinsic_width, align_type);
+                        }
+                    }
+                } else {
+                    // Row flex: cross-axis is height
+                    if (item->height <= 0 && item->fi->has_intrinsic_height) {
+                        int intrinsic_height = item->fi->intrinsic_height.max_content;
+                        if (intrinsic_height > 0) {
+                            item->height = intrinsic_height;
+                            log_debug("INTRINSIC_HEIGHT: Set item height=%d from intrinsic content (align=%d)",
+                                      intrinsic_height, align_type);
+                        }
+                    }
+                }
+            }
+        }
 
         int item_cross_size = get_cross_axis_size(item, flex_layout);
         int line_cross_size = line->cross_size;
