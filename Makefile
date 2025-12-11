@@ -1493,13 +1493,13 @@ test-layout:
 			node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR -j 5; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --category $$SUITE_VAR -j 5; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --engine lambda-css; \
+			node test/layout/test_radiant_layout.js --engine lambda-css -j 5; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
