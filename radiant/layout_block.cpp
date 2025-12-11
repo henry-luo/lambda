@@ -1408,11 +1408,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // Floated elements don't participate in normal flow
                 // They don't advance the parent's advance_y
                 // Only update max_width for containing block sizing
+                // Include lycon->line.left to account for parent's left border+padding
                 if (block->bound) {
-                    lycon->block.max_width = max(lycon->block.max_width, block->width
+                    lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width
                         + block->bound->margin.left + block->bound->margin.right);
                 } else {
-                    lycon->block.max_width = max(lycon->block.max_width, block->width);
+                    lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width);
                 }
                 log_debug("float block end (no advance_y update), pa max_width: %f, block hg: %f",
                     lycon->block.max_width, block->height);
@@ -1502,11 +1503,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                 }
                 lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
-                lycon->block.max_width = max(lycon->block.max_width, block->width
+                // Include lycon->line.left to account for parent's left border+padding
+                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width
                     + block->bound->margin.left + block->bound->margin.right);
             } else {
                 lycon->block.advance_y += block->height;
-                lycon->block.max_width = max(lycon->block.max_width, block->width);
+                // Include lycon->line.left to account for parent's left border+padding
+                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + block->width);
             }
             // For non-float blocks, we should be at line start after the block
             // (floats are handled above and don't require this assertion)
