@@ -1460,21 +1460,49 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                              parent->scroller->overflow_y != CSS_VALUE_VISIBLE);
                         // parent has top margin, but no border, no padding;  parent->parent to exclude html
                         // Also: no margin collapsing if parent creates BFC
-                        if (parent && parent->parent && parent->bound && !parent_creates_bfc &&
-                            parent->bound->padding.top == 0 &&
-                            (!parent->bound->border || parent->bound->border->width.top == 0)) {
-                            float margin_top = max(block->bound->margin.top, parent->bound->margin.top);
-                            parent->y += margin_top - parent->bound->margin.top;
-                            parent->bound->margin.top = margin_top;
+                        // If parent->bound is NULL, parent has no margin/border/padding - margins collapse through
+                        float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
+                        float parent_border_top = parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0;
+                        float parent_margin_top = parent && parent->bound ? parent->bound->margin.top : 0;
+                        if (parent && parent->parent && !parent_creates_bfc &&
+                            parent_padding_top == 0 && parent_border_top == 0) {
+                            float margin_top = max(block->bound->margin.top, parent_margin_top);
+
+                            // CSS 8.3.1: When parent has no border/padding, child margin collapses through parent
+                            // If parent had no margin (parent_margin_top == 0), we need to retroactively collapse
+                            // with parent's previous sibling
+                            float sibling_collapse = 0;
+                            if (parent_margin_top == 0) {
+                                // Find parent's previous in-flow sibling for retroactive sibling collapsing
+                                View* prev_view = parent->prev_placed_view();
+                                while (prev_view && prev_view->is_block()) {
+                                    ViewBlock* vb = (ViewBlock*)prev_view;
+                                    if (vb->position && element_has_float(vb)) {
+                                        prev_view = prev_view->prev_placed_view();
+                                        continue;
+                                    }
+                                    break;
+                                }
+                                if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
+                                    ViewBlock* prev_block = (ViewBlock*)prev_view;
+                                    if (prev_block->bound->margin.bottom > 0 && margin_top > 0) {
+                                        sibling_collapse = min(prev_block->bound->margin.bottom, margin_top);
+                                        log_debug("retroactive sibling collapse for parent-child: sibling_collapse=%f", sibling_collapse);
+                                    }
+                                }
+                            }
+
+                            parent->y += margin_top - parent_margin_top - sibling_collapse;
+                            if (parent->bound) {
+                                parent->bound->margin.top = margin_top - sibling_collapse;
+                            }
                             block->y = 0;  block->bound->margin.top = 0;
-                            log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f", margin_top, parent->y, block->y);
+                            log_debug("collapsed margin between block and first child: %f, parent y: %f, block y: %f, sibling_collapse: %f",
+                                margin_top, parent->y, block->y, sibling_collapse);
                         }
                         else {
                             log_debug("no parent margin collapsing: parent->bound=%p, border-top=%f, padding-top=%f, parent_creates_bfc=%d",
-                                parent ? parent->bound : NULL,
-                                parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0,
-                                parent && parent->bound ? parent->bound->padding.top : 0,
-                                parent_creates_bfc);
+                                parent ? parent->bound : NULL, parent_border_top, parent_padding_top, parent_creates_bfc);
                         }
                     }
                 }
