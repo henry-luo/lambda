@@ -1861,6 +1861,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // margin-block: sets both margin-top and margin-bottom (logical property for block axis)
+        case CSS_PROPERTY_MARGIN_BLOCK: {
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            float margin_value = resolve_margin_with_inherit(lycon, CSS_PROPERTY_MARGIN_BLOCK, value);
+            if (specificity >= span->bound->margin.top_specificity) {
+                span->bound->margin.top = margin_value;
+                span->bound->margin.top_specificity = specificity;
+                span->bound->margin.top_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+            }
+            if (specificity >= span->bound->margin.bottom_specificity) {
+                span->bound->margin.bottom = margin_value;
+                span->bound->margin.bottom_specificity = specificity;
+                span->bound->margin.bottom_type = value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : CSS_VALUE__UNDEF;
+            }
+            break;
+        }
+
         case CSS_PROPERTY_PADDING_TOP: {
             log_debug("[CSS] Processing padding-top property");
             if (!span->bound) {
