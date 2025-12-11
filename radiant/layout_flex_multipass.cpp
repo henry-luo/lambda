@@ -202,23 +202,27 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     // CRITICAL FIX: For nested flex containers without explicit width/height in a COLUMN parent,
     // use the available cross-axis size from the parent flex layout.
     // This ensures flex-wrap containers can properly wrap their content.
-    // NOTE: We only do this for column parent flex because:
-    // - In column flex, items naturally stretch to fill the cross-axis (width) unless align-items prevents it
-    // - In row flex, items should shrink to their content width
+    // NOTE: We only do this when align-items: stretch (or defaulting to stretch).
+    // For align-items: center/start/end, items should use intrinsic size.
     FlexContainerLayout* pa_flex = lycon->flex_container;
     if (pa_flex && flex_container->fi) {
         bool is_parent_horizontal = is_main_axis_horizontal(pa_flex);
-        
-        // Only set width for column parent flex (cross-axis is width)
-        if (!is_parent_horizontal) {
+
+        // Check if this item should stretch (based on align-items or align-self)
+        int align_type = (flex_container->fi->align_self != ALIGN_AUTO) ?
+                         flex_container->fi->align_self : pa_flex->align_items;
+        bool should_stretch = (align_type == ALIGN_STRETCH);
+
+        // Only set width for column parent flex with align-items: stretch
+        if (!is_parent_horizontal && should_stretch) {
             if ((!flex_container->blk || flex_container->blk->given_width <= 0) &&
                 flex_container->width <= 0 && pa_flex->cross_axis_size > 0) {
-                log_debug("NESTED_FLEX_WIDTH: Setting width=%.1f from parent cross axis (column parent)",
+                log_debug("NESTED_FLEX_WIDTH: Setting width=%.1f from parent cross axis (column parent, stretch)",
                           pa_flex->cross_axis_size);
                 flex_container->width = pa_flex->cross_axis_size;
             }
         }
-        // For row parent flex, don't auto-set width - let flex algorithm determine it from content
+        // For row parent flex or non-stretch alignment, don't auto-set width
     }
 
     // CRITICAL: Initialize flex container properties for this container
