@@ -1433,6 +1433,46 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             }
         }
     }
+
+    // Finalize border widths: per CSS spec, border-width computes to 0
+    // when border-style is 'none' or 'hidden' (or unset, which defaults to 'none')
+    ViewSpan* span = (ViewSpan*)lycon->view;
+    if (span->bound && span->bound->border) {
+        BorderProp* border = span->bound->border;
+        // Check each side: if style is none, hidden, or unset (_UNDEF), width is 0
+        if (border->top_style == CSS_VALUE_NONE || border->top_style == CSS_VALUE_HIDDEN ||
+            border->top_style == CSS_VALUE__UNDEF) {
+            if (border->width.top != 0) {
+                log_debug("[CSS] Border-top-style is none/hidden/undef, zeroing width from %.1f to 0",
+                          border->width.top);
+                border->width.top = 0;
+            }
+        }
+        if (border->right_style == CSS_VALUE_NONE || border->right_style == CSS_VALUE_HIDDEN ||
+            border->right_style == CSS_VALUE__UNDEF) {
+            if (border->width.right != 0) {
+                log_debug("[CSS] Border-right-style is none/hidden/undef, zeroing width from %.1f to 0",
+                          border->width.right);
+                border->width.right = 0;
+            }
+        }
+        if (border->bottom_style == CSS_VALUE_NONE || border->bottom_style == CSS_VALUE_HIDDEN ||
+            border->bottom_style == CSS_VALUE__UNDEF) {
+            if (border->width.bottom != 0) {
+                log_debug("[CSS] Border-bottom-style is none/hidden/undef, zeroing width from %.1f to 0",
+                          border->width.bottom);
+                border->width.bottom = 0;
+            }
+        }
+        if (border->left_style == CSS_VALUE_NONE || border->left_style == CSS_VALUE_HIDDEN ||
+            border->left_style == CSS_VALUE__UNDEF) {
+            if (border->width.left != 0) {
+                log_debug("[CSS] Border-left-style is none/hidden/undef, zeroing width from %.1f to 0",
+                          border->width.left);
+                border->width.left = 0;
+            }
+        }
+    }
 }
 
 struct MultiValue {
