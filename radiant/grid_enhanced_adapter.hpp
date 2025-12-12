@@ -114,7 +114,11 @@ inline MaxTrackSizingFunction convert_to_max_sizing(GridTrackSize* old_size) {
             return MaxTrackSizingFunction::Fr(static_cast<float>(old_size->value));
 
         case GRID_TRACK_SIZE_FIT_CONTENT:
-            return MaxTrackSizingFunction::FitContentPx(static_cast<float>(old_size->fit_content_limit));
+            if (old_size->is_percentage) {
+                return MaxTrackSizingFunction::FitContentPercent(static_cast<float>(old_size->fit_content_limit));
+            } else {
+                return MaxTrackSizingFunction::FitContentPx(static_cast<float>(old_size->fit_content_limit));
+            }
 
         case GRID_TRACK_SIZE_MINMAX:
             // Recurse on max_size
@@ -350,13 +354,22 @@ inline void place_items_with_occupancy(
     uint16_t effective_col_count = static_cast<uint16_t>(grid_layout->explicit_column_count);
     uint16_t effective_row_count = static_cast<uint16_t>(grid_layout->explicit_row_count);
 
-    // When auto-flow is row (default), we need at least 1 column
-    // When auto-flow is column, we need at least 1 row
+    // When auto-flow is row (default), we need at least 1 column to start
+    // When auto-flow is column, we need at least 1 row to start
+    // BUT: When there are no explicit tracks in the flow direction,
+    // the grid should expand implicitly based on auto tracks
     if (auto_flow != CSS_VALUE_COLUMN && effective_col_count == 0) {
         effective_col_count = 1;  // Default to single column for row-flow
     }
     if (auto_flow == CSS_VALUE_COLUMN && effective_row_count == 0) {
         effective_row_count = 1;  // Default to single row for column-flow
+    }
+    // For column-flow: if no explicit columns but we have grid-auto-columns,
+    // set effective_col_count to 0 to allow implicit expansion
+    // (The occupancy matrix will handle implicit column creation)
+    if (auto_flow == CSS_VALUE_COLUMN && effective_col_count == 0 &&
+        grid_layout->grid_auto_columns && grid_layout->grid_auto_columns->track_count > 0) {
+        // Leave effective_col_count as 0 - the matrix will create implicit columns
     }
 
     // Create initial track counts from effective grid

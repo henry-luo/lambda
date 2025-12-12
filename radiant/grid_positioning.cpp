@@ -24,36 +24,151 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
     int* row_positions = (int*)calloc(grid_layout->computed_row_count + 1, sizeof(int));
     int* column_positions = (int*)calloc(grid_layout->computed_column_count + 1, sizeof(int));
 
-    // Calculate row positions
-    int current_y = 0;
+    // First, calculate the total grid content size (all tracks + gaps)
+    int total_row_size = 0;
+    for (int i = 0; i < grid_layout->computed_row_count; i++) {
+        total_row_size += grid_layout->computed_rows[i].computed_size;
+        if (i < grid_layout->computed_row_count - 1) {
+            total_row_size += (int)grid_layout->row_gap;
+        }
+    }
+
+    int total_column_size = 0;
+    for (int i = 0; i < grid_layout->computed_column_count; i++) {
+        total_column_size += grid_layout->computed_columns[i].computed_size;
+        if (i < grid_layout->computed_column_count - 1) {
+            total_column_size += (int)grid_layout->column_gap;
+        }
+    }
+
+    log_debug(" Total grid content: %dx%d, container content: %dx%d\n",
+              total_column_size, total_row_size,
+              grid_layout->content_width, grid_layout->content_height);
+
+    // Calculate justify-content offset and spacing (horizontal)
+    int justify_offset = 0;
+    float justify_spacing = 0;  // Additional spacing between tracks
+    int extra_column_space = grid_layout->content_width - total_column_size;
+    int col_count = grid_layout->computed_column_count;
+    if (extra_column_space > 0 && col_count > 0) {
+        switch (grid_layout->justify_content) {
+            case CSS_VALUE_CENTER:
+                justify_offset = extra_column_space / 2;
+                break;
+            case CSS_VALUE_END:
+            case CSS_VALUE_FLEX_END:
+                justify_offset = extra_column_space;
+                break;
+            case CSS_VALUE_SPACE_BETWEEN:
+                // Space distributed between tracks (first and last track at edges)
+                if (col_count > 1) {
+                    justify_spacing = (float)extra_column_space / (col_count - 1);
+                }
+                break;
+            case CSS_VALUE_SPACE_AROUND:
+                // Equal space around each track (half space at edges)
+                justify_spacing = (float)extra_column_space / col_count;
+                justify_offset = (int)(justify_spacing / 2);
+                break;
+            case CSS_VALUE_SPACE_EVENLY:
+                // Equal space between all tracks including edges
+                justify_spacing = (float)extra_column_space / (col_count + 1);
+                justify_offset = (int)justify_spacing;
+                break;
+            case CSS_VALUE_START:
+            case CSS_VALUE_FLEX_START:
+            default:
+                justify_offset = 0;
+                break;
+        }
+    }
+    log_debug(" justify-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
+              grid_layout->justify_content, extra_column_space, justify_offset, justify_spacing);
+
+    // Calculate align-content offset and spacing (vertical)
+    int align_offset = 0;
+    float align_spacing = 0;  // Additional spacing between tracks
+    int extra_row_space = grid_layout->content_height - total_row_size;
+    int row_count = grid_layout->computed_row_count;
+    if (extra_row_space > 0 && row_count > 0) {
+        switch (grid_layout->align_content) {
+            case CSS_VALUE_CENTER:
+                align_offset = extra_row_space / 2;
+                break;
+            case CSS_VALUE_END:
+            case CSS_VALUE_FLEX_END:
+                align_offset = extra_row_space;
+                break;
+            case CSS_VALUE_SPACE_BETWEEN:
+                // Space distributed between tracks (first and last track at edges)
+                if (row_count > 1) {
+                    align_spacing = (float)extra_row_space / (row_count - 1);
+                }
+                break;
+            case CSS_VALUE_SPACE_AROUND:
+                // Equal space around each track (half space at edges)
+                align_spacing = (float)extra_row_space / row_count;
+                align_offset = (int)(align_spacing / 2);
+                break;
+            case CSS_VALUE_SPACE_EVENLY:
+                // Equal space between all tracks including edges
+                align_spacing = (float)extra_row_space / (row_count + 1);
+                align_offset = (int)align_spacing;
+                break;
+            case CSS_VALUE_START:
+            case CSS_VALUE_FLEX_START:
+            default:
+                align_offset = 0;
+                break;
+        }
+    }
+    log_debug(" align-content=%d, extra_space=%d, offset=%d, spacing=%.1f\n",
+              grid_layout->align_content, extra_row_space, align_offset, align_spacing);
+
+    // Calculate row positions with align-content offset and spacing
+    float current_y_f = align_offset;
     log_debug(" Calculating row positions for %d rows:\n", grid_layout->computed_row_count);
     for (int i = 0; i <= grid_layout->computed_row_count; i++) {
-        row_positions[i] = current_y;
-        log_debug(" Row %d position: %d\n", i, current_y);
+        row_positions[i] = (int)current_y_f;
+        log_debug(" Row %d position: %d\n", i, row_positions[i]);
         if (i < grid_layout->computed_row_count) {
             int track_size = grid_layout->computed_rows[i].computed_size;
             log_debug(" Row %d size: %d\n", i, track_size);
-            current_y += track_size;
+            current_y_f += track_size;
             if (i < grid_layout->computed_row_count - 1) {
-                current_y += (int)grid_layout->row_gap;
-                log_debug(" Added row gap: %.1f, new current_y: %d\n", grid_layout->row_gap, current_y);
+                current_y_f += grid_layout->row_gap;
+                // Add space-* distribution spacing
+                if (grid_layout->align_content == CSS_VALUE_SPACE_BETWEEN ||
+                    grid_layout->align_content == CSS_VALUE_SPACE_AROUND ||
+                    grid_layout->align_content == CSS_VALUE_SPACE_EVENLY) {
+                    current_y_f += align_spacing;
+                }
+                log_debug(" Added row gap: %.1f + spacing %.1f, new current_y: %.1f\n",
+                          grid_layout->row_gap, align_spacing, current_y_f);
             }
         }
     }
 
-    // Calculate column positions
-    int current_x = 0;
+    // Calculate column positions with justify-content offset and spacing
+    float current_x_f = justify_offset;
     log_debug(" Calculating column positions for %d columns:\n", grid_layout->computed_column_count);
     for (int i = 0; i <= grid_layout->computed_column_count; i++) {
-        column_positions[i] = current_x;
-        log_debug(" Column %d position: %d\n", i, current_x);
+        column_positions[i] = (int)current_x_f;
+        log_debug(" Column %d position: %d\n", i, column_positions[i]);
         if (i < grid_layout->computed_column_count) {
             int track_size = grid_layout->computed_columns[i].computed_size;
             log_debug(" Column %d size: %d\n", i, track_size);
-            current_x += track_size;
+            current_x_f += track_size;
             if (i < grid_layout->computed_column_count - 1) {
-                current_x += (int)grid_layout->column_gap;
-                log_debug(" Added column gap: %.1f, new current_x: %d\n", grid_layout->column_gap, current_x);
+                current_x_f += grid_layout->column_gap;
+                // Add space-* distribution spacing
+                if (grid_layout->justify_content == CSS_VALUE_SPACE_BETWEEN ||
+                    grid_layout->justify_content == CSS_VALUE_SPACE_AROUND ||
+                    grid_layout->justify_content == CSS_VALUE_SPACE_EVENLY) {
+                    current_x_f += justify_spacing;
+                }
+                log_debug(" Added column gap: %.1f + spacing %.1f, new current_x: %.1f\n",
+                          grid_layout->column_gap, justify_spacing, current_x_f);
             }
         }
     }
@@ -134,11 +249,11 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
             container_offset_y += container->bound->border->width.top;
         }
 
-        // Set item position and size
-        float new_x = container->x + container_offset_x + item_x;
-        float new_y = container->y + container_offset_y + item_y;
-        log_debug(" Assigning item %d: x=%.0f (%.0f+%d+%d), y=%.0f, width=%d, height=%d\n",
-               i, new_x, container->x, container_offset_x, item_x, new_y, item_width, item_height);
+        // Set item position and size (relative to parent's border box, per Radiant coordinate system)
+        float new_x = container_offset_x + item_x;
+        float new_y = container_offset_y + item_y;
+        log_debug(" Assigning item %d: x=%.0f (%d+%d), y=%.0f, width=%d, height=%d\n",
+               i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
         log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
         item->x = new_x;
         item->y = new_y;
@@ -151,9 +266,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         printf("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
         printf("  Track positions: x=%d, y=%d\n", item_x, item_y);
         printf("  Track sizes: width=%d, height=%d\n", item_width, item_height);
-        printf("  Container: pos=(%d,%d), offset=(%d,%d)\n",
-               container->x, container->y, container_offset_x, container_offset_y);
-        printf("  Final position: (%d,%d), size: %dx%d\n",
+        printf("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
+        printf("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
                item->x, item->y, item->width, item->height);
 
         log_debug("Positioned grid item %d: pos=(%d,%d), size=%dx%d, grid_area=(%d-%d, %d-%d)\n",

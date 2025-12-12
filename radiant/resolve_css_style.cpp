@@ -1071,6 +1071,21 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
                 track_size = parse_minmax_function(val);
             } else if (strcmp(func_name, "repeat") == 0) {
                 track_size = parse_repeat_function(val);
+            } else if (strcmp(func_name, "fit-content") == 0) {
+                // fit-content(<length-percentage>)
+                track_size = create_grid_track_size(GRID_TRACK_SIZE_FIT_CONTENT, 0);
+                if (track_size && val->data.function->arg_count > 0) {
+                    CssValue* arg = val->data.function->args[0];
+                    if (arg->type == CSS_VALUE_TYPE_LENGTH) {
+                        track_size->fit_content_limit = (int)arg->data.length.value;
+                        track_size->is_percentage = false;
+                        log_debug("[CSS]   parsed fit-content(%dpx)", track_size->fit_content_limit);
+                    } else if (arg->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        track_size->fit_content_limit = (int)arg->data.percentage.value;
+                        track_size->is_percentage = true;
+                        log_debug("[CSS]   parsed fit-content(%d%%)", track_size->fit_content_limit);
+                    }
+                }
             }
         }
     }
@@ -3701,14 +3716,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            // Allocate FlexProp if needed
+            // Allocate FlexProp if needed (for flexbox)
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
                     block->embed->flex->justify = val;
-                    log_debug("[CSS] justify-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                    log_debug("[CSS] justify-content (flex): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                }
+            }
+
+            // Also allocate GridProp and store value (for grid containers)
+            alloc_grid_prop(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->grid->justify_content = val;
+                    log_debug("[CSS] justify-content (grid): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -3721,14 +3746,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            // Allocate FlexProp if needed
+            // Allocate FlexProp if needed (for flexbox)
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
                     block->embed->flex->align_items = val;
-                    log_debug("[CSS] align-items: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                    log_debug("[CSS] align-items (flex): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                }
+            }
+
+            // Also allocate GridProp and store value (for grid containers)
+            alloc_grid_prop(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->grid->align_items = val;
+                    log_debug("[CSS] align-items (grid): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -3741,14 +3776,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 break;
             }
 
-            // Allocate FlexProp if needed
+            // Allocate FlexProp if needed (for flexbox)
             alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
                     block->embed->flex->align_content = val;
-                    log_debug("[CSS] align-content: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                    log_debug("[CSS] align-content (flex): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                }
+            }
+
+            // Also allocate GridProp and store value (for grid containers)
+            alloc_grid_prop(lycon, block);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val > 0) {
+                    block->embed->grid->align_content = val;
+                    log_debug("[CSS] align-content (grid): %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
                 }
             }
             break;
@@ -3912,6 +3957,22 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 parse_grid_track_list(value, &grid->grid_template_rows);
                 log_debug("[CSS] grid-template-rows: %d tracks parsed",
                           grid->grid_template_rows ? grid->grid_template_rows->track_count : 0);
+            }
+            // Handle single length/percentage value (e.g., 40px)
+            else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                log_debug("[CSS] grid-template-rows: handling single LENGTH/PERCENTAGE value");
+                GridTrackSize* ts = parse_css_value_to_track_size(value);
+                if (ts) {
+                    if (!grid->grid_template_rows) {
+                        grid->grid_template_rows = create_grid_track_list(1);
+                    } else {
+                        grid->grid_template_rows->track_count = 0;
+                    }
+                    grid->grid_template_rows->tracks[0] = ts;
+                    grid->grid_template_rows->track_count = 1;
+                    log_debug("[CSS] grid-template-rows: parsed single track -> %d tracks",
+                              grid->grid_template_rows->track_count);
+                }
             }
             // Handle single function value (e.g., repeat(...))
             else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
@@ -4382,6 +4443,97 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_PLACE_ITEMS: {
+            // place-items is a shorthand for align-items and justify-items
+            // Syntax: place-items: <align-items> <justify-items>?
+            // If only one value, it applies to both
+            log_debug("[CSS] Processing place-items shorthand property");
+            if (!block) {
+                log_debug("[CSS] place-items: Cannot apply to non-block element");
+                break;
+            }
+
+            alloc_grid_prop(lycon, block);
+            alloc_flex_prop(lycon, block);
+
+            CssEnum align_val = CSS_VALUE_STRETCH;
+            CssEnum justify_val = CSS_VALUE_STRETCH;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // Single value applies to both
+                align_val = value->data.keyword;
+                justify_val = value->data.keyword;
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
+                // First value is align-items
+                if (value->data.list.values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                    align_val = value->data.list.values[0]->data.keyword;
+                }
+                // Second value (if present) is justify-items
+                if (value->data.list.count >= 2 && value->data.list.values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                    justify_val = value->data.list.values[1]->data.keyword;
+                } else {
+                    justify_val = align_val;  // If no second value, same as first
+                }
+            }
+
+            // Apply to grid
+            block->embed->grid->align_items = align_val;
+            block->embed->grid->justify_items = justify_val;
+            // Also apply to flex
+            block->embed->flex->align_items = align_val;
+
+            log_debug("[CSS] place-items: align=%s, justify=%s",
+                      css_enum_info(align_val)->name, css_enum_info(justify_val)->name);
+            break;
+        }
+
+        case CSS_PROPERTY_PLACE_SELF: {
+            // place-self is a shorthand for align-self and justify-self
+            // Syntax: place-self: <align-self> <justify-self>?
+            // If only one value, it applies to both
+            log_debug("[CSS] Processing place-self shorthand property");
+
+            CssEnum align_val = CSS_VALUE_AUTO;
+            CssEnum justify_val = CSS_VALUE_AUTO;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                // Single value applies to both
+                align_val = value->data.keyword;
+                justify_val = value->data.keyword;
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
+                // First value is align-self
+                if (value->data.list.values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                    align_val = value->data.list.values[0]->data.keyword;
+                }
+                // Second value (if present) is justify-self
+                if (value->data.list.count >= 2 && value->data.list.values[1]->type == CSS_VALUE_TYPE_KEYWORD) {
+                    justify_val = value->data.list.values[1]->data.keyword;
+                } else {
+                    justify_val = align_val;  // If no second value, same as first
+                }
+            }
+
+            // Set align-self based on item type
+            if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+                span->gi->align_self_grid = align_val;
+                span->gi->justify_self = justify_val;
+            } else if (span->item_prop_type == DomElement::ITEM_PROP_FLEX) {
+                span->fi->align_self = align_val;
+                // Note: justify-self doesn't apply to flex items in the main axis
+            } else {
+                // Neither allocated yet - allocate grid prop (for grid items)
+                // or flex prop (for flex items). Default to grid since place-self
+                // is primarily used with grid.
+                alloc_grid_item_prop(lycon, span);
+                span->gi->align_self_grid = align_val;
+                span->gi->justify_self = justify_val;
+            }
+
+            log_debug("[CSS] place-self: align=%s, justify=%s (type=%d)",
+                      css_enum_info(align_val)->name, css_enum_info(justify_val)->name, span->item_prop_type);
+            break;
+        }
+
         case CSS_PROPERTY_FLEX_GROW: {
             log_debug("[CSS] Processing flex-grow property");
             alloc_flex_item_prop(lycon, span);
@@ -4426,23 +4578,45 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_ORDER: {
             log_debug("[CSS] Processing order property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int order_value = (int)value->data.number.value;
-                span->fi->order = order_value;
-                log_debug("[CSS] order: %d", order_value);
+                // order applies to both flex and grid items
+                // fi and gi share a union - check which type is allocated
+                if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+                    span->gi->order = order_value;
+                } else if (span->item_prop_type == DomElement::ITEM_PROP_FLEX) {
+                    span->fi->order = order_value;
+                } else {
+                    // Neither allocated yet - allocate flex prop (default)
+                    alloc_flex_item_prop(lycon, span);
+                    span->fi->order = order_value;
+                }
+                log_debug("[CSS] order: %d (type=%d)", order_value, span->item_prop_type);
             }
             break;
         }
 
         case CSS_PROPERTY_ALIGN_SELF: {
             log_debug("[CSS] Processing align-self property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
                 if (val > 0) {
-                    span->fi->align_self = val;
-                    log_debug("[CSS] align-self: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, val);
+                    // align-self applies to both flex and grid items
+                    // fi and gi share a union - check which type is allocated
+                    if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+                        // Grid item - set align_self_grid
+                        span->gi->align_self_grid = val;
+                    } else if (span->item_prop_type == DomElement::ITEM_PROP_FLEX) {
+                        // Flex item - set align_self
+                        span->fi->align_self = val;
+                    } else {
+                        // Neither allocated yet - allocate flex prop (more common case)
+                        // Grid items will have gi allocated first by init_grid_item_view
+                        alloc_flex_item_prop(lycon, span);
+                        span->fi->align_self = val;
+                    }
+                    log_debug("[CSS] align-self: %s -> 0x%04X (type=%d)",
+                              css_enum_info(value->data.keyword)->name, val, span->item_prop_type);
                 }
             }
             break;

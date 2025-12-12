@@ -329,6 +329,7 @@ struct GridItemProp {
     char* grid_area;             // Named grid area
     int justify_self;            // Item-specific justify alignment (CSS_VALUE_*)
     int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
+    int order;                   // CSS order property (affects placement order)
 
     // Grid item computed properties
     int computed_grid_row_start;
