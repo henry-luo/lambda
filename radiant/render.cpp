@@ -14,61 +14,6 @@
 // ============================================================================
 
 /**
- * Check if a white-space value is a concrete value (not inherit/initial/unset).
- * Concrete values: normal, nowrap, pre, pre-wrap, pre-line, break-spaces
- */
-static inline bool is_concrete_white_space_value(CssEnum ws) {
-    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP ||
-           ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
-           ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES;
-}
-
-/**
- * Get the white-space property value from the text node's ancestor chain.
- * Walks up from the text node to find the nearest element with a concrete white_space value.
- * Skips inherit/initial/unset values and continues searching up the tree.
- */
-static CssEnum get_white_space_value_for_render(DomNode* node) {
-    DomNode* current = node ? node->parent : nullptr;
-    while (current) {
-        if (current->is_element()) {
-            DomElement* elem = static_cast<DomElement*>(current);
-
-            // Check resolved BlockProp first (fastest path for blocks)
-            if (elem->blk && elem->blk->white_space != 0) {
-                CssEnum ws = elem->blk->white_space;
-                // Only return if it's a concrete value, not inherit/initial/unset
-                if (is_concrete_white_space_value(ws)) {
-                    return ws;
-                }
-                // If inherit/initial, continue walking up
-            }
-
-            // Check specified_style for inline elements (e.g., span with white-space: pre)
-            if (elem->specified_style && elem->specified_style->tree) {
-                AvlNode* ws_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_WHITE_SPACE);
-                if (ws_node) {
-                    StyleNode* style_node = (StyleNode*)ws_node->declaration;
-                    if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
-                        CssValue* val = style_node->winning_decl->value;
-                        if (val->type == CSS_VALUE_TYPE_KEYWORD && val->data.keyword != 0) {
-                            CssEnum ws = val->data.keyword;
-                            // Only return if it's a concrete value, not inherit/initial/unset
-                            if (is_concrete_white_space_value(ws)) {
-                                return ws;
-                            }
-                            // If inherit/initial, continue walking up
-                        }
-                    }
-                }
-            }
-        }
-        current = current->parent;
-    }
-    return CSS_VALUE_NORMAL;  // default
-}
-
-/**
  * Check if whitespace should be preserved according to white-space property.
  * Returns true for: pre, pre-wrap, break-spaces
  * Returns false for: normal, nowrap, pre-line
@@ -168,6 +113,8 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     }
 }
 
+extern CssEnum get_white_space_value(DomNode* node);
+
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     if (!rdcon->font.ft_face) {
         log_debug("font face is null");
@@ -177,7 +124,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     TextRect* text_rect = text_view->rect;
 
     // Get the white-space property for this text node
-    CssEnum white_space = get_white_space_value_for_render(text_view);
+    CssEnum white_space = get_white_space_value(text_view);
     bool preserve_spaces = ws_preserve_spaces(white_space);
 
     // Check if parent inline element has a background color to render

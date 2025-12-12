@@ -1472,7 +1472,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
     // Dispatch based on property ID
     // Parallel implementation to resolve_element_style() in resolve_style.cpp
     ViewSpan* span = (ViewSpan*)lycon->view;
-    ViewBlock* block = lycon->view->view_type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
+    ViewBlock* block = (ViewBlock*)span;  // lycon->view->view_type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
 
     switch (prop_id) {
         // ===== GROUP 1: Core Typography & Color =====
@@ -3408,14 +3408,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_WHITE_SPACE: {
             log_debug("[CSS] Processing white-space property");
-            if (!block || !block->blk) {
-                if (block) {
-                    block->blk = alloc_block_prop(lycon);
-                } else {
-                    break; // inline elements don't have white-space
-                }
-            }
-
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum whitespace_value = value->data.keyword;
                 if (whitespace_value > 0) {
