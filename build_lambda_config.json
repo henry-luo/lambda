@@ -1991,6 +1991,32 @@
                         ],
                         "binary": "test_latex_html_v2_lists_envs.exe",
                         "icon": "📋"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_tables.cpp",
+                        "name": "LaTeX-to-HTML V2: Tables Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_tables.exe",
+                        "icon": "📊"
+                    },
+                    {
+                        "source": "test/test_latex_html_v2_floats.cpp",
+                        "name": "LaTeX HTML V2 Floats Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_latex_html_v2_floats.exe",
+                        "icon": "🖼️"
                     }
                 ],
                 "type": "input",
