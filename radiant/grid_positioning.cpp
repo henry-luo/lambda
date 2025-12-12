@@ -79,14 +79,25 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         // Calculate item position and size
         int item_x = column_positions[col_start];
         int item_y = row_positions[row_start];
-        int track_width = column_positions[col_end] - column_positions[col_start];
-        int track_height = row_positions[row_end] - row_positions[row_start];
 
-        // Subtract gaps from size (gaps are between tracks, not part of item area)
-        int col_gaps = col_end - col_start - 1;
-        int row_gaps = row_end - row_start - 1;
-        track_width -= col_gaps * grid_layout->column_gap;
-        track_height -= row_gaps * grid_layout->row_gap;
+        // Calculate track width by summing individual track sizes (not from positions, which include gaps)
+        int track_width = 0;
+        for (int c = col_start; c < col_end; c++) {
+            track_width += grid_layout->computed_columns[c].computed_size;
+            // Add gap for interior tracks (not the last one in the span)
+            if (c < col_end - 1) {
+                track_width += (int)grid_layout->column_gap;
+            }
+        }
+
+        int track_height = 0;
+        for (int r = row_start; r < row_end; r++) {
+            track_height += grid_layout->computed_rows[r].computed_size;
+            // Add gap for interior tracks (not the last one in the span)
+            if (r < row_end - 1) {
+                track_height += (int)grid_layout->row_gap;
+            }
+        }
 
         // Store track area dimensions for alignment phase
         if (item->gi) {
