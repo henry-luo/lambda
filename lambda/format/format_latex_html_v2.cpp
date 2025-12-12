@@ -678,6 +678,229 @@ static void cmd_footnote(LatexProcessor* proc, Item elem) {
 }
 
 // =============================================================================
+// Table Commands
+// =============================================================================
+
+static void cmd_tabular(LatexProcessor* proc, Item elem) {
+    // \begin{tabular}{column_spec}
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Find column specification (first curly_group child)
+    std::string column_spec;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* spec_str = stringbuf_to_string(sb);
+                column_spec = spec_str->chars;
+                break;
+            }
+        }
+    }
+    
+    // Start table
+    gen->startTabular(column_spec.c_str());
+    
+    // Process table content (rows and cells)
+    proc->processChildren(elem);
+    
+    // End table
+    gen->endTabular();
+}
+
+static void cmd_hline(LatexProcessor* proc, Item elem) {
+    // \hline - horizontal line in table
+    HtmlGenerator* gen = proc->generator();
+    
+    // Insert a special row with hline class
+    gen->startRow();
+    gen->startCell();
+    gen->writer()->writeAttribute("class", "hline");
+    gen->writer()->writeAttribute("colspan", "100");
+    gen->endCell();
+    gen->endRow();
+}
+
+static void cmd_multicolumn(LatexProcessor* proc, Item elem) {
+    // \multicolumn{n}{align}{content}
+    // Parser gives us: {"$":"multicolumn", "_":["3", "c", "Title"]}
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Extract arguments - they come as direct text children
+    std::vector<std::string> args;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            // Direct string argument
+            String* str = (String*)child.item().string_ptr;
+            // Trim whitespace
+            std::string arg(str->chars);
+            // Remove leading/trailing whitespace
+            size_t start = arg.find_first_not_of(" \t\n\r");
+            size_t end = arg.find_last_not_of(" \t\n\r");
+            if (start != std::string::npos && end != std::string::npos) {
+                args.push_back(arg.substr(start, end - start + 1));
+            }
+        }
+    }
+    
+    if (args.size() < 3) {
+        log_error("\\multicolumn requires 3 arguments, got %zu", args.size());
+        return;
+    }
+    
+    // Parse arguments
+    int colspan = atoi(args[0].c_str());
+    const char* align = args[1].c_str();
+    
+    // Start cell with colspan
+    gen->startCell(align);
+    gen->writer()->writeAttribute("colspan", args[0].c_str());
+    
+    // Output content (third argument)
+    gen->text(args[2].c_str());
+    
+    gen->endCell();
+}
+
+static void cmd_figure(LatexProcessor* proc, Item elem) {
+    // \begin{figure}[position]
+    // Parser gives: {"$":"figure", "_":[...children...]}
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Extract position from first bracket_group if present
+    const char* position = nullptr;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    if (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "bracket_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* pos_str = stringbuf_to_string(sb);
+                position = pos_str->chars;
+            }
+        }
+    }
+    
+    gen->startFigure(position);
+    proc->processChildren(elem);
+    gen->endFigure();
+}
+
+static void cmd_table_float(LatexProcessor* proc, Item elem) {
+    // \begin{table}[position]
+    // Note: This is the float environment, not the tabular environment
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    // Extract position from first bracket_group if present
+    const char* position = nullptr;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    if (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "bracket_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* pos_str = stringbuf_to_string(sb);
+                position = pos_str->chars;
+            }
+        }
+    }
+    
+    // Use startFigure with "table" type
+    gen->startFigure(position);  // HtmlGenerator uses same method for both
+    proc->processChildren(elem);
+    gen->endFigure();
+}
+
+static void cmd_caption(LatexProcessor* proc, Item elem) {
+    // \caption{text}
+    // Parser gives: {"$":"caption", "_":[{"$":"\caption"}, {"$":"curly_group", "_":["text"]}]}
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    gen->startCaption();
+    
+    // Extract caption text from curly_group
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            if (strcmp(child_elem.tagName(), "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* text_str = stringbuf_to_string(sb);
+                gen->text(text_str->chars);
+            }
+        }
+    }
+    
+    gen->endCaption();
+}
+
+static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
+    // \includegraphics[options]{filename}
+    // Parser gives: {"$":"graphics_include", "_":[{"$":"\includegraphics"}, {"$":"curly_group_path", "_":[string/symbol]}]}
+    // The curly_group_path contains a STRING or SYMBOL child with the filename
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    const char* filename = nullptr;
+    const char* options = nullptr;
+    
+    // Extract filename and options
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group_path") == 0) {
+                // curly_group_path contains a STRING child with the filename
+                auto path_iter = child_elem.children();
+                ItemReader path_child;
+                while (path_iter.next(&path_child)) {
+                    if (path_child.getType() == LMD_TYPE_STRING) {
+                        String* str = (String*)path_child.item().string_ptr;
+                        filename = str->chars;
+                        break;
+                    }
+                }
+            } else if (strcmp(tag, "bracket_group") == 0) {
+                // Extract options
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* options_str = stringbuf_to_string(sb);
+                options = options_str->chars;
+            }
+        }
+    }
+    
+    if (filename) {
+        gen->includegraphics(filename, options);
+    }
+}
+
+// =============================================================================
 // LatexProcessor Implementation
 // =============================================================================
 
@@ -757,6 +980,22 @@ void LatexProcessor::initCommandTable() {
     
     // Footnotes
     command_table_["footnote"] = cmd_footnote;
+    
+    // Tables
+    command_table_["tabular"] = cmd_tabular;
+    command_table_["hline"] = cmd_hline;
+    command_table_["\\hline"] = cmd_hline;
+    command_table_["multicolumn"] = cmd_multicolumn;
+    
+    // Float environments
+    command_table_["figure"] = cmd_figure;
+    command_table_["table"] = cmd_table_float;
+    command_table_["caption"] = cmd_caption;
+    
+    // Graphics
+    command_table_["graphics_include"] = cmd_includegraphics;
+    command_table_["includegraphics"] = cmd_includegraphics;
+    command_table_["\\includegraphics"] = cmd_includegraphics;
 }
 
 void LatexProcessor::process(Item root) {
@@ -908,6 +1147,7 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
 extern "C" {
 
 Item format_latex_html_v2_c(Input* input, int text_mode) {
+    log_debug("format_latex_html_v2_c called, text_mode=%d", text_mode);
     return lambda::format_latex_html_v2(input, text_mode != 0);
 }
 
