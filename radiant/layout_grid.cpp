@@ -1,6 +1,7 @@
 #include "grid.hpp"
 #include "layout.hpp"
 #include "view.hpp"
+#include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
 
 extern "C" {
 #include <stdlib.h>
@@ -224,13 +225,18 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("DEBUG: Phase 3 - Determining initial grid size from templates");
     determine_grid_size(grid_layout);
 
-    // Phase 4: Place grid items (with dense packing if enabled)
-    log_debug("DEBUG: Phase 4 - Placing grid items");
-    if (grid_layout->is_dense_packing) {
-        auto_place_grid_items_dense(grid_layout);
-    } else {
-        place_grid_items(grid_layout, items, item_count);
-    }
+    // Phase 4: Place grid items (using enhanced CellOccupancyMatrix algorithm)
+    log_debug("DEBUG: Phase 4 - Placing grid items with enhanced algorithm");
+
+    // Use enhanced placement algorithm with proper collision detection
+    // This replaces both place_grid_items and auto_place_grid_items_dense
+    radiant::grid_adapter::place_items_with_occupancy(
+        grid_layout,
+        items,
+        item_count,
+        grid_layout->grid_auto_flow,
+        grid_layout->is_dense_packing
+    );
 
     // Phase 5: Update grid size after placement (may have grown due to auto-placement)
     log_debug("DEBUG: Phase 5 - Updating grid size after placement");

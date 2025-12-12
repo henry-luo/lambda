@@ -1,4 +1,5 @@
 #include "grid.hpp"
+#include "grid_enhanced_adapter.hpp"  // Enhanced track sizing algorithm
 
 extern "C" {
 #include <stdlib.h>
@@ -505,4 +506,27 @@ void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container)
     distribute_space_to_auto_tracks(grid_layout);
 
     log_debug("Track sizes resolved\n");
+}
+
+// Enhanced track sizing using the new algorithm adapted from Taffy
+// This provides more accurate CSS Grid spec compliance
+void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, ViewBlock* container) {
+    if (!grid_layout || !container) return;
+
+    log_debug("Resolving track sizes (enhanced algorithm)\n");
+
+    // Phase 1: Initialize track sizes (still needed for memory allocation)
+    initialize_track_sizes(grid_layout);
+
+    // Use the enhanced track sizing algorithm from the adapter
+    // This implements the full CSS Grid track sizing algorithm (§11.4-11.8)
+    radiant::grid_adapter::run_enhanced_track_sizing(
+        grid_layout,
+        grid_layout->grid_items,
+        grid_layout->item_count,
+        static_cast<float>(grid_layout->content_width),
+        static_cast<float>(grid_layout->content_height)
+    );
+
+    log_debug("Track sizes resolved (enhanced algorithm)\n");
 }
