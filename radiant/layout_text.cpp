@@ -5,6 +5,58 @@
 
 #include "../lib/log.h"
 
+// ============================================================================
+// CSS white-space Property Helpers
+// ============================================================================
+
+/**
+ * Check if whitespace should be collapsed according to white-space property.
+ * Returns true for: normal, nowrap, pre-line
+ * Returns false for: pre, pre-wrap, break-spaces
+ */
+static inline bool ws_collapse_spaces(CssEnum ws) {
+    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP ||
+           ws == CSS_VALUE_PRE_LINE || ws == 0;  // 0 = undefined, treat as normal
+}
+
+/**
+ * Check if newlines should be collapsed (treated as spaces).
+ * Returns true for: normal, nowrap
+ * Returns false for: pre, pre-wrap, pre-line, break-spaces
+ */
+static inline bool ws_collapse_newlines(CssEnum ws) {
+    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP || ws == 0;
+}
+
+/**
+ * Check if lines should wrap at soft break opportunities.
+ * Returns true for: normal, pre-wrap, pre-line, break-spaces
+ * Returns false for: nowrap, pre
+ */
+static inline bool ws_wrap_lines(CssEnum ws) {
+    return ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+           ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0;
+}
+
+/**
+ * Get the white-space property value from the containing block.
+ * Walks up the parent chain to find the nearest block with a white_space value.
+ */
+static CssEnum get_white_space_value(View* view) {
+    // Walk up parent chain to find nearest block with white_space
+    DomNode* node = view;
+    while (node) {
+        if (node->is_element()) {
+            DomElement* elem = static_cast<DomElement*>(node);
+            if (elem->blk && elem->blk->white_space != 0) {
+                return elem->blk->white_space;
+            }
+        }
+        node = node->parent;
+    }
+    return CSS_VALUE_NORMAL;  // default
+}
+
 // Platform-specific font metrics function (defined in font_lookup_platform.c)
 // Returns 1 if metrics were retrieved, 0 to fall back to FreeType
 extern "C" int get_font_metrics_platform(const char* font_family, float font_size,
@@ -399,9 +451,22 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;
-    // skip space at start of line
-    if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
-        do { str++; } while (is_space(*str));
+
+    // Get white-space property from containing block
+    CssEnum white_space = get_white_space_value(lycon->view);
+    bool collapse_spaces = ws_collapse_spaces(white_space);
+    bool collapse_newlines = ws_collapse_newlines(white_space);
+    bool wrap_lines = ws_wrap_lines(white_space);
+
+    log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d",
+              white_space, collapse_spaces, collapse_newlines, wrap_lines);
+
+    // skip space at start of line (only if collapsing spaces)
+    if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
+        // When collapsing spaces, skip all whitespace (including newlines if collapse_newlines)
+        while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'))) {
+            str++;
+        }
         if (!*str) {
             // todo: probably should still set it bounds
             text_node->view_type = RDT_VIEW_NONE;
@@ -480,6 +545,24 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     do {
         float wd;
         uint32_t codepoint = *str;
+
+        // Handle newlines as forced line breaks when not collapsing newlines
+        if (!collapse_newlines && (*str == '\n' || *str == '\r')) {
+            // Output any text before the newline
+            if (str > text_start + rect->start_index) {
+                output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+            }
+            // Handle CRLF as single line break
+            if (*str == '\r' && *(str + 1) == '\n') {
+                str += 2;
+            } else {
+                str++;
+            }
+            line_break(lycon);
+            if (*str) { goto LAYOUT_TEXT; }
+            else return;
+        }
+
         if (is_space(codepoint)) {
             wd = lycon->font.style->space_width;
         }
@@ -520,12 +603,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
-        if (rect->x + rect->width > line_right) { // line filled up
+        if (wrap_lines && rect->x + rect->width > line_right) { // line filled up and wrapping enabled
             log_debug("line filled up");
             if (is_space(*str)) { // break at the current space
                 log_debug("break on space");
-                // skip all spaces
-                do { str++; } while (is_space(*str));
+                // skip spaces according to white-space mode
+                if (collapse_spaces) {
+                    do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+                } else {
+                    str++;  // only skip the current space in pre-wrap mode
+                }
                 rect->width -= wd;  // minus away space width at line break
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
                 line_break(lycon);
@@ -551,7 +638,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // else cannot break, continue the flow in current line
         }
         if (is_space(*str)) {
-            do { str++; } while (is_space(*str));
+            if (collapse_spaces) {
+                // Collapse multiple spaces into one, respecting newline preservation
+                do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+            } else {
+                // Preserve spaces - just advance one character
+                str++;
+            }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
             lycon->line.has_space = true;
         }
@@ -560,7 +653,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     } while (*str);
     // end of text
-    if (lycon->line.last_space) { // need to check if line will fill up
+    if (wrap_lines && lycon->line.last_space) { // need to check if line will fill up (only when wrapping)
         float advance_x = lycon->line.advance_x;  lycon->line.advance_x += rect->width;
         if (view_has_line_filled(lycon, text_view) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
