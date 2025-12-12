@@ -2664,6 +2664,90 @@ static void cmd_bibitem(LatexProcessor* proc, Item elem) {
 }
 
 // =============================================================================
+// Document Structure Commands
+// =============================================================================
+
+static void cmd_documentclass(LatexProcessor* proc, Item elem) {
+    // \documentclass[options]{class}
+    // In HTML output, just store the class name (article, book, report, etc.)
+    // The actual formatting is handled by CSS
+    // For now, just skip - no HTML output needed
+}
+
+static void cmd_usepackage(LatexProcessor* proc, Item elem) {
+    // \usepackage[options]{package}
+    // Store package name for reference but no HTML output
+    // Package-specific commands should already be implemented individually
+}
+
+static void cmd_include(LatexProcessor* proc, Item elem) {
+    // \include{filename}
+    // File inclusion - in HTML output, we would need to actually read and process the file
+    // For now, just skip (no output)
+    // TODO: Implement actual file inclusion
+}
+
+static void cmd_input(LatexProcessor* proc, Item elem) {
+    // \input{filename}
+    // Similar to \include but more flexible (can be used anywhere)
+    // For now, just skip (no output)
+    // TODO: Implement actual file inclusion
+}
+
+static void cmd_abstract(LatexProcessor* proc, Item elem) {
+    // \begin{abstract}...\end{abstract}
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"abstract\"");
+    gen->h(3, "class=\"abstract-title\"");
+    gen->text("Abstract");
+    gen->closeElement();
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_tableofcontents(LatexProcessor* proc, Item elem) {
+    // \tableofcontents
+    // Generate table of contents from section headings
+    // For now, just output a placeholder
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"toc\"");
+    gen->h(2, nullptr);
+    gen->text("Contents");
+    gen->closeElement();
+    // TODO: Generate actual TOC from collected section headings
+    gen->closeElement();
+}
+
+static void cmd_appendix(LatexProcessor* proc, Item elem) {
+    // \appendix
+    // Changes section numbering to letters (A, B, C...)
+    // In HTML, just affects subsequent sections - no direct output
+}
+
+static void cmd_mainmatter(LatexProcessor* proc, Item elem) {
+    // \mainmatter (for book class)
+    // Resets page numbering and starts arabic numerals
+    // In HTML, affects page numbering - no direct output
+}
+
+static void cmd_frontmatter(LatexProcessor* proc, Item elem) {
+    // \frontmatter (for book class)
+    // Roman numerals for pages
+    // In HTML, affects page numbering - no direct output
+}
+
+static void cmd_backmatter(LatexProcessor* proc, Item elem) {
+    // \backmatter (for book class)
+    // Unnumbered chapters
+    // In HTML, affects chapter numbering - no direct output
+}
+
+static void cmd_tableofcontents_star(LatexProcessor* proc, Item elem) {
+    // \tableofcontents* (starred version - no TOC entry for itself)
+    cmd_tableofcontents(proc, elem);
+}
+
+// =============================================================================
 // LatexProcessor Implementation
 // =============================================================================
 
@@ -2846,6 +2930,19 @@ void LatexProcessor::initCommandTable() {
     command_table_["bibliographystyle"] = cmd_bibliographystyle;
     command_table_["bibliography"] = cmd_bibliography;
     command_table_["bibitem"] = cmd_bibitem;
+    
+    // Document structure (additional commands)
+    command_table_["documentclass"] = cmd_documentclass;
+    command_table_["usepackage"] = cmd_usepackage;
+    command_table_["include"] = cmd_include;
+    command_table_["input"] = cmd_input;
+    command_table_["abstract"] = cmd_abstract;
+    command_table_["tableofcontents"] = cmd_tableofcontents;
+    command_table_["tableofcontents*"] = cmd_tableofcontents_star;
+    command_table_["appendix"] = cmd_appendix;
+    command_table_["mainmatter"] = cmd_mainmatter;
+    command_table_["frontmatter"] = cmd_frontmatter;
+    command_table_["backmatter"] = cmd_backmatter;
 }
 
 // =============================================================================
@@ -3115,6 +3212,16 @@ void LatexProcessor::processText(const char* text) {
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    // Handle Tree-sitter special node types that should be silent
+    if (strcmp(cmd_name, "class_include") == 0) {
+        cmd_documentclass(this, elem);
+        return;
+    }
+    if (strcmp(cmd_name, "package_include") == 0) {
+        cmd_usepackage(this, elem);
+        return;
+    }
+    
     // Handle macro definition elements specially (from Tree-sitter)
     if (strcmp(cmd_name, "new_command_definition") == 0) {
         cmd_newcommand(this, elem);
