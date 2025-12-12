@@ -679,73 +679,146 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             
             // Check for brack_group FIRST before other processing
             if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "brack_group_argc") == 0) {
+                fprintf(stderr, "DEBUG: Found bracket group '%s'\n", tag);
                 // [num] parameter count - extract number from bracket group
                 Element* brack_elem = const_cast<Element*>(child_elem.element());
                 List* brack_list = (List*)brack_elem;
                 
-                
+                fprintf(stderr, "DEBUG: Bracket group has %lld items\n", brack_list->length);
                 
                 // Look through items to find the number
                 // The Tree-sitter grammar stores it as a symbol "argc" with value as attribute
                 // or as plain text/number
+                fprintf(stderr, "DEBUG: Bracket group has extra=%lld items beyond length\n", brack_list->extra);
+                
+                // First, dump ALL items (including extra)
+                for (int64_t j = 0; j < brack_list->length + brack_list->extra; j++) {
+                    Item item = brack_list->items[j];
+                    TypeId item_type = get_type_id(item);
+                    fprintf(stderr, "DEBUG:   Item %lld: type=%d", j, item_type);
+                    if (item_type == LMD_TYPE_STRING) {
+                        String* str = (String*)item.string_ptr;
+                        fprintf(stderr, " STRING='%s'", str->chars);
+                    } else if (item_type == LMD_TYPE_INT) {
+                        int val = (int)(item.item >> 32);
+                        fprintf(stderr, " INT=%d", val);
+                    } else if (item_type == LMD_TYPE_SYMBOL) {
+                        String* sym = (String*)item.string_ptr;
+                        fprintf(stderr, " SYMBOL='%s'", sym->chars);
+                    }
+                    fprintf(stderr, "\n");
+                }
+                
                 for (int64_t j = 0; j < brack_list->length; j++) {
                     Item item = brack_list->items[j];
                     TypeId item_type = get_type_id(item);
                     
-                    
+                    fprintf(stderr, "DEBUG:   Processing item %lld: type=%d\n", j, item_type);
                     
                     if (item_type == LMD_TYPE_STRING) {
                         String* str = (String*)item.string_ptr;
+                        fprintf(stderr, "DEBUG:   Item %lld: STRING '%s'\n", j, str->chars);
                         
                         // Try to parse as number
                         if (str->len > 0 && str->chars[0] >= '0' && str->chars[0] <= '9') {
                             num_params = atoi(str->chars);
-                            
+                            fprintf(stderr, "DEBUG:   Parsed num_params=%d from string\n", num_params);
                             break;
                         }
                     } else if (item_type == LMD_TYPE_SYMBOL) {
                         String* sym = (String*)item.string_ptr;
+                        fprintf(stderr, "DEBUG:   Item %lld: SYMBOL '%s'\n", j, sym->chars);
                         
                         // The symbol "argc" itself doesn't contain the value
                         // We need to look for numeric text in the bracket group
+                    } else if (item_type == LMD_TYPE_INT) {
+                        // Direct int value
+                        int64_t val = item.item >> 32;
+                        fprintf(stderr, "DEBUG:   Item %lld: INT %lld\n", j, val);
+                        num_params = (int)val;
+                        fprintf(stderr, "DEBUG:   Parsed num_params=%d from int\n", num_params);
+                        break;
                     } else if (item_type == LMD_TYPE_ELEMENT) {
+                        // Type 19 - ELEMENT
+                        fprintf(stderr, "DEBUG:   Item %lld: ELEMENT handler entered\n", j);
                         Item elem_item;
                         elem_item.item = (uint64_t)item.element;
                         ElementReader elem_reader(elem_item);
                         const char* elem_tag = elem_reader.tagName();
-                        
+                        fprintf(stderr, "DEBUG:   ELEMENT tag='%s'\n", elem_tag);
                         
                         // Check if this is an "argc" element - if so, extract its text content
                         if (strcmp(elem_tag, "argc") == 0) {
+                            // Check attributes first
+                            fprintf(stderr, "DEBUG:   argc element has %lld attributes\n", elem_reader.attrCount());
+                            
+                            // Try to get "value" attribute
+                            if (elem_reader.has_attr("value")) {
+                                const char* value_str = elem_reader.get_attr_string("value");
+                                fprintf(stderr, "DEBUG:   argc has 'value' attribute: '%s'\n", value_str);
+                                if (value_str && value_str[0] >= '0' && value_str[0] <= '9') {
+                                    num_params = atoi(value_str);
+                                    fprintf(stderr, "DEBUG:   Parsed num_params=%d from value attribute\n", num_params);
+                                    break;
+                                }
+                            }
+                            
+                            // Dump the raw element structure
+                            Element* argc_elem = item.element;
+                            List* argc_list = (List*)argc_elem;
+                            fprintf(stderr, "DEBUG:   argc element has length=%lld, extra=%lld\n", 
+                                    argc_list->length, argc_list->extra);
+                            
+                            // Dump all items in the element (including extra)
+                            for (int64_t k = 0; k < argc_list->length + argc_list->extra; k++) {
+                                Item elem_item = argc_list->items[k];
+                                TypeId elem_type = get_type_id(elem_item);
+                                fprintf(stderr, "DEBUG:     Item %lld: type=%d", k, elem_type);
+                                if (elem_type == LMD_TYPE_STRING) {
+                                    String* str = (String*)elem_item.string_ptr;
+                                    fprintf(stderr, " STRING='%s'", str->chars);
+                                } else if (elem_type == LMD_TYPE_INT) {
+                                    int val = (int)(elem_item.item >> 32);
+                                    fprintf(stderr, " INT=%d", val);
+                                }
+                                fprintf(stderr, "\n");
+                            }
+                            
                             // Use textContent to get the number from this element
                             Pool* pool = proc->pool();
                             StringBuf* sb = stringbuf_new(pool);
                             elem_reader.textContent(sb);
                             String* argc_str = stringbuf_to_string(sb);
                             
+                            fprintf(stderr, "DEBUG:   argc textContent len=%lld, text='%s'\n", argc_str->len, 
+                                    argc_str->len > 0 ? argc_str->chars : "(empty)");
                             
                             // The argc element might have the number stored as text or in children
                             // Try parsing it
                             if (argc_str->len > 0) {
                                 num_params = atoi(argc_str->chars);
-                                
+                                fprintf(stderr, "DEBUG:   Parsed num_params=%d from argc textContent\n", num_params);
                             }
                             
                             // If still 0, the number might be stored in the element's attributes or elsewhere
                             // For now, try looking at raw items
                             if (num_params == 0) {
+                                fprintf(stderr, "DEBUG:   num_params still 0, checking children\n");
                                 Element* argc_elem = item.element;
                                 List* argc_list = (List*)argc_elem;
+                                fprintf(stderr, "DEBUG:   argc element has %lld children\n", argc_list->length);
                                 
                                 for (int64_t k = 0; k < argc_list->length; k++) {
                                     Item argc_item = argc_list->items[k];
                                     TypeId argc_type = get_type_id(argc_item);
+                                    fprintf(stderr, "DEBUG:   argc child %lld: type=%d\n", k, argc_type);
                                     if (argc_type == LMD_TYPE_STRING) {
                                         String* argc_str_inner = (String*)argc_item.string_ptr;
+                                        fprintf(stderr, "DEBUG:   argc child %lld: STRING '%s'\n", k, argc_str_inner->chars);
                                         
                                         if (argc_str_inner->len > 0 && argc_str_inner->chars[0] >= '0' && argc_str_inner->chars[0] <= '9') {
                                             num_params = atoi(argc_str_inner->chars);
-                                            
+                                            fprintf(stderr, "DEBUG:   Parsed num_params=%d from child string\n", num_params);
                                             break;
                                         }
                                     }
@@ -880,6 +953,8 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
     }
     
     
+    
+    fprintf(stderr, "DEBUG: newcommand parsed: name='%s', num_params=%d, definition=%p\n", macro_name.c_str(), num_params, definition);
     
     if (!macro_name.empty() && definition) {
         // Check if macro already exists
@@ -3535,7 +3610,12 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
             ItemReader child;
             int args_collected = 0;
             
+            fprintf(stderr, "DEBUG: Macro %s needs %d params, has %lld children\n", cmd_name, macro->num_params, reader.childCount());
+            
             while (iter.next(&child) && args_collected < macro->num_params) {
+                TypeId child_type = child.getType();
+                fprintf(stderr, "DEBUG:   Child %d: type=%d\n", args_collected, child_type);
+                
                 // Create a wrapper element for this argument
                 ElementBuilder arg_elem = builder.element("arg");
                 
@@ -3547,6 +3627,8 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
                 args.push_back((Element*)arg_item.item);
                 args_collected++;
             }
+            
+            fprintf(stderr, "DEBUG: Macro %s collected %d/%d args\n", cmd_name, args_collected, macro->num_params);
             
             // Expand the macro with arguments
             Element* expanded = expandMacro(cmd_name, args);
