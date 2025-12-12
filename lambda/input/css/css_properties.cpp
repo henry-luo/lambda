@@ -170,6 +170,8 @@ static CssProperty property_definitions[] = {
     // Grid alignment properties
     {CSS_PROPERTY_JUSTIFY_ITEMS, "justify-items", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "stretch", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_JUSTIFY_SELF, "justify-self", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_PLACE_ITEMS, "place-items", PROP_TYPE_LIST, PROP_INHERIT_NO, "stretch", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_PLACE_SELF, "place-self", PROP_TYPE_LIST, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
 
     // Additional Grid Properties
     {CSS_PROPERTY_GRID_TEMPLATE, "grid-template", PROP_TYPE_LIST, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
