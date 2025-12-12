@@ -55,6 +55,9 @@ public:
     // Process element children
     void processChildren(Item elem);
     
+    // Process spacing command
+    void processSpacingCommand(Item elem);
+    
     // Process text content
     void processText(const char* text);
     
@@ -445,6 +448,139 @@ static void cmd_sout(LatexProcessor* proc, Item elem) {
     gen->span("sout");
     proc->processChildren(elem);
     gen->closeElement();
+}
+
+// =============================================================================
+// Additional Font Commands (textmd, textup, textsl, textnormal)
+// =============================================================================
+
+static void cmd_textmd(LatexProcessor* proc, Item elem) {
+    // \textmd{text} - medium weight text
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->enterGroup();
+    gen->currentFont().series = FontSeries::Normal;
+    gen->span("textmd");
+    proc->processChildren(elem);
+    gen->closeElement();
+    gen->exitGroup();
+}
+
+static void cmd_textup(LatexProcessor* proc, Item elem) {
+    // \textup{text} - upright shape
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->enterGroup();
+    gen->currentFont().shape = FontShape::Upright;
+    gen->span("textup");
+    proc->processChildren(elem);
+    gen->closeElement();
+    gen->exitGroup();
+}
+
+static void cmd_textsl(LatexProcessor* proc, Item elem) {
+    // \textsl{text} - slanted text
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->enterGroup();
+    gen->currentFont().shape = FontShape::Slanted;
+    gen->span("textsl");
+    proc->processChildren(elem);
+    gen->closeElement();
+    gen->exitGroup();
+}
+
+static void cmd_textnormal(LatexProcessor* proc, Item elem) {
+    // \textnormal{text} - normal font
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->enterGroup();
+    // Reset to defaults
+    gen->currentFont().series = FontSeries::Normal;
+    gen->currentFont().shape = FontShape::Upright;
+    gen->currentFont().family = FontFamily::Roman;
+    gen->currentFont().size = FontSize::NormalSize;
+    gen->span("textnormal");
+    proc->processChildren(elem);
+    gen->closeElement();
+    gen->exitGroup();
+}
+
+// =============================================================================
+// Font Declaration Commands (bfseries, mdseries, rmfamily, etc.)
+// =============================================================================
+
+static void cmd_bfseries(LatexProcessor* proc, Item elem) {
+    // \bfseries - switch to bold (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().series = FontSeries::Bold;
+    proc->processChildren(elem);
+}
+
+static void cmd_mdseries(LatexProcessor* proc, Item elem) {
+    // \mdseries - switch to medium weight (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().series = FontSeries::Normal;
+    proc->processChildren(elem);
+}
+
+static void cmd_rmfamily(LatexProcessor* proc, Item elem) {
+    // \rmfamily - switch to roman family (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().family = FontFamily::Roman;
+    proc->processChildren(elem);
+}
+
+static void cmd_sffamily(LatexProcessor* proc, Item elem) {
+    // \sffamily - switch to sans-serif family (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().family = FontFamily::SansSerif;
+    proc->processChildren(elem);
+}
+
+static void cmd_ttfamily(LatexProcessor* proc, Item elem) {
+    // \ttfamily - switch to typewriter family (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().family = FontFamily::Typewriter;
+    proc->processChildren(elem);
+}
+
+static void cmd_itshape(LatexProcessor* proc, Item elem) {
+    // \itshape - switch to italic shape (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().shape = FontShape::Italic;
+    proc->processChildren(elem);
+}
+
+static void cmd_slshape(LatexProcessor* proc, Item elem) {
+    // \slshape - switch to slanted shape (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().shape = FontShape::Slanted;
+    proc->processChildren(elem);
+}
+
+static void cmd_scshape(LatexProcessor* proc, Item elem) {
+    // \scshape - switch to small caps shape (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().shape = FontShape::SmallCaps;
+    proc->processChildren(elem);
+}
+
+static void cmd_upshape(LatexProcessor* proc, Item elem) {
+    // \upshape - switch to upright shape (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().shape = FontShape::Upright;
+    proc->processChildren(elem);
+}
+
+static void cmd_normalfont(LatexProcessor* proc, Item elem) {
+    // \normalfont - reset to normal font (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->currentFont().series = FontSeries::Normal;
+    gen->currentFont().shape = FontShape::Upright;
+    gen->currentFont().family = FontFamily::Roman;
+    gen->currentFont().size = FontSize::NormalSize;
+    proc->processChildren(elem);
 }
 
 // Macro definition commands
@@ -915,7 +1051,75 @@ static void cmd_Huge(LatexProcessor* proc, Item elem) {
     gen->exitGroup();
 }
 
+// =============================================================================
+// Special LaTeX Commands (\TeX, \LaTeX, \today, etc.)
+// =============================================================================
+
+static void cmd_TeX(LatexProcessor* proc, Item elem) {
+    // \TeX - TeX logo
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->span("class=\"tex\"");
+    gen->text("T");
+    gen->span("e");
+    gen->text("e");
+    gen->closeElement();  // close inner span
+    gen->text("X");
+    gen->closeElement();  // close outer span
+}
+
+static void cmd_LaTeX(LatexProcessor* proc, Item elem) {
+    // \LaTeX - LaTeX logo
+    HtmlGenerator* gen = proc->generator();
+    
+    gen->span("class=\"latex\"");
+    gen->text("L");
+    gen->span("a");
+    gen->text("a");
+    gen->closeElement();  // close inner span
+    gen->text("T");
+    gen->span("e");
+    gen->text("e");
+    gen->closeElement();  // close inner span
+    gen->text("X");
+    gen->closeElement();  // close outer span
+}
+
+static void cmd_today(LatexProcessor* proc, Item elem) {
+    // \today - Current date
+    HtmlGenerator* gen = proc->generator();
+    
+    // Format: December 12, 2025 (example)
+    time_t now = time(nullptr);
+    struct tm* tm_info = localtime(&now);
+    char buffer[100];
+    strftime(buffer, sizeof(buffer), "%B %d, %Y", tm_info);
+    
+    gen->text(buffer);
+}
+
+static void cmd_empty(LatexProcessor* proc, Item elem) {
+    // \empty - Empty macro (produces nothing)
+    // No output
+}
+
+static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
+    // \makeatletter - Make @ a letter (category code change)
+    // In HTML output, this doesn't affect anything
+    // Just process children
+    proc->processChildren(elem);
+}
+
+static void cmd_makeatother(LatexProcessor* proc, Item elem) {
+    // \makeatother - Make @ other (restore category code)
+    // In HTML output, this doesn't affect anything
+    // Just process children
+    proc->processChildren(elem);
+}
+
+// =============================================================================
 // Sectioning commands
+// =============================================================================
 
 static void cmd_section(LatexProcessor* proc, Item elem) {
     HtmlGenerator* gen = proc->generator();
@@ -1215,7 +1419,333 @@ static void cmd_newpage(LatexProcessor* proc, Item elem) {
     gen->lineBreak(true);  // page break
 }
 
+// =============================================================================
+// Spacing Commands
+// =============================================================================
+
+static void cmd_hspace(LatexProcessor* proc, Item elem) {
+    // \hspace{length} - horizontal space
+    HtmlGenerator* gen = proc->generator();
+    
+    // Extract length from children
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* length_str = stringbuf_to_string(sb);
+    
+    // Create inline spacer
+    char attrs[256];
+    snprintf(attrs, sizeof(attrs), "class=\"hspace\" style=\"display:inline-block;width:%s\"", length_str->chars);
+    gen->span(attrs);
+    gen->closeElement();
+}
+
+static void cmd_vspace(LatexProcessor* proc, Item elem) {
+    // \vspace{length} - vertical space
+    HtmlGenerator* gen = proc->generator();
+    
+    // Extract length from children
+    ElementReader elem_reader(elem);
+    Pool* pool = proc->pool();
+    StringBuf* sb = stringbuf_new(pool);
+    elem_reader.textContent(sb);
+    String* length_str = stringbuf_to_string(sb);
+    
+    // Create block spacer
+    char attrs[256];
+    snprintf(attrs, sizeof(attrs), "class=\"vspace\" style=\"display:block;height:%s\"", length_str->chars);
+    gen->div(attrs);
+    gen->closeElement();
+}
+
+static void cmd_addvspace(LatexProcessor* proc, Item elem) {
+    // \addvspace{length} - add vertical space (only if needed)
+    // For HTML, just treat as regular vspace
+    cmd_vspace(proc, elem);
+}
+
+static void cmd_smallbreak(LatexProcessor* proc, Item elem) {
+    // \smallbreak - small vertical break
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"vspace smallskip\"");
+    gen->closeElement();
+}
+
+static void cmd_medbreak(LatexProcessor* proc, Item elem) {
+    // \medbreak - medium vertical break
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"vspace medskip\"");
+    gen->closeElement();
+}
+
+static void cmd_bigbreak(LatexProcessor* proc, Item elem) {
+    // \bigbreak - big vertical break
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"vspace bigskip\"");
+    gen->closeElement();
+}
+
+static void cmd_vfill(LatexProcessor* proc, Item elem) {
+    // \vfill - vertical fill (flexible space)
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"vfill\" style=\"flex-grow:1\"");
+    gen->closeElement();
+}
+
+static void cmd_hfill(LatexProcessor* proc, Item elem) {
+    // \hfill - horizontal fill (flexible space)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"hfill\" style=\"flex-grow:1\"");
+    gen->closeElement();
+}
+
+static void cmd_nolinebreak(LatexProcessor* proc, Item elem) {
+    // \nolinebreak[priority] - discourage line break
+    // In HTML, use non-breaking space or CSS hint
+    HtmlGenerator* gen = proc->generator();
+    gen->span("style=\"white-space:nowrap\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_nopagebreak(LatexProcessor* proc, Item elem) {
+    // \nopagebreak[priority] - discourage page break
+    // In HTML, use CSS page-break hint
+    HtmlGenerator* gen = proc->generator();
+    gen->span("style=\"page-break-inside:avoid\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_pagebreak(LatexProcessor* proc, Item elem) {
+    // \pagebreak[priority] - encourage page break
+    HtmlGenerator* gen = proc->generator();
+    gen->div("style=\"page-break-after:always\"");
+    gen->closeElement();
+}
+
+static void cmd_clearpage(LatexProcessor* proc, Item elem) {
+    // \clearpage - end page and flush floats
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"clearpage\" style=\"clear:both;page-break-after:always\"");
+    gen->closeElement();
+}
+
+static void cmd_cleardoublepage(LatexProcessor* proc, Item elem) {
+    // \cleardoublepage - clear to next odd page
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"cleardoublepage\" style=\"clear:both;page-break-after:always\"");
+    gen->closeElement();
+}
+
+static void cmd_enlargethispage(LatexProcessor* proc, Item elem) {
+    // \enlargethispage{length} - enlarge current page
+    // In HTML, this is a no-op (no page concept)
+    // Just process children
+    proc->processChildren(elem);
+}
+
+static void cmd_negthinspace(LatexProcessor* proc, Item elem) {
+    // \negthinspace or \! - negative thin space
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"negthinspace\" style=\"margin-left:-0.16667em\"");
+    gen->closeElement();
+}
+
+// =============================================================================
+// Box Commands
+// =============================================================================
+
+static void cmd_mbox(LatexProcessor* proc, Item elem) {
+    // \mbox{text} - make box (prevent line breaking)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("style=\"white-space:nowrap\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_fbox(LatexProcessor* proc, Item elem) {
+    // \fbox{text} - framed box
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"fbox\" style=\"border:1px solid black;padding:3px\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_framebox(LatexProcessor* proc, Item elem) {
+    // \framebox[width][pos]{text} - framed box with options
+    // TODO: Parse width and position parameters
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"framebox\" style=\"border:1px solid black;padding:3px\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_frame(LatexProcessor* proc, Item elem) {
+    // \frame{text} - simple frame
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"frame\" style=\"border:1px solid black\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_parbox(LatexProcessor* proc, Item elem) {
+    // \parbox[pos][height][inner-pos]{width}{text} - paragraph box
+    // TODO: Parse all parameters
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"parbox\" style=\"display:inline-block\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_makebox(LatexProcessor* proc, Item elem) {
+    // \makebox[width][pos]{text} - make box with size
+    // TODO: Parse width and position
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"makebox\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_phantom(LatexProcessor* proc, Item elem) {
+    // \phantom{text} - invisible box with dimensions
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"phantom\" style=\"visibility:hidden\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_hphantom(LatexProcessor* proc, Item elem) {
+    // \hphantom{text} - horizontal phantom (width only)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"hphantom\" style=\"visibility:hidden\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_vphantom(LatexProcessor* proc, Item elem) {
+    // \vphantom{text} - vertical phantom (height/depth only)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"vphantom\" style=\"visibility:hidden;width:0\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_smash(LatexProcessor* proc, Item elem) {
+    // \smash[tb]{text} - smash height/depth
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"smash\" style=\"display:inline-block;height:0\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_clap(LatexProcessor* proc, Item elem) {
+    // \clap{text} - centered lap (zero width, centered)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"clap\" style=\"display:inline-block;width:0;text-align:center\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_llap(LatexProcessor* proc, Item elem) {
+    // \llap{text} - left lap (zero width, right-aligned)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"llap\" style=\"display:inline-block;width:0;text-align:right\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_rlap(LatexProcessor* proc, Item elem) {
+    // \rlap{text} - right lap (zero width, left-aligned)
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"rlap\" style=\"display:inline-block;width:0;text-align:left\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+// =============================================================================
+// Alignment Declaration Commands
+// =============================================================================
+
+static void cmd_centering(LatexProcessor* proc, Item elem) {
+    // \centering - center alignment (declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->div("style=\"text-align:center\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_raggedright(LatexProcessor* proc, Item elem) {
+    // \raggedright - ragged right (left-aligned, declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->div("style=\"text-align:left\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_raggedleft(LatexProcessor* proc, Item elem) {
+    // \raggedleft - ragged left (right-aligned, declaration)
+    HtmlGenerator* gen = proc->generator();
+    gen->div("style=\"text-align:right\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+// =============================================================================
+// Document Metadata Commands
+// =============================================================================
+
+static void cmd_author(LatexProcessor* proc, Item elem) {
+    // \author{name} - set document author
+    HtmlGenerator* gen = proc->generator();
+    // Store author for \maketitle
+    // For now, just output inline with span - \maketitle will format properly later
+    gen->span("class=\"latex-author\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_title(LatexProcessor* proc, Item elem) {
+    // \title{text} - set document title
+    HtmlGenerator* gen = proc->generator();
+    // Store title for \maketitle  
+    // For now, just output inline with span - \maketitle will format properly later
+    gen->span("class=\"latex-title\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_date(LatexProcessor* proc, Item elem) {
+    // \date{text} - set document date
+    HtmlGenerator* gen = proc->generator();
+    // Store date for \maketitle
+    // For now, just output inline with span - \maketitle will format properly later
+    gen->span("class=\"latex-date\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_thanks(LatexProcessor* proc, Item elem) {
+    // \thanks{text} - thanks footnote in title
+    HtmlGenerator* gen = proc->generator();
+    gen->span("class=\"thanks\" style=\"vertical-align:super;font-size:smaller\"");
+    proc->processChildren(elem);
+    gen->closeElement();
+}
+
+static void cmd_maketitle(LatexProcessor* proc, Item elem) {
+    // \maketitle - generate title page
+    HtmlGenerator* gen = proc->generator();
+    gen->div("class=\"maketitle\"");
+    // TODO: Combine stored title, author, date
+    // For now, just create a placeholder
+    gen->closeElement();
+}
+
+// =============================================================================
 // Label and reference commands
+// =============================================================================
 
 static void cmd_label(LatexProcessor* proc, Item elem) {
     // \label{name}
@@ -2154,6 +2684,22 @@ void LatexProcessor::initCommandTable() {
     command_table_["textsc"] = cmd_textsc;
     command_table_["underline"] = cmd_underline;
     command_table_["sout"] = cmd_sout;
+    command_table_["textmd"] = cmd_textmd;
+    command_table_["textup"] = cmd_textup;
+    command_table_["textsl"] = cmd_textsl;
+    command_table_["textnormal"] = cmd_textnormal;
+    
+    // Font declarations
+    command_table_["bfseries"] = cmd_bfseries;
+    command_table_["mdseries"] = cmd_mdseries;
+    command_table_["rmfamily"] = cmd_rmfamily;
+    command_table_["sffamily"] = cmd_sffamily;
+    command_table_["ttfamily"] = cmd_ttfamily;
+    command_table_["itshape"] = cmd_itshape;
+    command_table_["slshape"] = cmd_slshape;
+    command_table_["scshape"] = cmd_scshape;
+    command_table_["upshape"] = cmd_upshape;
+    command_table_["normalfont"] = cmd_normalfont;
     
     // Font sizes
     command_table_["tiny"] = cmd_tiny;
@@ -2180,7 +2726,6 @@ void LatexProcessor::initCommandTable() {
     command_table_["description"] = cmd_description;
     command_table_["item"] = cmd_item;
     command_table_["enum_item"] = cmd_item;  // Tree-sitter node type for \item
-    command_table_["\\item"] = cmd_item;     // Command form with backslash
     
     // Basic environments
     command_table_["quote"] = cmd_quote;
@@ -2205,6 +2750,59 @@ void LatexProcessor::initCommandTable() {
     command_table_["linebreak"] = cmd_linebreak;
     command_table_["newpage"] = cmd_newpage;
     
+    // Special LaTeX commands
+    command_table_["TeX"] = cmd_TeX;
+    command_table_["LaTeX"] = cmd_LaTeX;
+    command_table_["today"] = cmd_today;
+    command_table_["empty"] = cmd_empty;
+    command_table_["makeatletter"] = cmd_makeatletter;
+    command_table_["makeatother"] = cmd_makeatother;
+    
+    // Spacing commands
+    command_table_["hspace"] = cmd_hspace;
+    command_table_["vspace"] = cmd_vspace;
+    command_table_["addvspace"] = cmd_addvspace;
+    command_table_["smallbreak"] = cmd_smallbreak;
+    command_table_["medbreak"] = cmd_medbreak;
+    command_table_["bigbreak"] = cmd_bigbreak;
+    command_table_["vfill"] = cmd_vfill;
+    command_table_["hfill"] = cmd_hfill;
+    command_table_["nolinebreak"] = cmd_nolinebreak;
+    command_table_["nopagebreak"] = cmd_nopagebreak;
+    command_table_["pagebreak"] = cmd_pagebreak;
+    command_table_["clearpage"] = cmd_clearpage;
+    command_table_["cleardoublepage"] = cmd_cleardoublepage;
+    command_table_["enlargethispage"] = cmd_enlargethispage;
+    command_table_["negthinspace"] = cmd_negthinspace;
+    command_table_["!"] = cmd_negthinspace;  // \! is an alias for \negthinspace
+    
+    // Box commands
+    command_table_["mbox"] = cmd_mbox;
+    command_table_["fbox"] = cmd_fbox;
+    command_table_["framebox"] = cmd_framebox;
+    command_table_["frame"] = cmd_frame;
+    command_table_["parbox"] = cmd_parbox;
+    command_table_["makebox"] = cmd_makebox;
+    command_table_["phantom"] = cmd_phantom;
+    command_table_["hphantom"] = cmd_hphantom;
+    command_table_["vphantom"] = cmd_vphantom;
+    command_table_["smash"] = cmd_smash;
+    command_table_["clap"] = cmd_clap;
+    command_table_["llap"] = cmd_llap;
+    command_table_["rlap"] = cmd_rlap;
+    
+    // Alignment declarations
+    command_table_["centering"] = cmd_centering;
+    command_table_["raggedright"] = cmd_raggedright;
+    command_table_["raggedleft"] = cmd_raggedleft;
+    
+    // Document metadata
+    command_table_["author"] = cmd_author;
+    command_table_["title"] = cmd_title;
+    command_table_["date"] = cmd_date;
+    command_table_["thanks"] = cmd_thanks;
+    command_table_["maketitle"] = cmd_maketitle;
+    
     // Labels and references
     command_table_["label"] = cmd_label;
     command_table_["ref"] = cmd_ref;
@@ -2212,11 +2810,9 @@ void LatexProcessor::initCommandTable() {
     
     // Hyperlinks
     command_table_["url"] = cmd_url;
-    command_table_["\\url"] = cmd_url;  // Command form with backslash
     command_table_["hyperlink"] = cmd_href;  // Tree-sitter node type for \href
     command_table_["curly_group_uri"] = cmd_url;  // Tree-sitter uri group
     command_table_["href"] = cmd_href;
-    command_table_["\\href"] = cmd_href;  // Command form with backslash
     
     // Footnotes
     command_table_["footnote"] = cmd_footnote;
@@ -2224,7 +2820,6 @@ void LatexProcessor::initCommandTable() {
     // Tables
     command_table_["tabular"] = cmd_tabular;
     command_table_["hline"] = cmd_hline;
-    command_table_["\\hline"] = cmd_hline;
     command_table_["multicolumn"] = cmd_multicolumn;
     
     // Float environments
@@ -2235,34 +2830,22 @@ void LatexProcessor::initCommandTable() {
     // Graphics
     command_table_["graphics_include"] = cmd_includegraphics;
     command_table_["includegraphics"] = cmd_includegraphics;
-    command_table_["\\includegraphics"] = cmd_includegraphics;
     
     // Color commands
     command_table_["color_reference"] = cmd_color_reference;  // Tree-sitter node for \textcolor and \colorbox
     command_table_["textcolor"] = cmd_textcolor;
-    command_table_["\\textcolor"] = cmd_textcolor;
     command_table_["color"] = cmd_color;
-    command_table_["\\color"] = cmd_color;
     command_table_["colorbox"] = cmd_colorbox;
-    command_table_["\\colorbox"] = cmd_colorbox;
     command_table_["fcolorbox"] = cmd_fcolorbox;
-    command_table_["\\fcolorbox"] = cmd_fcolorbox;
     command_table_["definecolor"] = cmd_definecolor;
-    command_table_["\\definecolor"] = cmd_definecolor;
     
     // Bibliography & Citations
     command_table_["cite"] = cmd_cite;
-    command_table_["\\cite"] = cmd_cite;
     command_table_["citeauthor"] = cmd_citeauthor;
-    command_table_["\\citeauthor"] = cmd_citeauthor;
     command_table_["citeyear"] = cmd_citeyear;
-    command_table_["\\citeyear"] = cmd_citeyear;
     command_table_["bibliographystyle"] = cmd_bibliographystyle;
-    command_table_["\\bibliographystyle"] = cmd_bibliographystyle;
     command_table_["bibliography"] = cmd_bibliography;
-    command_table_["\\bibliography"] = cmd_bibliography;
     command_table_["bibitem"] = cmd_bibitem;
-    command_table_["\\bibitem"] = cmd_bibitem;
 }
 
 // =============================================================================
@@ -2380,6 +2963,24 @@ void LatexProcessor::processNode(Item node) {
                 // Paragraph break: close current paragraph and prepare for next
                 closeParagraphIfOpen();
                 // Don't open new paragraph yet - ensureParagraph() will handle it when next content arrives
+            } else if (strcmp(sym_name, "TeX") == 0) {
+                // TeX logo
+                ensureParagraph();
+                gen_->span("tex-logo");
+                gen_->text("T");
+                gen_->text("E");
+                gen_->text("X");
+                gen_->closeElement();
+            } else if (strcmp(sym_name, "LaTeX") == 0) {
+                // LaTeX logo
+                ensureParagraph();
+                gen_->span("latex-logo");
+                gen_->text("L");
+                gen_->text("A");
+                gen_->text("T");
+                gen_->text("E");
+                gen_->text("X");
+                gen_->closeElement();
             } else if (strlen(sym_name) == 1) {
                 // Single-character symbols are escaped special characters
                 // Output them as literal text
@@ -2415,6 +3016,19 @@ void LatexProcessor::processNode(Item node) {
             return;
         }
         
+        // Special handling for linebreak_command (\\)
+        if (strcmp(tag, "linebreak_command") == 0) {
+            ensureParagraph();
+            gen_->lineBreak(false);
+            return;
+        }
+        
+        // Special handling for spacing_command
+        if (strcmp(tag, "spacing_command") == 0) {
+            processSpacingCommand(node);
+            return;
+        }
+        
         // Process command
         processCommand(tag, node);
         return;
@@ -2436,6 +3050,48 @@ void LatexProcessor::processChildren(Item elem) {
     ItemReader child;
     while (iter.next(&child)) {
         processNode(child.item());
+    }
+}
+
+void LatexProcessor::processSpacingCommand(Item elem) {
+    ElementReader reader(elem);
+    
+    // Get the command field which contains the actual spacing command string
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* cmd = child.asString()->chars;
+            ensureParagraph();
+            
+            if (strcmp(cmd, "\\,") == 0 || strcmp(cmd, "\\thinspace") == 0) {
+                // Thin space (1/6 em) - use Unicode thin space U+2009
+                gen_->text("\u2009");
+            } else if (strcmp(cmd, "\\!") == 0 || strcmp(cmd, "\\negthinspace") == 0) {
+                // Negative thin space - use empty span with class
+                gen_->span("negthinspace");
+                gen_->closeElement();
+            } else if (strcmp(cmd, "\\;") == 0 || strcmp(cmd, "\\thickspace") == 0) {
+                // Thick space (5/18 em) - use em space U+2003
+                gen_->text("\u2003");
+            } else if (strcmp(cmd, "\\:") == 0 || strcmp(cmd, "\\medspace") == 0) {
+                // Medium space (2/9 em) - use en space U+2002
+                gen_->text("\u2002");
+            } else if (strcmp(cmd, "\\enspace") == 0) {
+                // en-space (0.5 em) - use en space U+2002
+                gen_->text("\u2002");
+            } else if (strcmp(cmd, "\\quad") == 0) {
+                // quad space (1 em) - use em space U+2003
+                gen_->text("\u2003");
+            } else if (strcmp(cmd, "\\qquad") == 0) {
+                // qquad space (2 em) - use two em spaces
+                gen_->text("\u2003\u2003");
+            } else if (strcmp(cmd, "\\space") == 0) {
+                // Normal space
+                gen_->text(" ");
+            }
+            break;
+        }
     }
 }
 
@@ -2544,6 +3200,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         ensureParagraph();
         // Track that we're entering an inline element
         inline_depth_++;
+    } else if (strcmp(cmd_name, "\\") == 0 || 
+               strcmp(cmd_name, "newline") == 0 || 
+               strcmp(cmd_name, "linebreak") == 0) {
+        // Line breaks: ensure paragraph but don't affect nesting depth
+        ensureParagraph();
     }
     
     // Look up command in table
