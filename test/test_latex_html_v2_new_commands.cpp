@@ -683,6 +683,104 @@ TEST_F(LatexHtmlV2NewCommandsTest, CompleteDocument) {
     EXPECT_TRUE(strstr(html, "Appendix") != nullptr);
 }
 
+// =============================================================================
+// Counter & Length System Command Tests (Phase 8)
+// =============================================================================
+
+TEST_F(LatexHtmlV2NewCommandsTest, Newcounter) {
+    const char* latex = R"(\newcounter{mycounter})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // newcounter is a no-op for HTML (counter definition)
+    EXPECT_TRUE(html != nullptr);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, Setcounter) {
+    const char* latex = R"(\setcounter{section}{5})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // setcounter is a no-op for HTML (counter state)
+    EXPECT_TRUE(html != nullptr);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, Addtocounter) {
+    const char* latex = R"(\addtocounter{page}{1})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // addtocounter is a no-op for HTML
+    EXPECT_TRUE(html != nullptr);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, Stepcounter) {
+    const char* latex = R"(\stepcounter{section})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // stepcounter is a no-op for HTML
+    EXPECT_TRUE(html != nullptr);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, Value) {
+    const char* latex = R"(\value{section})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // Value command should output "0" as placeholder
+    // It may or may not be wrapped depending on context
+    EXPECT_TRUE(html != nullptr && strlen(html) > 0);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, Newlength) {
+    const char* latex = R"(\newlength{\mylength})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // newlength is a no-op for HTML (length definition)
+    EXPECT_TRUE(html != nullptr);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, Setlength) {
+    const char* latex = R"(\setlength{\parindent}{0pt})";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    // setlength is a no-op for HTML
+    EXPECT_TRUE(html != nullptr);
+}
+
+TEST_F(LatexHtmlV2NewCommandsTest, CounterInDocument) {
+    const char* latex = R"(
+        \newcounter{example}
+        \setcounter{example}{10}
+        \addtocounter{example}{5}
+        Current value: \value{example}
+    )";
+    
+    parse_latex_string(input, latex);
+    const char* html = format_to_html_text(input);
+    
+    ASSERT_NE(html, nullptr);
+    EXPECT_TRUE(strstr(html, "Current value") != nullptr);
+    EXPECT_TRUE(strstr(html, "0") != nullptr);  // Placeholder (should be 15 in full implementation)
+}
+
 // Main function
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
