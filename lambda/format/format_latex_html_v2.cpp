@@ -857,13 +857,14 @@ static void cmd_caption(LatexProcessor* proc, Item elem) {
 
 static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
     // \includegraphics[options]{filename}
-    // Parser gives: {"$":"graphics_include", "_":[{"$":"\includegraphics"}, {"$":"curly_group_path", "_":[string/symbol]}]}
-    // The curly_group_path contains a STRING or SYMBOL child with the filename
+    // Tree-sitter structure: <graphics_include> <\includegraphics> <brack_group_key_value> <curly_group_path>
+    // brack_group_key_value contains <key_value_pair> elements like: <key_value_pair "width" <=> <value "5cm">>
     HtmlGenerator* gen = proc->generator();
     ElementReader elem_reader(elem);
     
     const char* filename = nullptr;
-    const char* options = nullptr;
+    Pool* pool = proc->pool();
+    StringBuf* options_sb = stringbuf_new(pool);
     
     // Extract filename and options
     auto iter = elem_reader.children();
@@ -884,20 +885,386 @@ static void cmd_includegraphics(LatexProcessor* proc, Item elem) {
                         break;
                     }
                 }
-            } else if (strcmp(tag, "bracket_group") == 0) {
-                // Extract options
-                Pool* pool = proc->pool();
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.textContent(sb);
-                String* options_str = stringbuf_to_string(sb);
-                options = options_str->chars;
+            } else if (strcmp(tag, "brack_group_key_value") == 0 || strcmp(tag, "bracket_group") == 0) {
+                // Parse structured key-value pairs
+                auto kv_iter = child_elem.children();
+                ItemReader kv_child;
+                bool first = true;
+                while (kv_iter.next(&kv_child)) {
+                    if (kv_child.getType() == LMD_TYPE_ELEMENT) {
+                        ElementReader kv_elem(kv_child.item());
+                        if (strcmp(kv_elem.tagName(), "key_value_pair") == 0) {
+                            // Extract key and value
+                            std::string key, value;
+                            auto pair_iter = kv_elem.children();
+                            ItemReader pair_child;
+                            while (pair_iter.next(&pair_child)) {
+                                if (pair_child.getType() == LMD_TYPE_STRING) {
+                                    if (key.empty()) {
+                                        String* str = (String*)pair_child.item().string_ptr;
+                                        key = str->chars;
+                                    }
+                                } else if (pair_child.getType() == LMD_TYPE_ELEMENT) {
+                                    ElementReader value_elem(pair_child.item());
+                                    if (strcmp(value_elem.tagName(), "value") == 0) {
+                                        StringBuf* val_sb = stringbuf_new(pool);
+                                        value_elem.textContent(val_sb);
+                                        String* val_str = stringbuf_to_string(val_sb);
+                                        value = val_str->chars;
+                                    }
+                                }
+                            }
+                            
+                            // Add to options string
+                            if (!key.empty() && !value.empty()) {
+                                if (!first) stringbuf_append_str(options_sb, ",");
+                                stringbuf_append_str(options_sb, key.c_str());
+                                stringbuf_append_str(options_sb, "=");
+                                stringbuf_append_str(options_sb, value.c_str());
+                                first = false;
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+    
+    const char* options = nullptr;
+    if (options_sb->length > 0) {
+        String* options_str = stringbuf_to_string(options_sb);
+        options = options_str->chars;
     }
     
     if (filename) {
         gen->includegraphics(filename, options);
     }
+}
+
+// =============================================================================
+// Color Commands
+// =============================================================================
+
+// Helper: Convert color specification to CSS color string
+static std::string colorToCss(const char* model, const char* spec) {
+    if (!model || !spec) return "black";
+    
+    if (strcmp(model, "rgb") == 0) {
+        // rgb{r,g,b} with values 0-1
+        float r, g, b;
+        if (sscanf(spec, "%f,%f,%f", &r, &g, &b) == 3) {
+            int ir = (int)(r * 255);
+            int ig = (int)(g * 255);
+            int ib = (int)(b * 255);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", ir, ig, ib);
+            return std::string(buf);
+        }
+    } else if (strcmp(model, "RGB") == 0) {
+        // RGB{R,G,B} with values 0-255
+        int r, g, b;
+        if (sscanf(spec, "%d,%d,%d", &r, &g, &b) == 3) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", r, g, b);
+            return std::string(buf);
+        }
+    } else if (strcmp(model, "HTML") == 0) {
+        // HTML{RRGGBB} hex color
+        char buf[16];
+        snprintf(buf, sizeof(buf), "#%s", spec);
+        return std::string(buf);
+    } else if (strcmp(model, "gray") == 0) {
+        // gray{value} with value 0-1
+        float gray;
+        if (sscanf(spec, "%f", &gray) == 1) {
+            int ig = (int)(gray * 255);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", ig, ig, ig);
+            return std::string(buf);
+        }
+    }
+    
+    return "black";
+}
+
+// Helper: Get named color CSS value
+static std::string namedColorToCss(const char* name) {
+    // Return standard CSS named colors
+    return std::string(name);
+}
+
+// Handler for color_reference node (tree-sitter specific)
+static void cmd_color_reference(LatexProcessor* proc, Item elem) {
+    // Tree-sitter parses \textcolor and \colorbox as <color_reference>
+    // Structure: <color_reference> <\textcolor|colorbox> <curly_group_text "color"> <curly_group "content">
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    std::string command_name;
+    std::string color_name;
+    Item content_group = ItemNull;
+    
+    log_debug("cmd_color_reference called");  // DEBUG
+    
+    // Extract command name, color, and content
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_SYMBOL) {
+            // Command name like "\textcolor" or "\colorbox"
+            String* str = (String*)child.item().string_ptr;
+            command_name = str->chars;
+            log_debug("Found command: %s", command_name.c_str());  // DEBUG
+        } else if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "curly_group_text") == 0) {
+                // Color name
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* content = stringbuf_to_string(sb);
+                color_name = content->chars;
+            } else if (strcmp(tag, "curly_group") == 0) {
+                // Text content
+                content_group = child.item();
+            }
+        }
+    }
+    
+    // Generate output based on command type
+    if (command_name.find("textcolor") != std::string::npos) {
+        // \textcolor - colored text
+        std::string style_value = "color: " + namedColorToCss(color_name.c_str());
+        gen->spanWithStyle(style_value.c_str());
+        if (get_type_id(content_group) != LMD_TYPE_NULL) {
+            proc->processChildren(content_group);
+        }
+        gen->closeElement();
+    } else if (command_name.find("colorbox") != std::string::npos) {
+        // \colorbox - colored background
+        std::string style_value = "background-color: " + namedColorToCss(color_name.c_str());
+        gen->spanWithStyle(style_value.c_str());
+        if (get_type_id(content_group) != LMD_TYPE_NULL) {
+            proc->processChildren(content_group);
+        }
+        gen->closeElement();
+    }
+}
+
+static void cmd_textcolor(LatexProcessor* proc, Item elem) {
+    // \textcolor{color}{text} or \textcolor[model]{spec}{text}
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    std::string color_model;
+    std::string color_spec;
+    std::string color_name;
+    bool has_model = false;
+    
+    // Extract color specification and text
+    Item text_content_item = ItemNull;
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group_text") == 0 || strcmp(tag, "bracket_group") == 0) {
+                // Color model like [rgb] or [HTML]
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* model_str = stringbuf_to_string(sb);
+                color_model = model_str->chars;
+                has_model = true;
+            } else if (strcmp(tag, "curly_group_text") == 0) {
+                // Color name (named color like "red", "blue")
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* content = stringbuf_to_string(sb);
+                color_name = content->chars;
+            } else if (strcmp(tag, "curly_group") == 0) {
+                // Either color spec (if has_model) or text content
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* content = stringbuf_to_string(sb);
+                
+                if (has_model && color_spec.empty()) {
+                    // First curly group after model is the spec
+                    color_spec = content->chars;
+                } else {
+                    // This is the text content - save it for processing
+                    text_content_item = child.item();
+                }
+            }
+        }
+    }
+    
+    // Generate colored span if we have text content
+    if (get_type_id(text_content_item) != LMD_TYPE_NULL) {
+        std::string style_value = "color: " + 
+             (has_model ? colorToCss(color_model.c_str(), color_spec.c_str()) 
+                        : namedColorToCss(color_name.c_str()));
+        gen->spanWithStyle(style_value.c_str());
+        proc->processChildren(text_content_item);
+        gen->closeElement();
+    }
+}
+
+static void cmd_color(LatexProcessor* proc, Item elem) {
+    // \color{name} or \color[model]{spec} - changes current color
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    std::string color_model;
+    std::string color_spec;
+    std::string color_name;
+    bool has_model = false;
+    
+    // Extract color specification
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "bracket_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* model_str = stringbuf_to_string(sb);
+                color_model = model_str->chars;
+                has_model = true;
+            } else if (strcmp(tag, "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* content = stringbuf_to_string(sb);
+                
+                if (has_model) {
+                    color_spec = content->chars;
+                } else {
+                    color_name = content->chars;
+                }
+            }
+        }
+    }
+    
+    // Open a span with the color style (contents will be added by parent)
+    std::string style_value = "color: " + 
+         (has_model ? colorToCss(color_model.c_str(), color_spec.c_str()) 
+                    : namedColorToCss(color_name.c_str()));
+    gen->spanWithStyle(style_value.c_str());
+}
+
+static void cmd_colorbox(LatexProcessor* proc, Item elem) {
+    // \colorbox{color}{text} or \colorbox[model]{spec}{text}
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    std::string color_model;
+    std::string color_spec;
+    std::string color_name;
+    bool has_model = false;
+    Item text_content_item = ItemNull;
+    
+    // Extract color specification and text
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_ELEMENT) {
+            ElementReader child_elem(child.item());
+            const char* tag = child_elem.tagName();
+            
+            if (strcmp(tag, "brack_group_text") == 0 || strcmp(tag, "bracket_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* model_str = stringbuf_to_string(sb);
+                color_model = model_str->chars;
+                has_model = true;
+            } else if (strcmp(tag, "curly_group_text") == 0) {
+                // Color name (named color)
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* content = stringbuf_to_string(sb);
+                color_name = content->chars;
+            } else if (strcmp(tag, "curly_group") == 0) {
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* content = stringbuf_to_string(sb);
+                
+                if (has_model && color_spec.empty()) {
+                    color_spec = content->chars;
+                } else {
+                    // This is the text content - save it
+                    text_content_item = child.item();
+                }
+            }
+        }
+    }
+    
+    // Generate colored box if we have text content
+    if (get_type_id(text_content_item) != LMD_TYPE_NULL) {
+        std::string style_value = "background-color: " + 
+             (has_model ? colorToCss(color_model.c_str(), color_spec.c_str()) 
+                        : namedColorToCss(color_name.c_str()));
+        gen->spanWithStyle(style_value.c_str());
+        proc->processChildren(text_content_item);
+        gen->closeElement();
+    }
+}
+
+static void cmd_fcolorbox(LatexProcessor* proc, Item elem) {
+    // \fcolorbox{framecolor}{bgcolor}{text}
+    // Tree-sitter parses this as <fcolorbox> with 3 direct STRING children (not curly_group!)
+    HtmlGenerator* gen = proc->generator();
+    ElementReader elem_reader(elem);
+    
+    std::string frame_color;
+    std::string bg_color;
+    std::string text_content;
+    int string_count = 0;
+    
+    // Extract the 3 string children
+    auto iter = elem_reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.getType() == LMD_TYPE_STRING) {
+            String* str = (String*)child.item().string_ptr;
+            if (string_count == 0) {
+                frame_color = str->chars;
+            } else if (string_count == 1) {
+                bg_color = str->chars;
+            } else if (string_count == 2) {
+                text_content = str->chars;
+            }
+            string_count++;
+        }
+    }
+    
+    // Generate output
+    if (string_count >= 3) {
+        std::string style_value = "background-color: " + namedColorToCss(bg_color.c_str()) + 
+                           "; border: 1px solid " + namedColorToCss(frame_color.c_str());
+        gen->spanWithStyle(style_value.c_str());
+        gen->text(text_content.c_str());
+        gen->closeElement();
+    }
+}
+
+static void cmd_definecolor(LatexProcessor* proc, Item elem) {
+    // \definecolor{name}{model}{spec}
+    // For now, just skip - in full implementation would store in color registry
+    // The color will be used later in \textcolor or \color commands
 }
 
 // =============================================================================
@@ -1214,6 +1581,19 @@ void LatexProcessor::initCommandTable() {
     command_table_["includegraphics"] = cmd_includegraphics;
     command_table_["\\includegraphics"] = cmd_includegraphics;
     
+    // Color commands
+    command_table_["color_reference"] = cmd_color_reference;  // Tree-sitter node for \textcolor and \colorbox
+    command_table_["textcolor"] = cmd_textcolor;
+    command_table_["\\textcolor"] = cmd_textcolor;
+    command_table_["color"] = cmd_color;
+    command_table_["\\color"] = cmd_color;
+    command_table_["colorbox"] = cmd_colorbox;
+    command_table_["\\colorbox"] = cmd_colorbox;
+    command_table_["fcolorbox"] = cmd_fcolorbox;
+    command_table_["\\fcolorbox"] = cmd_fcolorbox;
+    command_table_["definecolor"] = cmd_definecolor;
+    command_table_["\\definecolor"] = cmd_definecolor;
+    
     // Bibliography & Citations
     command_table_["cite"] = cmd_cite;
     command_table_["\\cite"] = cmd_cite;
@@ -1347,6 +1727,7 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     
     // Unknown command - just output children
+    log_debug("Unknown command: %s - processing children", cmd_name);  // DEBUG
     processChildren(elem);
 }
 
