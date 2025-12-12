@@ -249,11 +249,11 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
             container_offset_y += container->bound->border->width.top;
         }
 
-        // Set item position and size
-        float new_x = container->x + container_offset_x + item_x;
-        float new_y = container->y + container_offset_y + item_y;
-        log_debug(" Assigning item %d: x=%.0f (%.0f+%d+%d), y=%.0f, width=%d, height=%d\n",
-               i, new_x, container->x, container_offset_x, item_x, new_y, item_width, item_height);
+        // Set item position and size (relative to parent's border box, per Radiant coordinate system)
+        float new_x = container_offset_x + item_x;
+        float new_y = container_offset_y + item_y;
+        log_debug(" Assigning item %d: x=%.0f (%d+%d), y=%.0f, width=%d, height=%d\n",
+               i, new_x, container_offset_x, item_x, new_y, item_width, item_height);
         log_debug(" Before assignment - item->x=%.0f, item->y=%.0f, item=%p\n", item->x, item->y, (void*)item);
         item->x = new_x;
         item->y = new_y;
@@ -266,9 +266,8 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         printf("  Grid area: row %d-%d, col %d-%d\n", row_start, row_end, col_start, col_end);
         printf("  Track positions: x=%d, y=%d\n", item_x, item_y);
         printf("  Track sizes: width=%d, height=%d\n", item_width, item_height);
-        printf("  Container: pos=(%d,%d), offset=(%d,%d)\n",
-               container->x, container->y, container_offset_x, container_offset_y);
-        printf("  Final position: (%d,%d), size: %dx%d\n",
+        printf("  Container: offset=(%d,%d)\n", container_offset_x, container_offset_y);
+        printf("  Final position: (%.0f,%.0f), size: %.0fx%.0f\n",
                item->x, item->y, item->width, item->height);
 
         log_debug("Positioned grid item %d: pos=(%d,%d), size=%dx%d, grid_area=(%d-%d, %d-%d)\n",

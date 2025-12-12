@@ -366,6 +366,29 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
     }
 
     grid_layout->item_count = count;
+
+    // Sort items by CSS order property (stable sort - preserve DOM order for equal orders)
+    // CSS Grid spec: items are placed in order-modified document order
+    if (count > 1) {
+        // Simple insertion sort (stable, good for small arrays)
+        for (int i = 1; i < count; i++) {
+            ViewBlock* key = grid_layout->grid_items[i];
+            int key_order = key->gi ? key->gi->order : 0;
+            int j = i - 1;
+            while (j >= 0) {
+                int j_order = grid_layout->grid_items[j]->gi ?
+                             grid_layout->grid_items[j]->gi->order : 0;
+                if (j_order > key_order) {
+                    grid_layout->grid_items[j + 1] = grid_layout->grid_items[j];
+                    j--;
+                } else {
+                    break;
+                }
+            }
+            grid_layout->grid_items[j + 1] = key;
+        }
+    }
+
     *items = grid_layout->grid_items;
     return count;
 }

@@ -4547,11 +4547,20 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_ORDER: {
             log_debug("[CSS] Processing order property");
-            alloc_flex_item_prop(lycon, span);
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int order_value = (int)value->data.number.value;
-                span->fi->order = order_value;
-                log_debug("[CSS] order: %d", order_value);
+                // order applies to both flex and grid items
+                // fi and gi share a union - check which type is allocated
+                if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+                    span->gi->order = order_value;
+                } else if (span->item_prop_type == DomElement::ITEM_PROP_FLEX) {
+                    span->fi->order = order_value;
+                } else {
+                    // Neither allocated yet - allocate flex prop (default)
+                    alloc_flex_item_prop(lycon, span);
+                    span->fi->order = order_value;
+                }
+                log_debug("[CSS] order: %d (type=%d)", order_value, span->item_prop_type);
             }
             break;
         }
