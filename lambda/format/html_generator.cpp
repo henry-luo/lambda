@@ -751,8 +751,8 @@ void HtmlGenerator::lineBreak(bool newpage) {
         writer_->openTag("div", "class=\"page-break\"");
         writer_->closeTag("div");
     } else {
-        writer_->openTag("br", nullptr);
-        writer_->closeTag("br");
+        // <br> is a self-closing tag
+        writer_->writeSelfClosingTag("br", nullptr, nullptr);
     }
 }
 
