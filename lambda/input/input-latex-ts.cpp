@@ -254,6 +254,12 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
         return {.item = y2it(builder.createSymbol("parbreak"))};
     }
     
+    // Placeholder (#1, #2, etc.) -> Symbol("#1"), Symbol("#2"), etc.
+    // Used in macro definitions for parameter substitution
+    if (strcmp(node_type, "placeholder") == 0) {
+        return {.item = y2it(builder.createSymbol(source + start, len))};
+    }
+    
     // Space -> String(" ")
     // (LaTeX.js rule: multiple spaces/newlines collapse to single space)
     if (strcmp(node_type, "space") == 0) {
@@ -480,6 +486,15 @@ static Item convert_latex_node(InputContext& ctx, TSNode node, const char* sourc
                 }
                 
                 return elem_builder.final();
+            }
+            
+            // Special case: placeholder (#1, #2, etc.) - terminal node, extract text
+            if (strcmp(node_type, "placeholder") == 0) {
+                uint32_t start = ts_node_start_byte(node);
+                uint32_t end = ts_node_end_byte(node);
+                size_t len = end - start;
+                MarkBuilder& builder = ctx.builder;
+                return {.item = y2it(builder.createSymbol(source + start, len))};
             }
             
             // TODO: Add more specific handlers

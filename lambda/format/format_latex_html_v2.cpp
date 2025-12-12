@@ -138,6 +138,29 @@ Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<
     
     fprintf(stderr, "expandMacro: '%s' with %zu args, num_params=%d\n", name.c_str(), args.size(), macro->num_params);
     
+    // Debug: Show what's in the definition BEFORE cloning
+    ElementReader def_reader(macro->definition);
+    fprintf(stderr, "expandMacro: definition tag='%s', childCount=%lld\n", def_reader.tagName(), def_reader.childCount());
+    auto def_iter = def_reader.children();
+    ItemReader def_child;
+    int def_idx = 0;
+    while (def_iter.next(&def_child)) {
+        TypeId child_type = def_child.getType();
+        fprintf(stderr, "  def child[%d]: type=%d", def_idx, child_type);
+        if (def_child.isString()) {
+            fprintf(stderr, " STRING='%s'", def_child.cstring());
+        } else if (def_child.isSymbol()) {
+            fprintf(stderr, " SYMBOL='%s'", def_child.asSymbol()->chars);
+        } else if (def_child.isElement()) {
+            ElementReader child_elem = def_child.asElement();
+            fprintf(stderr, " ELEMENT tag='%s'", child_elem.tagName());
+        } else if (def_child.isList()) {
+            fprintf(stderr, " LIST");
+        }
+        fprintf(stderr, "\n");
+        def_idx++;
+    }
+    
     // Clone the definition using MarkBuilder to preserve TypeElmt metadata
     Element* expanded = cloneElement(macro->definition, input_, pool_);
     
@@ -145,7 +168,15 @@ Element* LatexProcessor::expandMacro(const std::string& name, const std::vector<
     
     // Substitute parameters with actual arguments if needed
     if (expanded && args.size() > 0 && macro->num_params > 0) {
-        fprintf(stderr, "expandMacro: calling substituteParamsRecursive\n");
+        fprintf(stderr, "expandMacro: calling substituteParamsRecursive with %zu args\n", args.size());
+        for (size_t i = 0; i < args.size(); i++) {
+            ElementReader arg_reader(args[i]);
+            fprintf(stderr, "  arg[%zu]: tag='%s', childCount=%lld\n", i, arg_reader.tagName(), arg_reader.childCount());
+            StringBuf* sb = stringbuf_new(pool_);
+            arg_reader.textContent(sb);
+            String* content = stringbuf_to_string(sb);
+            fprintf(stderr, "  arg[%zu] textContent='%s'\n", i, content->chars);
+        }
         substituteParamsRecursive(expanded, args, pool_);
         fprintf(stderr, "expandMacro: substitution done\n");
     }
@@ -317,23 +348,50 @@ static void substituteParamsRecursive(Element* elem, const std::vector<Element*>
             } else {
                 new_items.push_back(item);
             }
+        } else if (type == LMD_TYPE_SYMBOL) {
+            // Check if symbol is a parameter reference like "#1"
+            String* sym = (String*)item.string_ptr;
+            fprintf(stderr, "  Symbol item: '%s'\n", sym->chars);
+            
+            if (sym->len >= 2 && sym->chars[0] == '#' && 
+                sym->chars[1] >= '1' && sym->chars[1] <= '9') {
+                // This is a parameter reference
+                int param_num = sym->chars[1] - '0';
+                fprintf(stderr, "  Found parameter symbol #%d\n", param_num);
+                
+                if (param_num > 0 && param_num <= (int)args.size() && args[param_num - 1]) {
+                    // Substitute with the argument element
+                    Item arg_item;
+                    arg_item.item = (uint64_t)args[param_num - 1];
+                    new_items.push_back(arg_item);
+                    fprintf(stderr, "  Substituted #%d with arg element\n", param_num);
+                } else {
+                    fprintf(stderr, "  WARNING: parameter #%d out of range (%zu args)\n", param_num, args.size());
+                    new_items.push_back(item);
+                }
+            } else {
+                new_items.push_back(item);
+            }
         } else if (type == LMD_TYPE_ELEMENT) {
             // Recursively process child elements
             substituteParamsRecursive(item.element, args, pool);
+            new_items.push_back(item);
+        } else if (type == LMD_TYPE_LIST) {
+            // Recursively process list items
+            fprintf(stderr, "  List item\n");
+            substituteParamsRecursive((Element*)item.list, args, pool);
             new_items.push_back(item);
         } else {
             new_items.push_back(item);
         }
     }
     
-    // Replace element's items with substituted version
-    if (new_items.size() != (size_t)elem_list->length) {
-        elem_list->items = (Item*)pool_calloc(pool, sizeof(Item) * new_items.size());
-        elem_list->length = new_items.size();
-        elem_list->capacity = new_items.size();
-        for (size_t i = 0; i < new_items.size(); i++) {
-            elem_list->items[i] = new_items[i];
-        }
+    // Replace element's items with substituted version (always update, even if size is same)
+    elem_list->items = (Item*)pool_calloc(pool, sizeof(Item) * new_items.size());
+    elem_list->length = new_items.size();
+    elem_list->capacity = new_items.size();
+    for (size_t i = 0; i < new_items.size(); i++) {
+        elem_list->items[i] = new_items[i];
     }
 }
 
@@ -635,15 +693,94 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
             
             // Check for brack_group FIRST before other processing
             if (strcmp(tag, "brack_group") == 0 || strcmp(tag, "brack_group_argc") == 0) {
-                // [num] parameter count - use allText() to recursively extract all text
-                Pool* pool = proc->pool();
-                StringBuf* sb = stringbuf_new(pool);
-                child_elem.allText(sb);
-                String* num_str = stringbuf_to_string(sb);
-                fprintf(stderr, "    Found brack_group_argc: allText='%s'\n", num_str->chars);
+                // [num] parameter count - extract number from bracket group
+                Element* brack_elem = const_cast<Element*>(child_elem.element());
+                List* brack_list = (List*)brack_elem;
                 
-                // Parse the number (might have whitespace)
-                num_params = atoi(num_str->chars);
+                fprintf(stderr, "    Found brack_group_argc: examining %lld items, %lld attrs\n", 
+                        brack_list->length, child_elem.attrCount());
+                
+                // Look through items to find the number
+                // The Tree-sitter grammar stores it as a symbol "argc" with value as attribute
+                // or as plain text/number
+                for (int64_t j = 0; j < brack_list->length; j++) {
+                    Item item = brack_list->items[j];
+                    TypeId item_type = get_type_id(item);
+                    
+                    fprintf(stderr, "      Item %lld: type=%d ", j, item_type);
+                    
+                    if (item_type == LMD_TYPE_STRING) {
+                        String* str = (String*)item.string_ptr;
+                        fprintf(stderr, "string='%s'\n", str->chars);
+                        // Try to parse as number
+                        if (str->len > 0 && str->chars[0] >= '0' && str->chars[0] <= '9') {
+                            num_params = atoi(str->chars);
+                            fprintf(stderr, "      Extracted num_params=%d from string\n", num_params);
+                            break;
+                        }
+                    } else if (item_type == LMD_TYPE_SYMBOL) {
+                        String* sym = (String*)item.string_ptr;
+                        fprintf(stderr, "symbol='%s'\n", sym->chars);
+                        // The symbol "argc" itself doesn't contain the value
+                        // We need to look for numeric text in the bracket group
+                    } else if (item_type == LMD_TYPE_ELEMENT) {
+                        Item elem_item;
+                        elem_item.item = (uint64_t)item.element;
+                        ElementReader elem_reader(elem_item);
+                        const char* elem_tag = elem_reader.tagName();
+                        fprintf(stderr, "element='%s'\n", elem_tag);
+                        
+                        // Check if this is an "argc" element - if so, extract its text content
+                        if (strcmp(elem_tag, "argc") == 0) {
+                            // Use textContent to get the number from this element
+                            Pool* pool = proc->pool();
+                            StringBuf* sb = stringbuf_new(pool);
+                            elem_reader.textContent(sb);
+                            String* argc_str = stringbuf_to_string(sb);
+                            fprintf(stderr, "      argc element textContent='%s'\n", argc_str->chars);
+                            
+                            // The argc element might have the number stored as text or in children
+                            // Try parsing it
+                            if (argc_str->len > 0) {
+                                num_params = atoi(argc_str->chars);
+                                fprintf(stderr, "      Extracted num_params=%d from argc element\n", num_params);
+                            }
+                            
+                            // If still 0, the number might be stored in the element's attributes or elsewhere
+                            // For now, try looking at raw items
+                            if (num_params == 0) {
+                                Element* argc_elem = item.element;
+                                List* argc_list = (List*)argc_elem;
+                                fprintf(stderr, "      argc element has %lld items:\n", argc_list->length);
+                                for (int64_t k = 0; k < argc_list->length; k++) {
+                                    Item argc_item = argc_list->items[k];
+                                    TypeId argc_type = get_type_id(argc_item);
+                                    if (argc_type == LMD_TYPE_STRING) {
+                                        String* argc_str_inner = (String*)argc_item.string_ptr;
+                                        fprintf(stderr, "        Item %lld: string='%s'\n", k, argc_str_inner->chars);
+                                        if (argc_str_inner->len > 0 && argc_str_inner->chars[0] >= '0' && argc_str_inner->chars[0] <= '9') {
+                                            num_params = atoi(argc_str_inner->chars);
+                                            fprintf(stderr, "        Extracted num_params=%d from argc element string\n", num_params);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    } else {
+                        fprintf(stderr, "\n");
+                    }
+                }
+                
+                // WORKAROUND: If we found brack_group_argc but num_params is still 0,
+                // the Tree-sitter parser didn't properly capture the number
+                // Default to 1 (most common case)
+                if (num_params == 0) {
+                    num_params = 1;
+                    fprintf(stderr, "    WORKAROUND: brack_group_argc found but empty, defaulting to num_params=1\n");
+                }
+                
                 fprintf(stderr, "    Set num_params=%d\n", num_params);
                 continue;  // Don't process as regular arg
             }
@@ -689,6 +826,19 @@ static void cmd_newcommand(LatexProcessor* proc, Item elem) {
                     } else {
                         fprintf(stderr, "\n");
                     }
+                }
+            }
+            
+            // FALLBACK: Check if we still haven't found num_params and this looks like a number
+            if (num_params == 0 && strcmp(tag, "curly_group") != 0 && strcmp(tag, "curly_group_command_name") != 0) {
+                // Try extracting text content to see if it's a number
+                Pool* pool = proc->pool();
+                StringBuf* sb = stringbuf_new(pool);
+                child_elem.textContent(sb);
+                String* text_str = stringbuf_to_string(sb);
+                if (text_str->len > 0 && text_str->chars[0] >= '0' && text_str->chars[0] <= '9') {
+                    num_params = atoi(text_str->chars);
+                    fprintf(stderr, "    Extracted num_params=%d from element '%s' textContent\n", num_params, tag);
                 }
             }
             
@@ -1100,7 +1250,8 @@ static void cmd_today(LatexProcessor* proc, Item elem) {
 
 static void cmd_empty(LatexProcessor* proc, Item elem) {
     // \empty - Empty macro (produces nothing)
-    // No output
+    // When used as \begin{empty}...\end{empty}, just process children transparently
+    proc->processChildren(elem);
 }
 
 static void cmd_makeatletter(LatexProcessor* proc, Item elem) {
@@ -3112,6 +3263,11 @@ void LatexProcessor::processNode(Item node) {
     ItemReader reader(node.to_const());
     TypeId type = reader.getType();
     
+    if (type == LMD_TYPE_LIST) {
+        fprintf(stderr, "processNode: GOT LIST type!\n");
+        fflush(stderr);
+    }
+    
     if (type == LMD_TYPE_STRING) {
         // Text content
         String* str = reader.asString();
@@ -3162,11 +3318,28 @@ void LatexProcessor::processNode(Item node) {
     }
     
     if (type == LMD_TYPE_LIST) {
-        // Process list items (e.g., from math environments or flattened content)
+        // List (array of items) - process each item
         List* list = node.list;
+        fprintf(stderr, "LISTDEBUG: processing list with %lld items\n", list ? list->length : 0);
+        fflush(stderr);
         if (list && list->items) {
             for (int64_t i = 0; i < list->length; i++) {
-                processNode(list->items[i]);
+                Item item = list->items[i];
+                TypeId item_type = get_type_id(item);
+                fprintf(stderr, "LISTDEBUG:   item[%lld] type=%d", i, item_type);
+                if (item_type == LMD_TYPE_STRING) {
+                    String* str = (String*)item.string_ptr;
+                    fprintf(stderr, " STRING='%s'", str->chars);
+                } else if (item_type == LMD_TYPE_SYMBOL) {
+                    String* sym = (String*)item.string_ptr;
+                    fprintf(stderr, " SYMBOL='%s'", sym->chars);
+                } else if (item_type == LMD_TYPE_ELEMENT) {
+                    ElementReader elem_r(item.element);
+                    fprintf(stderr, " ELEMENT tag='%s'", elem_r.tagName());
+                }
+                fprintf(stderr, "\n");
+                fflush(stderr);
+                processNode(item);
             }
         }
         return;
@@ -3216,8 +3389,22 @@ void LatexProcessor::processChildren(Item elem) {
     // Iterate through children
     auto iter = elem_reader.children();
     ItemReader child;
+    int child_idx = 0;
     while (iter.next(&child)) {
+        TypeId child_type = child.getType();
+        fprintf(stderr, "CHILDEBUG[%d]: type=%d", child_idx, child_type);
+        if (child.isElement()) {
+            ElementReader child_elem = child.asElement();
+            fprintf(stderr, " ELEMENT tag='%s'", child_elem.tagName());
+        } else if (child.isList()) {
+            fprintf(stderr, " LIST");
+        } else if (child.isString()) {
+            fprintf(stderr, " STRING='%s'", child.cstring());
+        }
+        fprintf(stderr, "\n");
+        fflush(stderr);
         processNode(child.item());
+        child_idx++;
     }
 }
 
@@ -3266,23 +3453,55 @@ void LatexProcessor::processSpacingCommand(Item elem) {
 void LatexProcessor::processText(const char* text) {
     if (!text) return;
     
-    // Skip pure whitespace
-    bool all_whitespace = true;
+    // Normalize whitespace: collapse multiple spaces/newlines/tabs to single space
+    // This matches LaTeX behavior where whitespace is collapsed
+    std::string normalized;
+    bool in_whitespace = false;
+    
     for (const char* p = text; *p; p++) {
-        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+        if (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') {
+            if (!in_whitespace) {
+                // First whitespace character: keep it as a space
+                normalized += ' ';
+                in_whitespace = true;
+            }
+            // Skip additional consecutive whitespace
+        } else {
+            // Non-whitespace character
+            normalized += *p;
+            in_whitespace = false;
+        }
+    }
+    
+    // Check if result is pure whitespace (multiple spaces/newlines)
+    // Don't skip single spaces - they're significant in inline content
+    bool all_whitespace = true;
+    for (char c : normalized) {
+        if (c != ' ') {
             all_whitespace = false;
             break;
         }
     }
     
-    if (!all_whitespace) {
-        ensureParagraph();  // Auto-wrap text in <p> tags
+    // Skip if only whitespace AND more than one space (e.g., paragraph breaks)
+    // Keep single spaces as they're part of inline formatting
+    if (all_whitespace && normalized.length() > 1) {
+        return;
     }
     
-    gen_->text(text);
+    // Trim leading whitespace if starting a new paragraph (LaTeX ignores leading space)
+    if (!in_paragraph_ && !normalized.empty() && normalized[0] == ' ') {
+        normalized = normalized.substr(1);
+    }
+    
+    ensureParagraph();  // Auto-wrap text in <p> tags
+    gen_->text(normalized.c_str());
 }
 
 void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
+    fprintf(stderr, "===> processCommand: cmd_name='%s', isMacro=%d\n", cmd_name, isMacro(cmd_name));
+    fflush(stderr);
+    
     // Handle Tree-sitter special node types that should be silent
     if (strcmp(cmd_name, "class_include") == 0) {
         cmd_documentclass(this, elem);
@@ -3300,6 +3519,12 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     // Handle macro definition elements specially (from Tree-sitter)
     if (strcmp(cmd_name, "new_command_definition") == 0) {
         cmd_newcommand(this, elem);
+        return;
+    }
+    
+    // Handle macro argument wrapper (transparent - just process children)
+    if (strcmp(cmd_name, "arg") == 0) {
+        processChildren(elem);
         return;
     }
     if (strcmp(cmd_name, "renew_command_definition") == 0) {
@@ -3333,30 +3558,37 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     
     // Check if this is a user-defined macro
-    fprintf(stderr, "processCommand: checking if '%s' is a macro\n", cmd_name);
     if (isMacro(cmd_name)) {
-        fprintf(stderr, "processCommand: '%s' IS a macro!\n", cmd_name);
+        fprintf(stderr, "MACRO INVOCATION: cmd_name='%s'\n", cmd_name);
+        fflush(stderr);
         MacroDefinition* macro = getMacro(cmd_name);
         if (macro && macro->definition) {
+            fprintf(stderr, "MACRO FOUND: num_params=%d\n", macro->num_params);
+            fflush(stderr);
             // Extract arguments from the command element
+            // For user-defined macros like \greet{Alice}, the {Alice} argument
+            // is parsed as direct children of the 'greet' element, not as curly_group
             std::vector<Element*> args;
             ElementReader reader(elem);
+            
+            // Collect all children as macro arguments (up to num_params)
+            // Wrap each sequence of children into a temporary element
+            MarkBuilder builder(input_);
             auto iter = reader.children();
             ItemReader child;
+            int args_collected = 0;
             
-            while (iter.next(&child)) {
-                if (child.isElement()) {
-                    ElementReader child_elem(child.item());
-                    const char* tag = child_elem.tagName();
-                    
-                    // Collect curly_group arguments for the macro
-                    if (strcmp(tag, "curly_group") == 0) {
-                        args.push_back(const_cast<Element*>(child_elem.element()));
-                        if ((int)args.size() >= macro->num_params) {
-                            break;  // Got all arguments
-                        }
-                    }
-                }
+            while (iter.next(&child) && args_collected < macro->num_params) {
+                // Create a wrapper element for this argument
+                ElementBuilder arg_elem = builder.element("arg");
+                
+                // Add the child to the wrapper
+                arg_elem.child(child.item());
+                
+                // Store the wrapped argument
+                Item arg_item = arg_elem.final();
+                args.push_back((Element*)arg_item.item);
+                args_collected++;
             }
             
             // Expand the macro with arguments
@@ -3425,7 +3657,8 @@ Item format_latex_html_v2(Input* input, bool text_mode) {
     HtmlWriter* writer = nullptr;
     if (text_mode) {
         // Text mode - generate HTML string
-        writer = new TextHtmlWriter(pool, true);  // pretty print
+        // Disable pretty print to avoid extra newlines in output
+        writer = new TextHtmlWriter(pool, false);
     } else {
         // Node mode - generate Element tree
         writer = new NodeHtmlWriter(input);
