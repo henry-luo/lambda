@@ -292,6 +292,23 @@ static Item convert_leaf_node(InputContext& ctx, TSNode node, const char* source
         return {.item = s2it(extract_text(ctx, node, source))};
     }
     
+    // Command names: extract the actual command text (e.g., \greet -> "greet")
+    if (strcmp(node_type, "command_name") == 0) {
+        String* cmd_text = extract_text(ctx, node, source);
+        if (cmd_text && cmd_text->len > 0) {
+            // Skip leading backslash if present
+            const char* name_start = cmd_text->chars;
+            size_t name_len = cmd_text->len;
+            if (name_start[0] == '\\') {
+                name_start++;
+                name_len--;
+            }
+            if (name_len > 0) {
+                return {.item = s2it(builder.createString(name_start, name_len))};
+            }
+        }
+    }
+    
     // Default: use node type as symbol name
     return {.item = y2it(builder.createSymbol(node_type))};
 }
