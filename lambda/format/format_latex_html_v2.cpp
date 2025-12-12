@@ -55,6 +55,9 @@ public:
     // Process element children
     void processChildren(Item elem);
     
+    // Process spacing command
+    void processSpacingCommand(Item elem);
+    
     // Process text content
     void processText(const char* text);
     
@@ -2415,6 +2418,19 @@ void LatexProcessor::processNode(Item node) {
             return;
         }
         
+        // Special handling for linebreak_command (\\)
+        if (strcmp(tag, "linebreak_command") == 0) {
+            ensureParagraph();
+            gen_->lineBreak(false);
+            return;
+        }
+        
+        // Special handling for spacing_command
+        if (strcmp(tag, "spacing_command") == 0) {
+            processSpacingCommand(node);
+            return;
+        }
+        
         // Process command
         processCommand(tag, node);
         return;
@@ -2436,6 +2452,48 @@ void LatexProcessor::processChildren(Item elem) {
     ItemReader child;
     while (iter.next(&child)) {
         processNode(child.item());
+    }
+}
+
+void LatexProcessor::processSpacingCommand(Item elem) {
+    ElementReader reader(elem);
+    
+    // Get the command field which contains the actual spacing command string
+    auto iter = reader.children();
+    ItemReader child;
+    while (iter.next(&child)) {
+        if (child.isString()) {
+            const char* cmd = child.asString()->chars;
+            ensureParagraph();
+            
+            if (strcmp(cmd, "\\,") == 0 || strcmp(cmd, "\\thinspace") == 0) {
+                // Thin space (1/6 em) - use Unicode thin space U+2009
+                gen_->text("\u2009");
+            } else if (strcmp(cmd, "\\!") == 0 || strcmp(cmd, "\\negthinspace") == 0) {
+                // Negative thin space - use empty span with class
+                gen_->span("negthinspace");
+                gen_->closeElement();
+            } else if (strcmp(cmd, "\\;") == 0 || strcmp(cmd, "\\thickspace") == 0) {
+                // Thick space (5/18 em) - use em space U+2003
+                gen_->text("\u2003");
+            } else if (strcmp(cmd, "\\:") == 0 || strcmp(cmd, "\\medspace") == 0) {
+                // Medium space (2/9 em) - use en space U+2002
+                gen_->text("\u2002");
+            } else if (strcmp(cmd, "\\enspace") == 0) {
+                // en-space (0.5 em) - use en space U+2002
+                gen_->text("\u2002");
+            } else if (strcmp(cmd, "\\quad") == 0) {
+                // quad space (1 em) - use em space U+2003
+                gen_->text("\u2003");
+            } else if (strcmp(cmd, "\\qquad") == 0) {
+                // qquad space (2 em) - use two em spaces
+                gen_->text("\u2003\u2003");
+            } else if (strcmp(cmd, "\\space") == 0) {
+                // Normal space
+                gen_->text(" ");
+            }
+            break;
+        }
     }
 }
 
@@ -2544,6 +2602,11 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
         ensureParagraph();
         // Track that we're entering an inline element
         inline_depth_++;
+    } else if (strcmp(cmd_name, "\\") == 0 || 
+               strcmp(cmd_name, "newline") == 0 || 
+               strcmp(cmd_name, "linebreak") == 0) {
+        // Line breaks: ensure paragraph but don't affect nesting depth
+        ensureParagraph();
     }
     
     // Look up command in table
