@@ -80,6 +80,7 @@ TEST_F(LatexHtmlV2MacrosTest, NewCommandMultipleArgs) {
     const char* html = format_to_html_text(input);
     
     ASSERT_NE(html, nullptr);
+    std::cout << "NewCommandMultipleArgs HTML: '" << html << "'" << std::endl;
     EXPECT_TRUE(strstr(html, "John Doe") != nullptr) << "Should substitute multiple arguments";
 }
 
