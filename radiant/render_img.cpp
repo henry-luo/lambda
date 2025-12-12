@@ -9,6 +9,7 @@ extern "C" {
 #include <string.h>
 #include <png.h>
 #include <turbojpeg.h>
+#include <chrono>
 
 // Forward declarations for functions from other modules
 int ui_context_init(UiContext* uicon, bool headless);
@@ -145,6 +146,9 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 
 // Main function to layout HTML and render to PNG
 int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
     log_debug("render_html_to_png called with html_file='%s', png_file='%s', viewport=%dx%d",
               html_file, png_file, viewport_width, viewport_height);
 
@@ -170,6 +174,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
 
+    auto t_init = high_resolution_clock::now();
+    log_info("[TIMING] Init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
+
     // Load and layout the HTML document
     DomDocument* doc = load_html_doc(cwd, (char*)html_file, viewport_width, viewport_height);
     if (!doc) {
@@ -178,15 +185,24 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
 
+    auto t_load = high_resolution_clock::now();
+    log_info("[TIMING] Load HTML: %.1fms", duration<double, std::milli>(t_load - t_init).count());
+
     ui_context.document = doc;
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
 
+    auto t_fonts = high_resolution_clock::now();
+    log_info("[TIMING] Font faces: %.1fms", duration<double, std::milli>(t_fonts - t_load).count());
+
     // Layout the document
     if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
     }
+
+    auto t_layout = high_resolution_clock::now();
+    log_info("[TIMING] Layout: %.1fms", duration<double, std::milli>(t_layout - t_fonts).count());
 
     // Render the document
     if (doc && doc->view_tree) {
@@ -197,8 +213,15 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
         return 1;
     }
 
+    auto t_render = high_resolution_clock::now();
+    log_info("[TIMING] Render: %.1fms", duration<double, std::milli>(t_render - t_layout).count());
+
     log_debug("PNG rendering completed successfully");
     ui_context_cleanup(&ui_context);
+
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] Cleanup: %.1fms", duration<double, std::milli>(t_end - t_render).count());
+    log_info("[TIMING] TOTAL: %.1fms", duration<double, std::milli>(t_end - t_start).count());
     return 0;
 }
 

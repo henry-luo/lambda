@@ -6,6 +6,12 @@
 #include "../lib/avl_tree.h"
 
 #include "../lib/log.h"
+#include <chrono>
+using namespace std::chrono;
+
+// External timing accumulators from layout.cpp
+extern double g_text_layout_time;
+extern int64_t g_text_layout_count;
 
 // ============================================================================
 // CSS white-space Property Helpers
@@ -469,6 +475,8 @@ void adjust_text_bounds(ViewText* text) {
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
+    auto t_start = high_resolution_clock::now();
+
     unsigned char* next_ch;  ViewText* text_view = null;  TextRect* prev_rect = NULL;
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
@@ -709,4 +717,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     // else output the entire text
     output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+
+    auto t_end = high_resolution_clock::now();
+    g_text_layout_time += duration<double, std::milli>(t_end - t_start).count();
+    g_text_layout_count++;
 }
