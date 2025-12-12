@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <chrono>
 extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
@@ -49,6 +50,7 @@ void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
 // Forward declarations
 Element* get_html_root_element(Input* input);
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
+void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine);
 CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool, CssStylesheet*** stylesheets, int* count);
@@ -521,49 +523,256 @@ const char* extract_inline_css(Element* root) {
  * Apply a single CSS rule to a DOM element (and recursively to its children)
  * Handles style rules directly, and recursively processes media rules
  */
+
+// ============================================================================
+// Selector Index for O(1) Rule Lookup
+// ============================================================================
+
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include <string>
+
+// A rule entry in the index
+struct IndexedRule {
+    CssRule* rule;
+    CssSelector* selector;  // The specific selector that matched the index key
+    int rule_index;         // Original position for source order
+};
+
+// Selector index for fast rule lookup
+struct SelectorIndex {
+    std::unordered_map<std::string, std::vector<IndexedRule>> by_tag;      // rules indexed by tag name
+    std::unordered_map<std::string, std::vector<IndexedRule>> by_class;    // rules indexed by class
+    std::unordered_map<std::string, std::vector<IndexedRule>> by_id;       // rules indexed by id
+    std::vector<IndexedRule> universal;                                     // rules that match any element (*, etc.)
+    Pool* pool;
+};
+
+// Get the key selector (rightmost compound selector) from a selector
+static CssCompoundSelector* get_key_selector(CssSelector* selector) {
+    if (!selector || selector->compound_selector_count == 0) return nullptr;
+    return selector->compound_selectors[selector->compound_selector_count - 1];
+}
+
+// Extract indexing keys from a compound selector
+static void extract_index_keys(CssCompoundSelector* compound,
+                               const char** out_tag,
+                               std::vector<const char*>& out_classes,
+                               const char** out_id) {
+    *out_tag = nullptr;
+    *out_id = nullptr;
+    out_classes.clear();
+
+    if (!compound) return;
+
+    for (size_t i = 0; i < compound->simple_selector_count; i++) {
+        CssSimpleSelector* simple = compound->simple_selectors[i];
+        if (!simple) continue;
+
+        switch (simple->type) {
+            case CSS_SELECTOR_TYPE_ELEMENT:
+                if (simple->value && strcmp(simple->value, "*") != 0) {
+                    *out_tag = simple->value;
+                }
+                break;
+            case CSS_SELECTOR_TYPE_CLASS:
+                if (simple->value) {
+                    out_classes.push_back(simple->value);
+                }
+                break;
+            case CSS_SELECTOR_TYPE_ID:
+                if (simple->value) {
+                    *out_id = simple->value;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+// Build selector index from a stylesheet
+static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool) {
+    SelectorIndex* index = new SelectorIndex();
+    index->pool = pool;
+
+    for (size_t rule_idx = 0; rule_idx < stylesheet->rule_count; rule_idx++) {
+        CssRule* rule = stylesheet->rules[rule_idx];
+        if (!rule || rule->type != CSS_RULE_STYLE) continue;
+
+        // Handle selector groups (comma-separated)
+        CssSelectorGroup* group = rule->data.style_rule.selector_group;
+        CssSelector* single = rule->data.style_rule.selector;
+
+        std::vector<CssSelector*> selectors_to_index;
+        if (group && group->selector_count > 0) {
+            for (size_t i = 0; i < group->selector_count; i++) {
+                if (group->selectors[i]) {
+                    selectors_to_index.push_back(group->selectors[i]);
+                }
+            }
+        } else if (single) {
+            selectors_to_index.push_back(single);
+        }
+
+        for (CssSelector* selector : selectors_to_index) {
+            CssCompoundSelector* key_compound = get_key_selector(selector);
+            if (!key_compound) continue;
+
+            const char* tag = nullptr;
+            const char* id = nullptr;
+            std::vector<const char*> classes;
+            extract_index_keys(key_compound, &tag, classes, &id);
+
+            IndexedRule entry = { rule, selector, (int)rule_idx };
+
+            // Index by most specific key first (ID > class > tag)
+            bool indexed = false;
+
+            if (id) {
+                index->by_id[id].push_back(entry);
+                indexed = true;
+            }
+
+            if (!classes.empty()) {
+                // Index by first class (could index by all, but one is usually enough)
+                index->by_class[classes[0]].push_back(entry);
+                indexed = true;
+            }
+
+            if (tag) {
+                index->by_tag[tag].push_back(entry);
+                indexed = true;
+            }
+
+            // If no specific key, it's a universal rule
+            if (!indexed) {
+                index->universal.push_back(entry);
+            }
+        }
+    }
+
+    return index;
+}
+
+// Free selector index
+static void free_selector_index(SelectorIndex* index) {
+    delete index;
+}
+
+// Get candidate rules for an element from the index
+static void get_candidate_rules(SelectorIndex* index, DomElement* elem,
+                                std::vector<IndexedRule>& candidates) {
+    candidates.clear();
+    std::unordered_set<CssRule*> seen;  // Avoid duplicates
+
+    // Add universal rules
+    for (const auto& entry : index->universal) {
+        if (seen.find(entry.rule) == seen.end()) {
+            candidates.push_back(entry);
+            seen.insert(entry.rule);
+        }
+    }
+
+    // Add rules by tag
+    if (elem->tag_name) {
+        auto it = index->by_tag.find(elem->tag_name);
+        if (it != index->by_tag.end()) {
+            for (const auto& entry : it->second) {
+                if (seen.find(entry.rule) == seen.end()) {
+                    candidates.push_back(entry);
+                    seen.insert(entry.rule);
+                }
+            }
+        }
+    }
+
+    // Add rules by ID
+    if (elem->id) {
+        auto it = index->by_id.find(elem->id);
+        if (it != index->by_id.end()) {
+            for (const auto& entry : it->second) {
+                if (seen.find(entry.rule) == seen.end()) {
+                    candidates.push_back(entry);
+                    seen.insert(entry.rule);
+                }
+            }
+        }
+    }
+
+    // Add rules by class
+    if (elem->class_count > 0 && elem->class_names) {
+        for (int i = 0; i < elem->class_count; i++) {
+            if (elem->class_names[i]) {
+                auto it = index->by_class.find(elem->class_names[i]);
+                if (it != index->by_class.end()) {
+                    for (const auto& entry : it->second) {
+                        if (seen.find(entry.rule) == seen.end()) {
+                            candidates.push_back(entry);
+                            seen.insert(entry.rule);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by rule_index to maintain source order
+    std::sort(candidates.begin(), candidates.end(),
+              [](const IndexedRule& a, const IndexedRule& b) {
+                  return a.rule_index < b.rule_index;
+              });
+}
+
+// ============================================================================
+// Timing accumulators for CSS cascade analysis
+// ============================================================================
+
+static thread_local int64_t g_selector_match_count = 0;
+static thread_local int64_t g_selector_match_success = 0;
+static thread_local int64_t g_property_apply_count = 0;
+static thread_local int64_t g_element_count = 0;
+static thread_local int64_t g_candidate_rule_count = 0;
+
+static void reset_cascade_timing() {
+    g_selector_match_count = 0;
+    g_selector_match_success = 0;
+    g_property_apply_count = 0;
+    g_element_count = 0;
+    g_candidate_rule_count = 0;
+}
+
+static void log_cascade_timing_summary() {
+    log_info("[TIMING] cascade: elements: %lld, candidates: %lld, selectors: %lld matches (%lld hits, %.1f%%), properties: %lld",
+        g_element_count, g_candidate_rule_count, g_selector_match_count, g_selector_match_success,
+        g_selector_match_count > 0 ? (100.0 * g_selector_match_success / g_selector_match_count) : 0.0,
+        g_property_apply_count);
+}
+
 static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
     if (!elem || !rule || !matcher || !pool) return;
 
     // Handle media rules by evaluating the condition
     if (rule->type == CSS_RULE_MEDIA) {
         const char* media_condition = rule->data.conditional_rule.condition;
-
-        log_debug("[CSS] Processing @media rule with condition: %s",
-                  media_condition ? media_condition : "(null)");
-
-        // Evaluate media query
         bool matches = css_evaluate_media_query(engine, media_condition);
-
         if (matches) {
-            log_debug("[CSS] @media query MATCHES, applying %zu nested rules",
-                      rule->data.conditional_rule.rule_count);
-
-            // Apply all nested rules
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested_rule = rule->data.conditional_rule.rules[i];
                 if (nested_rule) {
                     apply_rule_to_dom_element(elem, nested_rule, matcher, pool, engine);
                 }
             }
-        } else {
-            log_debug("[CSS] @media query does NOT match, skipping %zu nested rules",
-                      rule->data.conditional_rule.rule_count);
         }
         return;
     }
 
-    // Handle @supports rules similarly (if condition evaluation is implemented)
-    if (rule->type == CSS_RULE_SUPPORTS) {
-        // For now, skip @supports rules as we'd need @supports condition evaluation
-        log_debug("[CSS] Skipping @supports rule (not yet implemented)");
-        return;
-    }
+    // Handle @supports rules - skip for now
+    if (rule->type == CSS_RULE_SUPPORTS) return;
 
     // Skip other at-rules (@import, @charset, @namespace, etc.)
-    if (rule->type != CSS_RULE_STYLE) {
-        log_debug("[CSS] Skipping non-style rule type %d", rule->type);
-        return;
-    }
+    if (rule->type != CSS_RULE_STYLE) return;
 
     // Process style rule
     CssSelector* selector = rule->data.style_rule.selector;
@@ -589,26 +798,25 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
             }
 
             MatchResult match_result;
-            if (selector_matcher_matches(matcher, group_sel, elem, &match_result)) {
+            bool matched = selector_matcher_matches(matcher, group_sel, elem, &match_result);
+            g_selector_match_count++;
+
+            if (matched) {
+                g_selector_match_success++;
                 any_match = true;
                 best_specificity = match_result.specificity;
                 pseudo_element = match_result.pseudo_element;
-                log_debug("[PSEUDO-MATCH] Group selector matched <%s>, pseudo_element=%d",
-                          elem->tag_name, (int)pseudo_element);
                 break;
             }
         }
 
         if (any_match && rule->data.style_rule.declaration_count > 0) {
             if (pseudo_element != PSEUDO_ELEMENT_NONE) {
-                // Apply to pseudo-element
-                log_debug("[PSEUDO-APPLY] Applying pseudo-element rule to <%s>, pseudo=%d",
-                          elem->tag_name, (int)pseudo_element);
                 dom_element_apply_pseudo_element_rule(elem, rule, best_specificity, (int)pseudo_element);
             } else {
-                // Apply to regular element
                 dom_element_apply_rule(elem, rule, best_specificity);
             }
+            g_property_apply_count++;
         }
         return;
     }
@@ -626,45 +834,36 @@ static void apply_rule_to_dom_element(DomElement* elem, CssRule* rule, SelectorM
 
     // Check if selector matches
     MatchResult match_result;
-    if (selector_matcher_matches(matcher, selector, elem, &match_result)) {
-        log_debug("[PSEUDO-SINGLE] Single selector matched <%s>, pseudo_element=%d",
-                  elem->tag_name, (int)match_result.pseudo_element);
+    bool matched = selector_matcher_matches(matcher, selector, elem, &match_result);
+    g_selector_match_count++;
+
+    if (matched) {
+        g_selector_match_success++;
         if (rule->data.style_rule.declaration_count > 0) {
             if (match_result.pseudo_element != PSEUDO_ELEMENT_NONE) {
-                // Apply to pseudo-element
-                log_debug("[PSEUDO-SINGLE-APPLY] Applying pseudo-element rule to <%s>, pseudo=%d",
-                          elem->tag_name, (int)match_result.pseudo_element);
                 dom_element_apply_pseudo_element_rule(elem, rule, match_result.specificity,
                                                       (int)match_result.pseudo_element);
             } else {
-                // Apply to regular element
                 dom_element_apply_rule(elem, rule, match_result.specificity);
             }
+            g_property_apply_count++;
         }
     }
 }
 
 /**
- * Apply CSS stylesheet rules to DOM tree
+ * Apply CSS stylesheet rules to DOM tree (original O(n×m) version)
  * Walks the tree recursively and matches selectors to elements
  */
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
     if (!root || !stylesheet || !matcher || !pool) return;
 
-    log_debug("[CSS] Applying stylesheet with %zu rules to element <%s>",
-              stylesheet->rule_count, root->tag_name);
+    g_element_count++;
 
     // Iterate through all rules in the stylesheet
     for (int rule_idx = 0; rule_idx < (int)stylesheet->rule_count; rule_idx++) {
         CssRule* rule = stylesheet->rules[rule_idx];
-        if (!rule) {
-            log_debug("[CSS] Rule %d is NULL", rule_idx);
-            continue;
-        }
-
-        log_debug("[CSS] Processing rule %d, type=%d", rule_idx, rule->type);
-
-        // Apply rule to this element (handles media queries internally)
+        if (!rule) continue;
         apply_rule_to_dom_element(root, rule, matcher, pool, engine);
     }
 
@@ -680,6 +879,55 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 }
 
 /**
+ * Apply CSS stylesheet rules to DOM tree using selector index
+ * This is an optimized O(n) version that uses pre-built index
+ */
+static void apply_stylesheet_to_dom_tree_indexed(DomElement* root, SelectorIndex* index,
+                                                  SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
+    if (!root || !index || !matcher || !pool) return;
+
+    g_element_count++;
+
+    // Get candidate rules for this element from the index
+    std::vector<IndexedRule> candidates;
+    get_candidate_rules(index, root, candidates);
+    g_candidate_rule_count += candidates.size();
+
+    // Only check candidate rules (much fewer than all rules)
+    for (const auto& entry : candidates) {
+        apply_rule_to_dom_element(root, entry.rule, matcher, pool, engine);
+    }
+
+    // Recursively apply to children (only element children)
+    DomNode* child = root->first_child;
+    while (child) {
+        if (child->is_element()) {
+            DomElement* child_elem = (DomElement*)child;
+            apply_stylesheet_to_dom_tree_indexed(child_elem, index, matcher, pool, engine);
+        }
+        child = child->next_sibling;
+    }
+}
+
+/**
+ * Apply CSS stylesheet to DOM tree with index optimization
+ * Builds index first, then applies using indexed lookup
+ */
+void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* stylesheet,
+                                        SelectorMatcher* matcher, Pool* pool, CssEngine* engine) {
+    if (!root || !stylesheet || !matcher || !pool) return;
+
+    // Build selector index
+    SelectorIndex* index = build_selector_index(stylesheet, pool);
+
+    // Apply using index
+    apply_stylesheet_to_dom_tree_indexed(root, index, matcher, pool, engine);
+
+    // Free index
+    free_selector_index(index);
+}
+
+/**
  * Load HTML document with Lambda CSS system
  * Parses HTML, applies CSS cascade, builds DOM tree, returns DomDocument for layout
  *
@@ -692,6 +940,9 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
  */
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int viewport_width, int viewport_height, Pool* pool) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
     if (!html_url || !pool) {
         log_error("load_lambda_html_doc: invalid parameters");
         return nullptr;
@@ -706,6 +957,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
+    auto t_read = high_resolution_clock::now();
+    log_info("[TIMING] load: read file: %.1fms", duration<double, std::milli>(t_read - t_start).count());
+
     // Create type string for HTML
     String* type_str = (String*)malloc(sizeof(String) + 5);
     type_str->len = 4;
@@ -713,6 +967,10 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     Input* input = input_from_source(html_content, html_url, type_str, nullptr);
     free(html_content);
+
+    auto t_parse = high_resolution_clock::now();
+    log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
+
     StrBuf* htm_buf = strbuf_new();
     print_item(htm_buf, input->root, 0);
     // write html to 'html_tree.txt' for debugging
@@ -722,6 +980,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         fclose(htm_file);
     }
     strbuf_free(htm_buf);
+
+    auto t_debug = high_resolution_clock::now();
+    log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
@@ -757,6 +1018,10 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         dom_document_destroy(dom_doc);
         return nullptr;
     }
+
+    auto t_dom = high_resolution_clock::now();
+    log_info("[TIMING] load: build DOM tree: %.1fms", duration<double, std::milli>(t_dom - t_debug).count());
+
     log_debug("Built DomElement tree: root=%p, backed=%s",
               (void*)dom_root,
               (dom_root->native_element && dom_root->doc) ? "YES" : "NO");
@@ -806,6 +1071,10 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, css_engine, html_filepath, pool, &inline_stylesheet_count);
+
+    auto t_css_parse = high_resolution_clock::now();
+    log_info("[TIMING] load: parse CSS: %.1fms", duration<double, std::milli>(t_css_parse - t_dom).count());
+
     // print internal stylesheets for debugging
     for (int i = 0; i < inline_stylesheet_count; i++) {
         const char* formatted_css = css_stylesheet_to_string_styled(
@@ -842,11 +1111,18 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
               external_stylesheet, external_stylesheet ? external_stylesheet->rule_count : -1);
     SelectorMatcher* matcher = selector_matcher_create(pool);
 
+    auto t_cascade_start = high_resolution_clock::now();
+    reset_cascade_timing();  // reset timing accumulators
+    reset_dom_element_timing();  // reset declaration timing
+
     // Apply external stylesheet first (lower priority)
     if (external_stylesheet && external_stylesheet->rule_count > 0) {
         log_debug("[Lambda CSS] Applying external stylesheet with %d rules", external_stylesheet->rule_count);
-        apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_fast(dom_root, external_stylesheet, matcher, pool, css_engine);
     }
+
+    auto t_external = high_resolution_clock::now();
+    log_info("[TIMING] cascade: external stylesheet: %.1fms", duration<double, std::milli>(t_external - t_cascade_start).count());
 
     // Apply inline stylesheets (higher priority)
     for (int i = 0; i < inline_stylesheet_count; i++) {
@@ -856,7 +1132,12 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             log_debug("[Lambda CSS] Stylesheet %d is not null, rule_count=%zu", i, inline_stylesheets[i]->rule_count);
             if (inline_stylesheets[i]->rule_count > 0) {
                 log_debug("[Lambda CSS] Applying inline stylesheet %d with %zu rules", i, inline_stylesheets[i]->rule_count);
-                apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+                auto t_inline_start = high_resolution_clock::now();
+                apply_stylesheet_to_dom_tree_fast(dom_root, inline_stylesheets[i], matcher, pool, css_engine);
+                auto t_inline_end = high_resolution_clock::now();
+                log_info("[TIMING] cascade: inline stylesheet %d (%zu rules): %.1fms",
+                    i, inline_stylesheets[i]->rule_count,
+                    duration<double, std::milli>(t_inline_end - t_inline_start).count());
                 log_debug("[Lambda CSS] Finished applying inline stylesheet %d", i);
             } else {
                 log_debug("[Lambda CSS] Skipping stylesheet %d: rule_count=%zu is not > 0", i, inline_stylesheets[i]->rule_count);
@@ -866,10 +1147,18 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
+    auto t_inline_done = high_resolution_clock::now();
+
     // Step 7: Apply inline style="" attributes (highest priority)
     log_debug("[Lambda CSS] Applying inline style attributes...");
     apply_inline_styles_to_tree(dom_root, html_root, pool);
     log_debug("[Lambda CSS] CSS cascade complete");
+
+    auto t_cascade = high_resolution_clock::now();
+    log_info("[TIMING] cascade: inline style attrs: %.1fms", duration<double, std::milli>(t_cascade - t_inline_done).count());
+    log_cascade_timing_summary();  // log selector matching and property application stats
+    log_dom_element_timing();  // log detailed cascade timing
+    log_info("[TIMING] load: CSS cascade: %.1fms", duration<double, std::milli>(t_cascade - t_css_parse).count());
 
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
     StrBuf* str_buf = strbuf_new();
@@ -884,6 +1173,9 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     dom_doc->url = html_url;
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
+
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] load: total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
 
     log_debug("[Lambda CSS] Document loaded and styled");
     return dom_doc;
@@ -1024,7 +1316,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
         log_debug("[Lambda Markdown] Applying CSS cascade...");
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        apply_stylesheet_to_dom_tree(dom_root, markdown_stylesheet, matcher, pool, css_engine);
+        apply_stylesheet_to_dom_tree_fast(dom_root, markdown_stylesheet, matcher, pool, css_engine);
         log_debug("[Lambda Markdown] CSS cascade complete");
     }
 

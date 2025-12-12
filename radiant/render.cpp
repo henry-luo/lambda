@@ -4,6 +4,7 @@
 #include "../lib/avl_tree.h"
 #include "../lambda/input/css/css_style.hpp"
 #include <string.h>
+#include <chrono>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
@@ -739,12 +740,17 @@ void render_clean_up(RenderContext* rdcon) {
 }
 
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
     RenderContext rdcon;
     log_debug("Render HTML doc");
     render_init(&rdcon, uicon, view_tree);
 
     // fill the surface with a white background
     fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF, &rdcon.block.clip);
+
+    auto t_init = high_resolution_clock::now();
 
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
@@ -764,9 +770,15 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
         log_error("Invalid root view");
     }
 
+    auto t_render = high_resolution_clock::now();
+    log_info("[TIMING] render_block_view: %.1fms", duration<double, std::milli>(t_render - t_init).count());
+
     // all shapes should already have been drawn to the canvas
     // tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
     tvg_canvas_sync(rdcon.canvas);  // wait for async draw operation to complete
+
+    auto t_sync = high_resolution_clock::now();
+    log_info("[TIMING] tvg_canvas_sync: %.1fms", duration<double, std::milli>(t_sync - t_render).count());
 
     // save the rendered surface to image file (PNG or JPEG based on extension)
     if (output_file) {
@@ -777,13 +789,17 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
             save_surface_to_png(rdcon.ui_context->surface, output_file);
         }
     }
-    // Commented out debug PNG saving - uncomment if you need to debug rendering
-    // else {
-    //     save_surface_to_png(rdcon.ui_context->surface, "output.png");
-    // }
+
+    auto t_save = high_resolution_clock::now();
+    if (output_file) {
+        log_info("[TIMING] save_to_file: %.1fms", duration<double, std::milli>(t_save - t_sync).count());
+    }
 
     render_clean_up(&rdcon);
     if (uicon->document->state) {
         uicon->document->state->is_dirty = false;
     }
+
+    auto t_end = high_resolution_clock::now();
+    log_info("[TIMING] render_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
 }

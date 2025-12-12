@@ -354,6 +354,10 @@ bool dom_element_remove_inline_styles(DomElement* element);
  */
 bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declaration);
 
+// Timing functions for profiling CSS cascade
+void reset_dom_element_timing();
+void log_dom_element_timing();
+
 /**
  * Apply a CSS rule to an element
  * @param element Target element
