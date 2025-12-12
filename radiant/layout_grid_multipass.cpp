@@ -191,6 +191,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
         Pool* pool = lycon->doc->view_tree->pool;
         elem->gi = (GridItemProp*)pool_calloc(pool, sizeof(GridItemProp));
         if (elem->gi) {
+            elem->item_prop_type = DomElement::ITEM_PROP_GRID;
             // Initialize with auto placement defaults
             elem->gi->is_grid_auto_placed = true;
             elem->gi->justify_self = CSS_VALUE_AUTO;
