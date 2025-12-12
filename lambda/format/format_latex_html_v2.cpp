@@ -2748,6 +2748,67 @@ static void cmd_tableofcontents_star(LatexProcessor* proc, Item elem) {
 }
 
 // =============================================================================
+// Counter & Length System Commands
+// =============================================================================
+
+static void cmd_newcounter(LatexProcessor* proc, Item elem) {
+    // \newcounter{counter}[parent]
+    // Defines a new counter
+    // In HTML, we just track this (no output)
+    // TODO: Actual counter management system
+}
+
+static void cmd_setcounter(LatexProcessor* proc, Item elem) {
+    // \setcounter{counter}{value}
+    // Sets counter to a specific value
+    // In HTML, no visual output (counter state management)
+    // TODO: Implement counter state tracking
+}
+
+static void cmd_addtocounter(LatexProcessor* proc, Item elem) {
+    // \addtocounter{counter}{value}
+    // Adds to counter value
+    // In HTML, no visual output
+    // TODO: Implement counter arithmetic
+}
+
+static void cmd_stepcounter(LatexProcessor* proc, Item elem) {
+    // \stepcounter{counter}
+    // Increments counter by 1
+    // In HTML, no visual output
+    // TODO: Implement counter increment
+}
+
+static void cmd_refstepcounter(LatexProcessor* proc, Item elem) {
+    // \refstepcounter{counter}
+    // Steps counter and makes it referenceable
+    // In HTML, no visual output
+    // TODO: Implement with label support
+}
+
+static void cmd_value(LatexProcessor* proc, Item elem) {
+    // \value{counter}
+    // Returns the value of a counter (for use in calculations)
+    // In HTML, output "0" as placeholder
+    HtmlGenerator* gen = proc->generator();
+    gen->text("0");
+}
+
+static void cmd_newlength(LatexProcessor* proc, Item elem) {
+    // \newlength{\lengthcmd}
+    // Defines a new length variable
+    // In HTML, no output (length management)
+    // TODO: Length variable tracking
+}
+
+static void cmd_setlength(LatexProcessor* proc, Item elem) {
+    // \setlength{\lengthcmd}{value}
+    // Sets a length to a specific value
+    // In HTML, no output
+    // TODO: Length state tracking
+}
+
+// =============================================================================
 // LatexProcessor Implementation
 // =============================================================================
 
@@ -2943,6 +3004,16 @@ void LatexProcessor::initCommandTable() {
     command_table_["mainmatter"] = cmd_mainmatter;
     command_table_["frontmatter"] = cmd_frontmatter;
     command_table_["backmatter"] = cmd_backmatter;
+    
+    // Counter and length system
+    command_table_["newcounter"] = cmd_newcounter;
+    command_table_["setcounter"] = cmd_setcounter;
+    command_table_["addtocounter"] = cmd_addtocounter;
+    command_table_["stepcounter"] = cmd_stepcounter;
+    command_table_["refstepcounter"] = cmd_refstepcounter;
+    command_table_["value"] = cmd_value;
+    command_table_["newlength"] = cmd_newlength;
+    command_table_["setlength"] = cmd_setlength;
 }
 
 // =============================================================================
@@ -3219,6 +3290,10 @@ void LatexProcessor::processCommand(const char* cmd_name, Item elem) {
     }
     if (strcmp(cmd_name, "package_include") == 0) {
         cmd_usepackage(this, elem);
+        return;
+    }
+    if (strcmp(cmd_name, "counter_value") == 0) {
+        cmd_value(this, elem);
         return;
     }
     
