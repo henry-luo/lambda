@@ -38,6 +38,71 @@ bool is_only_whitespace(const char* str) {
     return true;
 }
 
+/**
+ * Check if a node is a block-level element that participates in block formatting.
+ * Block-level elements include: block, list-item, table, table-row, table-cell, etc.
+ *
+ * Note: inline-block is NOT included because it's an inline-level element
+ * that creates a block formatting context internally. Whitespace between
+ * inline-block elements should be preserved (as spaces), not collapsed.
+ */
+static bool is_block_level_element(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DisplayValue display = resolve_display_value(node);
+    // Only true block-level elements - NOT inline-block (which is inline-level)
+    return display.outer == CSS_VALUE_BLOCK ||
+           display.outer == CSS_VALUE_LIST_ITEM ||
+           display.outer == CSS_VALUE_TABLE ||
+           display.outer == CSS_VALUE_TABLE_ROW ||
+           display.outer == CSS_VALUE_TABLE_CELL;
+}
+
+/**
+ * Check if a whitespace-only text node should be collapsed according to CSS rules.
+ * CSS 2.2: "When white space is contained at the end of a block's content, or at
+ * the start, or between block-level elements, it is rendered as nothing."
+ *
+ * This function returns true if the text node should be skipped during layout.
+ */
+static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
+    if (!text_node || !text_node->parent) return false;
+
+    // Only applies to text nodes in block containers
+    if (!text_node->parent->is_block()) return false;
+
+    // Check if text is whitespace-only
+    const char* str = (const char*)text_node->text_data();
+    if (!is_only_whitespace(str)) return false;
+
+    // Case 1: Whitespace at start of block (no previous sibling)
+    // AND there's a block-level sibling after it
+    if (!text_node->prev_sibling && text_node->next_sibling) {
+        if (is_block_level_element(text_node->next_sibling)) {
+            return true;
+        }
+    }
+
+    // Case 2: Whitespace at end of block (no next sibling)
+    // This is already handled, but let's be consistent
+    if (!text_node->next_sibling) {
+        return true;
+    }
+
+    // Case 3: Whitespace between two block-level elements
+    if (text_node->prev_sibling && text_node->next_sibling) {
+        bool prev_is_block = is_block_level_element(text_node->prev_sibling);
+        bool next_is_block = is_block_level_element(text_node->next_sibling);
+
+        // If either neighbor is a block, collapse the whitespace
+        // (This follows browser behavior more closely)
+        if (prev_is_block || next_is_block) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Constant for fsSelection bit 7 (USE_TYPO_METRICS)
 constexpr uint16_t OS2_FS_SELECTION_USE_TYPO_METRICS = 0x0080;
 
@@ -167,7 +232,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         value.type == CSS_VALUE_TYPE_NUMBER ?
             value.data.number.value * lycon->font.current_font_size :
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, &value);
-        
+
         // CSS 2.1: "Negative values are not allowed" for line-height
         // If negative, fall back to 'normal' (use default line height)
         if (resolved_height < 0) {
@@ -454,10 +519,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
         log_debug("layout_text: '%t'", str);
-        // skip whitespace at end of block
-        if (!node->next_sibling && node->parent->is_block() && is_only_whitespace((const char*)str)) {
+        // Skip inter-element whitespace (whitespace between/around block elements)
+        // CSS 2.2: "When white space is contained at the end of a block's content,
+        // or at the start, or between block-level elements, it is rendered as nothing."
+        if (should_collapse_inter_element_whitespace(node)) {
             node->view_type = RDT_VIEW_NONE;
-            log_debug("skipping whitespace text at end of block");
+            log_debug("skipping inter-element whitespace text");
         }
         else {
             layout_text(lycon, node);

@@ -529,8 +529,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .test { font: 2em/1 Ahem; color: teal; background: aqua; white-space: normal; width: 3em; border: solid black; }\n   .test span { display: none; color: red; background: maroon; }\n   em { background: red; }\n  ",
-                "length": 305,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n   .control { display: inline; font: 1em/1 Ahem, sans-serif; background: red; color: white; }\n   .test { font: 2em/1 Ahem; color: teal; background: aqua; white-space: normal; width: 3em; border: solid black; }\n   .test span { display: none; color: red; background: maroon; }\n   em { background: red; }\n  ",
+                "length": 431,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -633,9 +633,9 @@
             ],
             "layout": {
               "x": 8,
-              "y": 8,
-              "width": 245.48,
-              "height": 18,
+              "y": 9,
+              "width": 528,
+              "height": 16,
               "contentWidth": 0,
               "contentHeight": 0,
               "scrollWidth": 0,
@@ -694,11 +694,11 @@
                   "rects": [
                     {
                       "x": 8,
-                      "y": 8,
-                      "width": 245.48,
-                      "height": 18,
-                      "right": 253.48,
-                      "bottom": 26,
+                      "y": 9,
+                      "width": 528,
+                      "height": 16,
+                      "right": 536,
+                      "bottom": 25,
                       "text": "Ahem_font_required_for_this_test.",
                       "startIndex": 0,
                       "endIndex": 33
@@ -821,7 +821,7 @@
               "contentWidth": 96,
               "contentHeight": 32,
               "scrollWidth": 96,
-              "scrollHeight": 34
+              "scrollHeight": 32
             },
             "computed": {
               "display": "block",
@@ -876,11 +876,11 @@
                   "rects": [
                     {
                       "x": 11,
-                      "y": 92,
-                      "width": 54.22,
-                      "height": 37,
-                      "right": 65.22,
-                      "bottom": 129,
+                      "y": 95,
+                      "width": 96,
+                      "height": 32,
+                      "right": 107,
+                      "bottom": 127,
                       "text": "X X",
                       "startIndex": 0,
                       "endIndex": 3
@@ -913,7 +913,7 @@
               "contentWidth": 96,
               "contentHeight": 32,
               "scrollWidth": 96,
-              "scrollHeight": 34
+              "scrollHeight": 32
             },
             "computed": {
               "display": "block",
@@ -968,11 +968,11 @@
                   "rects": [
                     {
                       "x": 11,
-                      "y": 162,
-                      "width": 31.11,
-                      "height": 37,
-                      "right": 42.11,
-                      "bottom": 199,
+                      "y": 165,
+                      "width": 64,
+                      "height": 32,
+                      "right": 75,
+                      "bottom": 197,
                       "text": "\n    X ",
                       "startIndex": 0,
                       "endIndex": 7
@@ -994,10 +994,10 @@
                 "id": null,
                 "classes": [],
                 "layout": {
-                  "x": 42.11,
-                  "y": 162,
+                  "x": 75,
+                  "y": 165,
                   "width": 0,
-                  "height": 37,
+                  "height": 32,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1447,12 +1447,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 42.11,
-                      "y": 162,
-                      "width": 23.11,
-                      "height": 37,
-                      "right": 65.22,
-                      "bottom": 199,
+                      "x": 75,
+                      "y": 165,
+                      "width": 32,
+                      "height": 32,
+                      "right": 107,
+                      "bottom": 197,
                       "text": "X\n  ",
                       "startIndex": 0,
                       "endIndex": 4

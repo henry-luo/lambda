@@ -10,6 +10,10 @@
 #include <strings.h>  // for strcasecmp
 #include "../lib/log.h"
 #include "layout.hpp"
+#include "font_face.h"
+extern "C" {
+#include "../lib/url.h"
+}
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
@@ -34,12 +38,12 @@ typedef enum {
 // Detect document format from file extension
 static DocFormat detect_doc_format(const char* filename) {
     if (!filename) return DOC_FORMAT_UNKNOWN;
-    
+
     const char* ext = strrchr(filename, '.');
     if (!ext) return DOC_FORMAT_UNKNOWN;
-    
+
     ext++; // skip the '.'
-    
+
     if (strcasecmp(ext, "html") == 0 || strcasecmp(ext, "htm") == 0) {
         return DOC_FORMAT_HTML;
     } else if (strcasecmp(ext, "md") == 0 || strcasecmp(ext, "markdown") == 0) {
@@ -49,19 +53,19 @@ static DocFormat detect_doc_format(const char* filename) {
     } else if (strcasecmp(ext, "rst") == 0) {
         return DOC_FORMAT_RST;
     }
-    
+
     return DOC_FORMAT_UNKNOWN;
 }
 
 // Load document based on detected format
 static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int width, int height, Pool* pool) {
     DocFormat format = detect_doc_format(filename);
-    
+
     switch (format) {
         case DOC_FORMAT_HTML:
             log_debug("Loading as HTML document");
             return load_html_doc(base_url, (char*)filename, width, height);
-            
+
         case DOC_FORMAT_MARKDOWN: {
             log_debug("Loading as Markdown document");
             Url* doc_url = url_parse_with_base(filename, base_url);
@@ -72,15 +76,15 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             DomDocument* doc = load_markdown_doc(doc_url, width, height, pool);
             return doc;
         }
-        
+
         case DOC_FORMAT_XML:
             log_warn("XML format not yet implemented, treating as HTML");
             return load_html_doc(base_url, (char*)filename, width, height);
-            
+
         case DOC_FORMAT_RST:
             log_warn("RST format not yet implemented");
             return NULL;
-            
+
         default:
             log_error("Unknown document format for file: %s", filename);
             return NULL;
@@ -107,6 +111,10 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     log_debug("Showing HTML document %s", doc_url);
     DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height);
     ui_context.document = doc;
+
+    // Process @font-face rules before layout
+    process_document_font_faces(&ui_context, doc);
+
     // layout html doc
     if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
@@ -381,9 +389,9 @@ int view_doc_in_window(const char* doc_file) {
     if (cwd) {
         // Use provided document file or default to test HTML file
         const char* file_to_load = doc_file ? doc_file : "test/html/index.html";
-        
+
         log_debug("Loading document: %s", file_to_load);
-        
+
         // Create memory pool for document loading
         Pool* pool = pool_create();
         if (!pool) {
@@ -392,7 +400,7 @@ int view_doc_in_window(const char* doc_file) {
             ui_context_cleanup(&ui_context);
             return -1;
         }
-        
+
         // Load document based on file extension
         DomDocument* doc = load_doc_by_format(file_to_load, cwd, width, height, pool);
         if (!doc) {
@@ -402,21 +410,24 @@ int view_doc_in_window(const char* doc_file) {
             ui_context_cleanup(&ui_context);
             return -1;
         }
-        
+
         ui_context.document = doc;
-        
+
+        // Process @font-face rules before layout
+        process_document_font_faces(&ui_context, doc);
+
         // Layout document
         if (doc->root) {
             layout_html_doc(&ui_context, doc, false);
         }
-        
+
         // Render document
         if (doc && doc->view_tree) {
             render_html_doc(&ui_context, doc->view_tree, NULL);
         }
-        
+
         url_destroy(cwd);
-        
+
         // Set custom window title with format name
         if (doc_file) {
             char title[512];
@@ -437,7 +448,7 @@ int view_doc_in_window(const char* doc_file) {
     double lastTime = glfwGetTime();
     double deltaTime = 0.0;
     int frames = 0;
-    
+
     while (!glfwWindowShouldClose(window)) {
         // calculate deltaTime
         double currentTime = glfwGetTime();

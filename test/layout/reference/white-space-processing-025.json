@@ -606,8 +606,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            #div1\n            {\n                font: 16px/1em ahem;\n            }\n            #span1\n            {\n                white-space: nowrap;\n            }\n            #span2\n            {\n                white-space: normal;\n            }\n            #div2, #div3\n            {\n                background: black;\n                display: inline-block;\n                height: 1em;\n                width: 1em;\n            }\n            #div3\n            {\n                margin-left: 1em;\n            }\n        ",
-                "length": 524,
+                "text": "\n        @font-face {\n            font-family: 'ahem';\n            src: url('../font/Ahem.ttf') format('truetype');\n        }\n\n            #div1\n            {\n                font: 16px/1em ahem;\n            }\n            #span1\n            {\n                white-space: nowrap;\n            }\n            #span2\n            {\n                white-space: normal;\n            }\n            #div2, #div3\n            {\n                background: black;\n                display: inline-block;\n                height: 1em;\n                width: 1em;\n            }\n            #div3\n            {\n                margin-left: 1em;\n            }\n        ",
+                "length": 650,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -858,9 +858,9 @@
                 "classes": [],
                 "layout": {
                   "x": 8,
-                  "y": 49,
-                  "width": 15.56,
-                  "height": 18,
+                  "y": 50,
+                  "width": 32,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -919,11 +919,11 @@
                       "rects": [
                         {
                           "x": 8,
-                          "y": 49,
-                          "width": 15.56,
-                          "height": 18,
-                          "right": 23.56,
-                          "bottom": 67,
+                          "y": 50,
+                          "width": 32,
+                          "height": 16,
+                          "right": 40,
+                          "bottom": 66,
                           "text": "X ",
                           "startIndex": 0,
                           "endIndex": 2
@@ -947,10 +947,10 @@
                 "id": "span2",
                 "classes": [],
                 "layout": {
-                  "x": 23.56,
-                  "y": 49,
-                  "width": 11.56,
-                  "height": 18,
+                  "x": 40,
+                  "y": 50,
+                  "width": 16,
+                  "height": 16,
                   "contentWidth": 0,
                   "contentHeight": 0,
                   "scrollWidth": 0,
@@ -1008,12 +1008,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 23.56,
-                          "y": 49,
-                          "width": 11.56,
-                          "height": 18,
-                          "right": 35.13,
-                          "bottom": 67,
+                          "x": 40,
+                          "y": 50,
+                          "width": 16,
+                          "height": 16,
+                          "right": 56,
+                          "bottom": 66,
                           "text": " X",
                           "startIndex": 0,
                           "endIndex": 2
