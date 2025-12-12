@@ -83,7 +83,12 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
     int top = max(rdcon->block.clip.top, y);
     int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->rows);
-    if (left >= right || top >= bottom) return; // glyph outside the surface
+    if (left >= right || top >= bottom) {
+        log_debug("glyph clipped: x=%d, y=%d, bitmap=%dx%d, clip=[%.0f,%.0f,%.0f,%.0f]",
+            x, y, bitmap->width, bitmap->rows,
+            rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
+        return; // glyph outside the surface
+    }
     ImageSurface* surface = rdcon->ui_context->surface;
     for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
@@ -116,6 +121,8 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 extern CssEnum get_white_space_value(DomNode* node);
 
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
+    log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
+        rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
     if (!rdcon->font.ft_face) {
         log_debug("font face is null");
         return;
@@ -145,9 +152,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         }
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
-        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d",
+        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f), white_space:%d, preserve:%d, color:0x%08x",
             str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y,
-            white_space, preserve_spaces);
+            white_space, preserve_spaces, rdcon->color.c);
         bool has_space = false;  uint32_t codepoint;
         while (p < end) {
             // log_debug("draw character '%c'", *p);
@@ -438,7 +445,8 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
-    log_debug("render block view:%s", block->node_name());
+    log_debug("render block view:%s, clip:[%.0f,%.0f,%.0f,%.0f]", block->node_name(),
+        rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
@@ -723,6 +731,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     log_debug("render_init default font: %s, html version: %d", default_font->family, view_tree->html_version);
     setup_font(uicon, &rdcon->font, default_font);
     rdcon->block.clip = (Bound){0, 0, (float)uicon->surface->width, (float)uicon->surface->height};
+    log_debug("render_init clip: [%.0f, %.0f, %.0f, %.0f]", rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
 }
 
 void render_clean_up(RenderContext* rdcon) {

@@ -453,7 +453,10 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
-        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG) {
+        } else if (tag_id == HTM_TAG_SCRIPT || tag_id == HTM_TAG_STYLE || tag_id == HTM_TAG_SVG ||
+            tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
+            tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
+            tag_id == HTM_TAG_TEMPLATE) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
         } else if (tag_id == HTM_TAG_TABLE) {
@@ -3349,12 +3352,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->scroller->overflow_y = overflow_value;
                     log_debug("[CSS] Overflow: %s -> 0x%04X (both x and y)", css_enum_info(value->data.keyword)->name, overflow_value);
 
-                    // Set has_clip for hidden/clip overflow values
-                    // This enables clipping during rendering even when content doesn't overflow
-                    if (overflow_value == CSS_VALUE_HIDDEN || overflow_value == CSS_VALUE_CLIP) {
-                        block->scroller->has_clip = true;
-                        log_debug("[CSS] Overflow hidden/clip: enabling clipping");
-                    }
+                    // Note: has_clip and clip bounds are set during layout in layout_block.cpp and scroller.cpp
+                    // when the actual block dimensions are known
                 }
             }
             break;
@@ -3373,10 +3372,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->scroller->overflow_x = overflow_value;
                     log_debug("[CSS] Overflow-x: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
 
-                    // Set has_clip for hidden/clip overflow values
-                    if (overflow_value == CSS_VALUE_HIDDEN || overflow_value == CSS_VALUE_CLIP) {
-                        block->scroller->has_clip = true;
-                    }
+                    // Note: has_clip is set during layout when dimensions are known
                 }
             }
             break;
@@ -3395,10 +3391,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     block->scroller->overflow_y = overflow_value;
                     log_debug("[CSS] Overflow-y: %s -> 0x%04X", css_enum_info(value->data.keyword)->name, overflow_value);
 
-                    // Set has_clip for hidden/clip overflow values
-                    if (overflow_value == CSS_VALUE_HIDDEN || overflow_value == CSS_VALUE_CLIP) {
-                        block->scroller->has_clip = true;
-                    }
+                    // Note: has_clip is set during layout when dimensions are known
                 }
             }
             break;
@@ -3468,11 +3461,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
 
             // CSS clip property uses rect(top, right, bottom, left) syntax
-            // For now, just log that it's present. Full rect parsing would be complex.
-            // The clip field exists in ScrollProp as a Bound structure
-            log_debug("[CSS] Clip property detected (rect parsing not yet implemented)");
-            block->scroller->has_clip = true;
             // TODO: Parse rect() values and set block->scroller->clip bounds
+            // For now, clip bounds will be set during layout based on block dimensions
+            log_debug("[CSS] Clip property detected (rect parsing not yet implemented)");
             break;
         }
 
