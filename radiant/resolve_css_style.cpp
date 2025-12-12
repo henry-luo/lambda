@@ -4575,7 +4575,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         alloc_flex_item_prop(lycon, span);
                         span->fi->align_self = val;
                     }
-                    log_debug("[CSS] align-self: %s -> 0x%04X (type=%d)", 
+                    log_debug("[CSS] align-self: %s -> 0x%04X (type=%d)",
                               css_enum_info(value->data.keyword)->name, val, span->item_prop_type);
                 }
             }
