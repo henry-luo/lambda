@@ -79,14 +79,35 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container)
         // Calculate item position and size
         int item_x = column_positions[col_start];
         int item_y = row_positions[row_start];
-        int item_width = column_positions[col_end] - column_positions[col_start];
-        int item_height = row_positions[row_end] - row_positions[row_start];
+        int track_width = column_positions[col_end] - column_positions[col_start];
+        int track_height = row_positions[row_end] - row_positions[row_start];
 
         // Subtract gaps from size (gaps are between tracks, not part of item area)
         int col_gaps = col_end - col_start - 1;
         int row_gaps = row_end - row_start - 1;
-        item_width -= col_gaps * grid_layout->column_gap;
-        item_height -= row_gaps * grid_layout->row_gap;
+        track_width -= col_gaps * grid_layout->column_gap;
+        track_height -= row_gaps * grid_layout->row_gap;
+
+        // Store track area dimensions for alignment phase
+        if (item->gi) {
+            item->gi->track_area_width = track_width;
+            item->gi->track_area_height = track_height;
+        }
+
+        // Determine item dimensions - use CSS-specified size if available,
+        // otherwise default to track size (will be adjusted during alignment)
+        int item_width = track_width;
+        int item_height = track_height;
+
+        // Check if item has explicit CSS width
+        if (item->blk && item->blk->given_width > 0) {
+            item_width = (int)item->blk->given_width;
+        }
+
+        // Check if item has explicit CSS height
+        if (item->blk && item->blk->given_height > 0) {
+            item_height = (int)item->blk->given_height;
+        }
 
         // Apply container offset (borders and padding)
         int container_offset_x = 0;
@@ -152,24 +173,9 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     if (!item || !grid_layout || !item->gi) return;
 
-    // Get the item's grid area dimensions
-    int row_start = item->gi->computed_grid_row_start - 1;
-    int row_end = item->gi->computed_grid_row_end - 1;
-    int col_start = item->gi->computed_grid_column_start - 1;
-    int col_end = item->gi->computed_grid_column_end - 1;
-
-    // Calculate available space in the grid area
-    int available_width = 0;
-    for (int i = col_start; i < col_end && i < grid_layout->computed_column_count; i++) {
-        available_width += grid_layout->computed_columns[i].computed_size;
-    }
-    available_width += (col_end - col_start - 1) * grid_layout->column_gap;
-
-    int available_height = 0;
-    for (int i = row_start; i < row_end && i < grid_layout->computed_row_count; i++) {
-        available_height += grid_layout->computed_rows[i].computed_size;
-    }
-    available_height += (row_end - row_start - 1) * grid_layout->row_gap;
+    // Use stored track area dimensions from positioning phase
+    int available_width = item->gi->track_area_width;
+    int available_height = item->gi->track_area_height;
 
     // Apply justify-self (horizontal alignment)
     int justify = (item->gi->justify_self != CSS_VALUE_AUTO) ?
@@ -177,7 +183,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     switch (justify) {
         case CSS_VALUE_START:
-            // Already positioned at start
+            // Already positioned at start, use item's intrinsic width
             break;
 
         case CSS_VALUE_END:
@@ -189,12 +195,17 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             break;
 
         case CSS_VALUE_STRETCH:
-            item->width = available_width;
+            // Stretch to fill track area (unless item has explicit width)
+            if (!(item->blk && item->blk->given_width > 0)) {
+                item->width = available_width;
+            }
             break;
 
         default:
-            // Default to stretch for grid items
-            item->width = available_width;
+            // Default to stretch for grid items (unless item has explicit width)
+            if (!(item->blk && item->blk->given_width > 0)) {
+                item->width = available_width;
+            }
             break;
     }
 
@@ -204,7 +215,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     switch (align) {
         case CSS_VALUE_START:
-            // Already positioned at start
+            // Already positioned at start, use item's intrinsic height
             break;
 
         case CSS_VALUE_END:
@@ -216,12 +227,17 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             break;
 
         case CSS_VALUE_STRETCH:
-            item->height = available_height;
+            // Stretch to fill track area (unless item has explicit height)
+            if (!(item->blk && item->blk->given_height > 0)) {
+                item->height = available_height;
+            }
             break;
 
         default:
-            // Default to stretch for grid items
-            item->height = available_height;
+            // Default to stretch for grid items (unless item has explicit height)
+            if (!(item->blk && item->blk->given_height > 0)) {
+                item->height = available_height;
+            }
             break;
     }
 
